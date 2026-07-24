@@ -9,7 +9,7 @@ import { devlog } from './devlog.mjs'; // SOW-124: the page realm's devlog (supe
 import { BUNDLED_QUOTES, pickQuote, shouldShowSplash, splashDestHash, normalizeBgMode, normalizeBgOpacity, normalizeBgPattern, splashShowsCards, splashShowsQuote, splashKeepsDarkCards, normalizePatternGap, normalizeCardBlur, asciiAnchor, GBTI_ASCII } from '../../client-ui/src/splash.mjs'; // SOW-063 landing splash + SOW-074 background
 import { mergeAll, toMs } from '../../client-ui/src/all-merge.mjs'; // SOW-042: the All merge + Shares policy (per-share visibility filter is inside mergeAll)
 import { newsToItem } from '../../client-ui/src/news.mjs'; // SOW-043: blend members-only news into the feed
-import { parseBrowseHash, stripDoParam } from '../../client-ui/src/browse-hash.mjs'; // the activity bell's deep-link (tab=<type>&read=<path>)
+import { parseBrowseHash, stripDoParam, parseMemberHash } from '../../client-ui/src/browse-hash.mjs'; // the activity bell's deep-link (tab=<type>&read=<path>); SOW-143 the member deep-link (tab=member&member=<u>)
 import { initShell, setRailActive } from './shell.mjs';
 import { TYPE_FILTERS, typeForHash, railKeyForType, feedSources } from '../../client-ui/src/feed-route.mjs';
 import { viewKey, viewModeFor, landingType, LAST_SECTION_KEY, LEGACY_MODE_KEY } from '../../client-ui/src/newtab-prefs.mjs'; // SOW-105: last-section + per-section view-mode memory
@@ -85,6 +85,8 @@ let MODE = 'compact';
 // path that auto-opens the in-place reader.
 const hashStr = () => (typeof location !== 'undefined' && location.hash) || '';
 const readFromHash = () => { const { read } = parseBrowseHash(hashStr()); return read || null; };
+// SOW-143: the member-detail deep-link (#tab=member&member=<username>) -> the username, or null.
+const memberFromHash = () => parseMemberHash(hashStr());
 // SOW-114: the deep-link force-action (do=favorite|collect, sent by the public content pages through the
 // relay). Consumed ONE-SHOT: the hash is replaced without do= so a refresh or hashchange never re-runs it.
 const doFromHash = () => parseBrowseHash(hashStr()).action || null;
@@ -211,8 +213,13 @@ function renderFeed(filter = '') {
 /** Open an item IN the page reader, hiding the feed; Back restores it. The feed IS the browser now (no Browse-page
  *  bounce). content/Share -> <gbti-reader>; News -> <gbti-news-reader> (SOW-046 G: the expanded news view with
  *  publisher detail + Follow-publisher + discussion). Both are defined by mountPageClient (client-ui), called in init(). */
-function openReader(item) {
+// SOW-143: when an item is opened FROM a member view, Back should return to that member view, not the feed. This
+// is carried as an explicit openReader option (never ambient state), so the three existing callers clear it by
+// omission and a stale return target can never leak.
+let RETURN_MEMBER = null;
+function openReader(item, { returnTo = null } = {}) {
   if (!item) return;
+  RETURN_MEMBER = returnTo;
   hideSplash(); // opening a reader IN PLACE (post-share redirect, card-open, first-load deep link) dismisses the
                 // splash: those callers bypass the hashchange handler that would otherwise clear it (replaceState
                 // writes the deep-link hash without firing hashchange). Idempotent when the splash is already gone.
@@ -224,9 +231,38 @@ function openReader(item) {
   const r = document.createElement(item.type === 'news' ? 'gbti-news-reader' : 'gbti-reader');
   host.replaceChildren(r);
   r.open(item);
+  const back = $('[data-reader-back]');
+  if (back) back.textContent = returnTo ? `← Back to @${returnTo}` : '← Back to the feed';
   fv.hidden = true;
   rv.hidden = false;
   window.scrollTo(0, 0);
+}
+
+// SOW-143: render a member's profile detail IN the reader shell (reusing the same host), addressed by
+// #tab=member&member=<username>. Self-loading, so no async retry loop is needed (unlike the share resolver).
+function openMember(username) {
+  const u = String(username || '');
+  if (!u) return;
+  RETURN_MEMBER = null;
+  hideSplash();
+  writeMemberHash(u);
+  const fv = $('[data-feedview]');
+  const rv = $('[data-readerview]');
+  const host = $('[data-reader]');
+  if (!fv || !rv || !host) return;
+  const el = document.createElement('gbti-member-view');
+  el.setAttribute('data-gbti-username', u);
+  el.addEventListener('member-open-item', (e) => { const it = e.detail?.item; if (it) openReader(it, { returnTo: u }); });
+  host.replaceChildren(el);
+  const back = $('[data-reader-back]');
+  if (back) back.textContent = '← Back to the feed';
+  fv.hidden = true;
+  rv.hidden = false;
+  window.scrollTo(0, 0);
+}
+function writeMemberHash(username) {
+  if (typeof history === 'undefined' || typeof location === 'undefined') return;
+  try { history.replaceState(null, '', location.pathname + location.search + `#tab=member&member=${encodeURIComponent(username)}`); } catch { /* fail-soft */ }
 }
 // SOW-092: reflect the open item in the hash so every reader view is a copyable deep link. A share keys on
 // <author>/<id>; content types key on the repo path. replaceState adds no history entry + no hashchange.
@@ -243,11 +279,19 @@ function stripReadHash() {
   if (typeof history === 'undefined' || typeof location === 'undefined') return;
   try {
     const { tab } = parseBrowseHash(location.hash);
-    history.replaceState(null, '', location.pathname + location.search + (tab ? `#tab=${tab}` : ''));
+    // SOW-143: a member hash carries no browse `tab`, so fall back to the current feed type rather than a bare
+    // fragment, keeping the rail highlight coherent after Back.
+    const frag = tab ? `#tab=${tab}` : (parseMemberHash(location.hash) ? `#type=${TYPE}` : '');
+    history.replaceState(null, '', location.pathname + location.search + frag);
   } catch { /* fail-soft */ }
 }
 
+// Restore the FEED from the reader. Used both by the Back button (via onReaderBack) and by selectType when a
+// filter switch dismisses the reader. SOW-143: clear any pending member-return here, so a subsequent Back never
+// resurrects a stale member view after the user navigated away (the return-to-member logic lives ONLY in
+// onReaderBack, so a programmatic close from selectType honors the requested navigation instead of bouncing back).
 function closeReader() {
+  RETURN_MEMBER = null;
   stripReadHash();
   const fv = $('[data-feedview]');
   const rv = $('[data-readerview]');
@@ -255,6 +299,13 @@ function closeReader() {
   if (rv) rv.hidden = true;
   if (host) host.replaceChildren();
   if (fv) fv.hidden = false;
+}
+
+// SOW-143: the explicit Back button. If this reader was opened FROM a member view, return to that member view
+// (one-deep stack); otherwise restore the feed. This is the ONLY path that honors the member-return.
+function onReaderBack() {
+  if (RETURN_MEMBER) { const u = RETURN_MEMBER; RETURN_MEMBER = null; openMember(u); return; }
+  closeReader();
 }
 
 // SOW-063: the new-tab landing splash. A BARE tab (no hash) lands on the splash unless snoozed within the window;
@@ -761,6 +812,9 @@ function init() {
     const h = hashStr();
     if (!h) { showSplash(); return; } // SOW-063: Back to the bare tab returns to the splash
     hideSplash();
+    // SOW-143: a member deep link opens the member view and RETURNS EARLY, so the feed underneath never re-narrows.
+    const mem = parseMemberHash(h);
+    if (mem) { openMember(mem); return; }
     const t = typeForHash(h);
     selectType(t);
     const rd = readFromHash();
@@ -784,12 +838,19 @@ function init() {
 
   // A bell deep-link present on first load opens that item straight into the in-place reader (the feed still
   // renders underneath, so Back reveals it). The reader resolves the title/body from the path via the client.
-  const deepRead = readFromHash();
-  if (deepRead) {
-    const act = doFromHash();
-    if (act) consumeDo();
-    if (TYPE === 'share') window.gbtiOpenShareBySlug(deepRead);
-    else openReader({ type: TYPE, path: deepRead, doAction: act });
+  // SOW-143: a member deep link (the site's follow relay) opens the member view instead. It is self-loading, so
+  // unlike the share resolver it needs no retry loop against an async array.
+  const deepMember = memberFromHash();
+  if (deepMember) {
+    openMember(deepMember);
+  } else {
+    const deepRead = readFromHash();
+    if (deepRead) {
+      const act = doFromHash();
+      if (act) consumeDo();
+      if (TYPE === 'share') window.gbtiOpenShareBySlug(deepRead);
+      else openReader({ type: TYPE, path: deepRead, doAction: act });
+    }
   }
 
   // SOW-052: the feed search is now a persistent input in the left rail (shell-rendered). Filter the feed in place
@@ -799,7 +860,7 @@ function init() {
   srchIn?.addEventListener('keydown', (e) => { if (e.key === 'Escape') { srchIn.value = ''; renderFeed(''); srchIn.blur(); } });
 
   // The in-place reader's Back button returns to the feed.
-  $('[data-reader-back]')?.addEventListener('click', closeReader);
+  $('[data-reader-back]')?.addEventListener('click', onReaderBack);
 
   // SOW-023: Latest / Following tabs.
   document.querySelectorAll('[data-tab]').forEach((btn) => {

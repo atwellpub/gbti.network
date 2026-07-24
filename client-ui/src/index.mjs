@@ -50,6 +50,7 @@ import './elements/gbti-news.mjs';
 import './elements/gbti-news-reader.mjs'; // SOW-046 G: the in-extension expanded news view (opened from the feed)
 import './elements/gbti-discussion.mjs';
 import './elements/gbti-reader.mjs';
+import './elements/gbti-member-view.mjs'; // SOW-143: the in-extension member profile detail view
 import './elements/gbti-browse.mjs';
 import './elements/gbti-app.mjs';
 

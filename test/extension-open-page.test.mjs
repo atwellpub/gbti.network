@@ -44,3 +44,16 @@ test('browse.html (retired) aliases to newtab.html via the relay (reader deep li
   const r = resolveOpenPage({ page: 'browse.html', hash: 'tab=prompt&read=members%2Falice%2Fprompts%2Fx%2Findex.md' });
   assert.equal(r, 'newtab.html#tab=prompt&read=members%2Falice%2Fprompts%2Fx%2Findex.md');
 });
+
+// SOW-143: the member-detail deep link must survive the relay (guards a future HASH_RE tightening from silently
+// killing the follow relay). A kebab username uses only chars already in HASH_RE.
+test('newtab.html member-detail deep link resolves through the relay', () => {
+  assert.equal(
+    resolveOpenPage({ page: 'newtab.html', hash: 'tab=member&member=alice' }),
+    'newtab.html#tab=member&member=alice',
+  );
+  assert.equal(
+    resolveOpenPage({ page: 'newtab.html', hash: 'tab=member&member=atwell-pub' }),
+    'newtab.html#tab=member&member=atwell-pub',
+  );
+});

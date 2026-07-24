@@ -48,3 +48,31 @@ export function stripDoParam(hash) {
   const s = String(hash || '').replace(/^#/, '');
   return s.split('&').filter((p) => !/^do=/.test(p)).join('&');
 }
+
+// SOW-143: the in-extension member profile DETAIL view is addressed by a DISTINCT `member=<username>` key, NOT
+// `read=` (which everywhere else means "a repo path to read"). A username is not a path, and the separate key
+// keeps the route self-describing AND skew-safe: an extension build that predates this route finds no `read=`
+// and no tab it recognizes, so it falls through to the normal feed instead of erroring in the content reader.
+// `member` is deliberately kept OUT of TAB_IDS/TYPE_FILTERS so parseBrowseHash(...) still returns all-null for a
+// member hash (every existing feed/browse consumer no-ops on it).
+const USERNAME_RE = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/; // kebab, matches the member-folder / gbti-subscribe rule
+
+/** Build the member-detail deep-link fragment (WITHOUT the leading '#') for `username`, or '' when the
+ *  username is invalid (so a caller can fall back rather than emit a broken hash). Pure. */
+export function buildMemberHash(username) {
+  const u = String(username || '').trim().toLowerCase();
+  return USERNAME_RE.test(u) ? `tab=member&member=${u}` : '';
+}
+
+/** The member username a hash targets, or null. Requires BOTH `tab=member` AND a valid `member=<u>`, so a
+ *  stray `member=` on some other tab can never hijack the view. Accepts an optional leading '#'. Pure. */
+export function parseMemberHash(hash) {
+  const s = String(hash || '').replace(/^#/, '');
+  if (!/(?:^|&)tab=member(?:&|$)/.test(s)) return null;
+  const m = s.match(/(?:^|&)member=([^&]+)/);
+  if (!m) return null;
+  let u;
+  try { u = decodeURIComponent(m[1]); } catch { u = m[1]; }
+  u = u.toLowerCase();
+  return USERNAME_RE.test(u) ? u : null;
+}

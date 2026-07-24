@@ -7772,6 +7772,20 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   define("gbti-collection", GbtiCollection);
 
   // client-ui/src/elements/gbti-subscribe.mjs
+  var MEMBERSHIP_URL = "https://gbti.network/membership/";
+  function goMembership() {
+    try {
+      if (typeof location !== "undefined" && /^https?:$/.test(location.protocol)) {
+        window.location.href = "/membership/";
+        return;
+      }
+    } catch {
+    }
+    try {
+      window.open(MEMBERSHIP_URL, "_blank", "noopener");
+    } catch {
+    }
+  }
   var mega = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="margin-right:6px"><path d="M3 11v2a1 1 0 0 0 1 1h2l3.5 3.5V6.5L6 10H4a1 1 0 0 0-1 1zM14 8v8c1.7-.6 3-2.4 3-4s-1.3-3.4-3-4zm0-4.2v2.1c2.9.9 5 3.7 5 6.1s-2.1 5.2-5 6.1v2.1c4-.9 7-4.4 7-8.2s-3-7.3-7-8.2z" fill="currentColor"/></svg>`;
   var CSS20 = `
   .btn { display:inline-flex; align-items:center; cursor:pointer; font-family:var(--font-body);
@@ -7826,7 +7840,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const username = this._username;
       if (!username) return;
       if (!this.client || this._canFollow === false) {
-        window.location.href = "/membership/";
+        goMembership();
         return;
       }
       this._toggle(username);
@@ -7844,7 +7858,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this._following = !next;
         this.render();
         if (err?.code === "not-authenticated" || err?.code === "follows-failed" || /paid|sign in/i.test(err?.message || "")) {
-          window.location.href = "/membership/";
+          goMembership();
         }
       }
     }
@@ -9792,8 +9806,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     function fromHexCode(c) {
       if (c >= 48 && c <= 57) return c - 48;
-      const lc9 = c | 32;
-      if (lc9 >= 97 && lc9 <= 102) return lc9 - 97 + 10;
+      const lc12 = c | 32;
+      if (lc12 >= 97 && lc12 <= 102) return lc12 - 97 + 10;
       return -1;
     }
     function escapedHexLen(c) {
@@ -11731,6 +11745,50 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     kofi: "Ko-fi",
     telegram: "Telegram"
   };
+  var SOCIAL_URL_BASE = {
+    github: "https://github.com/",
+    x: "https://x.com/",
+    bluesky: "https://bsky.app/profile/",
+    youtube: "https://www.youtube.com/@",
+    devto: "https://dev.to/",
+    reddit: "https://www.reddit.com/user/",
+    linkedin: "https://www.linkedin.com/in/",
+    instagram: "https://www.instagram.com/",
+    threads: "https://www.threads.net/@",
+    tiktok: "https://www.tiktok.com/@",
+    twitch: "https://www.twitch.tv/",
+    facebook: "https://www.facebook.com/",
+    dailydev: "https://app.daily.dev/",
+    producthunt: "https://www.producthunt.com/@",
+    rumble: "https://rumble.com/user/",
+    // SOW-131:
+    soundcloud: "https://soundcloud.com/",
+    mixcloud: "https://www.mixcloud.com/",
+    wordpress: "https://profiles.wordpress.org/",
+    substack: "https://substack.com/@",
+    medium: "https://medium.com/@",
+    hashnode: "https://hashnode.com/@",
+    peerlist: "https://peerlist.io/",
+    gitlab: "https://gitlab.com/",
+    patreon: "https://www.patreon.com/",
+    kofi: "https://ko-fi.com/",
+    telegram: "https://t.me/"
+  };
+  function buildSocialUrl(key, raw) {
+    const value = String(raw == null ? "" : raw).trim();
+    if (!value) return "";
+    const k = String(key || "").toLowerCase();
+    if (/^https?:\/\//i.test(value)) return value;
+    if (k === "discord") return value;
+    if (k === "website") return "https://" + value.replace(/^\/+/, "");
+    const handle = value.replace(/^@+/, "");
+    if (k === "mastodon") {
+      const m = handle.match(/^([^@\s]+)@([^@\s]+)$/);
+      return m ? `https://${m[2]}/@${m[1]}` : value;
+    }
+    const base = SOCIAL_URL_BASE[k];
+    return base ? base + handle : value;
+  }
 
   // client-ui/src/profile-fields.mjs
   function recallProfileSocials(links, allowed = null) {
@@ -13967,14 +14025,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     async _prs() {
       const { prs = [] } = await this.client.listPRs() || {};
       return prs.filter((p) => p.merged === true || p.state === "merged" || p.state === "closed").map((p) => {
-        const lc9 = prLifecycle(p, null);
+        const lc12 = prLifecycle(p, null);
         return {
           id: p.number,
           ts: p.number,
           // no reliable timestamp in both host modes; the number is a recency proxy for display sort
           title: p.title || `PR #${p.number}`,
-          sub: lc9.needsAttention ? "Declined — open to see why" : "Accepted",
-          href: lc9.needsAttention ? "workspace.html#tab=prs" : p.html_url || SITE11
+          sub: lc12.needsAttention ? "Declined — open to see why" : "Accepted",
+          href: lc12.needsAttention ? "workspace.html#tab=prs" : p.html_url || SITE11
         };
       });
     }
@@ -13996,14 +14054,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // v1: replies on the caller's OWN Shares (the conversational surface the owner asked about). Content-item replies
     // (post/product/prompt) need a per-item comment walk and defer to P4's server aggregator. Hard-bounded fan-out.
     async _replies(login) {
-      const lc9 = String(login).toLowerCase();
+      const lc12 = String(login).toLowerCase();
       const { items = [] } = await this.client.listShares() || {};
-      const mine = items.filter((s) => String(s.author).toLowerCase() === lc9).slice(0, MAX_OWN_SHARES);
+      const mine = items.filter((s) => String(s.author).toLowerCase() === lc12).slice(0, MAX_OWN_SHARES);
       const lists = await Promise.all(mine.map((s) => this._safe(async () => {
         const slug = s.author && s.id ? `${s.author}/${s.id}` : "";
         if (!slug) return [];
         const r = await this.client.listShareComments({ targetSlug: slug }) || {};
-        return (r.items || []).filter((c) => String(c.author).toLowerCase() !== lc9).map((c) => ({
+        return (r.items || []).filter((c) => String(c.author).toLowerCase() !== lc12).map((c) => ({
           id: `cmt:${c.path || `${slug}:${c.id || c.createdAt}`}`,
           ts: toMs(c.createdAt),
           title: `Reply on ${s.title || s.shortDescription || "your Share"}`,
@@ -14588,6 +14646,20 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-news-reader", GbtiNewsReader);
 
+  // client-ui/src/members-index.mjs
+  var SITE13 = "https://gbti.network";
+  var lc7 = (s) => String(s || "").toLowerCase();
+  function directoryMap(json) {
+    const members = json && Array.isArray(json.members) ? json.members : [];
+    return new Map(members.filter((m) => m && m.username).map((m) => [lc7(m.username), m]));
+  }
+  var _directory = null;
+  function loadMembersDirectory() {
+    if (_directory) return _directory;
+    _directory = fetch(`${SITE13}/members-index.json`).then((r) => r.ok ? r.json() : { members: [] }).then((j) => directoryMap(j)).catch(() => /* @__PURE__ */ new Map());
+    return _directory;
+  }
+
   // membership/syndication-format.mjs
   var TYPE_LABEL5 = { post: "article", product: "product", prompt: "prompt", share: "link" };
   function sanitizeMentions(text) {
@@ -14744,19 +14816,19 @@ From the author:
   }
 
   // membership/news-channels.mjs
-  var lc7 = (s) => String(s ?? "").trim().toLowerCase();
+  var lc8 = (s) => String(s ?? "").trim().toLowerCase();
   function newsChannelMap(parsed) {
     const out = /* @__PURE__ */ new Map();
     const list = Array.isArray(parsed?.channels) ? parsed.channels : [];
     for (const e of list) {
-      const cat = lc7(e?.category);
+      const cat = lc8(e?.category);
       const ch = String(e?.channelId ?? "").trim();
       if (cat && ch) out.set(cat, ch);
     }
     return out;
   }
   function channelForCategory(parsed, category) {
-    return newsChannelMap(parsed).get(lc7(category)) ?? null;
+    return newsChannelMap(parsed).get(lc8(category)) ?? null;
   }
   function channelForCategoryPath(parsed, path) {
     const arr = Array.isArray(path) ? path : path ? [path] : [];
@@ -15305,14 +15377,14 @@ From the author:
   define("gbti-syndicate-now", GbtiSyndicateNow);
 
   // client-ui/src/elements/gbti-reader.mjs
-  var SITE13 = "https://gbti.network";
-  var lc8 = (s) => String(s || "").toLowerCase();
+  var SITE14 = "https://gbti.network";
+  var lc9 = (s) => String(s || "").toLowerCase();
   var isHouse = (a) => {
-    const x = lc8(a);
+    const x = lc9(a);
     return !x || x === "gbti" || x === "house";
   };
   var authorName4 = (a) => isHouse(a) ? "GBTI Network" : a;
-  var githubLogin = (a) => lc8(a) === "gbti" || lc8(a) === "house" ? "gbti-network" : a;
+  var githubLogin = (a) => lc9(a) === "gbti" || lc9(a) === "house" ? "gbti-network" : a;
   var githubAvatar = (a) => a ? `https://github.com/${encodeURIComponent(githubLogin(a))}.png?size=96` : "";
   function targetSlugFor(it) {
     if (it.type === "share") return it.author && it.id ? `${it.author}/${it.id}` : "";
@@ -15328,14 +15400,9 @@ From the author:
       return "";
     }
   };
-  var lockNotice = (what) => `<div class="locked">${esc(what)} is for members. <a href="${SITE13}/membership/" target="_blank" rel="noopener">Become a member</a> to unlock.</div>`;
+  var lockNotice = (what) => `<div class="locked">${esc(what)} is for members. <a href="${SITE14}/membership/" target="_blank" rel="noopener">Become a member</a> to unlock.</div>`;
   var prettyRole = (s) => String(s || "").split(/[-_]/).filter(Boolean).map((w) => w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-  var _directory = null;
-  function loadDirectory() {
-    if (_directory) return _directory;
-    _directory = fetch(`${SITE13}/members-index.json`).then((r) => r.ok ? r.json() : { members: [] }).then((j) => new Map((j.members || []).map((m) => [lc8(m.username), m]))).catch(() => /* @__PURE__ */ new Map());
-    return _directory;
-  }
+  var loadDirectory = loadMembersDirectory;
   var SOCIALS = [
     ["github", "GitHub", "https://github.com/"],
     ["website", "Website", ""],
@@ -15623,21 +15690,21 @@ From the author:
     // Resolve the author drawer model: directory entry (avatar/name/headline/links), whether the viewer follows
     // them, and whether the viewer CAN follow (SOW-060: any signed-in member). House content yields a branded, non-followable card.
     async _resolveAuthor(it) {
-      const username = lc8(it.author);
+      const username = lc9(it.author);
       if (isHouse(username)) return { house: true };
       const [dir, status] = await Promise.all([
         loadDirectory(),
         this.client.status ? this.client.status().catch(() => null) : Promise.resolve(null)
       ]);
       const entry = dir.get(username) || null;
-      const me = lc8(status?.identity?.username || status?.identity?.login);
+      const me = lc9(status?.identity?.username || status?.identity?.login);
       const canFollow = !!status?.canFollow;
       let following = false;
       if (canFollow && this.client.getFollows) {
         try {
           const f = await this.client.getFollows();
           const list = Array.isArray(f) ? f : f?.following ?? [];
-          following = list.some((x) => lc8(x.username) === username);
+          following = list.some((x) => lc9(x.username) === username);
         } catch {
         }
       }
@@ -15686,7 +15753,7 @@ From the author:
       let follow = "";
       if (a.isSelf) follow = ["post", "product", "prompt"].includes(it.type) ? `<a class="follow edit" href="workspace.html#tab=${esc(it.type)}">Edit in workspace</a>` : "";
       else if (a.canFollow) follow = `<button class="follow${a.following ? " on" : ""}" data-follow type="button">${a.following ? "Following" : "Follow"}</button>`;
-      else follow = `<a class="follow muted" href="${SITE13}/membership/" target="_blank" rel="noopener" title="Members can follow other members">Follow</a>`;
+      else follow = `<a class="follow muted" href="${SITE14}/membership/" target="_blank" rel="noopener" title="Members can follow other members">Follow</a>`;
       const links = e.links || {};
       const chips = [];
       for (const [key, label, base] of SOCIALS) {
@@ -15712,13 +15779,13 @@ From the author:
         return;
       }
       const shareOut = it.type === "share" && it.url ? utmLink(it.url, { ...UTM, utm_medium: "extension", utm_campaign: "shares" }) : "";
-      const view = it.type === "share" ? it.url ? `<a class="view" href="${esc(shareOut)}" target="_blank" rel="noopener nofollow">${embedUrl(it.url) ? "Watch video" : "Read article"} on ${esc(hostOf2(it.url))}</a>` : "" : it.url ? `<a class="view" href="${esc(SITE13 + it.url)}" target="_blank" rel="noopener">View on gbti.network</a>` : "";
+      const view = it.type === "share" ? it.url ? `<a class="view" href="${esc(shareOut)}" target="_blank" rel="noopener nofollow">${embedUrl(it.url) ? "Watch video" : "Read article"} on ${esc(hostOf2(it.url))}</a>` : "" : it.url ? `<a class="view" href="${esc(SITE14 + it.url)}" target="_blank" rel="noopener">View on gbti.network</a>` : "";
       const when = it.publishedAt ?? (it.createdAt ? Date.parse(it.createdAt) : null);
       const meta = this._metaHtml(it, when);
       const copyAll = it.type === "prompt" && this._rawBody ? `<button class="copyall" type="button" data-copyall>Copy prompt</button>` : "";
       const shareEmbed = it.type === "share" && it.url ? embedUrl(it.url) : null;
       const coverUrl = resolveAsset(it.thumbWide || it.thumbCard || it.thumb);
-      const cover = shareEmbed ? `<div class="cover-embed${isPortraitEmbed(shareEmbed) ? " tall" : ""}"><iframe src="${esc(`${SITE13}/embed/?u=${encodeURIComponent(it.url)}`)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>` : coverUrl ? `<img class="cover" src="${esc(coverUrl)}" alt="" loading="lazy">` : "";
+      const cover = shareEmbed ? `<div class="cover-embed${isPortraitEmbed(shareEmbed) ? " tall" : ""}"><iframe src="${esc(`${SITE14}/embed/?u=${encodeURIComponent(it.url)}`)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>` : coverUrl ? `<img class="cover" src="${esc(coverUrl)}" alt="" loading="lazy">` : "";
       let body;
       if (this._html === null) body = `<p class="muted">Loading...</p>`;
       else if (this._html && this._html.error) body = `<p class="muted">Could not load this content. Try opening it on gbti.network.</p>`;
@@ -15736,7 +15803,7 @@ From the author:
       const sideLink = it.type === "share" && it.url ? `<div class="side-src"><img class="ss-fav" src="${esc(faviconFor(it.url))}" alt="" onerror="this.remove()"><div class="ss-host">${esc(hostOf2(it.url))}</div><p class="ss-note">The source ${esc(this._author?.entry?.displayName || authorName4(it.author))} shared this from.</p><a class="side-open" href="${esc(utmLink(it.url, { ...UTM, utm_medium: "extension", utm_campaign: "shares" }))}" target="_blank" rel="noopener nofollow" title="Open ${esc(hostOf2(it.url))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5"/><path d="M19 5l-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>Visit</a></div>` : "";
       const syndCategory = it.type === "share" ? it.category || "" : this._fmCategories?.[0] || "";
       const syndPath = it.type === "share" ? "" : (this._fmCategories || []).join(",");
-      const syndUrl = it.url ? it.type === "share" ? it.url : SITE13 + it.url : "";
+      const syndUrl = it.url ? it.type === "share" ? it.url : SITE14 + it.url : "";
       const authorDiscord = this._author?.entry?.links?.discord || "";
       const authorX = this._author?.entry?.links?.x || "";
       const authorDevto = this._author?.entry?.links?.devto || "";
@@ -15846,8 +15913,192 @@ From the author:
   };
   define("gbti-reader", GbtiReader);
 
+  // client-ui/src/member-view-core.mjs
+  var lc10 = (s) => String(s || "").toLowerCase();
+  var MEMBER_SECTIONS = Object.freeze([
+    { type: "post", json: "blog-index.json", label: "Articles" },
+    { type: "product", json: "products-index.json", label: "Products" },
+    { type: "prompt", json: "prompts-index.json", label: "Prompts" }
+  ]);
+  function memberContent(items, username, cap = 24) {
+    const u = lc10(username);
+    if (!u || u === "gbti" || u === "house" || !Array.isArray(items)) return [];
+    const mine = items.filter((it) => it && lc10(it.author) === u);
+    mine.sort((a, b) => {
+      const av = Number.isFinite(a?.publishedAt) ? a.publishedAt : -Infinity;
+      const bv = Number.isFinite(b?.publishedAt) ? b.publishedAt : -Infinity;
+      if (bv !== av) return bv - av;
+      return String(a?.title || "").localeCompare(String(b?.title || ""));
+    });
+    return mine.slice(0, Math.max(0, cap));
+  }
+
+  // client-ui/src/elements/gbti-member-view.mjs
+  var SITE15 = "https://gbti.network";
+  var lc11 = (s) => String(s || "").toLowerCase();
+  var githubAvatar2 = (login) => login ? `https://github.com/${encodeURIComponent(login)}.png?size=128` : "";
+  var prettyRole2 = (s) => String(s || "").split(/[-_]/).filter(Boolean).map((w) => w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  var USERNAME_RE = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/;
+  var CSS38 = `
+  :host { display:block; }
+  .wrap { max-width:820px; margin:0 auto; padding:4px 2px 40px; }
+  .hero { display:flex; gap:18px; align-items:flex-start; padding:6px 2px 18px; border-bottom:1px solid var(--line, #e5e5ea); margin-bottom:20px; }
+  .av { flex:0 0 auto; width:96px; height:96px; border-radius:50%; overflow:hidden; display:grid; place-items:center;
+    background:var(--panel, #f2f2f5); border:1px solid var(--line, #e5e5ea); font-weight:800; font-size:34px; color:var(--muted, #6c6976); }
+  .av img { width:100%; height:100%; object-fit:cover; }
+  .id { flex:1 1 auto; min-width:0; }
+  .name { font-family:var(--font-display, inherit); font-weight:800; font-size:24px; line-height:1.15; color:var(--fg, #25232b); }
+  .user { color:var(--muted, #6c6976); font-size:13.5px; margin-top:1px; }
+  .headline { margin:8px 0 0; color:var(--fg-soft, #43414d); font-size:15px; }
+  .bio { margin:10px 0 0; color:var(--fg-soft, #43414d); font-size:14px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .since { margin-top:8px; color:var(--muted, #6c6976); font-size:12.5px; }
+  .actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .actions a.site, .actions a.edit { display:inline-flex; align-items:center; font:inherit; font-size:14px; font-weight:600;
+    text-decoration:none; padding:9px 16px; border-radius:10px; border:1.5px solid var(--line, #d9d9df); color:var(--fg, #25232b); }
+  .actions a.site:hover, .actions a.edit:hover { border-color:var(--brand, #1f9e5f); color:var(--brand, #1f9e5f); }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .tag { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px; border:1px solid var(--line, #e5e5ea); color:var(--fg-soft, #43414d); }
+  .tag.role { border-color:var(--brand, #1f9e5f); color:var(--brand, #1f9e5f); }
+  .socials { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .soc { position:relative; display:grid; place-items:center; width:34px; height:34px; border-radius:9px;
+    border:1px solid var(--line, #e5e5ea); color:var(--fg-soft, #43414d); text-decoration:none; }
+  .soc:hover { border-color:var(--brand, #1f9e5f); color:var(--brand, #1f9e5f); }
+  .note { margin:14px 0; padding:10px 12px; border-radius:10px; background:var(--panel, #f2f2f5); color:var(--muted, #6c6976); font-size:13px; }
+  section.work { margin-top:26px; }
+  section.work > h3 { font-family:var(--font-display, inherit); font-size:15px; font-weight:800; margin:0 0 10px; color:var(--fg, #25232b); }
+  .empty { color:var(--muted, #6c6976); font-size:14px; padding:8px 0; }
+  .skeleton { color:var(--muted, #6c6976); font-size:14px; padding:14px 0; }
+`;
+  var GbtiMemberView = class extends GbtiElement {
+    _loaded = false;
+    _loading = false;
+    _entry = null;
+    // /members-index.json row, or null (off-directory member)
+    _isSelf = false;
+    _sections = {};
+    // type -> filtered items[]
+    static get observedAttributes() {
+      return ["data-gbti-username"];
+    }
+    attributeChangedCallback() {
+      this._loaded = false;
+      this._loading = false;
+      this._entry = null;
+      this._isSelf = false;
+      this._sections = {};
+      if (this.isConnected) this.render();
+    }
+    /** Call-site symmetry with openReader(item): set the observed attribute, which drives the load. */
+    open(username) {
+      this.setAttribute("data-gbti-username", String(username || ""));
+    }
+    get _username() {
+      const u = lc11(this.getAttribute("data-gbti-username") || "").trim();
+      return USERNAME_RE.test(u) ? u : "";
+    }
+    async _load() {
+      const username = this._username;
+      if (!username || !this.client) {
+        this._loaded = true;
+        this._loading = false;
+        return;
+      }
+      const guard = (p) => Promise.resolve(p).then((v) => v, () => null);
+      try {
+        const [dir, status, ...idx] = await Promise.all([
+          guard(loadMembersDirectory()),
+          guard(this.client.status?.()),
+          ...MEMBER_SECTIONS.map((s) => guard(fetch(`${SITE15}/${s.json}`, { cache: "no-cache" }).then((r) => r.ok ? r.json() : null)))
+        ]);
+        this._entry = dir && dir.get ? dir.get(username) || null : null;
+        const me = lc11(status?.identity?.username || status?.identity?.login || "");
+        this._isSelf = !!me && me === username;
+        MEMBER_SECTIONS.forEach((s, i) => {
+          this._sections[s.type] = memberContent(idx[i]?.items || [], username, 24);
+        });
+      } catch {
+      }
+      this._loaded = true;
+      this._loading = false;
+      this.render();
+    }
+    _heroHtml() {
+      const username = this._username;
+      const e = this._entry || {};
+      const login = e.username || username;
+      const avUrl = resolveAsset(e.avatar) || githubAvatar2(login);
+      const name = e.displayName || username;
+      const ini = esc((name || "?").charAt(0).toUpperCase());
+      const headline = e.headline ? `<p class="headline">${esc(e.headline)}</p>` : "";
+      const bio = e.bio ? `<p class="bio">${esc(e.bio)}</p>` : "";
+      let since = "";
+      if (e.joinedAt) {
+        try {
+          since = `<div class="since">Member since ${new Date(e.joinedAt).toLocaleDateString(void 0, { year: "numeric", month: "long" })}</div>`;
+        } catch {
+          since = "";
+        }
+      }
+      const action = this._isSelf ? `<a class="edit" href="profile.html">Edit your profile</a>` : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
+      const siteLink = utmLink(`${SITE15}/members/${username}/`, { utm_source: "gbti-network", utm_medium: "extension", utm_campaign: "member-profile" });
+      const actions = `<div class="actions">${action}<a class="site" href="${esc(siteLink)}" target="_blank" rel="noopener">View on gbti.network</a></div>`;
+      const tagPills = [];
+      for (const r of Array.isArray(e.roles) ? e.roles : []) tagPills.push(`<span class="tag role">${esc(prettyRole2(r))}</span>`);
+      for (const s of Array.isArray(e.skills) ? e.skills : []) tagPills.push(`<span class="tag">${esc(String(s))}</span>`);
+      const tags = tagPills.length ? `<div class="tags">${tagPills.join("")}</div>` : "";
+      const links = e.links || {};
+      const chips = [];
+      for (const key of SOCIAL_KEYS) {
+        if (key === "discord" || !links[key]) continue;
+        const url = buildSocialUrl(key, links[key]);
+        const ico = socialIcon(key);
+        if (url && ico) chips.push(`<a class="soc" href="${esc(url)}" target="_blank" rel="noopener nofollow" aria-label="${esc(SOCIAL_LABELS[key] || key)}">${ico}</a>`);
+      }
+      if (links.discord) {
+        const handle = String(links.discord).trim();
+        chips.push(`<span class="soc" tabindex="0" role="img" title="Discord: ${esc(handle)}" aria-label="Discord: ${esc(handle)}">${socialIcon("discord")}</span>`);
+      }
+      const socials = chips.length ? `<div class="socials">${chips.join("")}</div>` : "";
+      const note = !this._entry && this._loaded ? `<div class="note">This member has not published a public profile. You can still follow them.</div>` : "";
+      return `<div class="hero"><span class="av">${avUrl ? `<img src="${esc(avUrl)}" alt="">` : ini}</span><div class="id"><div class="name">${esc(name)}</div><div class="user">@${esc(username)}</div>${headline}${bio}${since}${actions}${tags}${socials}</div></div>${note}`;
+    }
+    render() {
+      const username = this._username;
+      if (!username) {
+        this.set(this.css(CSS38) + `<div class="wrap"><div class="note">No member selected.</div></div>`);
+        return;
+      }
+      if (this.client && !this._loaded && !this._loading) {
+        this._loading = true;
+        this._load();
+      }
+      const sections = this._loaded ? MEMBER_SECTIONS.map((s) => `<section class="work" data-section="${s.type}"><h3>${esc(s.label)}</h3><div data-list="${s.type}"></div></section>`).join("") : `<div class="skeleton">Loading ${esc(username)}…</div>`;
+      this.set(this.css(CSS38) + `<div class="wrap">${this._heroHtml()}${sections}</div>`);
+      if (this._loaded) {
+        for (const s of MEMBER_SECTIONS) {
+          const host = this.$(`[data-list="${s.type}"]`);
+          if (!host) continue;
+          const items = this._sections[s.type] || [];
+          if (!items.length) {
+            host.innerHTML = `<div class="empty">No published ${esc(s.label.toLowerCase())} yet.</div>`;
+            continue;
+          }
+          const list = document.createElement("gbti-card-list");
+          list.mode = "detailed";
+          list.items = items;
+          list.addEventListener("card-open", (e) => {
+            const it = e.detail?.item;
+            if (it) this.emit("member-open-item", { item: it, username });
+          });
+          host.replaceChildren(list);
+        }
+      }
+    }
+  };
+  define("gbti-member-view", GbtiMemberView);
+
   // client-ui/src/elements/gbti-browse.mjs
-  var SITE14 = "https://gbti.network";
+  var SITE16 = "https://gbti.network";
   var TABS2 = [
     { id: "all", label: "All" },
     { id: "post", label: "Articles", json: "blog-index.json" },
@@ -15866,7 +16117,7 @@ From the author:
     } catch {
     }
   }
-  var CSS38 = `
+  var CSS39 = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
   .tabs { display:flex; gap:4px; background:var(--panel); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border:1px solid var(--line); border-radius:999px; padding:4px; margin:0 0 16px; flex-wrap:wrap; }
   .tab { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:700; font-size:13px; padding:7px 15px; border-radius:999px; cursor:pointer; }
@@ -15960,7 +16211,7 @@ From the author:
       const tab = TABS2.find((t) => t.id === id);
       if (!tab?.json || this._cache[id]) return;
       try {
-        const res = await fetch(`${SITE14}/${tab.json}`, { cache: "no-cache" });
+        const res = await fetch(`${SITE16}/${tab.json}`, { cache: "no-cache" });
         this._cache[id] = res.ok ? (await res.json()).items || [] : [];
       } catch {
         this._cache[id] = [];
@@ -16000,7 +16251,7 @@ From the author:
     render() {
       if (this._reading) {
         const label = TABS2.find((t) => t.id === this._reading.type)?.label || "list";
-        this.set(this.css(CSS38) + `<button class="btn" data-back type="button">&larr; Back to ${esc(label)}</button><div data-reader></div>`);
+        this.set(this.css(CSS39) + `<button class="btn" data-back type="button">&larr; Back to ${esc(label)}</button><div data-reader></div>`);
         this.on("[data-back]", "click", () => {
           this._reading = null;
           this.render();
@@ -16013,7 +16264,7 @@ From the author:
         return;
       }
       const tabs = TABS2.map((t) => `<button class="tab ${t.id === this._tab ? "on" : ""}" data-tab="${t.id}" type="button">${esc(t.label)}</button>`).join("");
-      this.set(this.css(CSS38) + `<div class="tabs" role="tablist">${tabs}</div><div data-body></div>`);
+      this.set(this.css(CSS39) + `<div class="tabs" role="tablist">${tabs}</div><div data-body></div>`);
       this.$$("[data-tab]").forEach((b) => b.addEventListener("click", () => {
         this._tab = b.dataset.tab;
         this._cat = [];

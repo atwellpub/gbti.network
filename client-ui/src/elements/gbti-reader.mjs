@@ -22,6 +22,7 @@ import './gbti-mod-actions.mjs'; // SOW-071: per-item moderation (Hide/Unhide/Re
 import { hostOf } from '../all-merge.mjs'; // SOW-057: the link domain for the "Read article on <domain>" CTA
 import { utmLink, UTM } from '../news.mjs'; // sow-145: UTM attribution on outbound share links
 import { faviconFor } from './gbti-card-list.mjs'; // owner QA 2026-07-22: the share source favicon (meta stack + side card)
+import { loadMembersDirectory } from '../members-index.mjs'; // SOW-143: the shared /members-index.json loader (one cache across elements)
 import { socialIcon } from '../social-icons.mjs'; // SOW-067: per-platform inline brand icons for the author card
 import './gbti-syndicate-now.mjs'; // SOW-088: the superadmin Manually Syndicate control (self-gates)
 import { embedUrl, isPortraitEmbed } from '../../../client/src/video-embed.mjs'; // SOW-092: the ONE shared video extractor (a share's video link plays inline)
@@ -48,17 +49,10 @@ const lockNotice = (what) => `<div class="locked">${esc(what)} is for members. <
 // SOW-129: humanize a role slug for the author card (mcp-developer -> "MCP Developer"). Short tokens uppercase.
 const prettyRole = (s) => String(s || '').split(/[-_]/).filter(Boolean).map((w) => (w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
 
-// SOW-050: the member directory (/members-index.json) carries the author drawer's avatar/name/headline/links. It
-// is small + public (CORS *), so fetch it once per page and cache the promise across reader opens.
-let _directory = null;
-function loadDirectory() {
-  if (_directory) return _directory;
-  _directory = fetch(`${SITE}/members-index.json`)
-    .then((r) => (r.ok ? r.json() : { members: [] }))
-    .then((j) => new Map((j.members || []).map((m) => [lc(m.username), m])))
-    .catch(() => new Map());
-  return _directory;
-}
+// SOW-050: the member directory (/members-index.json) carries the author drawer's avatar/name/headline/links.
+// SOW-143: the fetch+memoize moved to the shared client-ui/src/members-index.mjs so the reader and the new
+// member-detail view share ONE cache. `loadDirectory` stays as a thin local alias to minimize the reader diff.
+const loadDirectory = loadMembersDirectory;
 
 // Build a {href,label,handle?} for each known public social link. A bare handle is prefixed to a canonical URL;
 // an already-absolute value passes through. Discord is a handle (not reliably linkable), so it surfaces as an

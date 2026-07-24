@@ -8,6 +8,18 @@
 // JS-driven prompts directory hero can set it.
 import { GbtiElement, define } from '../base.mjs';
 
+// SOW-143: route the "become a member" fallback safely from ANY host. On gbti.network keep the relative nav
+// (unchanged behavior). Inside an extension page (chrome-extension:// origin, this element's first non-site
+// mount via <gbti-member-view>), a relative '/membership/' resolves to a dead chrome-extension://<id>/membership/
+// that would replace the whole tab, so open the absolute URL in a new tab instead.
+const MEMBERSHIP_URL = 'https://gbti.network/membership/';
+function goMembership() {
+  try {
+    if (typeof location !== 'undefined' && /^https?:$/.test(location.protocol)) { window.location.href = '/membership/'; return; }
+  } catch { /* no location: fall through to the absolute open */ }
+  try { window.open(MEMBERSHIP_URL, '_blank', 'noopener'); } catch { /* nothing more we can do */ }
+}
+
 // Megaphone inlined: a Shadow-DOM <use href="#ico-mega"> cannot reach the page sprite across the shadow boundary.
 const mega = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="margin-right:6px"><path d="M3 11v2a1 1 0 0 0 1 1h2l3.5 3.5V6.5L6 10H4a1 1 0 0 0-1 1zM14 8v8c1.7-.6 3-2.4 3-4s-1.3-3.4-3-4zm0-4.2v2.1c2.9.9 5 3.7 5 6.1s-2.1 5.2-5 6.1v2.1c4-.9 7-4.4 7-8.2s-3-7.3-7-8.2z" fill="currentColor"/></svg>`;
 
@@ -69,7 +81,7 @@ class GbtiSubscribe extends GbtiElement {
   _onClick() {
     const username = this._username;
     if (!username) return;
-    if (!this.client || this._canFollow === false) { window.location.href = '/membership/'; return; }
+    if (!this.client || this._canFollow === false) { goMembership(); return; }
     this._toggle(username);
   }
 
@@ -86,7 +98,7 @@ class GbtiSubscribe extends GbtiElement {
       this._following = !next; // revert
       this.render();
       if (err?.code === 'not-authenticated' || err?.code === 'follows-failed' || /paid|sign in/i.test(err?.message || '')) {
-        window.location.href = '/membership/';
+        goMembership();
       }
     }
   }

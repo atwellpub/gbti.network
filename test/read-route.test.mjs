@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createReader } from '../client/src/repo-fs.mjs';
 import { readContent, OperationError } from '../client/src/operations.mjs';
 import { handleApi } from '../client/src/api.mjs';
-import { buildReadHash, parseBrowseHash, stripDoParam } from '../client-ui/src/browse-hash.mjs';
+import { buildReadHash, parseBrowseHash, stripDoParam, buildMemberHash, parseMemberHash } from '../client-ui/src/browse-hash.mjs';
 import { resolveAsset } from '../client-ui/src/assets.mjs';
 
 const POST = '---\ntype: post\ntitle: Hello\nslug: hello\nauthor: alice\nstatus: published\nvisibility: public\n---\n\nBody here\n';
@@ -122,6 +122,40 @@ test('do= force-action: bounded build/parse + one-shot strip (SOW-114 content-pa
   assert.equal(stripDoParam('do=favorite&tab=post'), 'tab=post');
   assert.equal(stripDoParam('tab=post&read=x'), 'tab=post&read=x');
   assert.equal(stripDoParam(''), '');
+});
+
+// SOW-143: the member-detail deep-link hash (tab=member&member=<username>), a DISTINCT key from read=.
+test('buildMemberHash: valid username round-trips, invalid returns empty', () => {
+  assert.equal(buildMemberHash('alice'), 'tab=member&member=alice');
+  assert.equal(buildMemberHash('atwellpub'), 'tab=member&member=atwellpub');
+  assert.equal(buildMemberHash('Alice'), 'tab=member&member=alice'); // lowercased
+  assert.equal(buildMemberHash('a-b-c'), 'tab=member&member=a-b-c');
+  assert.equal(buildMemberHash(''), '');
+  assert.equal(buildMemberHash('-lead'), ''); // leading hyphen
+  assert.equal(buildMemberHash('trail-'), ''); // trailing hyphen
+  assert.equal(buildMemberHash('a--b'), ''); // double hyphen
+  assert.equal(buildMemberHash('a_b'), ''); // underscore not allowed
+  assert.equal(buildMemberHash('a'.repeat(40)), ''); // over length (max 39)
+});
+
+test('parseMemberHash: requires BOTH tab=member and a valid member=<u>', () => {
+  assert.equal(parseMemberHash('tab=member&member=alice'), 'alice');
+  assert.equal(parseMemberHash('#tab=member&member=alice'), 'alice'); // leading # optional
+  assert.equal(parseMemberHash('member=alice&tab=member'), 'alice'); // order-independent
+  assert.equal(parseMemberHash('tab=member&member=Alice'), 'alice'); // lowercased
+  assert.equal(parseMemberHash('tab=post&member=alice'), null); // wrong tab -> no hijack
+  assert.equal(parseMemberHash('tab=member'), null); // missing member key
+  assert.equal(parseMemberHash('tab=member&member='), null); // empty username
+  assert.equal(parseMemberHash('tab=member&member=-bad'), null); // invalid username
+  assert.equal(parseMemberHash(''), null);
+  assert.doesNotThrow(() => parseMemberHash('tab=member&member=%E0%A4%A')); // malformed percent-encoding
+  assert.equal(parseMemberHash('tab=member&member=%E0%A4%A'), null);
+});
+
+test('parseBrowseHash: a member hash is INERT to the feed/browse consumers (all-null)', () => {
+  // The single anti-regression guard: because `member` is kept out of TAB_IDS, the existing deep-read path and
+  // <gbti-browse> cannot be triggered by a member hash.
+  assert.deepEqual(parseBrowseHash('#tab=member&member=alice'), { tab: null, read: null, action: null });
 });
 
 test('resolveAsset: SITE-relative -> absolute, already-absolute passes through, null fallback', () => {

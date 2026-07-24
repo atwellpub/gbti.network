@@ -76,11 +76,21 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
     if (!btn || !dlg) return;
     btn.addEventListener('click', () => {
       // Owner QA 2026-07-22: with the extension installed AND a signed-in member, never show the
-      // dialog; relay into the extension's follow surface (the workspace Subscriptions tab) instead.
-      // (The upgraded shadow toggle normally covers this path; this is the fallback when it has not.)
+      // dialog; relay into the extension. (The upgraded shadow toggle normally covers this path; this is the
+      // fallback when it has not.)
+      // SOW-143: relay to the member's in-extension profile detail view so the follow lands on the RIGHT member.
+      // The username may be absent (the prompts directory renders <SubscribeButton> with none and fills it from
+      // JS), so fall back to the workspace Subscriptions tab (the pre-143 behavior) when it is missing/invalid.
+      // Shape note: `member=` (not `read=`) so an extension build that predates this route finds no deep read and
+      // lands on the activity feed, rather than erroring in the content reader.
       const de = document.documentElement.dataset;
       if (de.gbtiExtension && de.gbtiMember) {
-        document.dispatchEvent(new CustomEvent('gbti:open', { detail: { page: 'workspace.html', hash: 'tab=subs' } }));
+        const u = ((wrap as HTMLElement).dataset.gbtiUsername || '').trim().toLowerCase();
+        const ok = /^[a-z0-9](?:-?[a-z0-9]){0,38}$/.test(u);
+        const detail = ok
+          ? { page: 'newtab.html', hash: `tab=member&member=${encodeURIComponent(u)}` }
+          : { page: 'workspace.html', hash: 'tab=subs' };
+        document.dispatchEvent(new CustomEvent('gbti:open', { detail }));
         return;
       }
       const extensionNeeded = hasIdentity();

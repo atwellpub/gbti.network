@@ -31,6 +31,32 @@ function publicLinks(links) {
 }
 
 /**
+ * SOW-143: a short PLAIN-TEXT excerpt of a profile's markdown bio BODY, for the in-extension member detail view.
+ * The body already renders publicly at /members/<u>/, so this adds no new exposure, but it MUST be plain text:
+ * member markdown bodies render raw HTML on the site (no sanitize), so we strip ALL markup here and the extension
+ * additionally renders the result escaped. Drops fenced code, HTML tags, link/heading/emphasis/tick markers,
+ * collapses whitespace, and truncates on a word boundary. Returns undefined for an empty result (so the field is
+ * omitted, matching the links/roles/skills pattern). Pure.
+ */
+export function bioExcerpt(body, max = 280) {
+  let t = String(body == null ? '' : body);
+  t = t.replace(/```[\s\S]*?```/g, ' ');        // fenced code blocks
+  t = t.replace(/<[^>]*>/g, ' ');               // well-formed HTML tags
+  t = t.replace(/[<>]/g, ' ');                  // any residual angle bracket (an UNCLOSED tag leaves a '<') -> no bracket ever reaches the JSON
+  t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');   // images
+  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'); // links -> their label
+  t = t.replace(/^\s{0,3}#{1,6}\s+/gm, '');      // heading markers
+  t = t.replace(/^\s{0,3}>\s?/gm, '');           // blockquote markers
+  t = t.replace(/[*_`~]+/g, '');                 // emphasis / inline-code / strikethrough ticks
+  t = t.replace(/\s+/g, ' ').trim();             // collapse whitespace
+  if (!t) return undefined;
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).trimEnd()}…`;
+}
+
+/**
  * @param {{ data: { username:string, displayName?:string, avatar?:string, headline?:string, tier?:string, links?:Record<string,string> } }[]} profiles
  *   ALREADY filtered to public + directory profiles by the caller.
  * @param {(login?:string)=>(string|undefined)} [avatarFallback]  github avatar by login, for profiles without a gravatar.
@@ -45,6 +71,9 @@ export function buildMembersDirectory(profiles, avatarFallback = () => undefined
     // decision 2026-07-19). Still NO location (kept off the public surfaces).
     const roles = Array.isArray(d.roles) ? d.roles.filter((r) => typeof r === 'string' && r.trim()).map((r) => r.trim()) : [];
     const skills = Array.isArray(d.skills) ? d.skills.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()) : [];
+    // SOW-143: a plain-text bio excerpt (from the markdown BODY) + the join date, for the member detail view.
+    const bio = bioExcerpt(p.body);
+    const joinedAt = d.joinedAt ? new Date(d.joinedAt).toISOString() : undefined;
     return {
       username: d.username,
       displayName: d.displayName || d.username,
@@ -54,6 +83,8 @@ export function buildMembersDirectory(profiles, avatarFallback = () => undefined
       ...(links ? { links } : {}),
       ...(roles.length ? { roles } : {}),
       ...(skills.length ? { skills } : {}),
+      ...(bio ? { bio } : {}),
+      ...(joinedAt ? { joinedAt } : {}),
     };
   });
 }
