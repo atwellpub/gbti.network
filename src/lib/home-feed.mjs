@@ -165,3 +165,20 @@ export function relativeTime(date, now = Date.now()) {
   if (d < 365) return `${Math.max(1, Math.round(d / 30))}mo ago`;
   return `${Math.max(1, Math.round(d / 365))}y ago`;
 }
+
+/**
+ * sow-141 QA (2026-07-24): where to pepper worker news into the homepage feed. Returns the 0-based
+ * MEMBER-row indices after which to insert one news item, on a (ratio-1)-members : 1-news rhythm
+ * (ratio 3 = after rows 1, 3, 5, ...), capped so news never exceeds 1/(ratio) of the blended feed
+ * and never runs consecutively. Positions index the ORIGINAL member row list, so a DOM consumer can
+ * hold the row references first and insert after them in any order.
+ */
+export function newsInsertionPlan(memberCount, newsCount, ratio = 3) {
+  const per = Math.max(1, (ratio | 0) - 1);
+  const m = Math.max(0, memberCount | 0);
+  const n = Math.max(0, newsCount | 0);
+  const max = Math.min(Math.floor(m / per), n);
+  const plan = [];
+  for (let i = 0; i < max; i++) plan.push(per * (i + 1) - 1);
+  return plan;
+}

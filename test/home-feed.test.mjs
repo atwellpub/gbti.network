@@ -143,3 +143,21 @@ test('utmUrl appends the attribution params, preserves existing queries, falls t
   assert.equal(utmUrl('not a url', { campaign: 'shares' }), 'not a url');
   assert.equal(utmUrl('', { campaign: 'shares' }), '');
 });
+
+// sow-141 QA: the homepage news pepper. News lands after every 2nd member row (ratio 3), never exceeds
+// one third of the blended feed, and degrades to no insertions when either stream is empty.
+test('newsInsertionPlan peppers at 2:1 and holds the one-third cap', async () => {
+  const { newsInsertionPlan } = await import('../src/lib/home-feed.mjs');
+  assert.deepEqual(newsInsertionPlan(10, 60), [1, 3, 5, 7, 9]); // 5 news among 10 members = 1/3 blended
+  assert.deepEqual(newsInsertionPlan(5, 60), [1, 3]);
+  assert.deepEqual(newsInsertionPlan(5, 1), [1]); // news supply caps the plan
+  assert.deepEqual(newsInsertionPlan(0, 60), []);
+  assert.deepEqual(newsInsertionPlan(10, 0), []);
+  assert.deepEqual(newsInsertionPlan(1, 60), []); // a single member row takes no news
+  for (const [m, n] of [[7, 60], [30, 60], [200, 60], [9, 4]]) {
+    const plan = newsInsertionPlan(m, n);
+    assert.ok(plan.length <= Math.floor(m / 2), `${m}/${n} plan within the member half`);
+    assert.ok(plan.length / (plan.length + m) <= 1 / 3 + 1e-9, `${m}/${n} holds the one-third cap`);
+    assert.ok(plan.every((p, i) => p === 2 * (i + 1) - 1), `${m}/${n} follows the 2:1 rhythm`);
+  }
+});

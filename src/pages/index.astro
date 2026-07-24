@@ -13,7 +13,7 @@ import FeedList from '../components/feeds/FeedList.astro';
 import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
 import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime } from '../lib/home-feed.mjs';
-import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, MEMBERSHIP_PRICE_LABEL, BILLING_PERIOD } from '../lib/membership';
+import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
 const { contentItems, shareItems, profiles, avatarIndex } = await loadFeedItems();
 
@@ -117,7 +117,7 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
 
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
-    <main aria-label="The network feed">
+    <main aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
       <div class="feed-lab" id="feed"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><a class="more" href="/feeds/">Everything, including member shares</a></div>
       <FeedList items={feed} avatarIndex={avatarIndex} />
     </main>
@@ -133,7 +133,7 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
           <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg> Earn up to {FIRST_TOUCH_PCT} from members your work brings in</li>
         </ul>
         <a href="/membership/" class="btn btn-primary" style="width:100%;justify-content:center">Start your free trial</a>
-        <p class="note">{MEMBERSHIP_PRICE_LABEL}/{BILLING_PERIOD} after · {TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
+        <p class="note">{TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
       </div>
 
       <!-- live / events -->
@@ -209,7 +209,7 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
       <h2 class="h2">Join the GBTI Network</h2>
       <p class="lead">Publish your work, build with peers, and earn from what you make.</p>
       <div class="mt24"><a href="/membership/" class="btn btn-primary btn-lg">Start your free trial <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a></div>
-      <p class="mono muted" style="font-size:13px;margin-top:14px">{MEMBERSHIP_PRICE_LABEL}/{BILLING_PERIOD} after · {TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
+      <p class="mono muted" style="font-size:13px;margin-top:14px">{TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
     </div>
   </div>
 </section>
@@ -253,3 +253,84 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
   })();
 </script>
 </BaseLayout>
+
+<script>
+  // sow-141 QA (2026-07-24): pepper the public worker news into the homepage feed, client-side. The
+  // static build carries only member content (SEO); news is runtime data from the anonymous
+  // signup-Worker endpoint, spliced in on a 2-members : 1-news rhythm so news never exceeds one third
+  // of the blended feed. Rows mirror the /feeds/news renderer (same feed-item vocabulary, internal
+  // /news/item/ deep links). A failed fetch or an empty feed leaves the page exactly as built.
+  import { newsInsertionPlan } from '../lib/home-feed.mjs';
+  (() => {
+    const main = document.querySelector('main[aria-label="The network feed"]');
+    const base = main?.getAttribute('data-signup-base') || '';
+    const list = main?.querySelector('[data-feedlist]');
+    if (!base || !list) return;
+    const relTime = (epochS: number) => {
+      const s = Math.max(0, Math.floor(Date.now() / 1000 - epochS));
+      if (s < 60) return 'just now';
+      const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+      const d = Math.floor(h / 24); if (d < 30) return d + 'd ago';
+      if (d < 365) return Math.max(1, Math.round(d / 30)) + 'mo ago';
+      return Math.max(1, Math.round(d / 365)) + 'y ago';
+    };
+    const el = (t: string, cls?: string, text?: string) => {
+      const n = document.createElement(t);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    };
+    const newsRow = (it: any) => {
+      const art = el('article', 'feed-item news-row' + (it.image ? '' : ' nocover'));
+      art.setAttribute('data-fi', '');
+      const main2 = el('div', 'feed-main');
+      const meta = el('div', 'feed-meta');
+      meta.append(
+        el('span', 'kind-tag kt-news', 'news' + (it.source ? ' · ' + it.source : '')),
+        el('span', 'tmeta', typeof it.publishedAt === 'number' ? relTime(it.publishedAt) : ''),
+      );
+      const detailHref = '/news/item/?g=' + encodeURIComponent(String(it.guid || '')) + (it.source ? '&s=' + encodeURIComponent(String(it.source)) : '');
+      const h2 = el('h2', 'feed-title');
+      const a = el('a', undefined, String(it.title || 'Untitled'));
+      a.setAttribute('href', detailHref);
+      h2.append(a);
+      main2.append(meta, h2);
+      if (it.summary) {
+        const sum = String(it.summary).trim();
+        main2.append(el('p', 'feed-ex', /[.!?]["')\]]?$/.test(sum) ? sum : sum + '...'));
+      }
+      const foot = el('div', 'feed-foot');
+      foot.append(el('span', 'fsp'));
+      main2.append(foot);
+      art.append(main2);
+      const cover = el('a', 'feed-cover' + (it.image ? '' : ' feed-cover-fb'));
+      cover.setAttribute('href', detailHref);
+      cover.setAttribute('aria-hidden', 'true');
+      cover.setAttribute('tabindex', '-1');
+      const img = document.createElement('img');
+      const imgUrl = it.image ? String(it.image).replace(/&#0*38;/g, '&').replace(/&amp;/g, '&') : '';
+      img.src = imgUrl || '/brand/feature/feature-category.png';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.addEventListener('error', () => {
+        img.src = '/brand/feature/feature-category.png';
+        cover.classList.add('feed-cover-fb');
+      }, { once: true });
+      cover.append(img);
+      art.append(cover);
+      return art;
+    };
+    fetch(base + '/news/feed?limit=60')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('bad status'))))
+      .then((data) => {
+        const items = Array.isArray(data?.items) ? data.items : [];
+        if (!items.length) return;
+        const rows = Array.from(list.querySelectorAll('.feed-chunk [data-fi]'));
+        const plan = newsInsertionPlan(rows.length, items.length);
+        plan.forEach((pos, i) => rows[pos]?.after(newsRow(items[i])));
+      })
+      .catch(() => { /* news is optional garnish; the built feed stands alone */ });
+  })();
+</script>
