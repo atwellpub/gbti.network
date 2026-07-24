@@ -166,7 +166,7 @@ function hashtagList(labels) {
  * author-controlled displayName/title can never fire a mass mention (the adapter's allowed_mentions guard
  * additionally caps pings to the author id). Unknown {tokens} render empty; whitespace collapses. Pure.
  */
-export function renderTemplate(template, item = {}, { limit = 2000 } = {}) {
+export function renderTemplate(template, item = {}, { limit = 2000, previewMention = null } = {}) {
   const mention = /^<@!?\d+>$/.test(String(item.mention || '')) ? item.mention : null;
   const fullName = sanitizeMentions(item.authorName || (item.author ? `@${item.author}` : 'a member'));
   // {member-discord-username}: the member's Discord identity, best-first: a resolved <@id> mention, then
@@ -177,10 +177,16 @@ export function renderTemplate(template, item = {}, { limit = 2000 } = {}) {
   // anything else falls through to the GitHub username.
   const rawHandle = String(item.authorDiscord || '').trim().replace(/^@/, '');
   const discordHandle = /^[A-Za-z0-9._]{2,32}$/.test(rawHandle) && !/[\/:]/.test(rawHandle) ? rawHandle : '';
-  const discordUsername = mention
+  // PREVIEW-ONLY: the real Discord <@id> mention is resolved SERVER-SIDE at post time, so a browser preview can
+  // never show it and falls back to the name/handle, which reads like a bug. When the caller passes
+  // `previewMention` (only when it KNOWS the author's Discord will resolve), the Discord-mention tokens render
+  // that placeholder instead of the fallback. Used ONLY when there is no real mention; the server render path
+  // never sets it, so a posted message is unaffected. Not sanitized: it is our own literal, never posted.
+  const previewM = (!mention && previewMention) ? String(previewMention) : null;
+  const discordUsername = mention || previewM
     || sanitizeMentions(`@${discordHandle || item.author || 'a member'}`);
   const vars = {
-    memberdiscord: mention || fullName, // the owner-decided fallback: full name, no ping
+    memberdiscord: mention || previewM || fullName, // the owner-decided fallback: full name, no ping
     memberdiscordusername: discordUsername,
     contenttype: TYPE_LABEL[item.source] || 'item', // {content-type}: article / product / prompt / link
     fullname: fullName,

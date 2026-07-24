@@ -122,6 +122,24 @@ test('renderTemplate: a resolved mention pings; no mention falls back to the no-
   assert.ok(noName.includes('alice')); // @login text fallback (zero-width-space neutralized)
 });
 
+// SOW-143 follow-up: a PREVIEW-only placeholder for the Discord <@id> mention (which resolves server-side, so a
+// browser preview cannot show it and would otherwise fall back to the name and read like a bug).
+test('renderTemplate: previewMention placeholder stands in for the mention tokens when there is no real mention', () => {
+  const P = '[you will be @mentioned on Discord]';
+  // No real mention -> the placeholder fills both {memberdiscord} and {member-discord-username}.
+  assert.equal(renderTemplate(T, { authorName: 'Alice Q', url: 'https://ex.com/a' }, { previewMention: P }),
+    `Shared by ${P} https://ex.com/a`);
+  assert.match(renderTemplate('by {member-discord-username}', { author: 'alice', authorDiscord: 'ahandle' }, { previewMention: P }),
+    /by \[you will be @mentioned on Discord\]/);
+  // A REAL resolved mention still wins over the placeholder (never overridden).
+  assert.equal(renderTemplate(T, { mention: '<@123>', url: 'https://ex.com/a' }, { previewMention: P }),
+    'Shared by <@123> https://ex.com/a');
+  // No previewMention passed (the server render path) -> unchanged name fallback, no placeholder leak.
+  const noPreview = renderTemplate(T, { authorName: 'Alice Q', url: 'https://ex.com/a' });
+  assert.ok(noPreview.startsWith('Shared by Alice Q'));
+  assert.ok(!noPreview.includes('@mentioned'));
+});
+
 test('renderTemplate sanitizes every author-controlled variable (never a mass mention)', () => {
   const out = renderTemplate('{title} {fullName} {category}', {
     title: '@everyone free stuff <@&999>',

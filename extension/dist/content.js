@@ -14731,14 +14731,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     return out.join(" ");
   }
-  function renderTemplate(template, item = {}, { limit = 2e3 } = {}) {
+  function renderTemplate(template, item = {}, { limit = 2e3, previewMention = null } = {}) {
     const mention = /^<@!?\d+>$/.test(String(item.mention || "")) ? item.mention : null;
     const fullName = sanitizeMentions(item.authorName || (item.author ? `@${item.author}` : "a member"));
     const rawHandle = String(item.authorDiscord || "").trim().replace(/^@/, "");
     const discordHandle = /^[A-Za-z0-9._]{2,32}$/.test(rawHandle) && !/[\/:]/.test(rawHandle) ? rawHandle : "";
-    const discordUsername = mention || sanitizeMentions(`@${discordHandle || item.author || "a member"}`);
+    const previewM = !mention && previewMention ? String(previewMention) : null;
+    const discordUsername = mention || previewM || sanitizeMentions(`@${discordHandle || item.author || "a member"}`);
     const vars = {
-      memberdiscord: mention || fullName,
+      memberdiscord: mention || previewM || fullName,
       // the owner-decided fallback: full name, no ping
       memberdiscordusername: discordUsername,
       contenttype: TYPE_LABEL5[item.source] || "item",
@@ -14916,9 +14917,12 @@ From the author:
     }
     async _gate() {
       try {
-        this._role = (await this.client.status())?.role || "member";
+        const st = await this.client.status();
+        this._role = st?.role || "member";
+        this._me = String(st?.identity?.username || st?.identity?.login || "").toLowerCase();
       } catch {
         this._role = "member";
+        this._me = "";
       }
       this._loading = false;
       this.render();
@@ -14972,6 +14976,11 @@ From the author:
         this._info = info;
         const note = (thread?.items ?? thread?.comments ?? []).find((c) => c?.authorNote && typeof c.body === "string" && c.body.trim());
         this._authorNote = note ? note.body.trim() : null;
+        try {
+          this._discordLinked = Boolean((await this.client.discordLinkStatus?.())?.linked);
+        } catch {
+          this._discordLinked = false;
+        }
         const key = `${this._item().source}:${this._item().targetSlug}`;
         const prior = [...queue?.sent ?? [], ...queue?.failed ?? []].filter((it) => (it.id || "").startsWith(key + "#"));
         this._prior = prior.filter((it) => it.status === "sent");
@@ -15116,7 +15125,9 @@ From the author:
       const dest = this._dest;
       const item = this._item();
       const template = this._effectiveTemplate();
-      const preview = renderTemplate(template, item, { limit: 2e3 });
+      const authorIsMe = this._me && String(item.author || "").toLowerCase() === this._me;
+      const previewMention = dest === "discord" && authorIsMe && this._discordLinked ? "[you will be @mentioned on Discord]" : null;
+      const preview = renderTemplate(template, item, { limit: 2e3, previewMention });
       let channelRow = "";
       if (dest === "discord") {
         const groups = /* @__PURE__ */ new Map();

@@ -73,8 +73,13 @@ class GbtiSyndicateNow extends GbtiElement {
   }
 
   async _gate() {
-    try { this._role = (await this.client.status())?.role || 'member'; }
-    catch { this._role = 'member'; }
+    try {
+      const st = await this.client.status();
+      this._role = st?.role || 'member';
+      // SOW-143 follow-up: the signed-in viewer's username, to decide when the Discord-mention preview
+      // placeholder is safe to show (only for the viewer's OWN content, where we can confirm their link status).
+      this._me = String(st?.identity?.username || st?.identity?.login || '').toLowerCase();
+    } catch { this._role = 'member'; this._me = ''; }
     this._loading = false;
     this.render();
   }
@@ -117,6 +122,12 @@ class GbtiSyndicateNow extends GbtiElement {
       this._info = info;
       const note = (thread?.items ?? thread?.comments ?? []).find((c) => c?.authorNote && typeof c.body === 'string' && c.body.trim());
       this._authorNote = note ? note.body.trim() : null;
+      // SOW-143 follow-up: is the signed-in viewer's Discord linked (discord_user_id on their Stripe customer)?
+      // The Discord mention resolves from that SAME field server-side, so a linked viewer syndicating their OWN
+      // content WILL be @mentioned at post. Cache it so the preview can show an honest placeholder instead of
+      // the name fallback. Fail-soft to not-linked (the preview then just shows the real fallback).
+      try { this._discordLinked = Boolean((await this.client.discordLinkStatus?.())?.linked); }
+      catch { this._discordLinked = false; }
       const key = `${this._item().source}:${this._item().targetSlug}`;
       const prior = [...(queue?.sent ?? []), ...(queue?.failed ?? [])].filter((it) => (it.id || '').startsWith(key + '#'));
       this._prior = prior.filter((it) => it.status === 'sent');
@@ -293,7 +304,14 @@ class GbtiSyndicateNow extends GbtiElement {
     const item = this._item();
     // Reddit renders the template as the POST TITLE; a plain {title} reads natural there.
     const template = this._effectiveTemplate();
-    const preview = renderTemplate(template, item, { limit: 2000 });
+    // SOW-143 follow-up: for a Discord post, the {member-discord-username} / {memberdiscord} tokens resolve to a
+    // real <@id> mention SERVER-SIDE at publish, which the browser cannot show (it falls back to the name and
+    // reads like a bug). Show an honest placeholder ONLY when we can confirm it will resolve: the item's author
+    // is the signed-in viewer AND their Discord is linked. For anyone else's content, or an unlinked viewer, the
+    // preview keeps the real fallback (which honestly signals "not linked").
+    const authorIsMe = this._me && String(item.author || '').toLowerCase() === this._me;
+    const previewMention = (dest === 'discord' && authorIsMe && this._discordLinked) ? '[you will be @mentioned on Discord]' : null;
+    const preview = renderTemplate(template, item, { limit: 2000, previewMention });
     let channelRow = '';
     if (dest === 'discord') {
       const groups = new Map();
