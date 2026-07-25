@@ -30,7 +30,8 @@ import {
   deviceVerificationUrl, forkUrl, appInstallUrl, manageInstallsUrl,
 } from './onboarding.mjs';
 import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, authModeFor, isHostedCtx } from './signup-base.mjs';
-import { hostedAuthor, hostedItemId } from './hosted-publish.mjs'; // SOW-156 spike: hosted-mode publish transport
+import { hostedAuthor, hostedItemId, hostedPublishFiles } from './hosted-publish.mjs'; // SOW-156/157: hosted-mode publish transport
+import { workerListDrafts, workerPutDraft, workerDeleteDraft } from './drafts-client.mjs'; // SOW-157: the hosted draft store
 import { isContributionToFolder } from '../../membership/classify-pr.mjs';
 import yaml from 'js-yaml';
 import { rolesFromParsed, roleOf, isAdminRole } from '../../membership/overrides-core.mjs';
@@ -353,14 +354,20 @@ export async function renameContent(ctx, { path: rel, newSlug } = {}) {
     throw new OperationError('membership-required', 'Renaming a published item requires a paid membership.', { membership });
   }
 
-  const fork = await repo.ensureFork();
-  // v1 safety: no rename while staged work or an open PR exists for either slug (the rename would strand them).
-  for (const s of [oldSlug, slug]) {
-    const branch = branchName(type, s);
-    const staged = await repo.getBranchSha(fork.full_name, branch).catch(() => null);
-    if (staged) throw new OperationError('bad-request', `a staged draft exists for "${s}" — publish or discard it first`);
-    const pull = await repo.findOpenPull({ head: `${fork.owner}:${branch}` }).catch(() => null);
-    if (pull) throw new OperationError('bad-request', `an open pull request exists for "${s}" — wait for it to merge or close it first`);
+  // SOW-157: hosted mode has no fork; the staged-work safety loop and the fork base checks below are
+  // fork-mode-only (the hosted branch is always fresh-based on live main, so the SOW-112 stale-base
+  // failure cannot occur and the old file is verified via the canonical reader read further down).
+  const hosted = isHostedCtx(ctx);
+  if (!hosted) {
+    const fork = await repo.ensureFork();
+    // v1 safety: no rename while staged work or an open PR exists for either slug (the rename would strand them).
+    for (const s of [oldSlug, slug]) {
+      const branch = branchName(type, s);
+      const staged = await repo.getBranchSha(fork.full_name, branch).catch(() => null);
+      if (staged) throw new OperationError('bad-request', `a staged draft exists for "${s}" — publish or discard it first`);
+      const pull = await repo.findOpenPull({ head: `${fork.owner}:${branch}` }).catch(() => null);
+      if (pull) throw new OperationError('bad-request', `an open pull request exists for "${s}" — wait for it to merge or close it first`);
+    }
   }
 
   const newPath = contentPath(type, id.username, slug);
@@ -391,8 +398,13 @@ export async function renameContent(ctx, { path: rel, newSlug } = {}) {
   files.push(...await introMoveFiles(ctx, { username: id.username, type, oldSlug, newSlug: slug }));
 
   const branch = `gbti/rename-${type}-${oldSlug}`;
+  if (hosted) {
+    const pr = await hostedPublishFiles(ctx, { branch, files, title: `Rename: ${oldSlug} -> ${slug}` });
+    return { ...pr, ok: true, type, oldSlug, slug, path: newPath };
+  }
   await syncForkIfCreatingBranch(ctx, repo, branch);
   // The delete half needs the old file ON the branch base; without it the move would half-apply. Fail closed.
+  const fork = await repo.ensureFork();
   const base = await repo.getDefaultBranch(repo.upstream);
   const baseSha = await repo.getBranchSha(fork.full_name, base).catch(() => null);
   const oldOnBase = baseSha ? await repo.getFileSha(fork.full_name, rel, base).catch(() => null) : null;
@@ -454,6 +466,10 @@ export async function setOwnContentStatus(ctx, { path: rel, status } = {}) {
   const flip = flipContentStatus(text, status);
   if (!flip.changed) return { ok: true, noop: true, status };
   const verb = status === 'draft' ? 'Unpublish' : 'Republish';
+  if (isHostedCtx(ctx)) {
+    const pr = await hostedPublishFiles(ctx, { branch, files: [{ path: rel, content: flip.content }], title: `${verb}: ${slug}` });
+    return { ...pr, ok: true, status };
+  }
   await syncForkIfCreatingBranch(ctx, repo, branch); // SOW-106 Phase A: fresh-base the flip branch
   const pr = await publishFiles({
     repo, branch, files: [{ path: rel, content: flip.content }],
@@ -600,16 +616,32 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   const msg = message ?? desc.message;
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
-  // SOW-156 (spike): hosted mode hands the file set to the Worker (no fork, no local commit); the Worker
-  // commits to a canonical hosted branch and opens the auto-merging PR. Renames need fork reads (the SOW-112
-  // merge-base dance below), so they stay fork-mode-only until the full hosted build.
+  // SOW-156/157: hosted mode hands the file set to the Worker (no fork, no local commit); the Worker
+  // commits to a canonical hosted branch and opens the auto-merging PR. A hosted RENAME needs none of the
+  // SOW-112 fork dance below (that dance exists because fork branches base stale; the hosted branch is
+  // ALWAYS fresh-based on live main), so it is just the old-path deletes + the intro move in the same
+  // files[] — every path is own-folder, verified against the canonical reader.
   if (isHostedCtx(ctx)) {
-    if (renaming) throw new OperationError('bad-request', 'renaming is not yet available in hosted mode — contact the co-op to rename this item');
-    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
-    return hostedAuthor({
-      token: ctx.store?.get?.('githubToken'), itemId: hostedItemId(built.type, built.slug),
+    if (targetScope === 'house') throw new OperationError('bad-request', 'house content publishes through fork mode');
+    const hostedRenameFiles = [];
+    if (renaming) {
+      const onMain = (await ctx.reader?.readFile?.(origin.oldPath)) != null;
+      if (!onMain) throw new OperationError('bad-request', 'the original item could not be found on the network — refresh and try the rename again');
+      hostedRenameFiles.push({ path: origin.oldPath, content: null });
+      if (typeof oldFm?.encryptedBody === 'string' && oldFm.encryptedBody) hostedRenameFiles.push({ path: oldFm.encryptedBody, content: null });
+      if (!introFile) {
+        hostedRenameFiles.push(...await introMoveFiles(ctx, { username: id.username, type, oldSlug: origin.oldSlug, newSlug: built.slug }));
+      } else {
+        const oldIntro = `members/${id.username}/comments/intro-${origin.oldSlug}.md`;
+        if ((await ctx.reader?.readFile?.(oldIntro)) != null) hostedRenameFiles.push({ path: oldIntro, content: null });
+      }
+    }
+    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []).concat(hostedRenameFiles);
+    const r = await hostedAuthor({
+      token: ctx.store?.get?.('githubToken'), itemId: hostedItemId(built.type, renaming ? origin.oldSlug : built.slug),
       files, title: ttl, signupBase: SIGNUP_BASE, fetchImpl: ctx.fetch ?? globalThis.fetch,
     });
+    return renaming ? { ...r, renamed: { from: origin.oldSlug, to: built.slug } } : r;
   }
   // SOW-112 v2: a rename rides the item's OWN branch (the staged-draft identity), carries the deletes of the
   // old path (+ its .enc; the new one was freshly encrypted above), and moves the intro comment — unless this
@@ -791,6 +823,22 @@ export async function saveDraft(ctx, { type, input, body, message, path } = {}) 
   const origin = renameOriginOf({ path, username: id.username, type: built.type });
   const staging = origin && built.slug !== origin.oldSlug ? origin : null;
   const branch = branchName(built.type, staging ? staging.oldSlug : built.slug);
+  // SOW-157: a hosted member has no fork; drafts stage in the private, erasable KV store instead (which
+  // also serves trial members: nothing staged here ever touches the canonical repo). The body is stored
+  // plain (the store is per-member private); encryption happens at PUBLISH time via the normal plan.
+  if (isHostedCtx(ctx)) {
+    let fm = {};
+    try { fm = parseContentFile(built.markdown).frontmatter ?? {}; } catch { fm = {}; }
+    await workerPutDraft({
+      draft: {
+        type: built.type, slug: staging ? staging.oldSlug : built.slug,
+        pendingSlug: staging ? built.slug : null,
+        path: staging ? staging.oldPath : built.path, frontmatter: fm, body,
+      },
+      token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch,
+    });
+    return { ok: true, branch, type: built.type, slug: built.slug ?? null, path: staging ? staging.oldPath : built.path, state: 'staged', hosted: true, ...(staging ? { renamed: { from: staging.oldSlug, to: built.slug } } : {}) };
+  }
   const token = ctx.store?.get?.('githubToken');
   const encrypt = (plaintext, assetId) => encryptViaWorker({ plaintext, assetId, token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
   let plan;
@@ -832,6 +880,34 @@ export async function forkContentMatchesLive(ctx, path, forkText) {
 
 export async function listDrafts(ctx, { type } = {}) {
   const id = requireIdentity(ctx);
+  // SOW-157: hosted drafts come from the KV store; the same row shape, with no PR (drafts never open one).
+  if (isHostedCtx(ctx)) {
+    const opts = { token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const drafts = [];
+    for (const r of recs ?? []) {
+      if (type && r.type !== type) continue;
+      let valid = true;
+      let invalidReason = null;
+      try {
+        buildContentFile({ type: r.type, username: id.username, input: r.frontmatter ?? {}, body: r.body ?? '' });
+      } catch (err) {
+        valid = false;
+        invalidReason = err?.message || 'this draft no longer matches the current schema';
+      }
+      let rowPath = r.path;
+      if (!rowPath) { try { rowPath = contentPath(r.type, id.username, r.slug); } catch { rowPath = null; } }
+      drafts.push({
+        type: r.type, slug: r.slug, branch: branchName(r.type, r.slug), path: rowPath,
+        pendingSlug: r.pendingSlug ?? null,
+        title: r.frontmatter?.title || r.frontmatter?.displayName || r.slug || r.type,
+        visibility: r.frontmatter?.visibility || 'public',
+        status: r.frontmatter?.status || 'draft',
+        valid, invalidReason, pull: null,
+      });
+    }
+    return { drafts };
+  }
   const repo = requireRepo(ctx);
   const fork = await repo.ensureFork();
   const refs = await repo.listMatchingRefs(fork.full_name, 'gbti/');
@@ -896,8 +972,18 @@ export async function listDrafts(ctx, { type } = {}) {
  *  in the sibling .enc; decrypt it (the author is paid) so a re-save never replaces the gated text with a stub. */
 export async function readDraft(ctx, { type, slug } = {}) {
   const id = requireIdentity(ctx);
-  const repo = requireRepo(ctx);
   if (!type) throw new OperationError('bad-request', 'type is required');
+  // SOW-157: a hosted draft's restore state (frontmatter + plain body) comes straight from the KV record.
+  if (isHostedCtx(ctx)) {
+    const opts = { token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const rec = (recs ?? []).find((r) => r.type === type && r.slug === slug);
+    if (!rec) throw new OperationError('not-found', 'no such draft');
+    let recPath = rec.path;
+    if (!recPath) { try { recPath = contentPath(type, id.username, slug); } catch { recPath = null; } }
+    return { path: recPath, branch: branchName(type, slug), frontmatter: rec.frontmatter ?? {}, body: rec.body ?? '' };
+  }
+  const repo = requireRepo(ctx);
   const branch = branchName(type, slug);
   const fork = await repo.ensureFork();
   let path;
@@ -918,8 +1004,13 @@ export async function readDraft(ctx, { type, slug } = {}) {
  *  abruptly close the PR + lose the review thread); the member withdraws the PR first. */
 export async function discardDraft(ctx, { type, slug } = {}) {
   requireIdentity(ctx);
-  const repo = requireRepo(ctx);
   if (!type) throw new OperationError('bad-request', 'type is required');
+  // SOW-157: a hosted discard is a KV delete (idempotent; no branch, no PR to strand).
+  if (isHostedCtx(ctx)) {
+    await workerDeleteDraft({ type, slug, token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
+    return { ok: true, branch: branchName(type, slug), hosted: true };
+  }
+  const repo = requireRepo(ctx);
   const branch = branchName(type, slug);
   const fork = await repo.ensureFork();
   let pull = null;
@@ -946,6 +1037,21 @@ export async function publishDraft(ctx, { type, slug, title, prBody } = {}) {
   const membership = await membershipOf(ctx);
   if (isBlockedFromPublishing(membership)) {
     throw new OperationError('membership-required', 'Publishing on gbti.network requires a paid membership. Your draft is saved on your own fork. Upgrade to a paid membership at https://gbti.network, and your client publishes your staged drafts.', { membership });
+  }
+  // SOW-157: a hosted draft publishes through the normal publish op (validation + member-content encryption
+  // + the hosted Worker commit), then leaves the staging store — its content now lives on the network and
+  // the submitted PR shows in the workspace via the hosted my-pulls match.
+  if (isHostedCtx(ctx)) {
+    const opts = { token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const rec = (recs ?? []).find((r) => r.type === type && r.slug === slug);
+    if (!rec) throw new OperationError('not-found', 'no such draft');
+    const r = await publish(ctx, {
+      type, input: rec.frontmatter ?? {}, body: rec.body ?? '', title, prBody,
+      ...(rec.pendingSlug && rec.path ? { path: rec.path } : {}), // a pending rename applies at the publish event (SOW-112)
+    });
+    try { await workerDeleteDraft({ type, slug, ...opts }); } catch { /* best-effort; a stale staged copy is harmless */ }
+    return { ...r, ok: true, hosted: true };
   }
   const branch = branchName(type, slug);
   const fork = await repo.ensureFork();
@@ -1045,14 +1151,17 @@ export async function publishShare(ctx, { input = {}, body = '', message, title,
     throw err;
   }
   const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
-  const pr = await publishFiles({
-    repo,
-    branch: `gbti/share-${id_}`, // idempotent by branch: re-publishing the same id updates the same PR
-    files,
-    message: message ?? `Share: ${built.frontmatter.title || id_}`,
-    title: title ?? `New Share${built.frontmatter.title ? `: ${built.frontmatter.title}` : ''}`,
-    body: prBody,
-  });
+  const shareTitle = title ?? `New Share${built.frontmatter.title ? `: ${built.frontmatter.title}` : ''}`;
+  const pr = isHostedCtx(ctx)
+    ? await hostedPublishFiles(ctx, { branch: `gbti/share-${id_}`, files, title: shareTitle }) // SOW-157: no fork
+    : await publishFiles({
+        repo,
+        branch: `gbti/share-${id_}`, // idempotent by branch: re-publishing the same id updates the same PR
+        files,
+        message: message ?? `Share: ${built.frontmatter.title || id_}`,
+        title: shareTitle,
+        body: prBody,
+      });
   // SOW-092: spread the PR handle (prNumber/prUrl/updated) like the comment op does, so the composer ack
   // can cite the real PR (it used to read an undefined prNumber). The explicit fields win on collision.
   return { ...pr, id: id_, path: built.path, visibility: built.frontmatter.visibility ?? 'members', encrypted: Boolean(plan?.encPath) };
@@ -1078,8 +1187,10 @@ async function planAndPublishComment(ctx, repo, built, body, { message, title, p
     throw err;
   }
   const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
-  // Idempotent by branch: re-editing the same comment id updates the same PR.
-  const pr = await publishFiles({ repo, branch: `gbti/comment-${built.id}`, files, message, title, body: prBody });
+  // Idempotent by branch: re-editing the same comment id updates the same PR (hosted reuses one hosted branch).
+  const pr = isHostedCtx(ctx)
+    ? await hostedPublishFiles(ctx, { branch: `gbti/comment-${built.id}`, files, title })
+    : await publishFiles({ repo, branch: `gbti/comment-${built.id}`, files, message, title, body: prBody });
   // SOW-072 P2: spread the PR handle (prNumber/prUrl/updated) so the comment ack + the MCP post_comment can report
   // it (publishFiles returns it; this op used to discard it). The explicit fields win on any key collision.
   return { ...pr, id: built.id, path: built.path, visibility: built.frontmatter.visibility ?? 'public', encrypted: Boolean(plan?.encPath) };
@@ -1151,6 +1262,10 @@ export async function deleteComment(ctx, { id } = {}) {
     throw new OperationError('forbidden', 'you may only delete your own comments');
   }
   const branch = `gbti/comment-delete-${cid}`;
+  if (isHostedCtx(ctx)) {
+    const pr = await hostedPublishFiles(ctx, { branch, files: [{ path: rel, content: null }], title: `Delete comment: ${cid}` });
+    return { ...pr, ok: true, id: cid, path: rel };
+  }
   await syncForkIfCreatingBranch(ctx, repo, branch);
   const pr = await publishFiles({
     repo, branch,

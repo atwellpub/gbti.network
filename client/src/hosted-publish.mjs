@@ -17,6 +17,20 @@ export function hostedItemId(type, slug) {
  * ({ prNumber, prUrl, branch, fork, updated }). Throws a plain Error carrying the Worker's member-safe
  * message on any denial (flag off, not paid, folder not provisioned, invalid paths).
  */
+/**
+ * SOW-157: the drop-in hosted twin of publishFiles for the share/comment ops. Their branch names
+ * (`gbti/share-<id>`, `gbti/comment-<id>`, ...) already ARE the per-item identity, so the itemId is the
+ * branch minus the `gbti/` prefix — a hosted re-publish of the same id reuses one hosted branch + PR
+ * exactly as the fork flow reuses one fork branch + PR. Returns the same publishFiles result shape.
+ */
+export function hostedPublishFiles(ctx, { branch, files, title }) {
+  const itemId = String(branch || '').replace(/^gbti\//, '');
+  return hostedAuthor({
+    token: ctx.store?.get?.('githubToken'), itemId, files, title,
+    signupBase: SIGNUP_BASE, fetchImpl: ctx.fetch ?? globalThis.fetch,
+  });
+}
+
 export async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_BASE, fetchImpl = globalThis.fetch }) {
   if (!token) throw new Error('sign in to publish');
   const res = await fetchImpl(`${String(signupBase).replace(/\/$/, '')}/membership/author`, {

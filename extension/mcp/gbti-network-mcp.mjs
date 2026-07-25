@@ -18469,6 +18469,17 @@ async function workerSyncFork({ token, signupBase, fetch = globalThis.fetch, bra
 function hostedItemId(type, slug) {
   return type === "profile" ? "profile" : `${type}-${slug}`;
 }
+function hostedPublishFiles(ctx2, { branch, files, title }) {
+  const itemId = String(branch || "").replace(/^gbti\//, "");
+  return hostedAuthor({
+    token: ctx2.store?.get?.("githubToken"),
+    itemId,
+    files,
+    title,
+    signupBase: SIGNUP_BASE,
+    fetchImpl: ctx2.fetch ?? globalThis.fetch
+  });
+}
 async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_BASE, fetchImpl = globalThis.fetch }) {
   if (!token) throw new Error("sign in to publish");
   const res = await fetchImpl(`${String(signupBase).replace(/\/$/, "")}/membership/author`, {
@@ -18479,6 +18490,29 @@ async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_B
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ok) throw new Error(body.message || `hosted publish failed (${res.status})`);
   return { prNumber: body.number, prUrl: body.html_url, branch: body.branch, fork: null, updated: !!body.already, hosted: true };
+}
+
+// client/src/drafts-client.mjs
+var trimBase3 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var DraftsClientError = class extends Error {
+};
+async function call2(method, body, { token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new DraftsClientError("not signed in");
+  const res = await fetch(trimBase3(signupBase) + "/membership/drafts", {
+    method,
+    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
+    ...body ? { body: JSON.stringify(body) } : {}
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new DraftsClientError(data?.message || data?.error || `drafts request failed (${res.status})`);
+  return data;
+}
+async function workerPutDraft({ draft, ...opts }) {
+  return call2("POST", { op: "put", draft }, opts);
 }
 
 // membership/overrides-core.mjs
@@ -18806,16 +18840,30 @@ async function publish(ctx2, { type, input, body, message, title, prBody, author
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
   if (isHostedCtx(ctx2)) {
-    if (renaming) throw new OperationError("bad-request", "renaming is not yet available in hosted mode — contact the co-op to rename this item");
-    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
-    return hostedAuthor({
+    if (targetScope === "house") throw new OperationError("bad-request", "house content publishes through fork mode");
+    const hostedRenameFiles = [];
+    if (renaming) {
+      const onMain = await ctx2.reader?.readFile?.(origin.oldPath) != null;
+      if (!onMain) throw new OperationError("bad-request", "the original item could not be found on the network — refresh and try the rename again");
+      hostedRenameFiles.push({ path: origin.oldPath, content: null });
+      if (typeof oldFm?.encryptedBody === "string" && oldFm.encryptedBody) hostedRenameFiles.push({ path: oldFm.encryptedBody, content: null });
+      if (!introFile) {
+        hostedRenameFiles.push(...await introMoveFiles(ctx2, { username: id.username, type, oldSlug: origin.oldSlug, newSlug: built.slug }));
+      } else {
+        const oldIntro = `members/${id.username}/comments/intro-${origin.oldSlug}.md`;
+        if (await ctx2.reader?.readFile?.(oldIntro) != null) hostedRenameFiles.push({ path: oldIntro, content: null });
+      }
+    }
+    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []).concat(hostedRenameFiles);
+    const r = await hostedAuthor({
       token: ctx2.store?.get?.("githubToken"),
-      itemId: hostedItemId(built.type, built.slug),
+      itemId: hostedItemId(built.type, renaming ? origin.oldSlug : built.slug),
       files,
       title: ttl,
       signupBase: SIGNUP_BASE,
       fetchImpl: ctx2.fetch ?? globalThis.fetch
     });
+    return renaming ? { ...r, renamed: { from: origin.oldSlug, to: built.slug } } : r;
   }
   const branch = branchName(built.type, renaming ? origin.oldSlug : built.slug, built.scope);
   await syncForkIfCreatingBranch(ctx2, repo, branch);
@@ -18940,6 +18988,28 @@ async function saveDraft(ctx2, { type, input, body, message, path: path4 } = {})
   const origin = renameOriginOf({ path: path4, username: id.username, type: built.type });
   const staging = origin && built.slug !== origin.oldSlug ? origin : null;
   const branch = branchName(built.type, staging ? staging.oldSlug : built.slug);
+  if (isHostedCtx(ctx2)) {
+    let fm = {};
+    try {
+      fm = parseContentFile(built.markdown).frontmatter ?? {};
+    } catch {
+      fm = {};
+    }
+    await workerPutDraft({
+      draft: {
+        type: built.type,
+        slug: staging ? staging.oldSlug : built.slug,
+        pendingSlug: staging ? built.slug : null,
+        path: staging ? staging.oldPath : built.path,
+        frontmatter: fm,
+        body
+      },
+      token: ctx2.store?.get?.("githubToken"),
+      signupBase: SIGNUP_BASE,
+      fetch: ctx2.fetch ?? globalThis.fetch
+    });
+    return { ok: true, branch, type: built.type, slug: built.slug ?? null, path: staging ? staging.oldPath : built.path, state: "staged", hosted: true, ...staging ? { renamed: { from: staging.oldSlug, to: built.slug } } : {} };
+  }
   const token = ctx2.store?.get?.("githubToken");
   const encrypt = (plaintext, assetId) => encryptViaWorker({ plaintext, assetId, token, signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch });
   let plan;
@@ -18971,7 +19041,7 @@ async function planAndPublishComment(ctx2, repo, built, body, { message, title, 
     throw err;
   }
   const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
-  const pr = await publishFiles({ repo, branch: `gbti/comment-${built.id}`, files, message, title, body: prBody });
+  const pr = isHostedCtx(ctx2) ? await hostedPublishFiles(ctx2, { branch: `gbti/comment-${built.id}`, files, title }) : await publishFiles({ repo, branch: `gbti/comment-${built.id}`, files, message, title, body: prBody });
   return { ...pr, id: built.id, path: built.path, visibility: built.frontmatter.visibility ?? "public", encrypted: Boolean(plan?.encPath) };
 }
 async function publishComment(ctx2, { targetType, targetSlug, body, authorNote, parentId, visibility, message, title, prBody } = {}) {

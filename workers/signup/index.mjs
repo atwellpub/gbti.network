@@ -67,6 +67,7 @@ import { handleSocialQueueGet, handleSocialQueueAction } from './social-queue-ad
 import { handleSyndicateNowInfo, handleSyndicateNow } from './membership-syndicate-now.mjs'; // SOW-088: manual syndicate
 import { drainSyndication } from './syndication-drain.mjs';
 import { handleFollows } from './membership-follows.mjs';
+import { handleDrafts } from './membership-drafts.mjs'; // SOW-157: the hosted draft store
 import { handleEarnings } from './membership-earnings.mjs'; // SOW-083 P2: the member's own earnings ledger
 import { handleCommentEcho } from './membership-comment-echo.mjs'; // SOW-076 P1: optimistic comment echoes (instant-feel)
 import { membershipNews, membershipNewsCategories, membershipNewsSources, publicNews } from './membership-news.mjs'; // SOW-043/046 proxy; sow-139 public list
@@ -651,6 +652,17 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
         if (method === 'GET' || method === 'POST') {
           const r = await handleFollows(request, env);
+          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+        }
+      }
+
+      // SOW-157: the hosted draft store (a hosted member has no fork to stage on). Signed-in, non-banned
+      // (trial may stage; SOW-011 keeps trial drafts OFF the canonical repo, and this store never touches
+      // git). Per-member, private, ERASABLE (SOW-024). Per-token body: never cached, varied on the bearer.
+      if (pathname === '/membership/drafts') {
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        if (method === 'GET' || method === 'POST') {
+          const r = await handleDrafts(request, env);
           return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
