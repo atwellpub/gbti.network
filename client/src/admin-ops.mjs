@@ -11,7 +11,7 @@
 
 import yaml from 'js-yaml';
 
-import { OperationError } from './operations.mjs';
+import { OperationError, syncForkIfCreatingBranch } from './operations.mjs';
 import { canModerate, canBanGrandfather, canManageRoles } from './roles.mjs';
 import { ban, unban, grandfather, revokeGrandfather, grantRole, SuperadminActionError } from '../../membership/superadmin-actions.mjs';
 import { addCategory as addCategoryEdit, renameLabel as renameLabelEdit, TaxonomyEditError } from '../../membership/taxonomy-edits.mjs';
@@ -24,6 +24,17 @@ import { addCouponEdit, updateCouponEdit, CouponEditError } from '../../membersh
 import { syndicationConfigFromParsed, TEMPLATE_TYPES, TEMPLATE_CHANNELS, newsEngagement, NEWS_ENGAGEMENT_TIERS, contentEngagement, CONTENT_ENGAGEMENT_SIGNALS, AUTO_TYPES, AUTO_CHANNELS, MATRIX_CHANNELS, AUTO_MODES, CHANNEL_CAPABILITY } from '../../membership/syndication-config-core.mjs'; // SOW-087 + SOW-111 + SOW-088 + SOW-125 + SOW-126
 import { retagContent, parseContentFile, flipContentStatus } from './content-ops.mjs';
 import { publishFiles } from './publish.mjs';
+
+// SOW-152: fresh-base the fork branch before an admin CONFIG write, exactly like the content publish path
+// (operations.mjs callers of syncForkIfCreatingBranch). Without this, an admin write force-resets its branch
+// onto the fork's POSSIBLY-STALE main, whose merge-base can predate the file on upstream -> an add/add
+// ("new file mode") conflict that a superadmin-automerge PR then stalls on forever. The sync is fail-soft (its
+// own try/catch), so a miss never breaks the write; it only ensures commitToBranchOnFork bases on a fresh main.
+// EVERY admin write goes through here so none is skipped.
+async function adminPublish(ctx, opts) {
+  await syncForkIfCreatingBranch(ctx, opts.repo, opts.branch);
+  return publishFiles(opts);
+}
 
 function requireRole(ctx, check, need) {
   const role = ctx.role?.() ?? 'member';
@@ -108,7 +119,7 @@ export async function banMember(ctx, { githubId, reason } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit } = ban(await readYaml(ctx, 'house/bans.yml'), { githubId: id, reason }, actionCtx(ctx));
   if (!changed) return noop(`already banned: ${id}`, audit);
-  const pr = await publishFiles({ repo, branch: `gbti/ban-${id}`, files: [{ path: 'house/bans.yml', content: dumpYaml(next) }], message: `Ban ${id}`, title: `Ban member ${id}`, body: prBody(reason, audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/ban-${id}`, files: [{ path: 'house/bans.yml', content: dumpYaml(next) }], message: `Ban ${id}`, title: `Ban member ${id}`, body: prBody(reason, audit) });
   return { ...pr, changed: true, audit };
 }
 
@@ -118,7 +129,7 @@ export async function unbanMember(ctx, { githubId } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit } = unban(await readYaml(ctx, 'house/bans.yml'), { githubId: id }, actionCtx(ctx));
   if (!changed) return noop(`not banned: ${id}`, audit);
-  const pr = await publishFiles({ repo, branch: `gbti/unban-${id}`, files: [{ path: 'house/bans.yml', content: dumpYaml(next) }], message: `Unban ${id}`, title: `Unban member ${id}`, body: prBody(null, audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/unban-${id}`, files: [{ path: 'house/bans.yml', content: dumpYaml(next) }], message: `Unban ${id}`, title: `Unban member ${id}`, body: prBody(null, audit) });
   return { ...pr, changed: true, audit };
 }
 
@@ -134,7 +145,7 @@ export async function grandfatherMember(ctx, { githubId, reason, until = null, l
     throw err;
   }
   if (!result.changed) return noop(`already grandfathered: ${id}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/grandfather-${id}`, files: [{ path: 'house/grandfathered.yml', content: dumpYaml(result.next) }], message: `Grandfather ${id}`, title: `Grandfather member ${id}`, body: prBody(reason, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/grandfather-${id}`, files: [{ path: 'house/grandfathered.yml', content: dumpYaml(result.next) }], message: `Grandfather ${id}`, title: `Grandfather member ${id}`, body: prBody(reason, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -144,7 +155,7 @@ export async function ungrandfatherMember(ctx, { githubId } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit } = revokeGrandfather(await readYaml(ctx, 'house/grandfathered.yml'), { githubId: id }, actionCtx(ctx));
   if (!changed) return noop(`not grandfathered: ${id}`, audit);
-  const pr = await publishFiles({ repo, branch: `gbti/ungrandfather-${id}`, files: [{ path: 'house/grandfathered.yml', content: dumpYaml(next) }], message: `Remove grandfather ${id}`, title: `Remove grandfather for ${id}`, body: prBody(null, audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/ungrandfather-${id}`, files: [{ path: 'house/grandfathered.yml', content: dumpYaml(next) }], message: `Remove grandfather ${id}`, title: `Remove grandfather for ${id}`, body: prBody(null, audit) });
   return { ...pr, changed: true, audit };
 }
 
@@ -163,7 +174,7 @@ export async function setMemberRole(ctx, { githubId, role, login } = {}) {
     throw err;
   }
   if (!result.changed) return noop(`already ${role}: ${id}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/role-${id}`, files: [{ path: 'house/roles.yml', content: dumpYaml(result.next) }], message: `Set ${id} role=${role}`, title: `Set role for ${id}: ${role}`, body: prBody(`role: ${role}`, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/role-${id}`, files: [{ path: 'house/roles.yml', content: dumpYaml(result.next) }], message: `Set ${id} role=${role}`, title: `Set role for ${id}: ${role}`, body: prBody(`role: ${role}`, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -179,7 +190,7 @@ export async function deplatformContent(ctx, { path: rel } = {}) {
   // intact (not forced to members) so a later restore keeps the content's original public/members audience.
   const flip = flipContentStatus(text, 'draft'); // SOW-106: the shared status-flip core
   const content = flip.changed ? flip.content : text;
-  return publishFiles({ repo, branch: `gbti/deplatform-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Deplatform ${rel}`, title: `Deplatform ${rel}`, body: 'Moderation: set status to draft.' });
+  return adminPublish(ctx, { repo, branch: `gbti/deplatform-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Deplatform ${rel}`, title: `Deplatform ${rel}`, body: 'Moderation: set status to draft.' });
 }
 
 // SOW-071: the inverse of deplatform (status -> published); visibility is left untouched. Moderator+, members content
@@ -193,7 +204,7 @@ export async function republishContent(ctx, { path: rel } = {}) {
   if (text == null) throw new OperationError('not-found', `no such file: ${rel}`);
   const flip = flipContentStatus(text, 'published'); // SOW-106: the shared status-flip core
   const content = flip.changed ? flip.content : text;
-  return publishFiles({ repo, branch: `gbti/republish-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Republish ${rel}`, title: `Republish ${rel}`, body: 'Moderation: set status to published.' });
+  return adminPublish(ctx, { repo, branch: `gbti/republish-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Republish ${rel}`, title: `Republish ${rel}`, body: 'Moderation: set status to published.' });
 }
 
 // SOW-071: Remove is a destructive file delete, so it is gated heavier than Hide -> admin+ (was moderator+), so the
@@ -202,7 +213,7 @@ export async function removeContent(ctx, { path: rel } = {}) {
   requireRole(ctx, canBanGrandfather, 'admin');
   const { repo } = requireRepo(ctx);
   requireMemberContentPath(rel);
-  return publishFiles({ repo, branch: `gbti/remove-${slugOf(rel)}`, files: [{ path: rel, content: null }], message: `Remove ${rel}`, title: `Remove ${rel}`, body: 'Moderation: remove content.' });
+  return adminPublish(ctx, { repo, branch: `gbti/remove-${slugOf(rel)}`, files: [{ path: rel, content: null }], message: `Remove ${rel}`, title: `Remove ${rel}`, body: 'Moderation: remove content.' });
 }
 
 // ---- admin: category manager (house/taxonomy.yml) — SOW-055 v1 (add + rename-label, the safe ops) ----
@@ -239,7 +250,7 @@ export async function addContentCategory(ctx, { parentPath, key, label } = {}) {
   catch (err) { if (err instanceof TaxonomyEditError) throw new OperationError('bad-request', err.message); throw err; }
   const fullPath = [...(Array.isArray(parentPath) ? parentPath : []), key].filter(Boolean);
   if (!result.changed) return noop(`category already exists: ${fullPath.join(' > ')}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/category-add-${slugOf(fullPath.join('-'))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Add category ${fullPath.join('/')}`, title: `Add category: ${label}`, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/category-add-${slugOf(fullPath.join('-'))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Add category ${fullPath.join('/')}`, title: `Add category: ${label}`, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -254,7 +265,7 @@ export async function renameContentCategoryLabel(ctx, { path, label } = {}) {
   catch (err) { if (err instanceof TaxonomyEditError) throw new OperationError('bad-request', err.message); throw err; }
   const p = Array.isArray(path) ? path : [];
   if (!result.changed) return noop(`label unchanged: ${p.join(' > ')}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/category-rename-${slugOf(p.join('-'))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Rename category ${p.join('/')} -> ${label}`, title: `Rename category: ${label}`, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/category-rename-${slugOf(p.join('-'))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Rename category ${p.join('/')} -> ${label}`, title: `Rename category: ${label}`, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -282,7 +293,7 @@ async function editNewsSources(ctx, edit, { branch, message, title, noopMsg }) {
   try { result = edit(parsed); }
   catch (err) { if (err instanceof NewsSourceEditError) throw new OperationError('bad-request', err.message); throw err; }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: NEWS_SOURCES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: NEWS_SOURCES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -329,7 +340,7 @@ async function editCoupons(ctx, edit, { branch, message, title, noopMsg }) {
   try { result = edit(parsed); }
   catch (err) { if (err instanceof CouponEditError) throw new OperationError('bad-request', err.message); throw err; }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: COUPONS_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: COUPONS_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -370,7 +381,7 @@ async function editQuotes(ctx, edit, { branch, message, title, noopMsg }) {
   try { result = edit(parsed); }
   catch (err) { if (err instanceof QuoteEditError) throw new OperationError('bad-request', err.message); throw err; }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: QUOTES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: QUOTES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -430,7 +441,7 @@ async function editHouseYaml(ctx, relPath, edit, { branch, message, title, noopM
   if (!result.changed) return noop(noopMsg, result.audit);
   // clobberOpenPull: a house-config branch's open PR is always this same edit, so a stale CONFLICTING
   // PR self-heals to fresh content on the next save (hit live 2026-07-12, PR #107).
-  const pr = await publishFiles({ repo, branch, files: [{ path: relPath, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit), clobberOpenPull: true });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: relPath, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit), clobberOpenPull: true });
   return { ...pr, changed: true, audit: result.audit };
 }
 
@@ -468,7 +479,7 @@ export async function applyTagEdit(ctx, { mode, action, tag, to, paths } = {}) {
   }
   if (!files.length) return noop(`no item carries the tag "${src}"`);
   const verb = act === 'retire' ? `Retire tag ${src}` : `${act === 'merge' ? 'Merge' : 'Rename'} tag ${src} -> ${dest}`;
-  const pr = await publishFiles({ repo, branch: `gbti/tag-${act}-${slugOf(src)}`, files, message: verb, title: verb, body: `Tag curation (SOW-100): ${verb} across ${files.length} item${files.length === 1 ? '' : 's'}.` });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/tag-${act}-${slugOf(src)}`, files, message: verb, title: verb, body: `Tag curation (SOW-100): ${verb} across ${files.length} item${files.length === 1 ? '' : 's'}.` });
   return { ...pr, changed: true, rewritten: files.length };
 }
 
@@ -517,7 +528,7 @@ export async function applyCategoryBatch(ctx, { ops, descriptions } = {}) {
   if (!files.length) return noop('every batched edit was already applied', { ops: list.length });
   const lines = Array.isArray(descriptions) && descriptions.length ? descriptions : list.map((o) => `${o.kind}: ${JSON.stringify(o.args)}`);
   const stamp = (ctx.now?.() ?? new Date().toISOString()).replace(/[^0-9]/g, '').slice(0, 14);
-  const pr = await publishFiles({
+  const pr = await adminPublish(ctx, {
     repo,
     branch: `gbti/category-batch-${stamp}`,
     files,
@@ -595,7 +606,7 @@ export async function setSyndicationTemplates(ctx, { edits } = {}) {
     if (result.changed) changed++;
   }
   if (!changed) return noop('no template changes', audits);
-  const pr = await publishFiles({
+  const pr = await adminPublish(ctx, {
     repo,
     branch: 'gbti/syndication-templates',
     files: [{ path: SYNDICATION_CONFIG_PATH, content: leadingComment(raw) + dumpYaml(doc) }],

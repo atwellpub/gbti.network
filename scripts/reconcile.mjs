@@ -34,7 +34,7 @@ import { syncFavoriteCounts, readCountsFromDisk, readFavoritedByFromDisk, readMe
 import { syncCouponGrants, readGrandfatheredFromDisk } from './lib/coupon-grants.mjs'; // SOW-119
 import { syncUpvoteCounts, readCountsFromDisk as readUpvoteCountsFromDisk } from './lib/upvote-counts.mjs';
 import { main as promotePopular } from './promote-popular.mjs'; // SOW-126: the engagement-triggered popular promoter
-import { mergeState, alreadyLabeled, conflictComment, CONFLICT_LABEL } from './lib/pr-conflict.mjs';
+import { mergeState, alreadyLabeled, conflictComment, CONFLICT_LABEL, isStuckAutomergeBot } from './lib/pr-conflict.mjs';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
 
@@ -309,18 +309,25 @@ export function buildClients(env, fetchImpl = globalThis.fetch) {
  * member PR; this adds a `needs-rebase` label + a one-time @-mention comment telling the author to re-publish
  * (which reloads the fresh file + clears the conflict). Idempotent (skips an already-labeled PR) and fail-soft
  * (any GitHub error is swallowed so the conflict sweep never breaks the rest of reconcile). The list endpoint omits
- * mergeable_state, so each open PR is fetched once via getPull. Returns the list of surfaced { number, login }.
+ * mergeable_state, so each open PR is fetched once via getPull. Returns { surfaced, stuck }: `surfaced` = the
+ * newly labeled+commented conflicts; `stuck` (SOW-152) = conflicting BOT superadmin-automerge PRs that the
+ * auto-merge cannot land and the re-publish comment cannot fix (collected EVEN IF already needs-rebase-labeled,
+ * so a persistently-stuck one stays visible in the summary instead of piling up silently).
  */
 export async function surfaceConflicts({ github, dryRun = true } = {}) {
   const surfaced = [];
-  if (!github?.listOpenPulls) return surfaced;
+  const stuck = [];
+  if (!github?.listOpenPulls) return { surfaced, stuck };
   let open;
-  try { open = await github.listOpenPulls(); } catch { return surfaced; }
+  try { open = await github.listOpenPulls(); } catch { return { surfaced, stuck }; }
   for (const p of open || []) {
     let pull;
     try { pull = await github.getPull(p.number); } catch { continue; } // mergeable_state only on the single-PR GET
-    if (mergeState(pull) !== 'conflicting' || alreadyLabeled(pull)) continue;
+    if (mergeState(pull) !== 'conflicting') continue;
     const login = pull.user?.login || p.user?.login || '';
+    // SOW-152: surface a stuck bot auto-merge PR distinctly, before the already-labeled skip, so it stays visible.
+    if (isStuckAutomergeBot(pull)) stuck.push({ number: pull.number, login });
+    if (alreadyLabeled(pull)) continue;
     surfaced.push({ number: pull.number, login });
     if (dryRun) continue;
     try {
@@ -330,7 +337,7 @@ export async function surfaceConflicts({ github, dryRun = true } = {}) {
       console.error(`reconcile: WARNING could not surface conflict on PR #${pull.number}: ${e?.message ?? e}`);
     }
   }
-  return surfaced;
+  return { surfaced, stuck };
 }
 
 /**
@@ -663,9 +670,15 @@ async function main() {
   // SOW-053 Part B: surface conflicting PRs (auto-merge stalls silently on them). Runs in both modes; the sweep
   // only labels + comments on --apply, and is fail-soft so it never breaks the rest of reconcile.
   try {
-    const conflicts = await surfaceConflicts({ github, dryRun });
-    if (conflicts.length) {
-      console.log(`reconcile: ${conflicts.length} conflicting PR(s)${dryRun ? ' (dry-run, would label + comment)' : ' surfaced'}: ` + conflicts.map((c) => `#${c.number}`).join(', '));
+    const { surfaced, stuck } = await surfaceConflicts({ github, dryRun });
+    if (surfaced.length) {
+      console.log(`reconcile: ${surfaced.length} conflicting PR(s)${dryRun ? ' (dry-run, would label + comment)' : ' surfaced'}: ` + surfaced.map((c) => `#${c.number}`).join(', '));
+    }
+    // SOW-152: the class /ci health cannot see (the gate's failed merge stays a green run). A stuck bot
+    // superadmin-automerge PR cannot auto-merge and the re-publish comment is a dead end for a bot, so it needs
+    // a human to bring the change in or re-trigger the action. Surfaced distinctly so it never piles up unseen.
+    if (stuck.length) {
+      console.log(`reconcile: ${stuck.length} STUCK superadmin-automerge BOT PR(s) needing recovery (cannot auto-merge; bring the change in by hand or re-trigger the action): ` + stuck.map((c) => `#${c.number}`).join(', '));
     }
   } catch (e) {
     console.error('reconcile: conflict sweep failed (non-fatal):', e?.message ?? e);

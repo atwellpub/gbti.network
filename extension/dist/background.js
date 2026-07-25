@@ -21616,6 +21616,10 @@ function setSyndicationSettings(doc, { enabled, requireApproval, holdMinutes, ch
 }
 
 // client/src/admin-ops.mjs
+async function adminPublish(ctx, opts) {
+  await syncForkIfCreatingBranch(ctx, opts.repo, opts.branch);
+  return publishFiles(opts);
+}
 function requireRole(ctx, check2, need) {
   const role = ctx.role?.() ?? "member";
   if (!check2(role)) throw new OperationError("forbidden", `requires ${need} (you are ${role})`);
@@ -21679,7 +21683,7 @@ async function banMember(ctx, { githubId, reason } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit: audit2 } = ban(await readYaml(ctx, "house/bans.yml"), { githubId: id, reason }, actionCtx(ctx));
   if (!changed) return noop(`already banned: ${id}`, audit2);
-  const pr = await publishFiles({ repo, branch: `gbti/ban-${id}`, files: [{ path: "house/bans.yml", content: dumpYaml(next) }], message: `Ban ${id}`, title: `Ban member ${id}`, body: prBody(reason, audit2) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/ban-${id}`, files: [{ path: "house/bans.yml", content: dumpYaml(next) }], message: `Ban ${id}`, title: `Ban member ${id}`, body: prBody(reason, audit2) });
   return { ...pr, changed: true, audit: audit2 };
 }
 async function unbanMember(ctx, { githubId } = {}) {
@@ -21688,7 +21692,7 @@ async function unbanMember(ctx, { githubId } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit: audit2 } = unban(await readYaml(ctx, "house/bans.yml"), { githubId: id }, actionCtx(ctx));
   if (!changed) return noop(`not banned: ${id}`, audit2);
-  const pr = await publishFiles({ repo, branch: `gbti/unban-${id}`, files: [{ path: "house/bans.yml", content: dumpYaml(next) }], message: `Unban ${id}`, title: `Unban member ${id}`, body: prBody(null, audit2) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/unban-${id}`, files: [{ path: "house/bans.yml", content: dumpYaml(next) }], message: `Unban ${id}`, title: `Unban member ${id}`, body: prBody(null, audit2) });
   return { ...pr, changed: true, audit: audit2 };
 }
 async function grandfatherMember(ctx, { githubId, reason, until = null, login } = {}) {
@@ -21703,7 +21707,7 @@ async function grandfatherMember(ctx, { githubId, reason, until = null, login } 
     throw err;
   }
   if (!result.changed) return noop(`already grandfathered: ${id}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/grandfather-${id}`, files: [{ path: "house/grandfathered.yml", content: dumpYaml(result.next) }], message: `Grandfather ${id}`, title: `Grandfather member ${id}`, body: prBody(reason, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/grandfather-${id}`, files: [{ path: "house/grandfathered.yml", content: dumpYaml(result.next) }], message: `Grandfather ${id}`, title: `Grandfather member ${id}`, body: prBody(reason, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function ungrandfatherMember(ctx, { githubId } = {}) {
@@ -21712,7 +21716,7 @@ async function ungrandfatherMember(ctx, { githubId } = {}) {
   const id = requireId(githubId);
   const { next, changed, audit: audit2 } = revokeGrandfather(await readYaml(ctx, "house/grandfathered.yml"), { githubId: id }, actionCtx(ctx));
   if (!changed) return noop(`not grandfathered: ${id}`, audit2);
-  const pr = await publishFiles({ repo, branch: `gbti/ungrandfather-${id}`, files: [{ path: "house/grandfathered.yml", content: dumpYaml(next) }], message: `Remove grandfather ${id}`, title: `Remove grandfather for ${id}`, body: prBody(null, audit2) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/ungrandfather-${id}`, files: [{ path: "house/grandfathered.yml", content: dumpYaml(next) }], message: `Remove grandfather ${id}`, title: `Remove grandfather for ${id}`, body: prBody(null, audit2) });
   return { ...pr, changed: true, audit: audit2 };
 }
 async function setMemberRole(ctx, { githubId, role, login } = {}) {
@@ -21728,7 +21732,7 @@ async function setMemberRole(ctx, { githubId, role, login } = {}) {
     throw err;
   }
   if (!result.changed) return noop(`already ${role}: ${id}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/role-${id}`, files: [{ path: "house/roles.yml", content: dumpYaml(result.next) }], message: `Set ${id} role=${role}`, title: `Set role for ${id}: ${role}`, body: prBody(`role: ${role}`, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/role-${id}`, files: [{ path: "house/roles.yml", content: dumpYaml(result.next) }], message: `Set ${id} role=${role}`, title: `Set role for ${id}: ${role}`, body: prBody(`role: ${role}`, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function deplatformContent(ctx, { path: rel } = {}) {
@@ -21739,7 +21743,7 @@ async function deplatformContent(ctx, { path: rel } = {}) {
   if (text == null) throw new OperationError("not-found", `no such file: ${rel}`);
   const flip = flipContentStatus(text, "draft");
   const content = flip.changed ? flip.content : text;
-  return publishFiles({ repo, branch: `gbti/deplatform-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Deplatform ${rel}`, title: `Deplatform ${rel}`, body: "Moderation: set status to draft." });
+  return adminPublish(ctx, { repo, branch: `gbti/deplatform-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Deplatform ${rel}`, title: `Deplatform ${rel}`, body: "Moderation: set status to draft." });
 }
 async function republishContent(ctx, { path: rel } = {}) {
   requireRole(ctx, canModerate, "moderator");
@@ -21749,13 +21753,13 @@ async function republishContent(ctx, { path: rel } = {}) {
   if (text == null) throw new OperationError("not-found", `no such file: ${rel}`);
   const flip = flipContentStatus(text, "published");
   const content = flip.changed ? flip.content : text;
-  return publishFiles({ repo, branch: `gbti/republish-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Republish ${rel}`, title: `Republish ${rel}`, body: "Moderation: set status to published." });
+  return adminPublish(ctx, { repo, branch: `gbti/republish-${slugOf(rel)}`, files: [{ path: rel, content }], message: `Republish ${rel}`, title: `Republish ${rel}`, body: "Moderation: set status to published." });
 }
 async function removeContent(ctx, { path: rel } = {}) {
   requireRole(ctx, canBanGrandfather, "admin");
   const { repo } = requireRepo2(ctx);
   requireMemberContentPath(rel);
-  return publishFiles({ repo, branch: `gbti/remove-${slugOf(rel)}`, files: [{ path: rel, content: null }], message: `Remove ${rel}`, title: `Remove ${rel}`, body: "Moderation: remove content." });
+  return adminPublish(ctx, { repo, branch: `gbti/remove-${slugOf(rel)}`, files: [{ path: rel, content: null }], message: `Remove ${rel}`, title: `Remove ${rel}`, body: "Moderation: remove content." });
 }
 var TAXONOMY_PATH = "house/taxonomy.yml";
 function leadingComment(raw) {
@@ -21797,7 +21801,7 @@ async function addContentCategory(ctx, { parentPath, key, label } = {}) {
   }
   const fullPath = [...Array.isArray(parentPath) ? parentPath : [], key].filter(Boolean);
   if (!result.changed) return noop(`category already exists: ${fullPath.join(" > ")}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/category-add-${slugOf(fullPath.join("-"))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Add category ${fullPath.join("/")}`, title: `Add category: ${label}`, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/category-add-${slugOf(fullPath.join("-"))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Add category ${fullPath.join("/")}`, title: `Add category: ${label}`, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function renameContentCategoryLabel(ctx, { path, label } = {}) {
@@ -21819,7 +21823,7 @@ async function renameContentCategoryLabel(ctx, { path, label } = {}) {
   }
   const p = Array.isArray(path) ? path : [];
   if (!result.changed) return noop(`label unchanged: ${p.join(" > ")}`, result.audit);
-  const pr = await publishFiles({ repo, branch: `gbti/category-rename-${slugOf(p.join("-"))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Rename category ${p.join("/")} -> ${label}`, title: `Rename category: ${label}`, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/category-rename-${slugOf(p.join("-"))}`, files: [{ path: TAXONOMY_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message: `Rename category ${p.join("/")} -> ${label}`, title: `Rename category: ${label}`, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 var NEWS_SOURCES_PATH = "house/news-sources.yml";
@@ -21851,7 +21855,7 @@ async function editNewsSources(ctx, edit, { branch, message, title, noopMsg }) {
     throw err;
   }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: NEWS_SOURCES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: NEWS_SOURCES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function addNewsSource(ctx, { id, name, url: url2, description } = {}) {
@@ -21920,7 +21924,7 @@ async function editQuotes(ctx, edit, { branch, message, title, noopMsg }) {
     throw err;
   }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: QUOTES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: QUOTES_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function addQuote2(ctx, { text, author } = {}) {
@@ -21980,7 +21984,7 @@ async function editHouseYaml(ctx, relPath, edit, { branch, message, title, noopM
     throw err;
   }
   if (!result.changed) return noop(noopMsg, result.audit);
-  const pr = await publishFiles({ repo, branch, files: [{ path: relPath, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit), clobberOpenPull: true });
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: relPath, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit), clobberOpenPull: true });
   return { ...pr, changed: true, audit: result.audit };
 }
 async function applyTagEdit(ctx, { mode, action, tag, to, paths } = {}) {
@@ -22004,7 +22008,7 @@ async function applyTagEdit(ctx, { mode, action, tag, to, paths } = {}) {
   }
   if (!files.length) return noop(`no item carries the tag "${src}"`);
   const verb = act === "retire" ? `Retire tag ${src}` : `${act === "merge" ? "Merge" : "Rename"} tag ${src} -> ${dest}`;
-  const pr = await publishFiles({ repo, branch: `gbti/tag-${act}-${slugOf(src)}`, files, message: verb, title: verb, body: `Tag curation (SOW-100): ${verb} across ${files.length} item${files.length === 1 ? "" : "s"}.` });
+  const pr = await adminPublish(ctx, { repo, branch: `gbti/tag-${act}-${slugOf(src)}`, files, message: verb, title: verb, body: `Tag curation (SOW-100): ${verb} across ${files.length} item${files.length === 1 ? "" : "s"}.` });
   return { ...pr, changed: true, rewritten: files.length };
 }
 async function applyCategoryBatch(ctx, { ops, descriptions } = {}) {
@@ -22053,7 +22057,7 @@ async function applyCategoryBatch(ctx, { ops, descriptions } = {}) {
   if (!files.length) return noop("every batched edit was already applied", { ops: list.length });
   const lines = Array.isArray(descriptions) && descriptions.length ? descriptions : list.map((o) => `${o.kind}: ${JSON.stringify(o.args)}`);
   const stamp = (ctx.now?.() ?? (/* @__PURE__ */ new Date()).toISOString()).replace(/[^0-9]/g, "").slice(0, 14);
-  const pr = await publishFiles({
+  const pr = await adminPublish(ctx, {
     repo,
     branch: `gbti/category-batch-${stamp}`,
     files,
@@ -22133,7 +22137,7 @@ async function setSyndicationTemplates(ctx, { edits } = {}) {
     if (result.changed) changed++;
   }
   if (!changed) return noop("no template changes", audits);
-  const pr = await publishFiles({
+  const pr = await adminPublish(ctx, {
     repo,
     branch: "gbti/syndication-templates",
     files: [{ path: SYNDICATION_CONFIG_PATH, content: leadingComment(raw) + dumpYaml(doc) }],

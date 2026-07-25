@@ -2,7 +2,7 @@
 // (surfaceConflicts). Pure classification + an idempotent, fail-soft, dry-run-aware sweep over a mock GitHub client.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeState, alreadyLabeled, conflictComment, conflictAction, CONFLICT_LABEL } from '../scripts/lib/pr-conflict.mjs';
+import { mergeState, alreadyLabeled, conflictComment, conflictAction, CONFLICT_LABEL, hasLabel, isBotPull, isStuckAutomergeBot, AUTOMERGE_LABEL } from '../scripts/lib/pr-conflict.mjs';
 import { surfaceConflicts } from '../scripts/reconcile.mjs';
 
 test('mergeState: dirty / mergeable false = conflicting; null / unknown = unknown; else clean', () => {
@@ -38,6 +38,31 @@ test('conflictAction surfaces only a conflicting + unlabeled PR', () => {
   assert.equal(conflictAction({ mergeable: null }).surface, false); // unknown -> wait
 });
 
+// ---- SOW-152: bot / label / stuck helpers ----
+test('hasLabel reads object {name} or string labels for any label name', () => {
+  assert.equal(hasLabel({ labels: [{ name: AUTOMERGE_LABEL }] }, AUTOMERGE_LABEL), true);
+  assert.equal(hasLabel({ labels: ['superadmin-automerge'] }, AUTOMERGE_LABEL), true);
+  assert.equal(hasLabel({ labels: [{ name: 'needs-rebase' }] }, AUTOMERGE_LABEL), false);
+  assert.equal(hasLabel({}, AUTOMERGE_LABEL), false);
+});
+
+test('isBotPull: App bot by user.type or a [bot]-suffixed login, not a human', () => {
+  assert.equal(isBotPull({ user: { type: 'Bot' } }), true);
+  assert.equal(isBotPull({ user: { login: 'gbti-network-publisher[bot]' } }), true);
+  assert.equal(isBotPull({ user: { login: 'atwellpub', type: 'User' } }), false);
+  assert.equal(isBotPull({}), false);
+});
+
+test('isStuckAutomergeBot: conflicting AND bot AND superadmin-automerge (all three)', () => {
+  const stuck = { mergeable_state: 'dirty', user: { type: 'Bot' }, labels: [{ name: AUTOMERGE_LABEL }] };
+  assert.equal(isStuckAutomergeBot(stuck), true);
+  // still stuck even if ALSO already needs-rebase-labeled
+  assert.equal(isStuckAutomergeBot({ ...stuck, labels: [{ name: AUTOMERGE_LABEL }, { name: CONFLICT_LABEL }] }), true);
+  assert.equal(isStuckAutomergeBot({ ...stuck, mergeable_state: 'clean' }), false); // not conflicting
+  assert.equal(isStuckAutomergeBot({ ...stuck, user: { login: 'alice', type: 'User' } }), false); // human
+  assert.equal(isStuckAutomergeBot({ ...stuck, labels: [] }), false); // not automerge
+});
+
 // ---- the sweep ----
 function mockGithub(pulls) {
   const calls = { labels: [], comments: [] };
@@ -57,7 +82,7 @@ test('surfaceConflicts labels + comments each conflicting unlabeled PR on apply'
     { number: 3, user: { login: 'cara' }, mergeable_state: 'dirty', labels: [{ name: CONFLICT_LABEL }] }, // skip (already)
     { number: 4, user: { login: 'dan' }, mergeable: null, labels: [] },                      // skip (unknown)
   ]);
-  const surfaced = await surfaceConflicts({ github, dryRun: false });
+  const { surfaced } = await surfaceConflicts({ github, dryRun: false });
   assert.deepEqual(surfaced.map((s) => s.number), [1]);
   assert.deepEqual(github.calls.labels, [{ n: 1, labels: [CONFLICT_LABEL] }]);
   assert.equal(github.calls.comments.length, 1);
@@ -66,14 +91,27 @@ test('surfaceConflicts labels + comments each conflicting unlabeled PR on apply'
 
 test('surfaceConflicts in dry-run reports but does not mutate', async () => {
   const github = mockGithub([{ number: 7, user: { login: 'eve' }, mergeable_state: 'dirty', labels: [] }]);
-  const surfaced = await surfaceConflicts({ github, dryRun: true });
+  const { surfaced } = await surfaceConflicts({ github, dryRun: true });
   assert.deepEqual(surfaced.map((s) => s.number), [7]);
   assert.equal(github.calls.labels.length, 0);
   assert.equal(github.calls.comments.length, 0);
 });
 
-test('surfaceConflicts is fail-soft (a listOpenPulls error yields [])', async () => {
+test('surfaceConflicts is fail-soft (a listOpenPulls error yields empty)', async () => {
   const github = { listOpenPulls: async () => { throw new Error('boom'); } };
-  assert.deepEqual(await surfaceConflicts({ github, dryRun: false }), []);
-  assert.deepEqual(await surfaceConflicts({}), []); // no client -> []
+  assert.deepEqual(await surfaceConflicts({ github, dryRun: false }), { surfaced: [], stuck: [] });
+  assert.deepEqual(await surfaceConflicts({}), { surfaced: [], stuck: [] }); // no client -> empty
+});
+
+// SOW-152: a conflicting BOT superadmin-automerge PR is collected in `stuck` (even when already needs-rebase-
+// labeled, so a persistently-stuck one stays visible) while a human conflict is not.
+test('surfaceConflicts collects stuck bot superadmin-automerge PRs distinctly', async () => {
+  const github = mockGithub([
+    { number: 10, user: { login: 'gbti-network-publisher[bot]', type: 'Bot' }, mergeable_state: 'dirty', labels: [{ name: AUTOMERGE_LABEL }] },                       // stuck (fresh)
+    { number: 11, user: { login: 'gbti-network-publisher[bot]', type: 'Bot' }, mergeable_state: 'dirty', labels: [{ name: AUTOMERGE_LABEL }, { name: CONFLICT_LABEL }] }, // stuck (already labeled -> not in surfaced, still in stuck)
+    { number: 12, user: { login: 'alice', type: 'User' }, mergeable_state: 'dirty', labels: [] },                                                                       // human conflict -> surfaced, NOT stuck
+  ]);
+  const { surfaced, stuck } = await surfaceConflicts({ github, dryRun: true });
+  assert.deepEqual(stuck.map((s) => s.number), [10, 11]);
+  assert.deepEqual(surfaced.map((s) => s.number), [10, 12]); // 11 skipped (already labeled); 10 not-yet-labeled + human 12
 });

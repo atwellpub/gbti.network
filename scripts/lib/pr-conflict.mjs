@@ -8,6 +8,32 @@
 // merges cleanly. No manual git rebase is ever asked of the member.
 
 export const CONFLICT_LABEL = 'needs-rebase';
+// SOW-108: the label the gate assigns a superadmin PR that auto-merges on any path (membership/classify-pr.mjs).
+export const AUTOMERGE_LABEL = 'superadmin-automerge';
+
+/** Does a PR carry a given label? Same labels-array read as alreadyLabeled (string or {name}). Pure. */
+export function hasLabel(pull = {}, name) {
+  return (pull.labels || []).some((l) => (typeof l === 'string' ? l : l && l.name) === name);
+}
+
+/**
+ * SOW-152: is this PR authored by an App BOT (the gbti-network-publisher publisher app that opens the extension's
+ * superadmin config PRs)? A conflicting BOT superadmin-automerge PR is a DEAD END for the SOW-053 "re-publish"
+ * comment (a bot never re-publishes), so the sweep surfaces it distinctly for recovery. Pure: reads only the PR's
+ * user.type / user.login (GitHub tags an App author type 'Bot' and suffixes its login with '[bot]').
+ */
+export function isBotPull(pull = {}) {
+  const u = pull.user || {};
+  if (u.type === 'Bot') return true;
+  const login = String(u.login || '');
+  return login.endsWith('[bot]');
+}
+
+/** SOW-152: a conflicting, bot-authored, superadmin-automerge PR that the auto-merge cannot land and the
+ *  re-publish comment cannot fix. Surfaced distinctly so the stuck-bot class never silently piles up again. Pure. */
+export function isStuckAutomergeBot(pull = {}) {
+  return mergeState(pull) === 'conflicting' && isBotPull(pull) && hasLabel(pull, AUTOMERGE_LABEL);
+}
 
 /**
  * Classify a single-PR GET payload's merge state.

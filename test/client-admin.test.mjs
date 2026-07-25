@@ -93,6 +93,23 @@ test('banMember: forbidden for a plain member, allowed for admin (PR edits bans.
   assert.match(repo.puts[0].content, /999/);
 });
 
+// SOW-152: an admin config write now FRESH-BASES its fork branch (POST /membership/sync-fork) BEFORE committing,
+// exactly like the content publish path. Without it, the branch force-resets onto a stale fork main -> add/add
+// conflicts that a superadmin-automerge PR stalls on. A recording fetch proves the sync ran on an admin write.
+test('SOW-152: an admin write syncs the fork main before committing (fresh-base)', async () => {
+  const repoPath = seedRepo();
+  const repo = fakeRepo();
+  const fetched = [];
+  const fetch = async (url) => { fetched.push(String(url)); return { ok: true, json: async () => ({ synced: true }) }; };
+  const ctx = {
+    role: () => 'admin', getRepoClient: () => repo, reader: createReader(repoPath),
+    store: { get: (k) => ({ repoPath, githubToken: 't' })[k] }, now: () => '2026-06-03T00:00:00Z', fetch,
+  };
+  const out = await banMember(ctx, { githubId: '77', reason: 'spam' });
+  assert.equal(out.changed, true); // the write still succeeds
+  assert.ok(fetched.some((u) => u.includes('/membership/sync-fork')), 'the fork main was synced before the commit');
+});
+
 // SOW-038 P4: the governance ops are idempotent (already-in-that-state -> no PR) and fold an identity-minimal
 // audit entry into the PR body (the PR is the audit trail).
 test('banMember: idempotent no-op when already banned (no PR opened)', async () => {
