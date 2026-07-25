@@ -23,6 +23,7 @@ import { scrubCounterpart } from '../../workers/signup/conversion-snapshot-store
 
 export const ACTIVITY_KEY = (githubId) => `activity:${githubId}`;
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`; // SOW-023 subscription graph
+export const DRAFTS_KEY = (githubId) => `drafts:${githubId}`; // SOW-157 hosted draft staging
 export const PREFS_KEY = (githubId) => `prefs:${githubId}`; // SOW-046 member prefs (categories + followed news channels)
 export const LOOKUP_KEY = (githubId) => `gh:${githubId}`; // the github_id -> Stripe customer_id lookup cache
 export const CONV_SNAPSHOT_KEY = (githubId) => `conv:${githubId}`; // SOW-059 P1c: the frozen conversion attribution snapshot
@@ -66,6 +67,12 @@ export async function eraseFollows({ githubId, env = process.env, fetchImpl = gl
 export async function erasePrefs({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
   return deleteKvKey({ key: PREFS_KEY(String(githubId)), env, fetchImpl });
+}
+
+/** Hard-delete a member's hosted draft store (SOW-157: staged authoring state, may contain unpublished text). */
+export async function eraseDrafts({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  return deleteKvKey({ key: DRAFTS_KEY(String(githubId)), env, fetchImpl });
 }
 
 /** Hard-delete the github_id -> Stripe customer_id lookup cache (`gh:<github_id>`). It is per-member identity
@@ -399,6 +406,7 @@ export async function runErasure({
   await runStep('activity', () => eraseActivity({ githubId, env, fetchImpl }));
   await runStep('follows', () => eraseFollows({ githubId, env, fetchImpl }));
   await runStep('prefs', () => erasePrefs({ githubId, env, fetchImpl })); // SOW-046: categories + followed news channels
+  await runStep('drafts', () => eraseDrafts({ githubId, env, fetchImpl })); // SOW-157: hosted draft staging
   await runStep('lookup-cache', () => eraseLookupCache({ githubId, env, fetchImpl }));
   await runStep('share-votes', () => eraseShareVotes({ githubId, env, fetchImpl })); // SOW-057: per-target voter sets
   await runStep('news-opens', () => eraseNewsOpens({ githubId, env, fetchImpl })); // SOW-111: per-item opener sets
