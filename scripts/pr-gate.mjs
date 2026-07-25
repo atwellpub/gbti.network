@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import { deriveStatus } from '../membership/derive-status.mjs';
 import { loadOverrides, roleOf, effectiveStatus } from '../membership/overrides.mjs';
 import { ownedFolderFor, decide, contributionTarget } from '../membership/classify-pr.mjs';
+import { parseHostedRef } from '../membership/hosted-author.mjs'; // SOW-156: hosted canonical-head branch identity
 
 import { createStripeClient } from '../clients/stripe.mjs';
 import { createGitHubClient } from '../clients/github.mjs';
@@ -136,16 +137,33 @@ export function readEvent(eventPath, botId = null) {
  *  (the member's fork-scoped token cannot open it), the trust anchor is the PR HEAD (the fork owner), NOT the
  *  opener (now the bot). A member can only open a PR whose head is their own fork, so the head-repo owner is the
  *  real author. For any non-bot opener (a member opening their own PR directly), the opener stays the author. If
- *  a bot-opened PR has no resolvable head owner, author is null -> the gate fails closed. */
+ *  a bot-opened PR has no resolvable head owner, author is null -> the gate fails closed.
+ *
+ *  SOW-156 (hosted authoring): a bot-opened PR whose head lives on the CANONICAL repo itself (no fork) carries
+ *  the member identity in its branch name, hosted/<github_id>/<itemId>, written by the Worker from the VERIFIED
+ *  token identity (members cannot open PRs as the bot and cannot push branches to canonical). For that shape the
+ *  branch parse is the ONLY author source: a non-matching ref yields author null (fail closed). It must never
+ *  fall back to the head-repo owner, which for a canonical head is the org account -- if that id ever mapped to
+ *  a role, a malformed ref would escalate instead of failing. */
 export function parseEvent(event, botId = null) {
   const pr = event.pull_request;
   if (!pr) throw new Error('event payload has no pull_request');
   const opener = pr.user?.id;
   const botOpened = botId != null && String(opener) === String(botId);
-  const headOwner = pr.head?.repo?.owner?.id ?? pr.head?.user?.id ?? null;
+  const headRepoId = pr.head?.repo?.id ?? null;
+  const baseRepoId = pr.base?.repo?.id ?? null;
+  const sameRepoHead = headRepoId != null && String(headRepoId) === String(baseRepoId);
+  let author;
+  if (botOpened && sameRepoHead) {
+    author = parseHostedRef(pr.head?.ref); // hosted branch id, or null (hard fail; never the org owner id)
+  } else if (botOpened) {
+    author = pr.head?.repo?.owner?.id ?? pr.head?.user?.id ?? null; // fork head: the fork owner is the author
+  } else {
+    author = opener;
+  }
   return {
     number: event.number ?? pr.number,
-    author: botOpened ? headOwner : opener,
+    author,
     headSha: pr.head?.sha,
     botOpened,
   };

@@ -42,3 +42,39 @@ test('a bot-opened PR with no resolvable head owner fails closed (author null)',
 test('an event with no pull_request throws', () => {
   assert.throws(() => parseEvent({}, BOT), /no pull_request/);
 });
+
+// ---- SOW-156: hosted canonical-head PRs (the Worker commits to hosted/<github_id>/<itemId> on canonical) ----
+
+const CANON = 900100; // the canonical repo id
+const hostedEv = ({ openerId = BOT, ref, headRepoId = CANON, headOwnerId = 777 } = {}) => ({
+  number: 20,
+  pull_request: {
+    number: 20,
+    user: { id: openerId },
+    head: { sha: 'hsha', ref, user: { id: headOwnerId }, repo: { id: headRepoId, owner: { id: headOwnerId } } },
+    base: { repo: { id: CANON, owner: { id: 777 } } },
+  },
+});
+
+test('SOW-156: a bot-opened canonical-head PR resolves the author from the hosted branch name', () => {
+  const r = parseEvent(hostedEv({ ref: 'hosted/2002207/my-first-post' }), BOT);
+  assert.equal(r.author, '2002207');
+  assert.equal(r.botOpened, true);
+});
+
+test('SOW-156: a malformed hosted ref on a canonical-head bot PR fails closed to null, NEVER the org owner id', () => {
+  for (const ref of ['gbti/quote-add', 'hosted/2002207', 'hosted/abc/x', 'hosted/999/evil/2002207/x', undefined]) {
+    const r = parseEvent(hostedEv({ ref }), BOT);
+    assert.equal(r.author, null, `ref ${ref} must fail closed`);
+  }
+});
+
+test('SOW-156: a bot-opened FORK-head PR still resolves the fork owner (unchanged), even with a hosted-looking ref', () => {
+  const r = parseEvent(hostedEv({ ref: 'hosted/999/spoof', headRepoId: 12345, headOwnerId: 42 }), BOT);
+  assert.equal(r.author, 42, 'a fork head trusts the fork owner; the ref cannot spoof an id');
+});
+
+test('SOW-156: a NON-bot canonical-head PR (a superadmin pushing a branch) resolves the opener as always', () => {
+  const r = parseEvent(hostedEv({ openerId: 7, ref: 'hosted/999/spoof' }), BOT);
+  assert.equal(r.author, 7, 'a human opener is the author; the hosted rule only fires for the bot');
+});
