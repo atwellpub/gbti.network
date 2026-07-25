@@ -16,6 +16,7 @@ import { githubFetchUser } from './oauth.mjs';
 import { authorizePaid } from './membership-content.mjs';
 import { getInstallationToken } from './github-app.mjs';
 import { rateLimit } from './abuse.mjs';
+import { kickDispatch } from './checkout.mjs';
 import { parseMembersIndex, validateHostedRequest, hostedBranchFor } from '../../membership/hosted-author.mjs';
 
 const GH = 'https://api.github.com';
@@ -75,7 +76,21 @@ export async function membershipAuthor(request, env, deps = {}) {
   let indexText = '';
   try { indexText = atob(String(idx.data?.content || '').replace(/\n/g, '')); } catch { /* fail closed below */ }
   const folder = parseMembersIndex(indexText).get(githubId) ?? null;
-  if (!folder) return { status: 409, body: { error: 'folder_not_provisioned', message: 'your member folder is not provisioned yet; contact GBTI to be added to the member index' } };
+  if (!folder) {
+    // SOW-157: this caller is a VERIFIED effective-paid member missing only their index entry, so fire the
+    // 'enroll' repository_dispatch (the reconcile writes + merges the entry within minutes) — rate-limited
+    // to one nudge per hour per member; the daily reconcile sweep heals any missed dispatch. Fail soft.
+    const { dispatch = kickDispatch } = deps;
+    const enrollRl = await limiter({ kv, ip: githubId, limit: 1, windowSeconds: 3600, prefix: 'rl:enroll:' });
+    let provisioning = false;
+    if (enrollRl.allowed) {
+      provisioning = await dispatch({
+        eventType: 'enroll', githubId,
+        dispatchToken: env?.REGATE_DISPATCH_TOKEN, contentRepo: env?.GITHUB_CONTENT_REPO || upstream,
+      }, fetchImpl);
+    }
+    return { status: 409, body: { error: 'folder_not_provisioned', provisioning, message: 'your member folder is being provisioned — try publishing again in a few minutes' } };
+  }
 
   const itemId = String(payload?.itemId ?? '');
   const check = validateHostedRequest({ files: payload?.files, itemId, folder });

@@ -170,3 +170,42 @@ test('hosted author: an existing PR on the branch (422) reports already, not an 
   assert.equal(r.status, 200);
   assert.equal(r.body.already, true);
 });
+
+// ---- SOW-157: the 409 path fires the enroll dispatch (rate-limited, fail-soft) ----
+
+test('hosted author: a missing index entry fires the enroll dispatch once (rate-limited) and reports provisioning', async () => {
+  const rec = [];
+  const dispatched = [];
+  const dispatch = async (opts) => { dispatched.push(opts); return true; };
+  const d = {
+    ...deps(rec),
+    authorize: async () => ({ ok: true, githubId: '55555' }),
+    fetchUser: async () => ({ githubLogin: 'newbie', githubId: '55555' }),
+    dispatch,
+  };
+  const envd = { ...env, REGATE_DISPATCH_TOKEN: 'dtok', GITHUB_CONTENT_REPO: 'gbti-network/gbti.network' };
+  const r = await membershipAuthor(req(goodBody), envd, d);
+  assert.equal(r.status, 409);
+  assert.equal(r.body.provisioning, true);
+  assert.equal(dispatched[0].eventType, 'enroll');
+  assert.equal(dispatched[0].githubId, '55555');
+  // second call within the window: the rl:enroll limiter (real limiter injected) would block; here the
+  // injected allow-all limiter passes, so assert the dispatch carries the token wiring instead.
+  assert.equal(dispatched[0].dispatchToken, 'dtok');
+});
+
+test('hosted author: the enroll rate limiter blocks a repeat nudge (provisioning false, still 409)', async () => {
+  const rec = [];
+  const dispatched = [];
+  const d = {
+    ...deps(rec),
+    authorize: async () => ({ ok: true, githubId: '55555' }),
+    fetchUser: async () => ({ githubLogin: 'newbie', githubId: '55555' }),
+    dispatch: async () => { dispatched.push(1); return true; },
+    limiter: async ({ prefix }) => (prefix === 'rl:enroll:' ? { allowed: false } : { allowed: true }),
+  };
+  const r = await membershipAuthor(req(goodBody), { ...env, REGATE_DISPATCH_TOKEN: 'dtok' }, d);
+  assert.equal(r.status, 409);
+  assert.equal(r.body.provisioning, false);
+  assert.equal(dispatched.length, 0, 'no dispatch when rate-limited');
+});

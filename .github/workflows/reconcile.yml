@@ -17,8 +17,10 @@ on:
   # PRs released, Discord role upgraded, content published) instead of waiting for the daily run.
   # SOW-038 P3: 'admin-reconcile' (no client_payload.github_id) is the superadmin dashboard "Run reconcile"
   # button -> a FULL --apply run (targetedGithubId returns null without a github_id). Same run step.
+  # SOW-157: 'enroll' fires from the Worker's hosted-authoring 409 (folder_not_provisioned) with
+  # client_payload.github_id, so a paid hosted member's members-index entry lands within minutes.
   repository_dispatch:
-    types: [regate, admin-reconcile]
+    types: [regate, admin-reconcile, enroll]
 
 # Least privilege: the reconcile authenticates to GitHub with GITHUB_BOT_TOKEN (a content-write PAT),
 # not the default workflow token, so the bot identity (admin in roles.yml) is the PR author the gate sees.

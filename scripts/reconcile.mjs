@@ -32,6 +32,7 @@ import { planReconcile } from './lib/reconcile-plan.mjs';
 import { buildOverridesMirror, mirrorOverridesToKv, mirrorSyndicationConfigToKv, mirrorContentChannelsToKv, mirrorTopicsToKv, mirrorCouponsToKv } from './lib/kv-mirror.mjs';
 import { syncFavoriteCounts, readCountsFromDisk, readFavoritedByFromDisk, readMembersIndexFromDisk } from './lib/favorite-counts.mjs';
 import { syncCouponGrants, readGrandfatheredFromDisk } from './lib/coupon-grants.mjs'; // SOW-119
+import { syncEnrollments } from './lib/enroll-members.mjs'; // SOW-157: hosted-member index enrollment
 import { syncUpvoteCounts, readCountsFromDisk as readUpvoteCountsFromDisk } from './lib/upvote-counts.mjs';
 import { main as promotePopular } from './promote-popular.mjs'; // SOW-126: the engagement-triggered popular promoter
 import { mergeState, alreadyLabeled, conflictComment, CONFLICT_LABEL, isStuckAutomergeBot } from './lib/pr-conflict.mjs';
@@ -501,8 +502,15 @@ async function main() {
   const targetId = targetedGithubId(env);
   let members;
   if (targetId) {
-    console.log(`reconcile: TARGETED mode (repository_dispatch regate) for github_id ${targetId}.`);
+    console.log(`reconcile: TARGETED mode (repository_dispatch) for github_id ${targetId}.`);
     members = await gatherTargetedMember(stripe, overrides, now, targetId, { repoIndex, discord, env });
+    // SOW-157: a targeted member with NO Stripe customer (a grandfathered comp member, exactly who the
+    // 'enroll' dispatch fires for) still needs an entry, so union the override-only gather scoped to the id.
+    if (!members.length) {
+      const overrideOnly = await gatherOverrideOnlyMembers(overrides, now, { seen: new Set(), repoIndex, discord, env });
+      members = overrideOnly.filter((m) => String(m.githubId) === targetId);
+      if (members.length) console.log('reconcile: targeted member resolved from the overrides (no Stripe customer).');
+    }
   } else {
     members = await gatherMembers(stripe, overrides, now, { repoIndex, discord, env });
     // Grandfathered / banned members with NO Stripe customer are not enumerated above (gatherMembers
@@ -611,6 +619,29 @@ async function main() {
       console.error('reconcile: coupon-grants sync FAILED:', e?.message ?? e);
       process.exitCode = 1;
     }
+  }
+
+  // SOW-157: enroll unindexed effective-paid members into house/members-index.yml so the hosted authoring
+  // endpoint can resolve their folder (it reads ONLY the index; an absent entry is a 409). Candidates come
+  // from the gathered members (Stripe paid + grandfathered), so a targeted 'enroll' dispatch and the daily
+  // sweep both flow through here. A dry run prints the plan; rejects are per-candidate fail-closed.
+  try {
+    const r = await syncEnrollments({ members, overrides, root: ROOT, env, github, now, dryRun });
+    if (r.additions?.length) {
+      console.log(
+        r.synced
+          ? `reconcile: enrolled ${r.additions.length} hosted member(s) into members-index (PR #${r.prNumber}).`
+          : `reconcile: ${dryRun ? 'DRY RUN would enroll' : 'enrollment planned'} ${r.additions.length} member(s): ${r.additions.map((a) => `${a.githubId}->${a.folder}`).join(', ')}${r.reason && !dryRun ? ` (SKIPPED: ${r.reason})` : ''}.`,
+      );
+    } else if (r.reason !== 'no unenrolled effective-paid members') {
+      console.log(`reconcile: enrollment SKIPPED (${r.reason}).`);
+    }
+    for (const rej of r.rejects ?? []) {
+      console.warn(`reconcile: enrollment REJECTED github_id ${rej.githubId}: ${rej.reason}. Provision by hand if intended.`);
+    }
+  } catch (e) {
+    console.error('reconcile: enrollment sync FAILED:', e?.message ?? e);
+    process.exitCode = 1;
   }
 
   // SOW-024: sync the member-identity-free favorite counts (house/favorite-counts.yml) from the deletable edge

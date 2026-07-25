@@ -86,7 +86,16 @@ export async function createCheckout({ stripe, customerId, priceId, githubId, ba
  * @returns {Promise<boolean>} true if the dispatch was accepted (204), false on any failure.
  */
 export async function kickRegate({ githubId, dispatchToken, contentRepo }, fetchImpl = globalThis.fetch) {
-  if (!githubId || !dispatchToken || !contentRepo) return false;
+  return kickDispatch({ eventType: 'regate', githubId, dispatchToken, contentRepo }, fetchImpl);
+}
+
+/**
+ * The shared repository_dispatch sender (SOW-157): 'regate' (post-payment re-gate) and 'enroll' (hosted
+ * authoring hit a member with no members-index entry) ride the same token + API. Fail soft: the daily
+ * scheduled reconcile heals any missed nudge, so a failed dispatch never blocks the member.
+ */
+export async function kickDispatch({ eventType, githubId, dispatchToken, contentRepo }, fetchImpl = globalThis.fetch) {
+  if (!eventType || !githubId || !dispatchToken || !contentRepo) return false;
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${contentRepo}/dispatches`, {
       method: 'POST',
@@ -97,7 +106,7 @@ export async function kickRegate({ githubId, dispatchToken, contentRepo }, fetch
         'User-Agent': 'gbti-network-signup',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ event_type: 'regate', client_payload: { github_id: String(githubId) } }),
+      body: JSON.stringify({ event_type: String(eventType), client_payload: { github_id: String(githubId) } }),
     });
     return res.status === 204;
   } catch {
