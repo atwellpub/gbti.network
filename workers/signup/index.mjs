@@ -78,6 +78,7 @@ import { membershipContentOpened } from './membership-content-opened.mjs'; // SO
 import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
+import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 // CORS for the membership endpoints (token-authenticated, no cookies). Covers BOTH the GET reads (status oracle,
@@ -758,6 +759,18 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
         if (method === 'POST') {
           const r = await openPullForMember(request, env);
+          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+        }
+      }
+
+      // SOW-156 (spike, flag MEMBERSHIP_AUTHOR_ENABLED): hosted authoring. A paid member with no fork and no
+      // App install POSTs own-folder files; the Worker validates fail-closed, commits them to a
+      // hosted/<github_id>/<itemId> branch on the CANONICAL repo, and opens the PR. The gate stays the only
+      // merger. The App token never leaves the Worker.
+      if (pathname === '/membership/author') {
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        if (method === 'POST') {
+          const r = await membershipAuthor(request, env);
           return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
