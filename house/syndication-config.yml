@@ -53,8 +53,8 @@ syndication:
     - hashnode
   auto_matrix:
     share:
-      discord: 'off'
-      discord-category: 'off'
+      discord: 'on'
+      discord-category: 'on'
       reddit: 'off'
       devto: 'off'
       mastodon: 'off'

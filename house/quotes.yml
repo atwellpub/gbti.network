@@ -39,3 +39,9 @@ quotes:
   - text: To crave the result but not the process, is to guarantee disappointment.
     author: James Clear
     enabled: true
+  - text: Good habits make time your ally. Bad habits make time your enemy.
+    author: James Clear
+    enabled: true
+  - text: Build your opponent a golden bridge to retreat across.
+    author: Sun Tzu
+    enabled: true

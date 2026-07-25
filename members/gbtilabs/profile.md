@@ -5,6 +5,7 @@ directory: false
 skills: []
 roles: []
 visibility: public
+headline: Creative. Curative. Community. Cooperative.
 links:
   github: https://github.com/gbti-network
   website: https://gbtil.network
@@ -21,4 +22,4 @@ type: profile
 username: gbtilabs
 ---
 
-
+A professional co-op network where members publish products, contribute articles, and share profits.
