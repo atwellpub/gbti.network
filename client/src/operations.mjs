@@ -29,7 +29,8 @@ import {
   nextStep as onboardingNextStep, STEPS as ONBOARDING_STEPS, forkFullName,
   deviceVerificationUrl, forkUrl, appInstallUrl, manageInstallsUrl,
 } from './onboarding.mjs';
-import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, isAppMode } from './signup-base.mjs';
+import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, isAppMode, isHostedMode } from './signup-base.mjs';
+import { hostedAuthor, hostedItemId } from './hosted-publish.mjs'; // SOW-156 spike: hosted-mode publish transport
 import { isContributionToFolder } from '../../membership/classify-pr.mjs';
 import yaml from 'js-yaml';
 import { rolesFromParsed, roleOf, isAdminRole } from '../../membership/overrides-core.mjs';
@@ -599,6 +600,17 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   const msg = message ?? desc.message;
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
+  // SOW-156 (spike): hosted mode hands the file set to the Worker (no fork, no local commit); the Worker
+  // commits to a canonical hosted branch and opens the auto-merging PR. Renames need fork reads (the SOW-112
+  // merge-base dance below), so they stay fork-mode-only until the full hosted build.
+  if (isHostedMode()) {
+    if (renaming) throw new OperationError('bad-request', 'renaming is not yet available in hosted mode — contact the co-op to rename this item');
+    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
+    return hostedAuthor({
+      token: ctx.store?.get?.('githubToken'), itemId: hostedItemId(built.type, built.slug),
+      files, title: ttl, signupBase: SIGNUP_BASE, fetchImpl: ctx.fetch ?? globalThis.fetch,
+    });
+  }
   // SOW-112 v2: a rename rides the item's OWN branch (the staged-draft identity), carries the deletes of the
   // old path (+ its .enc; the new one was freshly encrypted above), and moves the intro comment — unless this
   // publish writes a fresh authorNote intro at the new slug already.

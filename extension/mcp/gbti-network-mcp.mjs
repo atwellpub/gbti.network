@@ -17699,10 +17699,12 @@ var GITHUB_CLIENT_ID = globalThis.process?.env?.GBTI_GITHUB_CLIENT_ID || "Ov23li
 var GITHUB_APP_CLIENT_ID = globalThis.process?.env?.GBTI_GITHUB_APP_CLIENT_ID || "Iv1.gbti-app-placeholder";
 var GITHUB_APP_SLUG = globalThis.process?.env?.GBTI_GITHUB_APP_SLUG || "gbti-network";
 var UPSTREAM_REPO = globalThis.process?.env?.GBTI_UPSTREAM_REPO || "gbti-network/gbti.network";
-var AUTH_MODE = globalThis.process?.env?.GBTI_AUTH_MODE === "app" ? "app" : "classic";
+var rawAuthMode = globalThis.process?.env?.GBTI_AUTH_MODE;
+var AUTH_MODE = rawAuthMode === "app" ? "app" : rawAuthMode === "hosted" ? "hosted" : "classic";
 var isAppMode = () => AUTH_MODE === "app";
-var activeClientId = () => isAppMode() ? GITHUB_APP_CLIENT_ID : GITHUB_CLIENT_ID;
-var activeScope = () => isAppMode() ? "" : "public_repo read:user";
+var isHostedMode = () => AUTH_MODE === "hosted";
+var activeClientId = () => AUTH_MODE === "classic" ? GITHUB_CLIENT_ID : GITHUB_APP_CLIENT_ID;
+var activeScope = () => AUTH_MODE === "classic" ? "public_repo read:user" : "";
 
 // client/src/github-repo.mjs
 var GitHubError = class extends Error {
@@ -18456,6 +18458,22 @@ async function workerSyncFork({ token, signupBase, fetch = globalThis.fetch, bra
   }
 }
 
+// client/src/hosted-publish.mjs
+function hostedItemId(type, slug) {
+  return type === "profile" ? "profile" : `${type}-${slug}`;
+}
+async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_BASE, fetchImpl = globalThis.fetch }) {
+  if (!token) throw new Error("sign in to publish");
+  const res = await fetchImpl(`${String(signupBase).replace(/\/$/, "")}/membership/author`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ itemId, files, title })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) throw new Error(body.message || `hosted publish failed (${res.status})`);
+  return { prNumber: body.number, prUrl: body.html_url, branch: body.branch, fork: null, updated: !!body.already, hosted: true };
+}
+
 // membership/overrides-core.mjs
 var ROLE2 = Object.freeze({
   member: "member",
@@ -18780,6 +18798,18 @@ async function publish(ctx2, { type, input, body, message, title, prBody, author
   const msg = message ?? desc.message;
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
+  if (isHostedMode()) {
+    if (renaming) throw new OperationError("bad-request", "renaming is not yet available in hosted mode — contact the co-op to rename this item");
+    const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
+    return hostedAuthor({
+      token: ctx2.store?.get?.("githubToken"),
+      itemId: hostedItemId(built.type, built.slug),
+      files,
+      title: ttl,
+      signupBase: SIGNUP_BASE,
+      fetchImpl: ctx2.fetch ?? globalThis.fetch
+    });
+  }
   const branch = branchName(built.type, renaming ? origin.oldSlug : built.slug, built.scope);
   await syncForkIfCreatingBranch(ctx2, repo, branch);
   let renameFiles = [];

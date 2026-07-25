@@ -19,12 +19,16 @@ export const GITHUB_APP_CLIENT_ID = (globalThis.process?.env?.GBTI_GITHUB_APP_CL
 export const GITHUB_APP_SLUG = (globalThis.process?.env?.GBTI_GITHUB_APP_SLUG) || 'gbti-network';
 export const UPSTREAM_REPO = (globalThis.process?.env?.GBTI_UPSTREAM_REPO) || 'gbti-network/gbti.network';
 
-// AUTH_MODE = 'classic' (today, account-wide public_repo) | 'app' (SOW-026, fork-scoped GitHub App). Defaults to
-// classic so nothing changes until the App is provisioned + GBTI_AUTH_MODE=app is set. Both hosts read this.
-export const AUTH_MODE = (globalThis.process?.env?.GBTI_AUTH_MODE) === 'app' ? 'app' : 'classic';
+// AUTH_MODE = 'classic' (today, account-wide public_repo) | 'app' (SOW-026, fork-scoped GitHub App) |
+// 'hosted' (SOW-156 spike: identity-only sign-in, no fork, no install; the Worker does the git work).
+// Defaults to classic so nothing changes until a mode is explicitly set via GBTI_AUTH_MODE.
+const rawAuthMode = globalThis.process?.env?.GBTI_AUTH_MODE;
+export const AUTH_MODE = rawAuthMode === 'app' ? 'app' : rawAuthMode === 'hosted' ? 'hosted' : 'classic';
 export const isAppMode = () => AUTH_MODE === 'app';
-/** The device-flow client id for the active auth mode. */
-export const activeClientId = () => (isAppMode() ? GITHUB_APP_CLIENT_ID : GITHUB_CLIENT_ID);
-/** The OAuth scope for the active mode. GitHub Apps IGNORE scope (permissions come from the install), so app-mode
- *  sends an empty scope; classic keeps the account-wide public_repo read:user it has always used. */
-export const activeScope = () => (isAppMode() ? '' : 'public_repo read:user');
+export const isHostedMode = () => AUTH_MODE === 'hosted';
+/** The device-flow client id for the active auth mode. Hosted uses the App id too (identity-only: with no
+ *  install granted, an App user token identifies the member and can touch nothing else). */
+export const activeClientId = () => (AUTH_MODE === 'classic' ? GITHUB_CLIENT_ID : GITHUB_APP_CLIENT_ID);
+/** The OAuth scope for the active mode. GitHub Apps IGNORE scope (permissions come from the install), so app +
+ *  hosted send an empty scope; classic keeps the account-wide public_repo read:user it has always used. */
+export const activeScope = () => (AUTH_MODE === 'classic' ? 'public_repo read:user' : '');
