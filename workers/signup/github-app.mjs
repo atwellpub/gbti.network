@@ -10,6 +10,7 @@
 
 import { githubFetchUser } from './oauth.mjs';
 import { authorizePaid } from './membership-content.mjs';
+import { parseHostedRef } from '../../membership/hosted-author.mjs'; // SOW-157: hosted PR ownership match
 
 const GH = 'https://api.github.com';
 const GH_HEADERS = (token) => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'gbti-network' });
@@ -173,7 +174,23 @@ async function authMemberLogin(request, { fetchImpl, fetchUser }) {
   // note in openPullForMember: the prior user?.login read 401'd every app-mode my-pulls/pr-status in production.
   const login = String(user?.githubLogin || user?.login || '').toLowerCase();
   if (!login) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'the token has no user login' } };
-  return { ok: true, login };
+  // SOW-157: the hosted PR match keys on the immutable github_id (the hosted branch carries it).
+  return { ok: true, login, githubId: user?.githubId != null ? String(user.githubId) : null };
+}
+
+/**
+ * SOW-157: does this PR belong to the caller as a HOSTED PR? True only when the head lives on the CANONICAL
+ * repo itself (same-repo head) AND the branch parses to the caller's github_id. The same-repo guard is
+ * security-load-bearing: without it a member could push a branch named hosted/<victim_id>/x to their OWN
+ * fork and plant PRs in the victim's workspace. Fork heads always fall to the headOwnerOf filter instead,
+ * so the two matchers are disjoint (a canonical head's owner is the org, which is no member's login).
+ */
+function isCallerHostedPull(pr, githubId) {
+  if (!githubId) return false;
+  const headRepoId = pr?.head?.repo?.id ?? null;
+  const baseRepoId = pr?.base?.repo?.id ?? null;
+  if (headRepoId == null || String(headRepoId) !== String(baseRepoId)) return false;
+  return parseHostedRef(pr?.head?.ref) === String(githubId);
 }
 
 /**
@@ -195,7 +212,7 @@ export async function listMemberPulls(request, env, deps = {}) {
   if (!res || !res.ok) return { status: 502, body: { error: 'list_failed', message: `GitHub returned ${res ? res.status : 'no response'}` } };
   const list = await res.json().catch(() => []);
   const items = (Array.isArray(list) ? list : [])
-    .filter((pr) => headOwnerOf(pr) === who.login)
+    .filter((pr) => headOwnerOf(pr) === who.login || isCallerHostedPull(pr, who.githubId))
     .map((pr) => ({ number: pr.number, title: pr.title, html_url: pr.html_url, state: pr.state, merged: Boolean(pr.merged_at) }));
   return { status: 200, body: { ok: true, items } };
 }
@@ -222,7 +239,7 @@ export async function memberPrStatus(request, env, deps = {}) {
   if (prRes && prRes.status === 404) return notYours;
   if (!prRes || !prRes.ok) return { status: 502, body: { error: 'status_failed', message: `GitHub returned ${prRes ? prRes.status : 'no response'}` } };
   const pr = await prRes.json().catch(() => ({}));
-  if (headOwnerOf(pr) !== who.login) return notYours; // exists but not the caller's: indistinguishable from not-found
+  if (headOwnerOf(pr) !== who.login && !isCallerHostedPull(pr, who.githubId)) return notYours; // exists but not the caller's: indistinguishable from not-found
   const sha = pr?.head?.sha;
   if (!sha) return { status: 200, body: { ok: true, state: 'unknown', meaning: 'unknown', sha: null, description: null } };
 

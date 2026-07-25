@@ -130,3 +130,12 @@ test('validateHostedRequest: rejects a bad itemId and non-string content', () =>
   assert.equal(validateHostedRequest({ files: [{ path: 'members/a/posts/x.md', content: 7 }], itemId: 'x', folder: 'a' }).ok, false);
   assert.equal(validateHostedRequest({ files: [], itemId: 'x', folder: 'a' }).ok, false);
 });
+
+// SOW-157: the id contract is 80 chars so share itemIds (share-<stamp>-<48-char slug> = 69) fit.
+test('id contract: a share-length itemId round-trips; 81+ chars still rejected', () => {
+  const shareId = 'share-20260725193000-' + 'a'.repeat(48); // 69 chars
+  const branch = hostedBranchFor('2002207', shareId);
+  assert.equal(branch, `hosted/2002207/${shareId}`);
+  assert.equal(parseHostedRef(branch), '2002207');
+  assert.equal(hostedBranchFor('1', 'a'.repeat(81)), null);
+});

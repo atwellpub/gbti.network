@@ -161,3 +161,49 @@ test('memberPrStatus rejects a bad number (400) and a missing PR (404)', async (
   const missing = await memberPrStatus(getReq('https://w/membership/pr-status?number=99'), env, { ...base, fetchImpl: async (u) => instOk(u) || { ok: false, status: 404, async json() { return {}; } } });
   assert.equal(missing.status, 404);
 });
+
+// ---- SOW-157: hosted PRs (canonical-head, branch hosted/<github_id>/...) in my-pulls / pr-status ----
+
+const userAliceWithId = async () => ({ githubLogin: 'Alice', githubId: '777' });
+const CANON_ID = 424242;
+
+test('listMemberPulls: a hosted canonical-head PR matching the caller github_id is included; a forged fork-head hosted ref is NOT', async () => {
+  const pulls = [
+    // the caller's real hosted PR (head repo IS the canonical repo)
+    { number: 1, title: 'Hosted mine', html_url: 'u1', state: 'open',
+      head: { ref: 'hosted/777/post-x', repo: { id: CANON_ID, owner: { login: 'gbti-network' } } },
+      base: { repo: { id: CANON_ID } } },
+    // ATTACK: another member pushes hosted/777/spoof to their OWN FORK -- must not appear for the caller
+    { number: 2, title: 'Forged', html_url: 'u2', state: 'open',
+      head: { ref: 'hosted/777/spoof', repo: { id: 555, owner: { login: 'mallory' } } },
+      base: { repo: { id: CANON_ID } } },
+    // another member's hosted PR (different github_id in the ref) -- not the caller's
+    { number: 3, title: 'Other hosted', html_url: 'u3', state: 'open',
+      head: { ref: 'hosted/888/post-y', repo: { id: CANON_ID, owner: { login: 'gbti-network' } } },
+      base: { repo: { id: CANON_ID } } },
+    // the caller's ordinary fork PR still matches by head owner
+    { number: 4, title: 'Fork mine', html_url: 'u4', state: 'open',
+      head: { ref: 'gbti/post-z', repo: { id: 999, owner: { login: 'alice' } } },
+      base: { repo: { id: CANON_ID } } },
+  ];
+  const fetchImpl = async (url) => instOk(url) || { ok: true, async json() { return pulls; } };
+  const r = await listMemberPulls(getReq(), env, { kv: fakeKv(), fetchImpl, signJwt, fetchUser: userAliceWithId });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.items.map((i) => i.number), [1, 4]);
+});
+
+test('memberPrStatus: the caller can read their hosted PR status; a forged fork-head hosted ref 404s', async () => {
+  const hostedPr = { number: 9, head: { sha: 'hsha', ref: 'hosted/777/post-x', repo: { id: CANON_ID, owner: { login: 'gbti-network' } } }, base: { repo: { id: CANON_ID } } };
+  const forged = { number: 10, head: { sha: 'fsha', ref: 'hosted/777/spoof', repo: { id: 555, owner: { login: 'mallory' } } }, base: { repo: { id: CANON_ID } } };
+  const mk = (pr) => async (url) => {
+    if (instOk(url)) return instOk(url);
+    if (/\/pulls\/\d+$/.test(url)) return { ok: true, status: 200, async json() { return pr; } };
+    if (/\/status$/.test(url)) return { ok: true, async json() { return { state: 'success', statuses: [{ context: 'membership-gate', state: 'success', description: 'pass' }] }; } };
+    return { ok: false, status: 500, async json() { return {}; } };
+  };
+  const ok = await memberPrStatus(getReq('https://w/membership/pr-status?number=9'), env, { kv: fakeKv(), fetchImpl: mk(hostedPr), signJwt, fetchUser: userAliceWithId });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.meaning, 'mergeable');
+  const bad = await memberPrStatus(getReq('https://w/membership/pr-status?number=10'), env, { kv: fakeKv(), fetchImpl: mk(forged), signJwt, fetchUser: userAliceWithId });
+  assert.equal(bad.status, 404, 'a forged fork-head hosted ref is not the caller\'s PR');
+});

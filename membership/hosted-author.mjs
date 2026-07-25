@@ -17,7 +17,8 @@ export const HOSTED_BRANCH_PREFIX = 'hosted/';
 
 // The item id becomes a branch segment AFTER the server-inserted github_id, so it must never be able to
 // shift the id parse or produce an illegal git ref: lowercase alphanumeric + hyphen only, bounded length.
-const ITEM_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// SOW-157: bounded at 80 (was 64) so a share itemId fits: share-<14-digit stamp>-<slug up to 48> = 69.
+const ITEM_ID_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const GITHUB_ID_RE = /^\d{1,20}$/;
 // Folder names are the members-index usernames (lowercase folder/username per house/members-index.yml).
 const FOLDER_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -54,7 +55,7 @@ export function hostedBranchFor(githubId, itemId) {
  * Fail closed: anything that does not match exactly returns null (the gate hard-fails a null author).
  */
 export function parseHostedRef(ref) {
-  const m = /^hosted\/(\d{1,20})\/[a-z0-9][a-z0-9-]{0,63}$/.exec(String(ref ?? ''));
+  const m = /^hosted\/(\d{1,20})\/[a-z0-9][a-z0-9-]{0,79}$/.exec(String(ref ?? ''));
   return m ? m[1] : null;
 }
 
