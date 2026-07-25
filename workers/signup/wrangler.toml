@@ -161,7 +161,7 @@ GITHUB_CONTENT_REPO = "gbti-network/gbti.network"
 REFERRAL_ENABLED = "true"            # SOW-059 ARMED: the Connect onboarding routes are live (mirrors referral-config.yml enabled)
 TOUCH_CAPTURE_ENABLED = "true"       # SOW-059 ARMED: anonymous, consent-gated attribution capture + the conversion freeze are LIVE
 MEMBER_CONTENT_KID = "1"
-MEMBERSHIP_AUTHOR_ENABLED = "false"  # SOW-156 spike: hosted authoring (flip to "true" only for the spike live proof)
+MEMBERSHIP_AUTHOR_ENABLED = "false"  # SOW-156 spike: proven live 2026-07-25 (PRs #171/#172); off until the owner elects the hosted rollout
 UPSTREAM_REPO = "gbti-network/gbti.network"   # SOW-026: canonical repo the App opens PRs into
 NEWS_API_BASE = "https://gbti-news.gbti-labs.workers.dev"   # SOW-043: the deployed gbti-news worker the news proxy calls (NEWS_API_KEY is a secret)
 # SOW-046 C: the news-category -> Discord-channel map for the curator "Add to Discord" action, as a JSON string of
