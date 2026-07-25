@@ -14184,6 +14184,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
   // client-ui/src/elements/gbti-onboarding.mjs
   var STEP_IDS = ["signin", "fork", "install"];
+  var HOSTED_SIGNIN_META = {
+    title: "Sign in with GitHub",
+    why: "Your GitHub account is your identity on the network. No repository access is requested, and the network publishes on your behalf.",
+    doneLabel: "Signed in"
+  };
   var check2 = (filled) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="${filled ? "var(--brand)" : "none"}" stroke="${filled ? "var(--brand)" : "var(--line)"}" stroke-width="2"/>${filled ? '<path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' : ""}</svg>`;
   var BTN_ICON = {
     signin: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>`,
@@ -14301,26 +14306,30 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.set(this.css(CSS32) + `<p class="note">Checking your setup...</p>`);
         return;
       }
+      const hostedLike = Boolean(s.mode && s.mode !== "app");
       if (s.ready) {
+        const note = hostedLike ? "Sign-in is all it takes: your drafts save privately, and the network publishes for you." : "Your drafts save to your copy, and we open the review request for you.";
         this.set(this.css(CSS32) + `<div class="ready">${check2(true)}<div class="big">You are ready to publish</div>
-        <p class="note">Your drafts save to your copy, and we open the review request for you.</p>
+        <p class="note">${note}</p>
         <button class="btn" data-start style="margin-top:12px">Complete Integration</button></div>`);
         this.on("[data-start]", "click", () => this.emit("gbti:onboarding-start"));
         return;
       }
-      const done = [s.signedIn, s.forkReady, s.installReady];
+      const stepIds = hostedLike ? ["signin"] : STEP_IDS;
+      const doneAll = [s.signedIn, s.forkReady, s.installReady];
+      const done = stepIds.map((_, i) => doneAll[i]);
       const nDone = done.filter(Boolean).length;
       const active = s.activeStep || (s.signedIn ? null : "signin");
-      const rows = STEP_IDS.map((id, i) => {
-        const meta = s.steps?.[id] || {};
+      const rows = stepIds.map((id, i) => {
+        const meta = s.steps?.[id] || (hostedLike && id === "signin" ? HOSTED_SIGNIN_META : {});
         if (done[i]) return `<li class="row done"><span class="ic">${check2(true)}</span><span class="t">${esc(meta.doneLabel || meta.title || id)}</span></li>`;
         if (id !== active) return "";
         return `<li class="row"><span class="ic">${check2(false)}</span>${this._card(id, meta, s)}</li>`;
       }).filter(Boolean).join("");
       const reached = s.reachedGithub !== false;
       this.set(this.css(CSS32) + `
-      <div class="head"><h2>Set up publishing</h2><span class="count">${nDone} of 3</span></div>
-      <div class="bar"><i style="width:${Math.round(nDone / 3 * 100)}%"></i></div>
+      <div class="head"><h2>${hostedLike ? "Sign in to publish" : "Set up publishing"}</h2><span class="count">${nDone} of ${stepIds.length}</span></div>
+      <div class="bar"><i style="width:${Math.round(nDone / stepIds.length * 100)}%"></i></div>
       <ul>${rows}</ul>
       <p class="foot${reached ? "" : " err"}">${reached ? "Reached GitHub just now." : "We could not reach GitHub. Trying again."}</p>`);
       this.on("[data-again]", "click", () => this.refresh({ manual: true }));

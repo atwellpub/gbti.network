@@ -66,11 +66,11 @@ UPSTREAM_REPO = "gbti-network/gbti.network"
 # referral_disabled). Attribution (capturing ?ref at signup) is always on and harmless from launch.
 REFERRAL_ENABLED = "false"
 
-# SOW-156 spike: hosted authoring. When "true", POST /membership/author lets a paid member (no fork, no App
+# SOW-156/157: hosted authoring. When "true", POST /membership/author lets a paid member (no fork, no App
 # install) publish own-folder content through the Worker, which commits to a hosted/<github_id>/<itemId>
 # branch on the canonical repo and opens the auto-merging PR (the SOW-005 gate stays the only merger).
-# Keep "false" outside spike testing.
-MEMBERSHIP_AUTHOR_ENABLED = "false"
+# STANDING ON since the SOW-157 rollout (hosted is the new-member default); "false" only kills the switch.
+MEMBERSHIP_AUTHOR_ENABLED = "true"
 
 # SOW-016 member-content encryption epoch id (non-secret). Identifies the current epoch key the server-side
 # POST /membership/decrypt + /membership/encrypt endpoints use (the SOW-015 GET /membership/key handout was
@@ -161,7 +161,7 @@ GITHUB_CONTENT_REPO = "gbti-network/gbti.network"
 REFERRAL_ENABLED = "true"            # SOW-059 ARMED: the Connect onboarding routes are live (mirrors referral-config.yml enabled)
 TOUCH_CAPTURE_ENABLED = "true"       # SOW-059 ARMED: anonymous, consent-gated attribution capture + the conversion freeze are LIVE
 MEMBER_CONTENT_KID = "1"
-MEMBERSHIP_AUTHOR_ENABLED = "false"  # SOW-156 spike: proven live 2026-07-25 (PRs #171/#172); off until the owner elects the hosted rollout
+MEMBERSHIP_AUTHOR_ENABLED = "true"   # SOW-157 rollout: hosted authoring is the new-member default (proven live: PRs #171/#172)
 UPSTREAM_REPO = "gbti-network/gbti.network"   # SOW-026: canonical repo the App opens PRs into
 NEWS_API_BASE = "https://gbti-news.gbti-labs.workers.dev"   # SOW-043: the deployed gbti-news worker the news proxy calls (NEWS_API_KEY is a secret)
 # SOW-046 C: the news-category -> Discord-channel map for the curator "Add to Discord" action, as a JSON string of

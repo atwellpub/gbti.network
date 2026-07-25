@@ -41,9 +41,12 @@ export function resolveExtensionDefine({ config = {}, env = {} } = {}) {
     GBTI_GITHUB_CLIENT_ID: pick('GBTI_GITHUB_CLIENT_ID', 'githubClientId'),
     GBTI_SIGNUP_BASE: pick('GBTI_SIGNUP_BASE', 'signupBase'),
   };
-  const mode = values.GBTI_AUTH_MODE === 'app' ? 'app' : 'classic';
-  if (mode === 'app' && !(values.GBTI_GITHUB_APP_CLIENT_ID && values.GBTI_GITHUB_APP_SLUG)) {
-    throw new Error('app mode requires the App client id + slug (env GBTI_GITHUB_APP_CLIENT_ID/_SLUG, or build-config.json appClientId/appSlug) so the bundle carries the real values, not the placeholder.');
+  // SOW-157: 'hosted' is a recognized baked mode too (sign-in-only onboarding; the Worker does the git
+  // work). It uses the same App client id for the device flow, so the app-mode credential guard applies to
+  // both. Note the BAKED mode is only the fallback: the per-member store value (decided at sign-in) wins.
+  const mode = values.GBTI_AUTH_MODE === 'app' ? 'app' : values.GBTI_AUTH_MODE === 'hosted' ? 'hosted' : 'classic';
+  if (mode !== 'classic' && !(values.GBTI_GITHUB_APP_CLIENT_ID && values.GBTI_GITHUB_APP_SLUG)) {
+    throw new Error(`${mode} mode requires the App client id + slug (env GBTI_GITHUB_APP_CLIENT_ID/_SLUG, or build-config.json appClientId/appSlug) so the bundle carries the real values, not the placeholder.`);
   }
   const define = {};
   for (const [k, v] of Object.entries(values)) if (v) define[`globalThis.process.env.${k}`] = JSON.stringify(v);

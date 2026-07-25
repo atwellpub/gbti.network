@@ -8,6 +8,12 @@
 import { GbtiElement, define, esc } from '../base.mjs';
 
 const STEP_IDS = ['signin', 'fork', 'install'];
+// SOW-157: hosted onboarding is sign-in only (the host has no step metadata for it, so the copy lives here).
+const HOSTED_SIGNIN_META = {
+  title: 'Sign in with GitHub',
+  why: 'Your GitHub account is your identity on the network. No repository access is requested, and the network publishes on your behalf.',
+  doneLabel: 'Signed in',
+};
 // White check on the filled (done) green circle, to match the white-on-green buttons.
 const check = (filled) =>
   `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="${filled ? 'var(--brand)' : 'none'}" stroke="${filled ? 'var(--brand)' : 'var(--line)'}" stroke-width="2"/>${filled ? '<path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' : ''}</svg>`;
@@ -115,23 +121,32 @@ class GbtiOnboarding extends GbtiElement {
     const s = this._status;
     if (!s) { this.set(this.css(CSS) + `<p class="note">Checking your setup...</p>`); return; }
 
+    // SOW-157: hosted (and classic) onboarding is SIGN-IN ONLY — no fork, no install; the network does the
+    // git work on the member's behalf. The host says which via status.mode; app mode keeps the 3-step wizard.
+    const hostedLike = Boolean(s.mode && s.mode !== 'app');
+
     if (s.ready) {
+      const note = hostedLike
+        ? 'Sign-in is all it takes: your drafts save privately, and the network publishes for you.'
+        : 'Your drafts save to your copy, and we open the review request for you.';
       this.set(this.css(CSS) + `<div class="ready">${check(true)}<div class="big">You are ready to publish</div>
-        <p class="note">Your drafts save to your copy, and we open the review request for you.</p>
+        <p class="note">${note}</p>
         <button class="btn" data-start style="margin-top:12px">Complete Integration</button></div>`);
       this.on('[data-start]', 'click', () => this.emit('gbti:onboarding-start'));
       return;
     }
 
-    const done = [s.signedIn, s.forkReady, s.installReady];
+    const stepIds = hostedLike ? ['signin'] : STEP_IDS;
+    const doneAll = [s.signedIn, s.forkReady, s.installReady];
+    const done = stepIds.map((_, i) => doneAll[i]);
     const nDone = done.filter(Boolean).length;
     // Default to the sign-in step when the probe could not resolve one (e.g. a transient error before sign-in),
     // so step 1 is ALWAYS an actionable card rather than a dead-end.
     const active = s.activeStep || (s.signedIn ? null : 'signin');
     // Show ONLY the done steps (a compact green-check row) plus the single active step as its own card. Upcoming
     // steps stay hidden until reached, so the member works one focused step at a time and never jumps ahead.
-    const rows = STEP_IDS.map((id, i) => {
-      const meta = s.steps?.[id] || {};
+    const rows = stepIds.map((id, i) => {
+      const meta = s.steps?.[id] || (hostedLike && id === 'signin' ? HOSTED_SIGNIN_META : {});
       if (done[i]) return `<li class="row done"><span class="ic">${check(true)}</span><span class="t">${esc(meta.doneLabel || meta.title || id)}</span></li>`;
       if (id !== active) return '';
       return `<li class="row"><span class="ic">${check(false)}</span>${this._card(id, meta, s)}</li>`;
@@ -139,8 +154,8 @@ class GbtiOnboarding extends GbtiElement {
 
     const reached = s.reachedGithub !== false;
     this.set(this.css(CSS) + `
-      <div class="head"><h2>Set up publishing</h2><span class="count">${nDone} of 3</span></div>
-      <div class="bar"><i style="width:${Math.round((nDone / 3) * 100)}%"></i></div>
+      <div class="head"><h2>${hostedLike ? 'Sign in to publish' : 'Set up publishing'}</h2><span class="count">${nDone} of ${stepIds.length}</span></div>
+      <div class="bar"><i style="width:${Math.round((nDone / stepIds.length) * 100)}%"></i></div>
       <ul>${rows}</ul>
       <p class="foot${reached ? '' : ' err'}">${reached ? 'Reached GitHub just now.' : 'We could not reach GitHub. Trying again.'}</p>`);
 

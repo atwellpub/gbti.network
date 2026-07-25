@@ -50,6 +50,6 @@ const nodeBundle = { bundle: true, target: 'node18', platform: 'node', format: '
 await build({ ...nodeBundle, entryPoints: [clientSrc('mcp-stdio.mjs')], outfile: mcp('gbti-network-mcp.mjs') });
 
 console.log('built extension/dist/{theme-init,background,content,onboarding,newtab,shares,workspace,admin,account,profile}.js + extension/mcp/gbti-network-mcp.mjs');
-if (mode === 'app') {
-  console.log(`  (APP mode inlined: client id ${values.GBTI_GITHUB_APP_CLIENT_ID}, slug ${values.GBTI_GITHUB_APP_SLUG})`);
+if (mode !== 'classic') {
+  console.log(`  (${mode.toUpperCase()} mode inlined: client id ${values.GBTI_GITHUB_APP_CLIENT_ID}, slug ${values.GBTI_GITHUB_APP_SLUG})`);
 }
