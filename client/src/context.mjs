@@ -6,7 +6,7 @@ import { createReader, createStager } from './repo-fs.mjs';
 import { createRepoClient } from './github-repo.mjs';
 import { roleOf, rolesFromText, curatorsFromText, canCurateNews } from './roles.mjs';
 import { resolveMembership } from './membership.mjs';
-import { SIGNUP_BASE } from './signup-base.mjs';
+import { SIGNUP_BASE, authModeFor } from './signup-base.mjs';
 import { createDevlog } from '../../membership/devlog-core.mjs';
 
 export const UPSTREAM = process.env.GBTI_UPSTREAM || 'gbti-network/gbti.network';
@@ -29,7 +29,8 @@ export function buildContext(store) {
     stager: createStager(repoPath),
     getRepoClient() {
       const token = store.get('githubToken');
-      return token ? createRepoClient({ token, upstream: UPSTREAM }) : null;
+      // SOW-157: app AND hosted read through the Worker proxies; only classic reads GitHub directly.
+      return token ? createRepoClient({ token, upstream: UPSTREAM, appMode: authModeFor(store) !== 'classic' }) : null;
     },
     identity() {
       const id = store.get('identity');

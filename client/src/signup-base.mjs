@@ -32,3 +32,32 @@ export const activeClientId = () => (AUTH_MODE === 'classic' ? GITHUB_CLIENT_ID 
 /** The OAuth scope for the active mode. GitHub Apps IGNORE scope (permissions come from the install), so app +
  *  hosted send an empty scope; classic keeps the account-wide public_repo read:user it has always used. */
 export const activeScope = () => (AUTH_MODE === 'classic' ? 'public_repo read:user' : '');
+
+// ---- SOW-157: runtime per-member auth mode ----
+// The extension bakes ONE build-time AUTH_MODE for every member of a bundle, but the rollout needs new
+// members on hosted while existing fork members keep app. So the PER-MEMBER store value (set once at
+// sign-in from the readiness probe) wins over the baked constant, which remains the fallback for members
+// with no stored mode (all pre-SOW-157 sessions) and for store-less contexts (the cli). Mode confers ZERO
+// privilege: it only selects the transport; the Worker re-authorizes every write server-side.
+
+/** The effective auth mode for a ctx (or a bare store): the stored per-member value, else the baked one. */
+export function authModeFor(ctxOrStore) {
+  const store = ctxOrStore?.store ?? ctxOrStore;
+  const stored = store?.get?.('authMode');
+  return stored === 'app' || stored === 'hosted' || stored === 'classic' ? stored : AUTH_MODE;
+}
+export const isHostedCtx = (ctxOrStore) => authModeFor(ctxOrStore) === 'hosted';
+
+/**
+ * Decide a freshly signed-in member's auth mode from the readiness probe. Pure; null = leave unset (the
+ * baked fallback applies). Rules (SOW-157 adversarial review): never decide on an unreachable probe (a
+ * transient network failure must not flip an app member and orphan their staged fork drafts); a working
+ * fork + install keeps the member on app; no fork at all means hosted (the 1-click default); a fork
+ * WITHOUT the install is left to the onboarding install prompt rather than silently flipped.
+ */
+export function decideAuthMode(probe) {
+  if (!probe?.reachedGithub || !probe?.signedIn) return null;
+  if (probe.forkReady && probe.installReady) return 'app';
+  if (!probe.forkReady) return 'hosted';
+  return null;
+}

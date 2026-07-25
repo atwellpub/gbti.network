@@ -32,8 +32,10 @@ var STORE_DEFAULTS = Object.freeze({
   // GitHub token from device-flow auth (used for git push + PR API)
   identity: null,
   // { githubId, githubLogin } cached after auth
-  status: null
+  status: null,
   // cached derived membership status (refreshed periodically)
+  authMode: null
+  // SOW-157: per-member auth mode ('app' | 'hosted' | 'classic'); null = baked default
 });
 function createStore({ dir = defaultStoreDir(), fileName = "config.json" } = {}) {
   const file2 = path.join(dir, fileName);
@@ -17702,9 +17704,14 @@ var UPSTREAM_REPO = globalThis.process?.env?.GBTI_UPSTREAM_REPO || "gbti-network
 var rawAuthMode = globalThis.process?.env?.GBTI_AUTH_MODE;
 var AUTH_MODE = rawAuthMode === "app" ? "app" : rawAuthMode === "hosted" ? "hosted" : "classic";
 var isAppMode = () => AUTH_MODE === "app";
-var isHostedMode = () => AUTH_MODE === "hosted";
 var activeClientId = () => AUTH_MODE === "classic" ? GITHUB_CLIENT_ID : GITHUB_APP_CLIENT_ID;
 var activeScope = () => AUTH_MODE === "classic" ? "public_repo read:user" : "";
+function authModeFor(ctxOrStore) {
+  const store = ctxOrStore?.store ?? ctxOrStore;
+  const stored = store?.get?.("authMode");
+  return stored === "app" || stored === "hosted" || stored === "classic" ? stored : AUTH_MODE;
+}
+var isHostedCtx = (ctxOrStore) => authModeFor(ctxOrStore) === "hosted";
 
 // client/src/github-repo.mjs
 var GitHubError = class extends Error {
@@ -18224,7 +18231,7 @@ function buildContext(store) {
     stager: createStager(repoPath),
     getRepoClient() {
       const token = store.get("githubToken");
-      return token ? createRepoClient({ token, upstream: UPSTREAM }) : null;
+      return token ? createRepoClient({ token, upstream: UPSTREAM, appMode: authModeFor(store) !== "classic" }) : null;
     },
     identity() {
       const id = store.get("identity");
@@ -18798,7 +18805,7 @@ async function publish(ctx2, { type, input, body, message, title, prBody, author
   const msg = message ?? desc.message;
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
-  if (isHostedMode()) {
+  if (isHostedCtx(ctx2)) {
     if (renaming) throw new OperationError("bad-request", "renaming is not yet available in hosted mode — contact the co-op to rename this item");
     const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
     return hostedAuthor({
@@ -19135,15 +19142,15 @@ async function getContributionReview(ctx2, { number: number4 } = {}) {
     author: pr.author,
     files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null })),
     proposed,
-    // SOW-028: in app mode (SOW-026) the member's fork-scoped token cannot post a review the gate would honor by
-    // their github_id, so the decision is taken on github.com. The UI shows decide buttons only when this is true.
-    canActInClient: !isAppMode()
+    // SOW-028: only the classic account-wide token can post a review the gate honors by the member's
+    // github_id. App mode (fork-scoped) and hosted mode (SOW-157, identity-only) both decide on github.com.
+    canActInClient: authModeFor(ctx2) === "classic"
   };
 }
 var DECLINE_NOTE = "Thank you for the contribution. The folder owner has decided not to merge this change right now. You are welcome to discuss it here or open a revised proposal.";
 async function reviewContribution(ctx2, { number: number4, decision, message } = {}) {
-  if (isAppMode()) {
-    throw new OperationError("forbidden", "in app mode, approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)");
+  if (authModeFor(ctx2) !== "classic") {
+    throw new OperationError("forbidden", "approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)");
   }
   const { repo, n, pr } = await loadOwnContribution(ctx2, number4);
   const msg = typeof message === "string" ? message.trim() : "";

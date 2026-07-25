@@ -5,7 +5,7 @@
 import { createGithubReader } from './github-reader.mjs';
 import { createRepoClient } from '../../client/src/github-repo.mjs';
 import { resolveMembership } from '../../client/src/membership.mjs';
-import { SIGNUP_BASE } from '../../client/src/signup-base.mjs';
+import { SIGNUP_BASE, authModeFor } from '../../client/src/signup-base.mjs';
 import { devlog } from './devlog.mjs';
 
 export const UPSTREAM = 'gbti-network/gbti.network';
@@ -29,7 +29,9 @@ export function buildExtContext(store) {
     authExpired: () => authExpired,
     getRepoClient() {
       const t = store.get('githubToken');
-      return t ? createRepoClient({ token: t, upstream: UPSTREAM }) : null;
+      // SOW-157: app AND hosted members read through the Worker proxies (a hosted member has no install of
+      // their own); only classic reads GitHub directly. The stored per-member mode wins over the baked one.
+      return t ? createRepoClient({ token: t, upstream: UPSTREAM, appMode: authModeFor(store) !== 'classic' }) : null;
     },
     identity() {
       const id = store.get('identity');

@@ -29,7 +29,7 @@ import {
   nextStep as onboardingNextStep, STEPS as ONBOARDING_STEPS, forkFullName,
   deviceVerificationUrl, forkUrl, appInstallUrl, manageInstallsUrl,
 } from './onboarding.mjs';
-import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, isAppMode, isHostedMode } from './signup-base.mjs';
+import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, authModeFor, isHostedCtx } from './signup-base.mjs';
 import { hostedAuthor, hostedItemId } from './hosted-publish.mjs'; // SOW-156 spike: hosted-mode publish transport
 import { isContributionToFolder } from '../../membership/classify-pr.mjs';
 import yaml from 'js-yaml';
@@ -603,7 +603,7 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   // SOW-156 (spike): hosted mode hands the file set to the Worker (no fork, no local commit); the Worker
   // commits to a canonical hosted branch and opens the auto-merging PR. Renames need fork reads (the SOW-112
   // merge-base dance below), so they stay fork-mode-only until the full hosted build.
-  if (isHostedMode()) {
+  if (isHostedCtx(ctx)) {
     if (renaming) throw new OperationError('bad-request', 'renaming is not yet available in hosted mode — contact the co-op to rename this item');
     const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
     return hostedAuthor({
@@ -1536,9 +1536,11 @@ export async function getDiscordLinkStatus(ctx) {
 // has no fork/install onboarding); in classic mode the wizard is dormant (ready once signed in).
 export async function getOnboardingStatus(ctx) {
   const token = ctx.store?.get?.('githubToken');
-  if (!isAppMode()) {
-    // Classic mode: there is no fork/install step. Signed-in = ready.
-    return { appMode: false, signedIn: !!token, forkReady: true, installReady: true, activeStep: token ? 'ready' : 'signin', ready: !!token, reachedGithub: true };
+  const mode = authModeFor(ctx); // SOW-157: the per-member runtime mode, falling back to the baked constant
+  if (mode !== 'app') {
+    // Classic + hosted: there is no fork/install step. Signed-in = ready (hosted is the 1-click default:
+    // the Worker does the git work, so sign-in is the whole onboarding).
+    return { appMode: false, mode, signedIn: !!token, forkReady: true, installReady: true, activeStep: token ? 'ready' : 'signin', ready: !!token, reachedGithub: true };
   }
   const r = await probeReadiness({ token, appSlug: GITHUB_APP_SLUG, upstream: UPSTREAM_REPO, fetch: ctx.fetch ?? globalThis.fetch });
   // Self-heal a DEAD token: if GitHub reached us and rejected the token (reachedGithub && !signedIn) while a token
@@ -1553,7 +1555,7 @@ export async function getOnboardingStatus(ctx) {
   // Enrich with the step copy + the resolved deep-links so the UI component is purely data-driven (no
   // cross-package import). The install link preselects the member account via their numeric id.
   return {
-    appMode: true, ...r, activeStep, ready: activeStep === 'ready',
+    appMode: true, mode, ...r, activeStep, ready: activeStep === 'ready',
     forkName: r.login ? forkFullName(r.login) : null,
     steps: ONBOARDING_STEPS,
     links: { device: deviceVerificationUrl(), fork: forkUrl(), install: appInstallUrl({ targetId: r.githubId }), manage: manageInstallsUrl() },
@@ -1780,9 +1782,9 @@ export async function getContributionReview(ctx, { number } = {}) {
     author: pr.author,
     files: files.map((f) => ({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, patch: f.patch ?? null })),
     proposed,
-    // SOW-028: in app mode (SOW-026) the member's fork-scoped token cannot post a review the gate would honor by
-    // their github_id, so the decision is taken on github.com. The UI shows decide buttons only when this is true.
-    canActInClient: !isAppMode(),
+    // SOW-028: only the classic account-wide token can post a review the gate honors by the member's
+    // github_id. App mode (fork-scoped) and hosted mode (SOW-157, identity-only) both decide on github.com.
+    canActInClient: authModeFor(ctx) === 'classic',
   };
 }
 
@@ -1798,9 +1800,10 @@ const DECLINE_NOTE =
 export async function reviewContribution(ctx, { number, decision, message } = {}) {
   // App mode (SOW-026): a fork-scoped token cannot post a review the gate would honor by the owner's github_id,
   // and the installation token must not act as a universal approver, so the decision is taken on github.com.
-  // Fail fast with a clear message (the UI hides the decide buttons in app mode; this guards the MCP/agent path).
-  if (isAppMode()) {
-    throw new OperationError('forbidden', 'in app mode, approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)');
+  // Hosted mode (SOW-157) has an identity-only token, so the same applies. Fail fast with a clear message
+  // (the UI hides the decide buttons via canActInClient; this guards the MCP/agent path).
+  if (authModeFor(ctx) !== 'classic') {
+    throw new OperationError('forbidden', 'approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)');
   }
   const { repo, n, pr } = await loadOwnContribution(ctx, number);
   const msg = typeof message === 'string' ? message.trim() : '';

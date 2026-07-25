@@ -29,6 +29,7 @@ export const STORE_DEFAULTS = Object.freeze({
   githubToken: null,     // GitHub token from device-flow auth (used for git push + PR API)
   identity: null,        // { githubId, githubLogin } cached after auth
   status: null,          // cached derived membership status (refreshed periodically)
+  authMode: null,        // SOW-157: per-member auth mode ('app' | 'hosted' | 'classic'); null = baked default
 });
 
 /** A small file-backed store. Pass a dir for tests; defaults to the per-OS config dir. */

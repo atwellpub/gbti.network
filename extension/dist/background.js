@@ -17590,9 +17590,20 @@ var UPSTREAM_REPO = globalThis.process?.env?.GBTI_UPSTREAM_REPO || "gbti-network
 var rawAuthMode = "app";
 var AUTH_MODE = rawAuthMode === "app" ? "app" : rawAuthMode === "hosted" ? "hosted" : "classic";
 var isAppMode = () => AUTH_MODE === "app";
-var isHostedMode = () => AUTH_MODE === "hosted";
 var activeClientId = () => AUTH_MODE === "classic" ? GITHUB_CLIENT_ID : GITHUB_APP_CLIENT_ID;
 var activeScope = () => AUTH_MODE === "classic" ? "public_repo read:user" : "";
+function authModeFor(ctxOrStore) {
+  const store = ctxOrStore?.store ?? ctxOrStore;
+  const stored = store?.get?.("authMode");
+  return stored === "app" || stored === "hosted" || stored === "classic" ? stored : AUTH_MODE;
+}
+var isHostedCtx = (ctxOrStore) => authModeFor(ctxOrStore) === "hosted";
+function decideAuthMode(probe) {
+  if (!probe?.reachedGithub || !probe?.signedIn) return null;
+  if (probe.forkReady && probe.installReady) return "app";
+  if (!probe.forkReady) return "hosted";
+  return null;
+}
 
 // client/src/github-repo.mjs
 var GitHubError = class extends Error {
@@ -18178,7 +18189,7 @@ function buildExtContext(store) {
     authExpired: () => authExpired,
     getRepoClient() {
       const t = store.get("githubToken");
-      return t ? createRepoClient({ token: t, upstream: UPSTREAM }) : null;
+      return t ? createRepoClient({ token: t, upstream: UPSTREAM, appMode: authModeFor(store) !== "classic" }) : null;
     },
     identity() {
       const id = store.get("identity");
@@ -19398,7 +19409,7 @@ async function publish(ctx, { type, input, body, message, title, prBody: prBody2
   const msg = message ?? desc.message;
   const ttl = title ?? desc.title;
   const bdy = prBody2 ?? desc.body;
-  if (isHostedMode()) {
+  if (isHostedCtx(ctx)) {
     if (renaming) throw new OperationError("bad-request", "renaming is not yet available in hosted mode — contact the co-op to rename this item");
     const files = (plan ? plan.files : [{ path: built.path, content: built.markdown }]).concat(introFile ? [introFile] : []);
     return hostedAuthor({
@@ -20146,8 +20157,9 @@ async function getDiscordLinkStatus(ctx) {
 }
 async function getOnboardingStatus(ctx) {
   const token = ctx.store?.get?.("githubToken");
-  if (!isAppMode()) {
-    return { appMode: false, signedIn: !!token, forkReady: true, installReady: true, activeStep: token ? "ready" : "signin", ready: !!token, reachedGithub: true };
+  const mode = authModeFor(ctx);
+  if (mode !== "app") {
+    return { appMode: false, mode, signedIn: !!token, forkReady: true, installReady: true, activeStep: token ? "ready" : "signin", ready: !!token, reachedGithub: true };
   }
   const r = await probeReadiness({ token, appSlug: GITHUB_APP_SLUG, upstream: UPSTREAM_REPO, fetch: ctx.fetch ?? globalThis.fetch });
   if (token && r.reachedGithub && !r.signedIn) {
@@ -20159,6 +20171,7 @@ async function getOnboardingStatus(ctx) {
   const activeStep = nextStep(r);
   return {
     appMode: true,
+    mode,
     ...r,
     activeStep,
     ready: activeStep === "ready",
@@ -20318,15 +20331,15 @@ async function getContributionReview(ctx, { number: number4 } = {}) {
     author: pr.author,
     files: files.map((f2) => ({ filename: f2.filename, status: f2.status, additions: f2.additions, deletions: f2.deletions, patch: f2.patch ?? null })),
     proposed,
-    // SOW-028: in app mode (SOW-026) the member's fork-scoped token cannot post a review the gate would honor by
-    // their github_id, so the decision is taken on github.com. The UI shows decide buttons only when this is true.
-    canActInClient: !isAppMode()
+    // SOW-028: only the classic account-wide token can post a review the gate honors by the member's
+    // github_id. App mode (fork-scoped) and hosted mode (SOW-157, identity-only) both decide on github.com.
+    canActInClient: authModeFor(ctx) === "classic"
   };
 }
 var DECLINE_NOTE = "Thank you for the contribution. The folder owner has decided not to merge this change right now. You are welcome to discuss it here or open a revised proposal.";
 async function reviewContribution(ctx, { number: number4, decision, message } = {}) {
-  if (isAppMode()) {
-    throw new OperationError("forbidden", "in app mode, approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)");
+  if (authModeFor(ctx) !== "classic") {
+    throw new OperationError("forbidden", "approve or decline this contribution on github.com (the gate records your GitHub identity as the reviewer)");
   }
   const { repo, n, pr } = await loadOwnContribution(ctx, number4);
   const msg = typeof message === "string" ? message.trim() : "";
@@ -22609,6 +22622,14 @@ async function handleLogin(store) {
     githubTokenExpiresAt: expiresIn ? Date.now() + expiresIn * 1e3 : null,
     identity: { login: u.login, githubId: String(u.id), username: String(u.login).toLowerCase() }
   });
+  if (!store.get("authMode")) {
+    try {
+      const probe = await probeReadiness({ token: accessToken, appSlug: GITHUB_APP_SLUG, upstream: UPSTREAM, fetch: globalThis.fetch });
+      const mode = decideAuthMode(probe);
+      if (mode) store.set({ authMode: mode });
+    } catch {
+    }
+  }
   try {
     const reader = createGithubReader({ upstream: UPSTREAM, token: accessToken });
     const { stripeStatus, membership, couponUntil } = await resolveMembership({ githubId: String(u.id), token: accessToken, signupBase: SIGNUP_BASE2, readFile: (p) => reader.readFile(p) });
