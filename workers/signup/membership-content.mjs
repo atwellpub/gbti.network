@@ -95,7 +95,7 @@ export async function authorizePaid(request, env, deps = {}) {
   if (r.status !== 'paid') {
     return deny(r.status === 'banned' ? 'this account is not permitted' : 'an active paid membership is required');
   }
-  return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status }; // SOW-061: tier for usage analytics
+  return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status, via: r.via }; // SOW-061 tier; sow-158 P3a via
 }
 
 /**
@@ -109,7 +109,7 @@ export async function authorizeMember(request, env, deps = {}) {
   const r = await resolveEffective(request, env, deps);
   if (!r.ok) return r;
   if (r.status === 'banned') return deny('this account is not permitted');
-  return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status }; // SOW-061: tier for usage analytics
+  return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status, via: r.via }; // SOW-061 tier; sow-158 P3a via
 }
 
 /**

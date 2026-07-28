@@ -50,16 +50,22 @@ export async function membershipAuthor(request, env, deps = {}) {
   const paid = await authorize(request, env, deps); // fail-closed: only paid members publish (SOW-011)
   if (!paid.ok) return { status: paid.status, body: paid.body };
 
-  // Identity re-check (the openPullForMember pattern): the branch name carries the github_id the gate
-  // trusts, so it is ALWAYS the verified id, never anything from the request body.
-  const authHeader = request.headers.get('Authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  let user;
-  try { user = await fetchUser(token, fetchImpl); } catch { return { status: 401, body: { error: 'unauthorized' } }; }
-  const githubId = String(user?.githubId ?? '');
-  if (!githubId || githubId !== String(paid.githubId)) {
-    return { status: 401, body: { error: 'unauthorized', message: 'could not verify the member identity' } };
+  // Identity re-check: the branch name carries the github_id the gate trusts, so it is ALWAYS the verified id,
+  // never anything from the request body. sow-158 Phase 3a: a website (cookie) caller already carries the
+  // HMAC-verified github_id in the signed session (identity.mjs) and holds no bearer token, so the token
+  // re-check is skipped for it; the bearer path (extension/npm) keeps its re-verification unchanged.
+  let githubId = String(paid.githubId ?? '');
+  if (paid.via !== 'cookie') {
+    const authHeader = request.headers.get('Authorization') || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    let user;
+    try { user = await fetchUser(token, fetchImpl); } catch { return { status: 401, body: { error: 'unauthorized' } }; }
+    const bearerId = String(user?.githubId ?? '');
+    if (!bearerId || bearerId !== githubId) {
+      return { status: 401, body: { error: 'unauthorized', message: 'could not verify the member identity' } };
+    }
   }
+  if (!githubId) return { status: 401, body: { error: 'unauthorized', message: 'could not verify the member identity' } };
 
   const rl = await limiter({ kv, ip: githubId, limit: 10, windowSeconds: 600, prefix: 'rl:author:' });
   if (!rl.allowed) return { status: 429, body: { error: 'rate_limited', message: 'too many publish requests; try again in a few minutes' } };

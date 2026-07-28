@@ -618,12 +618,21 @@ export default {
       // SOW-016: server-side member-content crypto. The AES-256-GCM epoch key NEVER leaves the Worker
       // (this supersedes the SOW-015 /membership/key handout). Both are POST, effective-paid gated, and
       // fail-closed; the decrypt response carries plaintext, so it is never cached.
-      if (pathname === '/membership/decrypt' || pathname === '/membership/encrypt') {
+      // sow-158 Phase 3a: decrypt is cookie-eligible (the website reader/editor decrypts a member's own
+      // members-only body); credentialed CORS + automatic CSRF (POST). Encrypt STAYS bearer-only (members-only
+      // PUBLISH is deferred), so it keeps the wildcard MEMBER_CONTENT_CORS.
+      if (pathname === '/membership/decrypt') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'POST') {
+          const r = await membershipDecrypt(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+      if (pathname === '/membership/encrypt') {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBER_CONTENT_CORS });
         if (method === 'POST') {
-          const r = pathname === '/membership/decrypt'
-            ? await membershipDecrypt(request, env)
-            : await membershipEncrypt(request, env);
+          const r = await membershipEncrypt(request, env);
           return json(r.body, r.status, { ...MEMBER_CONTENT_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
@@ -837,10 +846,11 @@ export default {
       // hosted/<github_id>/<itemId> branch on the CANONICAL repo, and opens the PR. The gate stays the only
       // merger. The App token never leaves the Worker.
       if (pathname === '/membership/author') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 3a: website (cookie) publish (POST -> CSRF)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await membershipAuthor(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipAuthor(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -858,17 +868,19 @@ export default {
       // read the canonical repo, so the Worker reads with GBTI's installation token, SCOPED to the caller's own
       // fork (the App opens the PRs, so they are matched by head owner, not author). Public data; member-scoped.
       if (pathname === '/membership/my-pulls') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 3a: cookie-readable (authMemberLogin)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await listMemberPulls(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
       if (pathname === '/membership/pr-status') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 3a: cookie-readable
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await memberPrStatus(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -899,10 +911,11 @@ export default {
         }
       }
       if (pathname === '/membership/file') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 3a: cookie-readable (the WorkBench reader)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await reviewFileContent(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 

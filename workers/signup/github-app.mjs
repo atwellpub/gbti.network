@@ -9,6 +9,7 @@
 // no network, no secrets.
 
 import { githubFetchUser } from './oauth.mjs';
+import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 3a: bearer-or-cookie identity for the member reads
 import { authorizePaid } from './membership-content.mjs';
 import { parseHostedRef } from '../../membership/hosted-author.mjs'; // SOW-157: hosted PR ownership match
 
@@ -164,18 +165,17 @@ export async function openPullForMember(request, env, deps = {}) {
  * are benign, so this needs only a VALID member token (no paid gate) -- but every read below is then SCOPED to
  * the caller's own fork, so the installation token can never be used to surface another member's PRs.
  */
-async function authMemberLogin(request, { fetchImpl, fetchUser }) {
-  const authHeader = request.headers.get('Authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  if (!token) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'a GitHub bearer token is required' } };
-  let user;
-  try { user = await fetchUser(token, fetchImpl); } catch { return { ok: false, status: 401, body: { error: 'unauthorized', message: 'could not verify the GitHub token' } }; }
-  // githubFetchUser returns { githubId, githubLogin }; read githubLogin (with a `login` fallback). See the same
-  // note in openPullForMember: the prior user?.login read 401'd every app-mode my-pulls/pr-status in production.
-  const login = String(user?.githubLogin || user?.login || '').toLowerCase();
+async function authMemberLogin(request, env, { fetchImpl, fetchUser } = {}) {
+  // sow-158 Phase 3a: accept EITHER a bearer member token (extension/npm) OR the website session cookie
+  // (allowCookie). The cookie carries the HMAC-verified github_id + login; every read below is scoped to the
+  // caller's own fork (headOwnerOf === login) or hosted PRs (isCallerHostedPull by github_id), so a valid
+  // signed-in identity is enough (no paid gate). GET routes -> no CSRF (resolveIdentity SAFE_METHODS).
+  const id = await resolveIdentity(request, env, { fetchImpl, fetchUser, allowCookie: true });
+  if (!id.ok) return { ok: false, status: id.status, body: id.body };
+  const login = String(id.login || '').toLowerCase();
   if (!login) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'the token has no user login' } };
   // SOW-157: the hosted PR match keys on the immutable github_id (the hosted branch carries it).
-  return { ok: true, login, githubId: user?.githubId != null ? String(user.githubId) : null };
+  return { ok: true, login, githubId: id.githubId != null ? String(id.githubId) : null };
 }
 
 /**
@@ -201,7 +201,7 @@ function isCallerHostedPull(pr, githubId) {
  */
 export async function listMemberPulls(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   let instToken;
   try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
@@ -225,7 +225,7 @@ export async function listMemberPulls(request, env, deps = {}) {
  */
 export async function memberPrStatus(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   const number = Number(new URL(request.url).searchParams.get('number'));
   if (!Number.isInteger(number) || number <= 0) return { status: 400, body: { error: 'bad_request', message: 'a positive PR number is required' } };
@@ -270,7 +270,7 @@ const authorOf = (pr) => ({ login: pr?.user?.login ?? null, id: pr?.user?.id != 
 /** GET /membership/open-pulls -> { ok, items }: ALL open PRs on the canonical repo (public), newest first. */
 export async function listOpenPullsForReview(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   let instToken;
   try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
@@ -287,7 +287,7 @@ export async function listOpenPullsForReview(request, env, deps = {}) {
 /** GET /membership/pr?number=N -> the PR ({ number, title, body, html_url, state, headSha, author }). */
 export async function reviewPrDetail(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   const number = Number(new URL(request.url).searchParams.get('number'));
   if (!Number.isInteger(number) || number <= 0) return { status: 400, body: { error: 'bad_request', message: 'a positive PR number is required' } };
@@ -303,7 +303,7 @@ export async function reviewPrDetail(request, env, deps = {}) {
 /** GET /membership/pr-files?number=N[&patch=1] -> { ok, files }: a PR's changed files (with patch when asked). */
 export async function reviewPrFiles(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   const url = new URL(request.url);
   const number = Number(url.searchParams.get('number'));
@@ -327,7 +327,7 @@ export async function reviewPrFiles(request, env, deps = {}) {
  *  public). Returns text:null for a missing file. */
 export async function reviewFileContent(request, env, deps = {}) {
   const { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network' } = deps;
-  const who = await authMemberLogin(request, { fetchImpl, fetchUser });
+  const who = await authMemberLogin(request, env, { fetchImpl, fetchUser });
   if (!who.ok) return { status: who.status, body: who.body };
   const url = new URL(request.url);
   const path = String(url.searchParams.get('path') || '');

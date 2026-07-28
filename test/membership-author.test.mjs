@@ -209,3 +209,18 @@ test('hosted author: the enroll rate limiter blocks a repeat nudge (provisioning
   assert.equal(r.body.provisioning, false);
   assert.equal(dispatched.length, 0, 'no dispatch when rate-limited');
 });
+
+test('sow-158 Phase 3a: a website (cookie) caller publishes with NO bearer re-check', async () => {
+  // authorizePaid resolves the cookie session (via:'cookie') and carries the HMAC-verified github_id; the
+  // endpoint must skip the fetchUser(bearer) re-check (the cookie holds no token) and still open the hosted PR.
+  const rec = [];
+  const paidCookie = async () => ({ ok: true, githubId: '2002207', via: 'cookie' });
+  let fetchUserCalled = false;
+  const fetchUserSpy = async () => { fetchUserCalled = true; return { githubLogin: 'atwellpub', githubId: '2002207' }; };
+  const reqNoBearer = { headers: { get: () => null }, json: async () => goodBody }; // no Authorization header
+  const r = await membershipAuthor(reqNoBearer, env, { kv: fakeKv(), fetchImpl: ghFetch(rec), signJwt, authorize: paidCookie, fetchUser: fetchUserSpy, limiter: allow });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.branch, 'hosted/2002207/my-first-post', 'server-inserted github_id in the hosted branch');
+  assert.equal(fetchUserCalled, false, 'the cookie path does NOT re-verify a bearer token');
+});
