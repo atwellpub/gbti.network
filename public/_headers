@@ -1,0 +1,24 @@
+# Cloudflare Pages response headers. Copied verbatim to dist/_headers by `astro build` (like public/_redirects).
+# sow-158 security-prerequisite #1: a Content-Security-Policy. It is the host-level backstop the build-time
+# member-markdown sanitizer cannot express (residual #2: off-host frame/connect/image beacons), plus
+# clickjacking / base-uri / form-hijack hardening, plus script-XSS defense-in-depth on top of the sanitizer.
+#
+# ROLLOUT: this ships as Content-Security-Policy-REPORT-ONLY first (enforces nothing, only reports), so it cannot
+# break a visitor. After a live report-only pass with zero violations (npm run check:csp + a manual pass), the
+# header name flips to Content-Security-Policy to enforce. The CSP value must stay a SINGLE line (this file has no
+# line-continuation). script-src/style-src carry 'unsafe-inline' for now (Stage 1); dropping it is a documented
+# follow-up (Stage 2) that needs an inline-script refactor + a build-time hash generator.
+#
+# Cloudflare comma-JOINS a header set by two matching path rules into an intersection (most-restrictive wins), so
+# a subpath can only REMOVE the CSP (with `! `), never loosen it. Only the email-signature tool needs that (its
+# vendored jzip.min.js uses eval); it keeps clickjacking protection via X-Frame-Options: SAMEORIGIN. Do NOT add a
+# global X-Frame-Options (it would comma-join to "DENY, SAMEORIGIN" on that subtree and break the tool iframe);
+# the global frame-ancestors 'self' covers clickjacking for every real page (no CROSS-origin framing) while still
+# allowing the site's own same-origin utility->tool iframes (e.g. /utilities/js-animate-hue/ frames /tools/...).
+
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self' data:; connect-src 'self' https://signup.gbti.network https://cloudflareinsights.com; frame-src 'self' https://challenges.cloudflare.com https://www.youtube.com https://player.vimeo.com https://www.tiktok.com https://rumble.com https://platform.twitter.com; form-action 'self' https://signup.gbti.network; upgrade-insecure-requests
+
+/tools/email-signature-generator/*
+  ! Content-Security-Policy-Report-Only
+  X-Frame-Options: SAMEORIGIN

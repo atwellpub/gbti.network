@@ -1,0 +1,150 @@
+#!/usr/bin/env node
+// Build guard (sow-158 security-prerequisite #1): the SERVED dist/_headers must carry a well-formed
+// Content-Security-Policy. public/_headers is a STATIC file copied verbatim to dist/ by `astro build` (no
+// composer, unlike _redirects), so if it fails to copy or a directive gets silently weakened, this fails the
+// build BEFORE deploy. Accepts either Content-Security-Policy or -Report-Only (passes in both rollout phases).
+//   node scripts/check-headers.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Parse a Cloudflare Pages `_headers` file into rules. Each rule is { path, set: { <lowercase-name>: { name,
+ * value } }, unset: [ <lowercase-name> ] }. Comments (#) and blanks are ignored. Pure + exported so the CSP
+ * harness (check-csp.mjs) reuses it.
+ */
+export function parseHeaders(text) {
+  const rules = [];
+  let current = null;
+  for (const raw of text.split('\n')) {
+    if (!raw.trim() || raw.trim().startsWith('#')) continue;
+    if (!/^\s/.test(raw)) {
+      current = { path: raw.trim(), set: {}, unset: [] };
+      rules.push(current);
+      continue;
+    }
+    if (!current) continue;
+    const line = raw.trim();
+    if (line.startsWith('!')) {
+      current.unset.push(line.slice(1).trim().toLowerCase());
+      continue;
+    }
+    const idx = line.indexOf(':');
+    if (idx > 0) {
+      const name = line.slice(0, idx).trim();
+      current.set[name.toLowerCase()] = { name, value: line.slice(idx + 1).trim() };
+    }
+  }
+  return rules;
+}
+
+/** Split a CSP value into a Map of directive -> tokens[]. */
+export function parseCsp(value) {
+  const directives = new Map();
+  for (const part of value.split(';')) {
+    const seg = part.trim();
+    if (!seg) continue;
+    const sp = seg.search(/\s/);
+    const name = (sp < 0 ? seg : seg.slice(0, sp)).toLowerCase();
+    const tokens = sp < 0 ? [] : seg.slice(sp + 1).trim().split(/\s+/).filter(Boolean);
+    directives.set(name, { tokens, duplicate: directives.has(name) });
+  }
+  return directives;
+}
+
+const cspEntryOf = (rule) => (rule?.set['content-security-policy'] || rule?.set['content-security-policy-report-only'] || null);
+
+// Cloudflare _headers path matcher: `/*` matches all; `/foo/*` matches the prefix; else exact.
+function matchRule(pattern, urlPath) {
+  if (pattern === '/*') return true;
+  if (pattern.endsWith('/*')) return urlPath.startsWith(pattern.slice(0, -1));
+  return urlPath === pattern;
+}
+
+/**
+ * For the check-csp harness: the CSP value to ENFORCE locally for a request path, or null if a matching rule
+ * unsets it (models Cloudflare's `!` removal). Our file has just a `/*` set + one `/tools/...` unset.
+ */
+export function cspForPath(rules, urlPath) {
+  let value = null;
+  let unset = false;
+  for (const r of rules) {
+    if (!matchRule(r.path, urlPath)) continue;
+    const entry = cspEntryOf(r);
+    if (entry) value = entry.value;
+    if (r.unset.includes('content-security-policy') || r.unset.includes('content-security-policy-report-only')) unset = true;
+  }
+  return unset ? null : value;
+}
+
+const REQUIRED_DIRECTIVES = ['default-src', 'script-src', 'style-src', 'img-src', 'font-src', 'connect-src', 'frame-src', 'form-action', 'frame-ancestors', 'base-uri', 'object-src'];
+
+/**
+ * Assert dist/_headers exists and carries a well-formed CSP with the required directives + key locked tokens.
+ * Pure over root/distDir, so it is unit-testable. Returns { errors, notes, checked }.
+ */
+export function checkHeaders({ root, distDir = path.join(root, 'dist'), headersFile = path.join(distDir, '_headers') } = {}) {
+  const errors = [];
+  const notes = [];
+  let checked = 0;
+
+  if (!fs.existsSync(distDir)) {
+    notes.push('dist/ not found, skipped the headers check (run after `npm run build`).');
+    return { errors, notes, checked };
+  }
+  if (!fs.existsSync(headersFile)) {
+    errors.push('dist/_headers is missing: public/_headers did not copy into dist. A static public/_headers is required to ship the CSP.');
+    return { errors, notes, checked };
+  }
+
+  const rules = parseHeaders(fs.readFileSync(headersFile, 'utf8'));
+  const global = rules.find((r) => r.path === '/*');
+  if (!global) { errors.push('dist/_headers has no `/*` rule (the global policy block).'); return { errors, notes, checked }; }
+
+  const entry = cspEntryOf(global);
+  if (!entry) { errors.push('the `/*` rule sets no Content-Security-Policy (or -Report-Only) header.'); return { errors, notes, checked }; }
+  checked++;
+  const enforce = !!global.set['content-security-policy'];
+  notes.push(enforce ? 'CSP is in ENFORCE mode.' : 'CSP is in Report-Only mode (observe, not enforce).');
+
+  const directives = parseCsp(entry.value);
+  for (const [name, d] of directives) if (d.duplicate) errors.push(`duplicate CSP directive: ${name}`);
+  for (const d of REQUIRED_DIRECTIVES) if (!directives.has(d)) errors.push(`missing required CSP directive: ${d}`);
+
+  const tok = (dir) => (directives.get(dir)?.tokens || []);
+  const wants = (dir, needle) => tok(dir).some((t) => t === needle || t.includes(needle));
+  // frame-ancestors must block CROSS-origin framing: 'none' or 'self' (the site frames its own utility tools),
+  // and never a wildcard or a host. Both 'self' and 'none' prevent clickjacking from another origin.
+  const fa = tok('frame-ancestors');
+  if (directives.has('frame-ancestors') && (!(fa.includes("'none'") || fa.includes("'self'")) || fa.includes('*') || fa.some((t) => /^https?:/i.test(t)))) {
+    errors.push("frame-ancestors must be 'self' or 'none' (no cross-origin framing)");
+  }
+  if (directives.has('object-src') && !tok('object-src').includes("'none'")) errors.push("object-src must be 'none'");
+  if (directives.has('base-uri') && !tok('base-uri').includes("'self'")) errors.push("base-uri must be 'self'");
+  if (directives.has('connect-src') && !wants('connect-src', 'signup.gbti.network')) errors.push('connect-src must include signup.gbti.network (the news feed + login break otherwise)');
+  if (directives.has('frame-src') && !wants('frame-src', 'challenges.cloudflare.com')) errors.push('frame-src must include challenges.cloudflare.com (Turnstile)');
+  if (directives.has('frame-src') && !wants('frame-src', 'www.youtube.com')) errors.push('frame-src must include www.youtube.com (member embeds)');
+  if (directives.has('script-src') && !wants('script-src', 'challenges.cloudflare.com')) errors.push('script-src must include challenges.cloudflare.com (Turnstile)');
+
+  // Recommended: the eval-using tool subtree unsets the CSP so enforce mode does not break its vendored jzip.
+  const toolRule = rules.find((r) => r.path.includes('/tools/email-signature-generator/'));
+  const unsetName = enforce ? 'content-security-policy' : 'content-security-policy-report-only';
+  if (!toolRule || !toolRule.unset.includes(unsetName)) {
+    notes.push('note: /tools/email-signature-generator/* does not unset the CSP; its vendored jzip (eval) would break under enforce.');
+  }
+
+  return { errors, notes, checked };
+}
+
+// CLI
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
+  const { errors, notes, checked } = checkHeaders({ root: ROOT });
+  for (const n of notes) console.log('· ' + n);
+  if (errors.length) {
+    console.error(`✗ headers guard failed (${errors.length} problem${errors.length === 1 ? '' : 's'}):`);
+    for (const e of errors) console.error('  - ' + e);
+    process.exit(1);
+  }
+  console.log(`✓ headers guard passed (${checked} CSP present + well-formed)`);
+}
