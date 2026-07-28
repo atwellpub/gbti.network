@@ -3,7 +3,10 @@ import { defineConfig } from 'astro/config';
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import mdx from '@astrojs/mdx';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import { remarkContentBlocks } from './src/lib/remark-content-blocks.mjs';
+import { sanitizeSchema, rehypeIframeHostAllowlist, rehypeStyleAllowlist, rehypeIdSafety } from './src/lib/markdown-sanitize.mjs';
 
 // SOW-001: static site for gbti.network, deployed on Cloudflare Pages.
 // Output is the default `static` — Pages serves `dist/` directly; no adapter needed.
@@ -28,7 +31,18 @@ export default defineConfig({
   // second key for the same path would collide ("route defined more than once" build warning).
   redirects: { '/model': '/revenue-model', '/about': '/revenue-model', '/co-op': '/revenue-model' },
   // SOW-062 5d: remarkContentBlocks renders the body ```callout / ```embed fences (runs on mdast, before Shiki).
-  markdown: { remarkPlugins: [remarkContentBlocks], rehypePlugins: [rehypeDemoteBodyH1] },
+  // sow-158 Phase 1a: member markdown is SANITIZED at build. ORDER IS LOAD-BEARING: rehypeRaw first
+  // (parses the raw-HTML nodes the fences + Shiki emit into real elements; sanitize alone would DELETE
+  // the legitimate embeds), then the allowlist sanitize, then the backstops for what the attribute
+  // schema cannot express: the iframe host allowlist, the style-attribute allowlist (hast-util-sanitize
+  // never parses CSS, so this kills clickjacking / url() beacons / legacy expression()/-moz-binding),
+  // and the id/name safety pass (neutralizes DOM clobbering while keeping the footnote anchors). All
+  // three were hardened after an adversarial red-team (see markdown-sanitize.mjs). Every member body
+  // sink (Content + rendered.html) flows through this one config.
+  markdown: {
+    remarkPlugins: [remarkContentBlocks],
+    rehypePlugins: [rehypeDemoteBodyH1, rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeIframeHostAllowlist, rehypeStyleAllowlist, rehypeIdSafety],
+  },
   // Dev-only Astro toolbar — hidden so local testing matches the published view.
   devToolbar: { enabled: false },
   integrations: [

@@ -211,6 +211,14 @@ function checkContent(file, owner, type) {
 }
 
 const has = (p) => fs.existsSync(p);
+// sow-158: recursive file list (for the member .mdx ban). Small trees only (one member folder at a time).
+function* walkFiles(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) yield* walkFiles(p);
+    else yield p;
+  }
+}
 function eachSlug(base, owner) {
   for (const sub of ['posts', 'products', 'prompts']) {
     const dir = path.join(base, sub);
@@ -250,6 +258,12 @@ if (has(membersDir)) {
     eachSlug(base, user);
     // SOW-022: applets are superadmin-only. A member must never publish one; they link out from a product instead.
     if (has(path.join(base, 'applets'))) errors.push(`members/${user}/applets/: applets are a superadmin-only content type (SOW-022); members link out from a product instead`);
+    // sow-158: member content is .md ONLY. MDX runs through a different pipeline than the sanitized
+    // markdown config, so a member .mdx would be an unsanitized-HTML bypass; the collections no longer
+    // load it, and this error gives the PR a clear message instead of a silently unrendered file.
+    for (const f of walkFiles(base)) {
+      if (f.endsWith('.mdx')) errors.push(`${path.relative(ROOT, f)}: .mdx is not allowed in member folders (sow-158); use .md`);
+    }
     const profile = path.join(base, 'profile.md');
     if (has(profile)) {
       const ptxt = fs.readFileSync(profile, 'utf8');

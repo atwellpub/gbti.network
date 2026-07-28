@@ -33,6 +33,12 @@ node_modules/
 # Local Claude Code agent config (permissions, settings). Stays local, never in the repo.
 .claude/
 
+# Local Codex agent config. Stays local, never in the repo.
+.codex/
+
+# Local agent skills/config. Stays local, never in the repo.
+.agents/
+
 # Internal project guide (architecture + the email -> github_id mapping). Stays local, never in the repo.
 CLAUDE.md
 

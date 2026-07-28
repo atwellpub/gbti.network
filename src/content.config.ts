@@ -105,7 +105,7 @@ const socialLinks = z
 
 // 1. Blog post — members/<username>/posts/<slug>.md (or house/posts/<slug>.md)
 const post = defineCollection({
-  loader: glob({ base: '.', pattern: ['members/*/posts/**/*.{md,mdx}', 'house/posts/**/*.{md,mdx}'] }),
+  loader: glob({ base: '.', pattern: ['members/*/posts/**/*.md', 'house/posts/**/*.{md,mdx}'] }),
   schema: ({ image }) => z.object({
     type: z.literal('post').default('post'),
     title: z.string(),
@@ -170,7 +170,7 @@ const productShape = ({ image }: { image: any }) => ({
   redirectFrom: z.array(z.string()).default([]),
 });
 const product = defineCollection({
-  loader: glob({ base: '.', pattern: ['members/*/products/**/*.{md,mdx}', 'house/products/**/*.{md,mdx}'] }),
+  loader: glob({ base: '.', pattern: ['members/*/products/**/*.md', 'house/products/**/*.{md,mdx}'] }),
   schema: ({ image }) => z.object(productShape({ image })),
 });
 
@@ -234,7 +234,7 @@ const page = defineCollection({
 
 // 5. Prompt — members/<username>/prompts/<slug>.md (or house/prompts/<slug>.md)
 const prompt = defineCollection({
-  loader: glob({ base: '.', pattern: ['members/*/prompts/**/*.{md,mdx}', 'house/prompts/**/*.{md,mdx}'] }),
+  loader: glob({ base: '.', pattern: ['members/*/prompts/**/*.md', 'house/prompts/**/*.{md,mdx}'] }),
   schema: ({ image }) => z.object({
     type: z.literal('prompt').default('prompt'),
     title: z.string(),
@@ -277,7 +277,7 @@ const prompt = defineCollection({
 
 // 6. Comment — members/<username>/comments/<id>.md (native member comments; see specs/comments.md)
 const comment = defineCollection({
-  loader: glob({ base: '.', pattern: ['members/*/comments/*.{md,mdx}', 'house/comments/*.{md,mdx}'] }),
+  loader: glob({ base: '.', pattern: ['members/*/comments/*.md', 'house/comments/*.{md,mdx}'] }),
   schema: z.object({
     type: z.literal('comment').default('comment'),
     id: z.string(),
@@ -311,7 +311,7 @@ const comment = defineCollection({
 // `publicStub`/Mode B/C carry over for schema + build-guard consistency, but a one-line status has no large
 // body to gate, so realistic Shares are public-or-members-A.
 const share = defineCollection({
-  loader: glob({ base: '.', pattern: ['members/*/shares/*.{md,mdx}'] }),
+  loader: glob({ base: '.', pattern: ['members/*/shares/*.md'] }),
   schema: z.object({
     type: z.literal('share').default('share'),
     id: z.string(), // the timestamp-slug filename stem, unique within the member's folder

@@ -26,7 +26,8 @@ function renderBlock(node) {
   // embed
   const url = String(node.value || '').trim();
   const src = embedUrl(url);
-  if (src) return `<div class="embed-wrap"><iframe src="${esc(src)}" loading="lazy" allowfullscreen title="Embedded video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe></div>`;
+  // sow-158: sandbox matches the in-extension reader (client/src/markdown.mjs) so both renderers cage the frame.
+  if (src) return `<div class="embed-wrap"><iframe src="${esc(src)}" loading="lazy" allowfullscreen title="Embedded video" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe></div>`;
   return `<p><a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a></p>`;
 }
 
