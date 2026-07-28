@@ -80,6 +80,8 @@ import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
+import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
+import { generateCsrfToken, csrfCookieHeader, requireCsrf } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 // CORS for the membership endpoints (token-authenticated, no cookies). Covers BOTH the GET reads (status oracle,
@@ -100,12 +102,19 @@ const MEMBER_CONTENT_CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-function json(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...extraHeaders } });
+// sow-158 Phase 1b: `cookies` is an optional array of Set-Cookie strings. A plain headers object cannot hold two
+// Set-Cookie keys (the OAuth callbacks now set BOTH the session and the CSRF cookie, and logout expires both), so
+// build a Headers object and append each. extraHeaders may still carry a single Set-Cookie (the OAuth nonce flows).
+function json(body, status = 200, extraHeaders = {}, cookies = []) {
+  const headers = new Headers({ ...JSON_HEADERS, ...extraHeaders });
+  for (const c of cookies) headers.append('Set-Cookie', c);
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
-function redirect(location, extraHeaders = {}) {
-  return new Response(null, { status: 302, headers: { Location: location, ...extraHeaders } });
+function redirect(location, extraHeaders = {}, cookies = []) {
+  const headers = new Headers({ Location: location, ...extraHeaders });
+  for (const c of cookies) headers.append('Set-Cookie', c);
+  return new Response(null, { status: 302, headers });
 }
 
 /** Build the two collaborator clients from env (least-privilege keys, see .dev.vars.example). */
@@ -249,7 +258,9 @@ async function handleGithubCallback(request, env) {
   // SOW-119: &coupon=applied lets the welcome surfaces confirm the free period without another round-trip.
   const couponParam = signup?.couponApplied ? '&coupon=applied' : '';
   const dest = `${env.SITE_BASE_URL}/extension/?welcome=trial&u=${encodeURIComponent(githubLogin || '')}${couponParam}`;
-  return redirect(dest, { 'Set-Cookie': sessionCookieHeader(session) });
+  // sow-158 Phase 1b: mint the CSRF token cookie alongside the session so a future website client can make
+  // credentialed writes (double-submit). Both are set here as two Set-Cookie headers via the cookies array.
+  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken())]);
 }
 
 // SOW Part C: the DEFERRED Discord-link callback. Signup no longer hops through Discord (it is deferred), so this
@@ -298,7 +309,8 @@ async function handleDiscordCallback(request, env) {
   // SOW: land the member in Discord (the community they just joined), NOT back on the marketing site. The flow
   // started from the extension welcome, which polls /discord/link/status and advances itself once the link lands.
   const dest = env.DISCORD_INVITE_URL || `${env.SITE_BASE_URL}/extension/?linked=discord`;
-  return redirect(dest, { 'Set-Cookie': sessionCookieHeader(session) });
+  // sow-158 Phase 1b: re-issue the CSRF cookie with the refreshed session (two Set-Cookie headers).
+  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken())]);
 }
 
 // SOW Part C: deferred Discord link, step 1. The extension welcome opens this in a tab. It authenticates the member
@@ -535,6 +547,23 @@ export default {
         }
       }
 
+      // sow-158 Phase 1b: end a website session. This is a cookie-authenticated write, so it is CSRF-gated
+      // (Origin allow-list + double-submit token). It clears BOTH the session and the CSRF cookie (matching
+      // attributes, Max-Age=0 so the browser deletes them). There is no bearer path: the extension + npm hosts
+      // sign out by discarding their own token, never by calling this.
+      if (pathname === '/auth/logout') {
+        const cors = corsHeaders(request, env, { credentials: true, methods: 'POST, OPTIONS' });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'POST') {
+          const csrf = requireCsrf(request, env);
+          if (!csrf.ok) return json(csrf.body, csrf.status, { ...cors, 'Cache-Control': 'no-store' });
+          return json({ ok: true }, 200, { ...cors, 'Cache-Control': 'no-store' }, [
+            sessionCookieHeader('', { ttlSeconds: 0 }),
+            csrfCookieHeader('', { ttlSeconds: 0 }),
+          ]);
+        }
+      }
+
       if (method === 'GET' && pathname === '/signup/start') return await handleStart(request, env);
       if (method === 'GET' && pathname === '/signup/github/callback') return await handleGithubCallback(request, env);
       if (method === 'GET' && pathname === '/signup/discord/callback') return await handleDiscordCallback(request, env);
@@ -555,12 +584,14 @@ export default {
       // Cross-origin (the extension + the npm host call it), and it carries no cookies, so a wildcard CORS
       // origin with an Authorization allow-header is safe (no ambient credentials are exposed).
       if (pathname === '/membership/status') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        // sow-158 Phase 1b: cookie-eligible, so credentialed reflected-origin CORS (corsHeaders sets
+        // Vary: Origin, Authorization). A GET carries no CSRF gate. Bearer callers (the extension background +
+        // the npm host) are not browser-CORS-bound, so reflecting only allow-listed origins does not affect them.
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await membershipStatus(request, env);
-          // Per-token, per-user body: never cache it by URL, and vary on the bearer so no shared cache can
-          // serve one caller's status to another (mirrors the decrypt/encrypt responses).
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -580,10 +611,11 @@ export default {
       // SOW-024: member activity (favorites + collections) in the deletable edge store. Token-authenticated,
       // per-member, private, ERASABLE. Per-token body, so never cached and varied on the bearer.
       if (pathname === '/membership/activity') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route (POST -> CSRF gate in resolveIdentity)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handleActivity(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -649,10 +681,11 @@ export default {
       // (the FREE tier, SOW-060; authorizeMember denies banned), per-member, private, ERASABLE. Per-token body, so
       // never cached and varied on the bearer.
       if (pathname === '/membership/follows') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route (POST -> CSRF gate in resolveIdentity)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handleFollows(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -660,10 +693,11 @@ export default {
       // (trial may stage; SOW-011 keeps trial drafts OFF the canonical repo, and this store never touches
       // git). Per-member, private, ERASABLE (SOW-024). Per-token body: never cached, varied on the bearer.
       if (pathname === '/membership/drafts') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route (POST -> CSRF gate in resolveIdentity)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handleDrafts(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -671,10 +705,11 @@ export default {
       // payout job. Signed-in + non-banned (Stripe-free); a free / non-earning member gets an empty ledger. Per-token
       // body, so never cached and varied on the bearer.
       if (pathname === '/membership/earnings') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await handleEarnings(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -682,10 +717,11 @@ export default {
       // while its SOW-072 PR auto-merges + deploys behind it. Signed-in + non-banned; read-your-writes (a member sees
       // only their own echoes). Per-token body, so never cached, varied on the bearer.
       if (pathname === '/membership/comment-echo') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route (POST -> CSRF gate in resolveIdentity)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handleCommentEcho(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 
@@ -714,10 +750,11 @@ export default {
       // SOW-046: member prefs (category interests + followed news channels) in the deletable edge store.
       // Effective-paid, per-member, private, ERASABLE. Per-token body, so never cached and varied on the bearer.
       if (pathname === '/membership/prefs') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route (POST -> CSRF gate in resolveIdentity)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handlePrefs(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 

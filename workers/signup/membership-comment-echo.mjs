@@ -19,7 +19,7 @@ const validTarget = (t, s) => TARGET_TYPES.has(t) && typeof s === 'string' && !!
 
 export async function handleCommentEcho(request, env, { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, kv = env?.SIGNUP_KV, now = Date.now, authorize = authorizeMemberCheap } = {}) {
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the comment echo store is not configured' } };
-  const a = await authorize(request, env, { fetchImpl, fetchUser, kv });
+  const a = await authorize(request, env, { fetchImpl, fetchUser, kv, allowCookie: true }); // sow-158 Phase 1b: accept the website session cookie
   if (!a.ok) return { status: a.status, body: a.body };
   const requester = String(a.githubId);
 

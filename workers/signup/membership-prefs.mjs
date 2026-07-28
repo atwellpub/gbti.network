@@ -21,7 +21,7 @@ export async function handlePrefs(request, env, { kv = env?.SIGNUP_KV, authorize
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the prefs store is not configured' } };
 
   // Pass kv so the (default) Stripe-free authorizer reads the overrides mirror from the SAME namespace as the prefs store.
-  const auth = await authorize(request, env, { ...authDeps, kv });
+  const auth = await authorize(request, env, { ...authDeps, kv, allowCookie: true }); // sow-158 Phase 1b: accept the website session cookie
   if (!auth.ok) return { status: auth.status, body: auth.body };
   const key = PREFS_KEY(auth.githubId);
 

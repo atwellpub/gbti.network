@@ -17,7 +17,7 @@ export const DRAFTS_KEY = (githubId) => `drafts:${githubId}`;
 export async function handleDrafts(request, env, { kv = env?.SIGNUP_KV, now, authorize = authorizeMember, ...authDeps } = {}) {
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the draft store is not configured' } };
 
-  const auth = await authorize(request, env, authDeps);
+  const auth = await authorize(request, env, { ...authDeps, allowCookie: true }); // sow-158 Phase 1b: accept the website session cookie
   if (!auth.ok) return { status: auth.status, body: auth.body };
   const key = DRAFTS_KEY(auth.githubId);
   const method = request.method;

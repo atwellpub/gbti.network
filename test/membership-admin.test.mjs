@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { authorizeAdmin, membershipAdminStatuses } from '../workers/signup/membership-admin.mjs';
+import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 1b: mint a website session cookie
 
 const req = (token) => ({ headers: { get: (k) => (k === 'Authorization' && token ? `Bearer ${token}` : null) } });
 const now = new Date('2026-06-17T00:00:00Z');
@@ -28,6 +29,17 @@ test('authorizeAdmin: no token -> 401', async () => {
   const r = await authorizeAdmin(req(null), envWith(freshMirror()), { fetchUser, now });
   assert.equal(r.ok, false);
   assert.equal(r.status, 401);
+});
+
+test('sow-158 Phase 1b: a session cookie alone does NOT authorize admin (the gate stays bearer-only)', async () => {
+  // Even a valid superadmin session cookie is rejected: the admin gate never opted into cookie auth, so it
+  // resolves identity from the bearer token only and 401s before it ever reads the overrides mirror.
+  const session = await signSession({ githubId: '1', githubLogin: 'super' }, 'secret');
+  const reqCookie = new Request('https://signup.gbti.network/membership/admin/ops', { method: 'POST', headers: { Cookie: 'gbti_session=' + session } });
+  const r = await authorizeAdmin(reqCookie, envWith(freshMirror()), { now });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 401);
+  assert.equal(r.body.message, 'a GitHub bearer token is required');
 });
 
 test('authorizeAdmin: admin + superadmin pass; moderator + member are forbidden', async () => {

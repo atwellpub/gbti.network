@@ -4,6 +4,10 @@
 
 # --- Public config (also lives in wrangler.toml [vars]; .dev.vars overrides for local dev) ---
 PUBLIC_BASE_URL="http://localhost:8787"
+# sow-158 Phase 1b: origins allowed to make CREDENTIALED (cookie) calls to the member endpoints. Include your
+# Astro dev origin so the website can call with credentials in local dev. Shared by the CORS reflect policy AND
+# the CSRF Origin check; production sets this tight to https://gbti.network. Never a wildcard (breaks credentials).
+CORS_ALLOWED_ORIGINS="https://gbti.network,http://localhost:4321"
 DISCORD_GUILD_ID="000000000000000000"
 DISCORD_TRIAL_ROLE_ID="000000000000000000"
 DISCORD_MEMBER_ROLE_ID="000000000000000000"

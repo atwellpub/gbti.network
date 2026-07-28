@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { membershipStatus } from '../workers/signup/membership-status.mjs';
+import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 1b: mint a website session cookie
 
 const req = (auth) => new Request('https://signup.gbti.network/membership/status', { headers: auth ? { Authorization: auth } : {} });
 const ENV = { STRIPE_SECRET_KEY: 'rk_test' };
@@ -67,4 +68,22 @@ test('fails closed to none when the member has no Stripe customer', async () => 
 test('500 when Stripe is not configured', async () => {
   const r = await membershipStatus(req('Bearer good'), {}, { fetchUser: async () => ({ githubId: '1', githubLogin: 'a' }) });
   assert.equal(r.status, 500);
+});
+
+test('sow-158 Phase 1b: accepts the website session cookie and makes NO GitHub /user call', async () => {
+  const SESSION_SECRET = 'status-cookie-secret';
+  const session = await signSession({ githubId: '1', githubLogin: 'alice' }, SESSION_SECRET);
+  const reqCookie = new Request('https://signup.gbti.network/membership/status', { headers: { Cookie: 'gbti_session=' + session } });
+  const r = await membershipStatus(reqCookie, { STRIPE_SECRET_KEY: 'rk_test', SESSION_SECRET }, {
+    fetchUser: async () => { throw new Error('the cookie path must not call GitHub /user'); }, // proves no round-trip
+    makeStripe: () => ({ findCustomerByGithubId: async () => paidCustomer }),
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.github_id, '1');
+  assert.equal(r.body.status, 'paid');
+});
+
+test('sow-158 Phase 1b: an unsigned/absent cookie and no bearer fails closed (401)', async () => {
+  const r = await membershipStatus(req(null), { STRIPE_SECRET_KEY: 'rk_test', SESSION_SECRET: 'x' });
+  assert.equal(r.status, 401);
 });

@@ -56,7 +56,7 @@ async function hmac(secret, message) {
 }
 
 /** Constant-time compare of two strings. Avoids leaking signature length-prefix matches via timing. */
-function timingSafeEqual(a, b) {
+export function timingSafeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -108,13 +108,18 @@ export async function verifySession(token, secret, { now = Date.now() } = {}) {
   return payload;
 }
 
-/** Build a Set-Cookie header value for the session. HttpOnly + Secure + SameSite=Lax + Path=/. */
-export function sessionCookieHeader(token, { ttlSeconds = DEFAULT_TTL_SECONDS } = {}) {
+/**
+ * Build a Set-Cookie header value for the session. HttpOnly + Secure + SameSite=Lax + Path=/, host-only.
+ * `secure` defaults true (production over HTTPS). sow-158 Phase 1b: a dev host over http://localhost can pass
+ * secure:false so the browser will store the cookie; this is gated on an env flag by the caller, never on by
+ * default (a non-Secure session cookie in production would be sent over plain HTTP).
+ */
+export function sessionCookieHeader(token, { ttlSeconds = DEFAULT_TTL_SECONDS, secure = true } = {}) {
   const attrs = [
     `${COOKIE_NAME}=${token}`,
     'Path=/',
     'HttpOnly',
-    'Secure',
+    ...(secure ? ['Secure'] : []),
     'SameSite=Lax',
     `Max-Age=${ttlSeconds}`,
   ];

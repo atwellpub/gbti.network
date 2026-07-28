@@ -530,6 +530,10 @@ test('GET /signup/github/callback completes the trial signup on GitHub ALONE (Di
       assert.ok(location.includes('/extension/') && location.includes('welcome=trial'), 'completes signup -> the extension download page with the welcome flag, not a Discord redirect');
       assert.ok(!location.includes('discord.com'), 'no Discord hop in the signup flow');
       assert.ok(res.headers.get('Set-Cookie'), 'a session cookie is set (signup completed on GitHub alone)');
+      // sow-158 Phase 1b: the callback now mints BOTH the HttpOnly session cookie and the readable CSRF cookie.
+      const setCookies = res.headers.getSetCookie();
+      assert.ok(setCookies.some((c) => c.startsWith('gbti_session=') && /HttpOnly/.test(c)), 'the HttpOnly session cookie is set');
+      assert.ok(setCookies.some((c) => c.startsWith('gbti_csrf=') && !/HttpOnly/.test(c)), 'the readable (non-HttpOnly) CSRF cookie is set');
       assert.equal(env.SIGNUP_KV.store.get('gh:424242'), 'cus_new', 'the trial Customer was created + indexed');
     },
   );
@@ -547,6 +551,45 @@ test('GET /signup/github/callback REJECTS a replayed state with no matching nonc
   );
   assert.equal(res.status, 400);
   assert.ok(!res.headers.get('Set-Cookie'), 'no session is minted for a replayed state');
+});
+
+// ---- sow-158 Phase 1b: website cookie session + CSRF (router integration; these paths short-circuit before Stripe/KV) ----
+
+test('sow-158: a cookie POST to /membership/activity with NO CSRF is rejected (403 csrf check failed)', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const session = await signSession({ githubId: '42', githubLogin: 'gwen' }, env.SESSION_SECRET);
+  const res = await worker.fetch(
+    req('POST', '/membership/activity', { headers: { Cookie: 'gbti_session=' + session, Origin: 'https://gbti.test' }, body: '{}' }),
+    env, {},
+  );
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).message, 'csrf check failed');
+});
+
+test('sow-158: POST /auth/logout 403s without CSRF and clears both cookies with a valid one', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const bad = await worker.fetch(req('POST', '/auth/logout', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.equal(bad.status, 403);
+
+  const ok = await worker.fetch(
+    req('POST', '/auth/logout', { headers: { Cookie: 'gbti_csrf=T', 'X-GBTI-CSRF': 'T', Origin: 'https://gbti.test' } }),
+    env, {},
+  );
+  assert.equal(ok.status, 200);
+  const cleared = ok.headers.getSetCookie();
+  assert.ok(cleared.some((c) => c.startsWith('gbti_session=') && /Max-Age=0/.test(c)), 'the session cookie is expired');
+  assert.ok(cleared.some((c) => c.startsWith('gbti_csrf=') && /Max-Age=0/.test(c)), 'the csrf cookie is expired');
+});
+
+test('sow-158: OPTIONS /membership/status reflects an allow-listed Origin with credentials, blocks others', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const ok = await worker.fetch(req('OPTIONS', '/membership/status', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.equal(ok.status, 204);
+  assert.equal(ok.headers.get('Access-Control-Allow-Origin'), 'https://gbti.test');
+  assert.equal(ok.headers.get('Access-Control-Allow-Credentials'), 'true');
+
+  const blocked = await worker.fetch(req('OPTIONS', '/membership/status', { headers: { Origin: 'https://evil.example' } }), env, {});
+  assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null);
 });
 
 test('SOW Part C: /discord/link/start with a session -> Discord OAuth carrying the verified github_id + a nonce', async () => {

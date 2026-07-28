@@ -11,7 +11,7 @@ const emptyLedger = (githubId) => ({ v: 1, recipient: githubId, entries: [], tot
 export async function handleEarnings(request, env, { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, kv = env?.SIGNUP_KV, authorize = authorizeMemberCheap } = {}) {
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the earnings store is not configured' } };
   // Same ban-aware, Stripe-free gate as activity/follows: a banned account gets ZERO KV; an unverifiable token is 401.
-  const a = await authorize(request, env, { fetchImpl, fetchUser, kv });
+  const a = await authorize(request, env, { fetchImpl, fetchUser, kv, allowCookie: true }); // sow-158 Phase 1b: accept the website session cookie
   if (!a.ok) return { status: a.status, body: a.body };
   let ledger = null;
   try { ledger = await kv.get(EARNINGS_KEY(a.githubId), 'json'); } catch { ledger = null; }

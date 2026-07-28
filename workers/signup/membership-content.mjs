@@ -11,6 +11,7 @@
 // plaintext they open; the public ciphertext is permanent (bounded by key-destroying rotation). See SOW-016.
 
 import { githubFetchUser } from './oauth.mjs';
+import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 1b: bearer-or-cookie identity choke point
 import { deriveStatus } from '../../membership/derive-status.mjs';
 import { effectiveStatus, bansFromParsed, rolesFromParsed, grandfathersFromParsed } from '../../membership/overrides-core.mjs';
 import { createStripeClient } from '../../clients/stripe.mjs';
@@ -30,19 +31,15 @@ const deny = (message) => ({ ok: false, status: 403, body: { error: 'forbidden',
  * from the verified token; ban > staff > grandfather > Stripe is applied here. The caller decides which
  * statuses it accepts (decrypt allows an active trial to read a Share; encrypt + everything else is paid-only).
  */
-export async function resolveEffective(request, env, { fetchImpl = globalThis.fetch, makeStripe = createStripeClient, fetchUser = githubFetchUser, now = new Date(), needStripe = true, kv = env?.SIGNUP_KV } = {}) {
-  const auth = request.headers.get('Authorization') || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'a GitHub bearer token is required' } };
-
-  let user;
-  try {
-    user = await fetchUser(token, fetchImpl);
-  } catch {
-    return { ok: false, status: 401, body: { error: 'unauthorized', message: 'could not verify the GitHub token' } };
-  }
-  if (!user?.githubId) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'the GitHub token has no user id' } };
-  const githubId = String(user.githubId);
+export async function resolveEffective(request, env, { fetchImpl = globalThis.fetch, makeStripe = createStripeClient, fetchUser = githubFetchUser, verifyCookie, now = new Date(), needStripe = true, allowCookie = false, needToken = false, kv = env?.SIGNUP_KV } = {}) {
+  // sow-158 Phase 1b: identity now comes from EITHER a bearer token OR (only when the route opts in with
+  // allowCookie) the signed gbti_session cookie. resolveIdentity preserves the exact bearer-path messages, so
+  // a bearer caller is unaffected. Everything below (Stripe derive, mirror staleness/shape gate, effectiveStatus
+  // ban>staff>grandfather, the coupon fast-path) is unchanged and runs on the resolved githubId regardless.
+  const id = await resolveIdentity(request, env, { fetchImpl, fetchUser, ...(verifyCookie ? { verifyCookie } : {}), now, allowCookie, needToken });
+  if (!id.ok) return id;
+  const githubId = id.githubId;
+  const login = id.login;
 
   // SOW-078: a free / ban-only caller (authorizeMemberCheap) does NOT need the Stripe-derived paid/trial status —
   // its decision rests on identity + the cheap KV ban/override mirror, and ban > staff > grandfather wins regardless
@@ -82,10 +79,10 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
   // neither paid (nothing to add) nor banned (ban outranks everything, including a coupon).
   if (effective.status !== 'paid' && effective.status !== 'banned') {
     const grant = await readCouponGrant(kv, githubId, now);
-    if (grant) return { ok: true, githubId, login: user.githubLogin ?? null, status: 'paid', source: 'coupon' };
+    if (grant) return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon' };
   }
 
-  return { ok: true, githubId, login: user.githubLogin ?? null, status: effective.status, source: effective.source };
+  return { ok: true, githubId, login, via: id.via, status: effective.status, source: effective.source };
 }
 
 /**

@@ -33,7 +33,7 @@ export async function handleActivity(request, env, {
   // missing/stale/incomplete overrides mirror) WITHOUT a Stripe call, matching the follows/prefs gate — closing
   // the gap where the old identity-only auth let a banned member keep writing favorites/collections. The activity
   // store and the overrides mirror share the SAME SIGNUP_KV namespace, so the mirror is read through `kv`.
-  const a = await authorizeMemberCheap(request, env, { fetchImpl, fetchUser, kv });
+  const a = await authorizeMemberCheap(request, env, { fetchImpl, fetchUser, kv, allowCookie: true }); // sow-158 Phase 1b: accept the website session cookie
   if (!a.ok) return { status: a.status, body: a.body };
   const key = ACTIVITY_KEY(a.githubId);
   const method = request.method;

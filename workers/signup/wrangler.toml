@@ -26,6 +26,10 @@ head_sampling_rate = 1
 # checkout return URLs.
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+# sow-158 Phase 1b: origins allowed to make CREDENTIALED (cookie) calls to the member endpoints (comma-separated,
+# no trailing slash). Shared by the CORS reflect-origin policy AND the CSRF Origin check. A local dev host adds
+# http://localhost:4321 via .dev.vars; keep this tight (never a wildcard, which cannot co-exist with credentials).
+CORS_ALLOWED_ORIGINS = "https://gbti.network"
 
 # Discord guild + role ids (non-secret, but environment-specific).
 DISCORD_GUILD_ID = "1073029070411006053"
@@ -157,6 +161,7 @@ crons = ["*/5 * * * *"]
 # Worker reads in production must be listed here):
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+CORS_ALLOWED_ORIGINS = "https://gbti.network"   # sow-158 Phase 1b: credentialed-CORS + CSRF Origin allow-list (never a wildcard)
 GITHUB_CONTENT_REPO = "gbti-network/gbti.network"
 REFERRAL_ENABLED = "true"            # SOW-059 ARMED: the Connect onboarding routes are live (mirrors referral-config.yml enabled)
 TOUCH_CAPTURE_ENABLED = "true"       # SOW-059 ARMED: anonymous, consent-gated attribution capture + the conversion freeze are LIVE
