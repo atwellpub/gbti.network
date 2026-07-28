@@ -176,6 +176,17 @@ export function readOauthNonce(cookieHeader) {
   return null;
 }
 
+// sow-158 Phase 2: validate a website-login return path. Only a same-site, root-relative path is allowed, so a
+// value concatenated onto the fixed SITE_BASE_URL origin can never escape it. Rejects protocol-relative (//evil),
+// backslash tricks (/\evil), any scheme/host, and control chars. '' means "no return_to" (use the signup default).
+export function safeReturnTo(v) {
+  if (typeof v !== 'string' || v.length === 0 || v.length > 512) return '';
+  if (v[0] !== '/') return '';                 // must be root-relative (rejects https://evil, scheme:/…)
+  if (v[1] === '/' || v[1] === '\\') return ''; // rejects //evil and /\evil (protocol-relative / backslash)
+  if (/[\\\x00-\x1f\x7f]/.test(v)) return '';   // no backslash or control chars anywhere
+  return v;
+}
+
 async function handleStart(request, env) {
   const url = new URL(request.url);
   const ip = request.headers.get('CF-Connecting-IP') || '';
@@ -203,7 +214,10 @@ async function handleStart(request, env) {
   const coupon = await validateCouponParam(env.SIGNUP_KV, url.searchParams.get('coupon') || '');
   // SOW security fix: bind the state to THIS browser with a per-flow nonce (cookie + embedded in the signed state).
   const nonce = crypto.randomUUID();
-  const state = await packState({ ref, via, sid, nonce, ...(coupon ? { coupon } : {}) }, env);
+  // sow-158 Phase 2: a website "Sign in" carries return_to (the path to land on after login). Validated to a
+  // same-site path here, then carried in the HMAC-signed state (tamper-proof between the OAuth hops).
+  const returnTo = safeReturnTo(url.searchParams.get('return_to') || '');
+  const state = await packState({ ref, via, sid, nonce, ...(coupon ? { coupon } : {}), ...(returnTo ? { returnTo } : {}) }, env);
   const location = githubAuthorizeUrl({
     clientId: env.GITHUB_OAUTH_CLIENT_ID,
     redirectUri: `${env.PUBLIC_BASE_URL}/signup/github/callback`,
@@ -257,8 +271,14 @@ async function handleGithubCallback(request, env) {
   // extension is installed -- once the extension is in, its SOW-030 signal takes over.
   // SOW-119: &coupon=applied lets the welcome surfaces confirm the free period without another round-trip.
   const couponParam = signup?.couponApplied ? '&coupon=applied' : '';
-  const dest = `${env.SITE_BASE_URL}/extension/?welcome=trial&u=${encodeURIComponent(githubLogin || '')}${couponParam}`;
-  // sow-158 Phase 1b: mint the CSRF token cookie alongside the session so a future website client can make
+  // sow-158 Phase 2: a website login carries a validated same-site return_to in the signed state; land the member
+  // back there (the header hydrates the signed-in state from the cookie). Re-validate defense-in-depth. Otherwise
+  // this is a fresh signup -> the extension welcome page (with the ?u= display hint + welcome ribbon).
+  const returnTo = safeReturnTo(state.returnTo);
+  const dest = returnTo
+    ? `${env.SITE_BASE_URL}${returnTo}`
+    : `${env.SITE_BASE_URL}/extension/?welcome=trial&u=${encodeURIComponent(githubLogin || '')}${couponParam}`;
+  // sow-158 Phase 1b: mint the CSRF token cookie alongside the session so the website client can make
   // credentialed writes (double-submit). Both are set here as two Set-Cookie headers via the cookies array.
   return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken())]);
 }

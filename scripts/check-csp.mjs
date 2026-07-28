@@ -61,7 +61,7 @@ function firstShare() {
   return null;
 }
 const pages = [
-  '/', '/articles/', '/products/', '/prompts/', '/members/', '/membership/', '/account/', '/revenue-model/', '/feeds/',
+  '/', '/articles/', '/products/', '/prompts/', '/members/', '/membership/', '/login/', '/account/', '/revenue-model/', '/feeds/',
   '/utilities/', '/utilities/email-signature-generator/', '/tools/email-signature-generator/', '/utilities/js-animate-hue/',
   firstSlug('articles'), firstSlug('products'), firstSlug('prompts'), firstSlug('members'),
   firstArticleWithEmbed(), firstShare(),

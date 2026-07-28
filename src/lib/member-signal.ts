@@ -9,6 +9,8 @@
 // and CODEOWNERS. The inert <gbti-edit-panel> still self-activates only for the true owner via the
 // worker-backed client; this signal only governs the chrome around it.
 
+import { memberSignalFromStatus, selectIdentity } from './member-signal-core.mjs'; // sow-158 Phase 2: pure core
+
 export interface MemberSignal {
   authenticated: true;
   login: string | null;
@@ -17,6 +19,7 @@ export interface MemberSignal {
   role: string;
   membership: string;
   canPublish: boolean;
+  source?: 'cookie' | 'extension'; // sow-158 Phase 2: which producer set it (the cookie session wins over the extension)
 }
 
 /** Validate an already-parsed object into a MemberSignal, or null. Shared by the attribute + event paths. */
@@ -33,6 +36,7 @@ function coerce(o: unknown): MemberSignal | null {
     role: typeof r.role === 'string' ? r.role : 'member',
     membership: typeof r.membership === 'string' ? r.membership : 'unknown',
     canPublish: r.canPublish === true,
+    source: 'extension', // sow-158 Phase 2: the attribute/event path is the extension signal (display-only)
   };
 }
 
@@ -52,12 +56,26 @@ export function readMemberSignal(): MemberSignal | null {
   return parseMemberSignal(document.documentElement.dataset.gbtiMember);
 }
 
-/** Subscribe to live sign-in/sign-out changes. Returns an unsubscribe fn. */
+// sow-158 Phase 2: the website httpOnly-cookie session state. The cookie is the REAL session and WINS over the
+// extension's display-only signal (selectIdentity). onMemberSignal routes every extension event through the
+// precedence selector, so a late extension gbti:identity event can never override a resolved cookie member.
+const listeners = new Set<(s: MemberSignal | null) => void>();
+let cookieResolved = false;
+let cookieSignal: MemberSignal | null = null;
+let hydrateStarted = false;
+
+/** The effective identity given the resolved cookie session and an incoming extension signal (cookie wins). */
+export function currentIdentity(extSignal: MemberSignal | null): MemberSignal | null {
+  return selectIdentity({ cookieResolved, cookieSignal, extSignal }) as MemberSignal | null;
+}
+
+/** Subscribe to live sign-in/sign-out changes. Returns an unsubscribe fn. The cookie session takes precedence. */
 export function onMemberSignal(cb: (s: MemberSignal | null) => void): () => void {
   if (typeof document === 'undefined') return () => {};
-  const handler = (e: Event) => cb(coerce((e as CustomEvent).detail));
+  listeners.add(cb);
+  const handler = (e: Event) => cb(currentIdentity(coerce((e as CustomEvent).detail)));
   document.addEventListener('gbti:identity', handler as EventListener);
-  return () => document.removeEventListener('gbti:identity', handler as EventListener);
+  return () => { listeners.delete(cb); document.removeEventListener('gbti:identity', handler as EventListener); };
 }
 
 /** Reflect the signal onto <html> so components + CSS can react to a signed-in / paid member presentationally. */
@@ -70,4 +88,86 @@ export function applyMemberSignalClasses(s: MemberSignal | null): void {
   el.classList.toggle('is-gbti-member-active', s?.membership === 'paid' || s?.membership === 'trialing');
   if (s && s.role) el.dataset.gbtiRole = s.role;
   else delete el.dataset.gbtiRole;
+}
+
+/** Read a cookie value by name from document.cookie (for the non-HttpOnly gbti_csrf). */
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  for (const part of document.cookie.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+  }
+  return null;
+}
+
+/** The signup Worker origin, stamped site-wide on <html> by BaseLayout (data-signup-base). */
+function readSignupBase(): string {
+  if (typeof document === 'undefined') return '';
+  return document.documentElement.dataset.signupBase || '';
+}
+
+/**
+ * sow-158 Phase 2: hydrate the signed-in state from the httpOnly gbti_session cookie. Fetches the PUBLIC
+ * /membership/status with credentials so the cookie rides along; the token NEVER enters the page. Cheap gate: with
+ * no readable gbti_csrf cookie there is no web session, so it skips the network entirely (no Stripe hit on
+ * anonymous pageloads). On a member it becomes the authoritative source (the cookie wins over the extension) and
+ * notifies every registered consumer.
+ */
+const STATUS_CACHE_KEY = 'gbti_status_v1';
+const STATUS_CACHE_TTL_MS = 120000; // 2 min: coalesce same-session navigations, short enough to reflect a fresh pay
+
+/** Read the cached status signal for this csrf token, or undefined on a miss/stale/other-session. Presentation only. */
+function readStatusCache(csrf: string): MemberSignal | null | undefined {
+  try {
+    const raw = sessionStorage.getItem(STATUS_CACHE_KEY);
+    if (!raw) return undefined;
+    const c = JSON.parse(raw);
+    if (c.k !== csrf || typeof c.t !== 'number' || Date.now() - c.t > STATUS_CACHE_TTL_MS) return undefined;
+    return c.s ?? null;
+  } catch { return undefined; }
+}
+function writeStatusCache(csrf: string, signal: MemberSignal | null): void {
+  try { sessionStorage.setItem(STATUS_CACHE_KEY, JSON.stringify({ k: csrf, t: Date.now(), s: signal })); } catch { /* no storage */ }
+}
+
+export async function hydrateMemberSignal(base: string = readSignupBase()): Promise<void> {
+  if (typeof document === 'undefined' || hydrateStarted) return;
+  hydrateStarted = true;
+  const csrf = readCookie('gbti_csrf');
+  if (!base || !csrf) { cookieResolved = true; cookieSignal = null; return; } // no web session -> no network at all
+  // sessionStorage coalesces the Stripe-backed /membership/status fetch across same-session navigations (the
+  // response is no-store and hits Stripe per call). Keyed by the csrf value so a re-login misses the old cache.
+  let signal: MemberSignal | null | undefined = readStatusCache(csrf);
+  if (signal === undefined) {
+    signal = null;
+    try {
+      const res = await fetch(base + '/membership/status', { credentials: 'include' });
+      if (res.ok) signal = memberSignalFromStatus(await res.json()) as MemberSignal | null;
+    } catch {
+      signal = null; // fail closed: stay signed-out
+    }
+    writeStatusCache(csrf, signal);
+  }
+  cookieResolved = true;
+  cookieSignal = signal;
+  if (signal) {
+    applyMemberSignalClasses(signal);
+    for (const cb of listeners) cb(currentIdentity(null)); // deliver the winning cookie signal to all consumers
+  }
+}
+
+/**
+ * sow-158 Phase 2: end the website session. Reads the readable gbti_csrf cookie for the double-submit header and
+ * POSTs /auth/logout with credentials so the Worker clears both cookies (fail-closed CSRF + Origin check). No-op
+ * when there is no web session. The caller reloads afterward so the page re-hydrates signed-out.
+ */
+export async function signOutWeb(base: string = readSignupBase()): Promise<void> {
+  if (typeof document === 'undefined') return;
+  try { sessionStorage.removeItem(STATUS_CACHE_KEY); } catch { /* no storage */ } // invalidate the cached member
+  const csrf = readCookie('gbti_csrf');
+  if (!base || !csrf) return;
+  try {
+    await fetch(base + '/auth/logout', { method: 'POST', credentials: 'include', headers: { 'X-GBTI-CSRF': csrf } });
+  } catch { /* best effort; the reload + re-hydrate reflects reality */ }
 }

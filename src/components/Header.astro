@@ -44,7 +44,7 @@ const nav = [
         <svg class="ico-moon" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-moon" /></svg>
         <svg class="ico-sun" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-sun" /></svg>
       </button>
-      <a href="/membership/" class="btn-gh" data-signin><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#ico-github" /></svg> Sign in</a>
+      <a href="/login/" class="btn-gh" data-signin><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#ico-github" /></svg> Sign in</a>
       {/* SOW-030/036: shown only when the GBTI extension stamps a signed-in member signal (presentation only). The
           avatar is a menu button; its items deep-link into the extension's management pages via the content-script
           relay (the site cannot link to chrome-extension:// directly). */}
@@ -59,6 +59,8 @@ const nav = [
           <div class="hm-sep" role="separator"></div>
           {/* SOW: shown only in the hint-only state (signed up, extension not installed yet) -> nudge the download. */}
           <a class="hm-item hm-download" role="menuitem" href="/extension/" hidden>Get the extension to continue &rarr;</a>
+          {/* sow-158 Phase 2: shown in the WEB menu mode (a cookie session with no extension) -> the real account page. */}
+          <a class="hm-item hm-account" role="menuitem" data-head-account href="/account/" hidden>Account</a>
           <button class="hm-item" role="menuitem" type="button" data-open="workspace.html">My workspace</button>
           <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=post">My articles</button>
           <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=prompt">My prompts</button>
@@ -84,7 +86,7 @@ const nav = [
       <span class="m-group">Feeds</span>
       {feedsMenu.map((i) => <a href={i.href} class="m-sub">{i.label}</a>)}
       {nav.map((i) => <a href={i.href}>{i.label}</a>)}
-      <a href="/membership/" class="m-join">Sign in / Join</a>
+      <a href="/login/" class="m-join">Sign in / Join</a>
     </div>
   </nav>
 </header>
@@ -144,7 +146,7 @@ const nav = [
 </style>
 
 <script>
-  import { readMemberSignal, onMemberSignal } from '../lib/member-signal';
+  import { readMemberSignal, onMemberSignal, currentIdentity, signOutWeb } from '../lib/member-signal';
 
   // SOW-030/036: reflect the extension's signed-in signal into the header. When a member signal is present we show
   // the avatar account menu and hide the "Sign in" button; otherwise the header stays in its logged-out state.
@@ -186,12 +188,23 @@ const nav = [
     } catch { /* no storage */ }
     return login ? { login, hintOnly: true } : null;
   }
-  function setMenuMode(hintOnly) {
-    // The extension-relay items + Sign out only work with the extension installed; in the hint-only state we hide
-    // them and surface a "get the extension" item instead.
-    headMenu?.querySelectorAll('[data-open],[data-head-signout]').forEach((el) => { el.hidden = Boolean(hintOnly); });
+  // sow-158 Phase 2: the menu has three modes. 'hint' = signed up, no extension, cookie unresolved -> nudge the
+  // download. 'web' = a cookie session with NO extension installed -> a real /account link + web Sign out (the
+  // extension-relay items are dead without the extension, so hide them). 'extension' = the extension is present ->
+  // its relay items + Sign out (unchanged; a cookie session with the extension also present keeps the relay menu).
+  function menuModeFor(eff) {
+    if (eff && eff.hintOnly) return 'hint';
+    if (eff && eff.source === 'cookie' && !document.documentElement.dataset.gbtiExtension) return 'web';
+    return 'extension';
+  }
+  function setMenuMode(mode) {
     const dl = headMenu?.querySelector('.hm-download');
-    if (dl) dl.hidden = !hintOnly;
+    const account = headMenu?.querySelector('[data-head-account]');
+    const signout = headMenu?.querySelector('[data-head-signout]');
+    headMenu?.querySelectorAll('[data-open]').forEach((el) => { el.hidden = mode !== 'extension'; });
+    if (dl) dl.hidden = mode !== 'hint';
+    if (account) account.hidden = mode !== 'web';
+    if (signout) signout.hidden = mode === 'hint'; // web + extension both show Sign out
   }
   function applyHeaderIdentity(s) {
     if (!wrap || !signin) return;
@@ -203,7 +216,7 @@ const nav = [
       if (meAv) { meAv.src = 'https://github.com/' + encodeURIComponent(login) + '.png?size=52'; meAv.alt = '@' + login; }
       if (meProfile) meProfile.href = '/members/' + encodeURIComponent(folder) + '/';
       if (adminItem) adminItem.hidden = (RANK[eff.role] ?? 0) < RANK.moderator;
-      setMenuMode(Boolean(eff.hintOnly));
+      setMenuMode(menuModeFor(eff));
       wrap.hidden = false;
       signin.style.display = 'none';
     } else {
@@ -213,7 +226,7 @@ const nav = [
     }
   }
   meAv?.addEventListener('error', () => { if (meAv) meAv.src = '/favicon-32x32.png'; });
-  applyHeaderIdentity(readMemberSignal());
+  applyHeaderIdentity(currentIdentity(readMemberSignal()));
   onMemberSignal(applyHeaderIdentity);
 
   // Toggle the dropdown; close on Esc, on outside-click, and after choosing an item.
@@ -232,9 +245,14 @@ const nav = [
       closeMenu();
     });
   });
-  document.querySelector('[data-head-signout]')?.addEventListener('click', () => {
-    document.dispatchEvent(new CustomEvent('gbti:request-signout'));
+  // sow-158 Phase 2: sign out of BOTH sessions -- dispatch the extension signout (clears its token if installed)
+  // AND clear the httpOnly cookie session via the Worker (no-op when there is no web session), then reload so the
+  // page re-hydrates signed-out. Both are idempotent/harmless when the respective session is absent.
+  document.querySelector('[data-head-signout]')?.addEventListener('click', async () => {
     closeMenu();
+    document.dispatchEvent(new CustomEvent('gbti:request-signout'));
+    await signOutWeb();
+    location.reload();
   });
 
   // Light/dark toggle: flip data-theme on <html>, persist to localStorage. The no-FOUC initial theme is

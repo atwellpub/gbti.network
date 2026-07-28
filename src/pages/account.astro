@@ -3,16 +3,61 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 <BaseLayout title="Account" description="Your GBTI Network account." noindex={true}>
   <section class="band">
-    <div class="wrap">
-      <div class="sec-head center">
+    <div class="wrap acct-wrap">
+      {/* sow-158 Phase 2: signed-OUT fallback (also the pre-hydration state; static SSG has no request-time cookie). */}
+      <div class="sec-head center" data-account-signedout>
         <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-id"/></svg></span>
         <h1 class="h1 mt24">Your account</h1>
         <p class="lead">
-          Welcome to GBTI Network. You manage your membership and author content from the GBTI browser
-          extension, where you sign in with GitHub. Install it to get started, then join the community.
+          Sign in with GitHub to manage your GBTI Network membership. Save, collect, and follow on the web; add the
+          browser extension to edit and publish your content in place.
         </p>
-        <a href="/membership/" class="btn btn-primary btn-lg mt24">See membership <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+        <a href="/login/?return_to=%2Faccount%2F" class="btn btn-primary btn-lg mt24">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+
+      {/* sow-158 Phase 2: signed-IN view, hydrated client-side from the httpOnly-cookie session (member-signal.ts). */}
+      <div class="sec-head center" data-account-signedin hidden>
+        <img class="acct-av" data-account-av alt="" width="64" height="64" decoding="async" />
+        <h1 class="h1 mt16">Welcome, <span data-account-name>@you</span></h1>
+        <p class="lead">Membership: <strong data-account-status>…</strong></p>
+        <div class="acct-actions mt24">
+          <a href="/membership/" class="btn btn-ghost">Membership</a>
+          <button type="button" class="btn btn-primary" data-account-signout>Sign out</button>
+        </div>
       </div>
     </div>
   </section>
+
+  <script>
+    import { onMemberSignal, currentIdentity, readMemberSignal, signOutWeb } from '../lib/member-signal';
+    const out = document.querySelector('[data-account-signedout]');
+    const inn = document.querySelector('[data-account-signedin]');
+    const nameEl = document.querySelector('[data-account-name]');
+    const av = document.querySelector('[data-account-av]') as HTMLImageElement | null;
+    const statusEl = document.querySelector('[data-account-status]');
+    const LABELS: Record<string, string> = { paid: 'Paid member', trialing: 'Free trial', expired: 'Expired', cancelled: 'Cancelled', none: 'No active membership', banned: 'Suspended', unknown: 'Signed in' };
+    function render(s) {
+      const signedIn = !!(s && s.login);
+      if (out) out.hidden = signedIn;
+      if (inn) inn.hidden = !signedIn;
+      if (!signedIn) return;
+      if (nameEl) nameEl.textContent = '@' + s.login;
+      if (av) { av.src = 'https://github.com/' + encodeURIComponent(s.login) + '.png?size=128'; av.alt = '@' + s.login; }
+      if (statusEl) statusEl.textContent = LABELS[s.membership] || LABELS.unknown;
+    }
+    av?.addEventListener('error', () => { if (av) av.src = '/favicon-32x32.png'; });
+    render(currentIdentity(readMemberSignal()));
+    onMemberSignal(render); // BaseLayout invokes hydrateMemberSignal(); the cookie member arrives here
+    document.querySelector('[data-account-signout]')?.addEventListener('click', async () => {
+      document.dispatchEvent(new CustomEvent('gbti:request-signout')); // extension (no-op if absent)
+      await signOutWeb(); // cookie session
+      location.reload();
+    });
+  </script>
+
+  <style>
+    .acct-wrap { max-width: 560px; }
+    .acct-av { border-radius: 50%; border: 2px solid var(--line-2); margin: 0 auto; }
+    .acct-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  </style>
 </BaseLayout>

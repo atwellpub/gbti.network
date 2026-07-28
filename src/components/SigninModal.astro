@@ -7,27 +7,26 @@
 import { extensionInstallUrl, extensionIsListed } from '../lib/extension';
 const benefitsUrl = '/membership/';
 ---
-<dialog id="gbti-signin-dialog" class="signin-dialog" data-install={extensionInstallUrl} data-listed={String(extensionIsListed)} aria-labelledby="signin-title">
+<dialog id="gbti-signin-dialog" data-signin-dialog class="signin-dialog" data-install={extensionInstallUrl} data-listed={String(extensionIsListed)} aria-labelledby="signin-title">
   <div class="signin-card">
     <button type="button" class="signin-x" data-close aria-label="Close">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
     </button>
 
-    {/* Extension NOT installed: prompt to install + read benefits (which doubles as registration). */}
+    {/* sow-158 Phase 2: web sign-in is the primary path (GitHub OAuth -> an httpOnly session, no extension needed);
+        the extension is now an optional add-on for in-place editing/publishing. */}
     <div data-state="absent">
-      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-puzzle"/></svg></span>
-      <h2 class="h3 mt12" id="signin-title">Sign in with the GBTI extension</h2>
+      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-github"/></svg></span>
+      <h2 class="h3 mt12" id="signin-title">Sign in to GBTI Network</h2>
       <p class="body-sm muted mt8">
-        Signing in and publishing happen through the free GBTI browser extension. It keeps your GitHub sign-in
-        on your own machine and lets you edit and publish in place.
+        Sign in on the web with GitHub to save, collect, and follow. To edit and publish your own content in place,
+        add the free GBTI browser extension too.
       </p>
       <div class="signin-actions mt20">
-        <a class="btn btn-primary" href={extensionInstallUrl} data-install-link rel={extensionIsListed ? null : 'nofollow'}>Get the extension</a>
-        <a class="btn btn-ghost" href={benefitsUrl}>Read about member benefits</a>
+        <a class="btn btn-primary" href="/login/" data-web-signin>Sign in on the web</a>
+        <a class="btn btn-ghost" href={extensionInstallUrl} data-install-link rel={extensionIsListed ? null : 'nofollow'}>Get the extension</a>
       </div>
-      {!extensionIsListed && (
-        <p class="body-sm muted mt12" style="font-size:12.5px">The Chrome Web Store listing is coming soon. For now, the download page walks you through loading it as an unpacked extension.</p>
-      )}
+      <p class="body-sm muted mt12" style="font-size:12.5px"><a href={benefitsUrl}>Read about member benefits</a></p>
     </div>
 
     {/* Extension installed: a page cannot open the extension popup, so guide the user to the toolbar. */}
@@ -49,7 +48,7 @@ const benefitsUrl = '/membership/';
 
 <script>
   (() => {
-    const dialog = document.getElementById('gbti-signin-dialog') as HTMLDialogElement | null;
+    const dialog = document.querySelector('[data-signin-dialog]') as HTMLDialogElement | null; // sow-158 residual #1: data-attr, not a guessable id
     if (!dialog) return;
     const absent = dialog.querySelector('[data-state="absent"]') as HTMLElement;
     const present = dialog.querySelector('[data-state="present"]') as HTMLElement;
@@ -71,6 +70,13 @@ const benefitsUrl = '/membership/';
         if (typeof dialog.showModal !== 'function') return; // no <dialog> support: follow the href fallback
         e.preventDefault();
         sync();
+        // sow-158 Phase 2: carry the current path into the web sign-in link so login returns the member here (the
+        // Worker re-validates return_to to a same-site path). Omit it when already on /login.
+        const web = dialog.querySelector('[data-web-signin]') as HTMLAnchorElement | null;
+        if (web) {
+          const rt = location.pathname + location.search + location.hash;
+          web.href = location.pathname.startsWith('/login') ? '/login/' : ('/login/?return_to=' + encodeURIComponent(rt));
+        }
         // owner QA 2026-07-22: surface the open-in-extension action when the page declares a reader hash.
         const openBtn = dialog.querySelector('[data-open-in-extension]') as HTMLElement | null;
         const readerHash = document.querySelector('[data-gbti-reader-hash]')?.getAttribute('data-gbti-reader-hash') || '';

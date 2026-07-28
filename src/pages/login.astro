@@ -1,0 +1,73 @@
+---
+// sow-158 Phase 2: the website sign-in surface. A Turnstile-gated "Continue with GitHub" that navigates to the
+// Worker's /signup/start (idempotent: an existing member is logged in and their trial clock is untouched; a new
+// visitor is signed up into a free no-card trial), carrying a validated return_to so the member lands back where
+// they started. The Worker sets the httpOnly gbti_session cookie on the OAuth callback; the header then hydrates
+// the signed-in state from it (src/lib/member-signal.ts). Turnstile guards mass trial-creation on this shared
+// signup/login endpoint (one solve per 30-day cookie session).
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { REF_COOKIE, REF_VIA_COOKIE } from '../lib/referral';
+import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../lib/touch.mjs';
+import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../lib/membership';
+---
+<BaseLayout title="Sign in" description="Sign in to GBTI Network with GitHub." noindex={true}>
+  <section class="band">
+    <div class="wrap login-wrap">
+      <div class="login-card">
+        <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-github"/></svg></span>
+        <h1 class="h2 mt16">Sign in to GBTI Network</h1>
+        <p class="body-sm muted mt8">
+          Continue with GitHub. New here? You get a free limited-access trial, no card required. To edit and publish
+          your own content in place, add the <a href="/extension/">browser extension</a> too.
+        </p>
+        <div class="login-cta mt20">
+          <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-callback="gbtiTurnstileOk" data-expired-callback="gbtiTurnstileReset" data-error-callback="gbtiTurnstileReset" data-theme="auto"></div>
+          <button type="button" data-login-go class="btn btn-primary btn-lg" style="width:100%;margin-top:14px" disabled>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><use href="#ico-github"/></svg> Continue with GitHub
+          </button>
+        </div>
+        <p class="body-sm muted tcenter mt12" style="font-size:13px">Complete the check above to continue.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- sow-158 Phase 2: Cloudflare Turnstile + the gated /signup/start navigation carrying a same-site return_to. -->
+  <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script define:vars={{ signupBase: SIGNUP_BASE, refCookie: REF_COOKIE, viaCookie: REF_VIA_COOKIE, sidCookie: TOUCH_SID_COOKIE, touchEnabled: TOUCH_CAPTURE_ENABLED }}>
+    (function () {
+      function cookie(name) {
+        var c = document.cookie.split('; ').find(function (x) { return x.indexOf(name + '=') === 0; });
+        return c ? decodeURIComponent(c.split('=').slice(1).join('=')) : '';
+      }
+      // A same-site return path from ?return_to. The Worker re-validates (safeReturnTo); this is a client sanity gate.
+      function safeReturn() {
+        try {
+          var rt = new URLSearchParams(location.search).get('return_to') || '';
+          if (rt && rt.charAt(0) === '/' && rt.charAt(1) !== '/' && rt.charAt(1) !== '\\' && rt.indexOf('\\') < 0) return rt;
+        } catch (e) { /* ignore */ }
+        return '/account/';
+      }
+      var btn = document.querySelector('[data-login-go]');
+      window.gbtiTurnstileOk = function (token) { if (btn) { btn.disabled = false; btn.dataset.token = token; } };
+      window.gbtiTurnstileReset = function () { if (btn) { btn.disabled = true; delete btn.dataset.token; } };
+      if (btn) btn.addEventListener('click', function () {
+        var token = btn.dataset.token;
+        if (!token) return;
+        var u = new URL(signupBase + '/signup/start');
+        u.searchParams.set('cf-turnstile-response', token);
+        var ref = cookie(refCookie); if (ref) u.searchParams.set('ref', ref);
+        var via = cookie(viaCookie); if (via) u.searchParams.set('via', via);
+        if (touchEnabled) { var sid = cookie(sidCookie); if (sid) u.searchParams.set('sid', sid); }
+        u.searchParams.set('return_to', safeReturn());
+        window.location.href = u.toString();
+      });
+    })();
+  </script>
+
+  <style>
+    .login-wrap { max-width: 460px; }
+    .login-card { text-align: center; padding: 8px 0 44px; }
+    .login-card .itile { margin: 0 auto; }
+    .login-cta { text-align: left; }
+  </style>
+</BaseLayout>

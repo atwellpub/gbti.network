@@ -19,7 +19,7 @@ import { signSession, verifySession } from '../workers/signup/session.mjs';
 import { sessionCookieHeader } from '../workers/signup/session.mjs';
 import { verifyTurnstile } from '../workers/signup/abuse.mjs';
 import { isDuplicateEvent, markEventSeen, handleStripeEvent } from '../workers/signup/webhook.mjs';
-import worker, { packState, unpackState } from '../workers/signup/index.mjs';
+import worker, { packState, unpackState, safeReturnTo } from '../workers/signup/index.mjs';
 
 const SECRET = 'test-session-secret-0123456789';
 
@@ -590,6 +590,72 @@ test('sow-158: OPTIONS /membership/status reflects an allow-listed Origin with c
 
   const blocked = await worker.fetch(req('OPTIONS', '/membership/status', { headers: { Origin: 'https://evil.example' } }), env, {});
   assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null);
+});
+
+// ---- sow-158 Phase 2: website login return_to ----
+
+test('sow-158 Phase 2: safeReturnTo allows a same-site path and rejects open-redirect attempts', () => {
+  assert.equal(safeReturnTo('/account/'), '/account/');
+  assert.equal(safeReturnTo('/articles/foo/?x=1#h'), '/articles/foo/?x=1#h');
+  for (const bad of ['//evil.example', 'https://evil.example', '/\\evil', 'http:/evil', '', 'account', 'javascript:alert(1)', '/x\ty']) {
+    assert.equal(safeReturnTo(bad), '', `must reject ${JSON.stringify(bad)}`);
+  }
+  assert.equal(safeReturnTo('/' + 'a'.repeat(600)), ''); // length cap
+});
+
+test('sow-158 Phase 2: return_to threads through the signed state', async () => {
+  const env = fakeEnv();
+  await withFetch(
+    (url) => (url.includes('siteverify') ? { status: 200, body: { success: true } } : { status: 200, body: '' }),
+    async () => {
+      const res = await worker.fetch(
+        req('GET', '/signup/start?cf-turnstile-response=tok&return_to=%2Faccount%2F', { headers: { 'CF-Connecting-IP': '9.9.9.9' } }),
+        env, {},
+      );
+      assert.equal(res.status, 302);
+      const state = new URL(res.headers.get('Location')).searchParams.get('state');
+      assert.equal((await unpackState(state, env)).returnTo, '/account/');
+    },
+  );
+});
+
+test('sow-158 Phase 2: an open-redirect return_to is dropped from the state', async () => {
+  const env = fakeEnv();
+  await withFetch(
+    (url) => (url.includes('siteverify') ? { status: 200, body: { success: true } } : { status: 200, body: '' }),
+    async () => {
+      const res = await worker.fetch(
+        req('GET', '/signup/start?cf-turnstile-response=tok&return_to=' + encodeURIComponent('//evil.example'), { headers: { 'CF-Connecting-IP': '9.9.9.9' } }),
+        env, {},
+      );
+      assert.equal((await unpackState(new URL(res.headers.get('Location')).searchParams.get('state'), env)).returnTo, undefined);
+    },
+  );
+});
+
+test('sow-158 Phase 2: the github callback lands on SITE_BASE_URL + return_to when present', async () => {
+  const env = fakeEnv();
+  const startState = await packState({ ref: 'bob', nonce: 'n1', returnTo: '/account/' }, env);
+  await withFetch(
+    (url) => {
+      if (url.includes('login/oauth/access_token')) return { status: 200, body: { access_token: 'gho_token' } };
+      if (url.includes('api.github.com/user/emails')) return { status: 200, body: [{ email: 'o@example.com', primary: true, verified: true }] };
+      if (url.includes('api.github.com/user')) return { status: 200, body: { id: 424242, login: 'octocat' } };
+      if (url.includes('api.stripe.com/v1/customers/search')) return { status: 200, body: { data: [] } };
+      if (url.includes('api.stripe.com/v1/customers')) return { status: 200, body: { id: 'cus_new', metadata: {} } };
+      return { status: 200, body: '' };
+    },
+    async () => {
+      const res = await worker.fetch(
+        req('GET', `/signup/github/callback?code=ghcode&state=${encodeURIComponent(startState)}`, { headers: { Cookie: 'gbti_oauth_nonce=n1' } }),
+        env, {},
+      );
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.get('Location'), 'https://gbti.test/account/');
+      const cookies = res.headers.getSetCookie();
+      assert.ok(cookies.some((c) => c.startsWith('gbti_session=')) && cookies.some((c) => c.startsWith('gbti_csrf=')), 'both cookies set');
+    },
+  );
 });
 
 test('SOW Part C: /discord/link/start with a session -> Discord OAuth carrying the verified github_id + a nonce', async () => {
