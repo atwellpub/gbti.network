@@ -20,11 +20,12 @@
 //   - HOUSE scope: house content publishes through fork mode (operations re-checks superadmin server-side).
 //   - IMAGE upload: /membership/author commits UTF-8 text only.
 
-import { buildContentFile, buildCommentFile, flipContentStatus, parseContentFile } from '../../client/src/content-ops.mjs';
+import { buildContentFile, buildCommentFile, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
+import { planMemberFiles, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from './workbench-client-core.mjs';
 
 const MEM_MARKER = '<!-- members-only -->';
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
@@ -191,6 +192,66 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     return { ok: true };
   }
 
+  // Read an own `.enc` asset and decrypt it via the Worker (the key stays in the Worker). Returns the plaintext.
+  async function decryptEnc(encPath: string): Promise<string> {
+    const text = await readOwnFile(encPath);
+    if (text == null) throw err('not-found', 'could not read that asset');
+    let envelope: any;
+    try { envelope = JSON.parse(text); } catch { throw err('undecryptable', 'the asset envelope is invalid'); }
+    const r = await workerPost('/membership/decrypt', envelope);
+    return r.text;
+  }
+
+  // sow-158 Phase 3b: the cookie twin of member-content.mjs encryptViaWorker. POSTs plaintext to the now-cookie-
+  // enabled /membership/encrypt (credentials + CSRF); the AES key never comes back. A 401/403 (not effective-paid)
+  // surfaces as the membership-required nudge through workerPost's throw.
+  async function encryptViaCookie(plaintext: string, assetId: string) {
+    const r = await workerPost('/membership/encrypt', { plaintext, assetId });
+    if (!r || r.ok !== true || !r.envelope) throw err('encrypt-failed', 'the comment could not be encrypted');
+    return r.envelope;
+  }
+
+  // Build + publish one comment file set (post or edit). Mirrors operations.publishComment/editComment: a members
+  // body is encrypted to a sibling .enc (planMemberFiles) and the stub .md carries only the pointer; a public
+  // author-note intro is committed plaintext. Both files live under members/<login>/, which the hosted validator
+  // permits, and ride the own-folder-gated /membership/author (idempotent per comment-<id> item).
+  async function commitComment(input: any, body: string) {
+    let built: any;
+    try { built = buildCommentFile({ username: user, input, body }); }
+    catch (e: any) { throw new WorkbenchClientError('invalid-content', e?.message || 'the comment is invalid'); }
+    const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
+    const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
+    const res = await workerPost('/membership/author', { itemId: `comment-${built.id}`, files, title: `Comment on ${input.targetType}: ${input.targetSlug}` });
+    return { id: built.id, path: built.path, prNumber: res.number, prUrl: res.html_url, visibility: built.frontmatter.visibility, encrypted: Boolean(plan?.encPath) };
+  }
+
+  // Read one of the member's OWN comments (frontmatter + decrypted body), for the edit-form prefill. A members
+  // comment stores its body in the .enc, so decrypt it or an edit would start blank and overwrite the gated text.
+  async function getCommentLocal(id: string) {
+    const path = `members/${user}/comments/${id}.md`;
+    const text = await readOwnFile(path);
+    if (text == null) throw err('not-found', 'no such comment in your folder');
+    const { frontmatter, body } = parseContentFile(text);
+    const enc = (frontmatter as any)?.encryptedBody;
+    return { path, frontmatter, body: enc ? await decryptEnc(enc) : body };
+  }
+
+  // The caller's effective tier (for the SOW-078 member-stub read gate), fail-closed to a non-member on any error.
+  async function currentTier(): Promise<string> {
+    try { const p = await workerGet('/membership/status'); return typeof p?.status === 'string' ? p.status : 'none'; }
+    catch { return 'none'; }
+  }
+
+  // A discussion thread from the same-origin comments index (public bodies inline, member rows pointer-only),
+  // filtered to the target (+ rename aliases), oldest-first. A non-member viewer sees only the public rows.
+  async function listCommentsLocal({ targetType, targetSlug, limit, aliases }: any = {}) {
+    if (!COMMENT_TARGET_TYPES.has(targetType) || !targetSlug) return { items: [] };
+    let all: any[] = [];
+    try { all = (await sameOriginJson('/comments-index.json'))?.items ?? []; } catch { return { items: [] }; }
+    const canSeeMembers = MEMBER_READ_TIER.has(await currentTier()); // SOW-078: gate the member stubs by tier
+    return { items: filterThreadComments(all, { targetType, targetSlug, aliases, limit, canSeeMembers }) };
+  }
+
   return {
     // ----- identity + read -----
     async status() {
@@ -302,13 +363,59 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     prStatus({ number }: any) { return workerGet(`/membership/pr-status?number=${encodeURIComponent(number)}`); },
 
     // ----- members-only READ (a paid/trial member reading an existing own members-only body) -----
-    async decrypt({ encPath }: any) {
-      const text = await readOwnFile(encPath);
-      if (text == null) throw err('not-found', 'could not read that asset');
-      let envelope: any;
-      try { envelope = JSON.parse(text); } catch { throw err('undecryptable', 'the asset envelope is invalid'); }
-      const r = await workerPost('/membership/decrypt', envelope);
-      return { text: r.text };
+    async decrypt({ encPath }: any) { return { text: await decryptEnc(encPath) }; },
+
+    // ----- SOW-024: favorites + collections (Saved), all over the cookie-ready KV /membership/activity -----
+    async getActivity() { const r = await workerGet('/membership/activity'); return r?.activity ?? { favorites: [], collections: [] }; },
+    async toggleFavorite({ targetType, targetSlug, on }: any) {
+      const r = await workerPost('/membership/activity', { action: 'favorite', targetType, targetSlug, on });
+      return { favorited: favoritedFrom(r?.activity, targetType, targetSlug) };
+    },
+    async createCollection({ name }: any) { const r = await workerPost('/membership/activity', { action: 'collection.create', name }); return { id: r.id, activity: r.activity }; },
+    addToCollection({ id, targetType, targetSlug, on = true }: any) { return workerPost('/membership/activity', { action: 'collection.item', id, targetType, targetSlug, on }); },
+    renameCollection({ id, name }: any) { return workerPost('/membership/activity', { action: 'collection.rename', id, name }); },
+    deleteCollection({ id }: any) { return workerPost('/membership/activity', { action: 'collection.delete', id }); },
+
+    // ----- SOW-023/046: the follow graph + prefs (Following), cookie-ready KV -----
+    getFollows() { return workerGet('/membership/follows'); }, // { following }
+    setFollow({ username, on = true }: any) { return workerPost('/membership/follows', { username, on }); },
+    getPrefs() { return workerGet('/membership/prefs'); }, // { categories, followedChannels }
+    setPrefs(patch: any) { return workerPost('/membership/prefs', patch); },
+
+    // ----- SOW-027/044: comments — read (public + own decrypt) + post/edit (members-encrypted) + own delete -----
+    listComments(a: any = {}) { return listCommentsLocal(a); },
+    listShareComments({ targetSlug, limit }: any = {}) { return listCommentsLocal({ targetType: 'share', targetSlug, limit }); },
+    getComment({ id }: any) { return getCommentLocal(String(id || '')); },
+    // Post a discussion reply (members-only, encrypted) or a from-the-author intro (public). Paid-only, gate-backed.
+    postComment({ targetType, targetSlug, body, authorNote, parentId, visibility }: any) {
+      if (!COMMENT_TARGET_TYPES.has(targetType)) throw err('bad-request', 'a valid targetType is required');
+      if (!targetSlug) throw err('bad-request', 'a targetSlug is required');
+      const createdAt = new Date().toISOString();
+      const id = commentId(createdAt, Math.random().toString(36).slice(2, 8));
+      const input = coerceCommentInput({ id, targetType, targetSlug, createdAt, authorNote, parentId, visibility });
+      return commitComment(input, body ?? '');
+    },
+    async editComment({ id, body, authorNote }: any) {
+      const cur = await getCommentLocal(String(id || ''));
+      const fm: any = cur.frontmatter || {};
+      const effAuthorNote = authorNote !== undefined ? Boolean(authorNote) : Boolean(fm.authorNote);
+      const input = coerceCommentInput({
+        id: fm.id, targetType: fm.targetType, targetSlug: fm.targetSlug,
+        createdAt: fm.createdAt, updatedAt: new Date().toISOString(),
+        authorNote: effAuthorNote, parentId: fm.parentId, visibility: fm.visibility,
+      });
+      const r = await commitComment(input, body ?? '');
+      return { ...r, edited: true, targetType: fm.targetType, targetSlug: fm.targetSlug };
+    },
+    async deleteComment({ id }: any) {
+      const cid = String(id || '').trim();
+      if (!cid) throw err('bad-request', 'a comment id is required');
+      const res = await workerPost('/membership/author', {
+        itemId: `comment-${cid}`,
+        files: [{ path: `members/${user}/comments/${cid}.md`, content: null }],
+        title: `Delete comment: ${cid}`,
+      });
+      return { ok: true, id: cid, prNumber: res.number, prUrl: res.html_url };
     },
 
     // ----- deferred capabilities: a clear, typed refusal the editor surfaces (never a silent failure) -----
