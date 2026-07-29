@@ -2,8 +2,8 @@
 // <link rel="image_src">). The regex-only scraper now lives in the SHARED module workers/lib/og-scrape.mjs (also
 // used by the SOW-057 share OG-preview endpoint); this file re-exports it and keeps the news-bot fetch wrapper.
 
-export { scrapeOgImage } from '../../lib/og-scrape.mjs';
-import { scrapeOgImage } from '../../lib/og-scrape.mjs';
+export { scrapeOgImage } from '../../../lib/og-scrape.mjs';
+import { scrapeOgImage } from '../../../lib/og-scrape.mjs';
 
 /** Fetch an article page (bounded, timed out) and scrape its og:image. Returns the URL or null. Never throws.
  *  `fetchImpl` is injectable for tests. `maxBytes` caps the body we scan (og tags are near the top). */

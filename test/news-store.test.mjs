@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayOf, mergeDayItems, applyCounts, expiredDays, commitIngest, emptyIndex } from '../src/store.mjs';
+import { dayOf, mergeDayItems, applyCounts, expiredDays, commitIngest, emptyIndex } from '../workers/signup/news/src/store.mjs';
 
 const NOW = 1_750_000_000;
 const day = 86400;

@@ -15,7 +15,7 @@ import { validateNewsChannels } from '../membership/news-channels.mjs'; // SOW-0
 import { validateCoupons } from '../membership/coupons.mjs'; // SOW-119: the coupon registry
 import { validateTopicMap } from '../membership/topic-map.mjs'; // SOW-054: the followed-topic -> news-category map
 import { topicVocabKeys } from '../membership/topics-vocab.mjs'; // SOW-080: the flat house/topics.yml topic vocabulary
-import { CATEGORY_NAMES } from '../workers/news/config/categories.mjs'; // SOW-054: the canonical news category labels
+import { CATEGORY_NAMES } from '../workers/signup/news/config/categories.mjs'; // SOW-054: the canonical news category labels
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
 const errors = [];

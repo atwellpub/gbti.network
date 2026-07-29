@@ -66,6 +66,8 @@ import { handleSyndicationTracker, handleSyndicationCancel, handleSyndicationApp
 import { handleSocialQueueGet, handleSocialQueueAction } from './social-queue-admin.mjs'; // SOW-121
 import { handleSyndicateNowInfo, handleSyndicateNow } from './membership-syndicate-now.mjs'; // SOW-088: manual syndicate
 import { drainSyndication } from './syndication-drain.mjs';
+import { ingest } from './news/src/ingest.mjs'; // UnifiedWorker: the hourly news RSS fetch + AI classify (was the gbti-news worker)
+import { backfillImages } from './news/src/backfill.mjs'; // UnifiedWorker: the :30 og:image backfill
 import { handleFollows } from './membership-follows.mjs';
 import { handleDrafts } from './membership-drafts.mjs'; // SOW-157: the hosted draft store
 import { handleEarnings } from './membership-earnings.mjs'; // SOW-083 P2: the member's own earnings ledger
@@ -1012,14 +1014,21 @@ export default {
     }
   },
 
-  // SOW-058: the syndication drain. Each cron tick posts items past the one-hour hold to every ready channel.
-  // Fail-closed (disabled unless the config mirror enables it) and best-effort (a failure never breaks the cron).
+  // UnifiedWorker cron dispatch (this Worker now owns three schedules; wrangler crons must match these strings):
+  //   `0 * * * *`  -> ingest: fetch news sources, parse, dedupe, AI-classify, prune, save to NEWS_KV.
+  //   `30 * * * *` -> backfillImages: scrape og:images for stored items lacking one (SOW-050).
+  //   `*/5 * * * *`-> drainSyndication (SOW-058): post items past the one-hour hold to every ready channel.
+  // Each is fail-closed + best-effort (a failure never breaks the cron) and runs via ctx.waitUntil so the handler
+  // returns immediately. ingest (dedupe by guid) + backfillImages (imgTried flag) are idempotent, so an overlap
+  // with the still-deployed gbti-news worker during cutover is safe.
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(
-      drainSyndication(env).then(
-        (r) => console.log('syndication drain', JSON.stringify(r)),
-        (e) => console.error('syndication drain failed', e?.message ?? e),
-      ),
-    );
+    const cron = controller?.cron;
+    const [job, label] = cron === '0 * * * *' ? [ingest(env), 'news ingest']
+      : cron === '30 * * * *' ? [backfillImages(env), 'news image backfill']
+        : [drainSyndication(env), 'syndication drain'];
+    ctx.waitUntil(job.then(
+      (r) => console.log(label, JSON.stringify(r)),
+      (e) => console.error(`${label} failed`, e?.message ?? e),
+    ));
   },
 };

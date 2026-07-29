@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFeed, cleanText, toEpochSeconds, contentRichness, RICH_CONTENT_MIN } from '../src/feeds.mjs';
+import { parseFeed, cleanText, toEpochSeconds, contentRichness, RICH_CONTENT_MIN } from '../workers/signup/news/src/feeds.mjs';
 
 const RSS = `<?xml version="1.0"?>
 <rss version="2.0"><channel>

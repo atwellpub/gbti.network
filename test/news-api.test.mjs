@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clampLimit, matchesFilter, publicItem, categoriesWithCounts, sourcesWithCounts, contentDiagnostics } from '../src/api.mjs';
-import { SOURCES } from '../config/sources.mjs';
+import { clampLimit, matchesFilter, publicItem, categoriesWithCounts, sourcesWithCounts, contentDiagnostics } from '../workers/signup/news/src/api.mjs';
+import { SOURCES } from '../workers/signup/news/config/sources.mjs';
 
 const item = { guid: '1', source: 'hn', title: 'A', link: 'l', summary: '', category: 'Security', classified: true, publishedAt: 200, fetchedAt: 200 };
 

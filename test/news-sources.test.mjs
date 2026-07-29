@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanSources, loadSourceList, nextChunk } from '../src/sources.mjs';
+import { cleanSources, loadSourceList, nextChunk } from '../workers/signup/news/src/sources.mjs';
 
 function kv() {
   const m = new Map();

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeLabel, keywordCategory, buildMessages, buildAnalysisMessages, parseAnalysis, analyzeItem } from '../src/classify.mjs';
-import { CATEGORY_NAMES } from '../config/categories.mjs';
+import { normalizeLabel, keywordCategory, buildMessages, buildAnalysisMessages, parseAnalysis, analyzeItem } from '../workers/signup/news/src/classify.mjs';
+import { CATEGORY_NAMES } from '../workers/signup/news/config/categories.mjs';
 
 test('normalizeLabel matches exact labels (case-insensitive)', () => {
   assert.equal(normalizeLabel('Security'), 'Security');

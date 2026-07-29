@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { backfillImages } from '../src/backfill.mjs';
+import { backfillImages } from '../workers/signup/news/src/backfill.mjs';
 
 const NOW = 1_750_000_000;
 

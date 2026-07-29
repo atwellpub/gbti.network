@@ -50,6 +50,7 @@
     "@fontsource-variable/open-sans": "^5.2.7",
     "@tailwindcss/vite": "^4.3.0",
     "astro": "^5.18.2",
+    "fast-xml-parser": "^4.5.7",
     "js-yaml": "^4.1.0",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",

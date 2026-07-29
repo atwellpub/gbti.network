@@ -7,7 +7,7 @@ import path from 'node:path';
 import url from 'node:url';
 import yaml from 'js-yaml';
 import { topicMapFromParsed, newsCategoriesForTopics, validateTopicMap, prioritizeNewsByTopics } from '../membership/topic-map.mjs';
-import { CATEGORY_NAMES } from '../workers/news/config/categories.mjs';
+import { CATEGORY_NAMES } from '../workers/signup/news/config/categories.mjs';
 import { topicVocabKeys } from '../membership/topics-vocab.mjs'; // SOW-080: topics now come from house/topics.yml
 
 const ROOT = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');

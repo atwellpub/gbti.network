@@ -82,6 +82,15 @@ MEMBERSHIP_AUTHOR_ENABLED = "true"
 # secret in lockstep; see .data/ops/encryption-ops/rotation-runbook.md).
 MEMBER_CONTENT_KID = "1"
 
+# UnifiedWorker: the news ingest engine (folded in from the retired gbti-news worker) reads these each cron. AI is
+# the shared Workers AI binding above; NEWS_SOURCES_URL is the public source-pool artifact the site publishes.
+AI_MODEL = "@cf/meta/llama-3.2-3b-instruct"
+SOURCE_CHUNK = "16"
+RETENTION_DAYS = "30"
+MAX_CLASSIFY = "16"
+MAX_IMAGE_BACKFILL = "12"
+NEWS_SOURCES_URL = "https://gbti.network/news-sources.json"
+
 # KV namespace: github_id -> customer_id index, per-IP rate-limit records, and webhook event dedupe.
 # Bind one namespace; the code namespaces keys by prefix (gh:, rl:signup:, evt:). Replace the id with
 # the real namespace id from `npx wrangler kv namespace create SIGNUP_KV`.
@@ -89,6 +98,13 @@ MEMBER_CONTENT_KID = "1"
 binding = "SIGNUP_KV"
 id = "49432379e11844ac81b6fdaf22d3937a"
 preview_id = "09ca7e156ea04e62b9f4c8716e2a83c9"
+
+# UnifiedWorker: the news collection (day-sharded feed:v2:* keys, the source-pool cache + cursor). SAME namespace
+# the retired gbti-news worker used, so all existing news data is readable immediately with no migration.
+[[kv_namespaces]]
+binding = "NEWS_KV"
+id = "64b09b4d03764c979447cc008ffe528c"
+preview_id = "9abe9b8204b14c04b0a8f69f48a8545c"
 
 # SOW-087: Workers AI for the share category suggestion (topic-suggest.mjs; one tiny classify call per
 # composer URL preview, inside the free Neuron budget). Without this binding the suggester falls back to the
@@ -107,7 +123,9 @@ dataset = "gbti_ext_usage"
 # 5 minutes past the hour and is far cheaper than per-minute. Wrangler does NOT inherit triggers into named envs,
 # so the same crons are repeated under [env.production.triggers].
 [triggers]
-crons = ["*/5 * * * *"]
+# UnifiedWorker: */5 = syndication drain (SOW-058); 0 = news ingest; 30 = news og:image backfill. The scheduled()
+# handler in index.mjs dispatches on controller.cron against these exact strings.
+crons = ["*/5 * * * *", "0 * * * *", "30 * * * *"]
 
 # Secrets set out-of-band (wrangler secret put / .dev.vars), listed here for documentation only:
 #   STRIPE_SECRET_KEY            restricted: create-customer + checkout only (least privilege)
@@ -168,7 +186,14 @@ TOUCH_CAPTURE_ENABLED = "true"       # SOW-059 ARMED: anonymous, consent-gated a
 MEMBER_CONTENT_KID = "1"
 MEMBERSHIP_AUTHOR_ENABLED = "true"   # SOW-157 rollout: hosted authoring is the new-member default (proven live: PRs #171/#172)
 UPSTREAM_REPO = "gbti-network/gbti.network"   # SOW-026: canonical repo the App opens PRs into
-NEWS_API_BASE = "https://gbti-news.gbti-labs.workers.dev"   # SOW-043: the deployed gbti-news worker the news proxy calls (NEWS_API_KEY is a secret)
+# UnifiedWorker: the news ingest engine (folded in) reads these each cron. The old NEWS_API_BASE HTTP hop +
+# NEWS_API_KEY secret are gone (the news reads are in-process now); NEWS_CHANNELS below still drives the curator publish.
+AI_MODEL = "@cf/meta/llama-3.2-3b-instruct"
+SOURCE_CHUNK = "16"
+RETENTION_DAYS = "30"
+MAX_CLASSIFY = "16"
+MAX_IMAGE_BACKFILL = "12"
+NEWS_SOURCES_URL = "https://gbti.network/news-sources.json"
 # SOW-046 C: the news-category -> Discord-channel map for the curator "Add to Discord" action, as a JSON string of
 # house/news-channels.yml's shape ({ "channels": [{ "category": "ai", "channelId": "123..." }] }). Non-secret config.
 # Empty (no channels) until the owner provisions the channel ids; an unmapped category posts nothing (fail-closed).
@@ -216,6 +241,12 @@ custom_domain = true
 binding = "SIGNUP_KV"
 id = "49432379e11844ac81b6fdaf22d3937a"
 
+# UnifiedWorker: NEWS_KV in production (the SAME namespace the retired gbti-news worker wrote, so the live news
+# collection carries over with no migration).
+[[env.production.kv_namespaces]]
+binding = "NEWS_KV"
+id = "64b09b4d03764c979447cc008ffe528c"
+
 # SOW-087: Workers AI for production (no inheritance from the top-level [ai]).
 [env.production.ai]
 binding = "AI"
@@ -227,7 +258,7 @@ dataset = "gbti_ext_usage"
 
 # SOW-058: the syndication drain cron for production (wrangler does not inherit the top-level [triggers]).
 [env.production.triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 * * * *", "30 * * * *"]
 
 # SOW-124: retain production Worker logs in the dashboard (wrangler does not inherit the top-level block).
 [env.production.observability]

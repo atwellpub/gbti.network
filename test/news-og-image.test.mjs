@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { scrapeOgImage, fetchOgImage } from '../src/og-image.mjs';
+import { scrapeOgImage, fetchOgImage } from '../workers/signup/news/src/og-image.mjs';
 
 // SOW-050 Tier 1: scrape a page's lead image (og:image preferred), resolving relative + protocol-relative URLs.
 test('scrapeOgImage prefers og:image and resolves protocol-relative + relative URLs', () => {
