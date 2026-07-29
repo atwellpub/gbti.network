@@ -618,9 +618,12 @@ export default {
       // SOW-016: server-side member-content crypto. The AES-256-GCM epoch key NEVER leaves the Worker
       // (this supersedes the SOW-015 /membership/key handout). Both are POST, effective-paid gated, and
       // fail-closed; the decrypt response carries plaintext, so it is never cached.
-      // sow-158 Phase 3a: decrypt is cookie-eligible (the website reader/editor decrypts a member's own
-      // members-only body); credentialed CORS + automatic CSRF (POST). Encrypt STAYS bearer-only (members-only
-      // PUBLISH is deferred), so it keeps the wildcard MEMBER_CONTENT_CORS.
+      // sow-158 Phase 3a/3b: BOTH decrypt and encrypt are cookie-eligible now. decrypt lets the website
+      // reader/editor read a member's own members-only body; encrypt (Phase 3b) lets a website member POST a
+      // members-only comment (the body is encrypted server-side before the git write). Same posture for both:
+      // credentialed reflected-origin CORS + automatic CSRF on the POST + effective-PAID gate, and the key never
+      // leaves the Worker. encrypt grants a paid cookie member no new capability (the git write still rides the
+      // own-folder-gated /membership/author), it just reaches the same oracle the bearer hosts already do.
       if (pathname === '/membership/decrypt') {
         const cors = corsHeaders(request, env, { credentials: true });
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
@@ -630,10 +633,11 @@ export default {
         }
       }
       if (pathname === '/membership/encrypt') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBER_CONTENT_CORS });
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await membershipEncrypt(request, env);
-          return json(r.body, r.status, { ...MEMBER_CONTENT_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipEncrypt(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 

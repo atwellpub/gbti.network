@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { membershipDecrypt, membershipEncrypt, authorizePaid, authorizeMember, authorizeMemberCheap, authorizeSignedIn, OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from '../workers/signup/membership-content.mjs';
 import { encryptAsset, generateEpochKey } from '../client/src/crypto-assets.mjs';
+import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 3b: sign a website session for the cookie-encrypt tests
+import { CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
 
 const KEY = generateEpochKey();
 const ENC = (body, headers = {}) => new Request('https://signup.gbti.network/membership/decrypt', { method: 'POST', headers, body: body == null ? undefined : JSON.stringify(body) });
@@ -87,6 +89,43 @@ test('encrypt: a non-paid author cannot encrypt (403)', async () => {
 test('encrypt: 400 when plaintext or assetId is missing', async () => {
   assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { assetId: 'a' }), ENV(), deps('1', () => paid))).status, 400);
   assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'x' }), ENV(), deps('1', () => paid))).status, 400);
+});
+
+// sow-158 Phase 3b: encrypt is COOKIE-eligible now (a website member posts a members-only comment; the body is
+// encrypted server-side before the git write). Same authorizePaid + double-submit CSRF posture as cookie decrypt.
+const SESSION_SECRET = 'test-session-secret';
+const COOKIE_ENV = (mirror = freshMirror()) => ENV({ SESSION_SECRET, CORS_ALLOWED_ORIGINS: 'https://gbti.network' }, mirror);
+async function encryptCookieReq({ csrfCookie = 'C', csrfHeader = 'C', origin = 'https://gbti.network', githubId = '1', body = { plaintext: 'members reply', assetId: 'comment:20260101-abc:body' } } = {}) {
+  const session = await signSession({ githubId, githubLogin: 'u' + githubId }, SESSION_SECRET);
+  const cookies = [`gbti_session=${session}`];
+  if (csrfCookie != null) cookies.push(`${CSRF_COOKIE}=${csrfCookie}`);
+  const headers = { Cookie: cookies.join('; '), 'Content-Type': 'application/json' };
+  if (csrfHeader != null) headers[CSRF_HEADER] = csrfHeader;
+  if (origin != null) headers['Origin'] = origin;
+  return new Request('https://signup.gbti.network/membership/encrypt', { method: 'POST', headers, body: JSON.stringify(body) });
+}
+
+test('encrypt (Phase 3b): a website COOKIE paid caller gets an envelope (no bearer, CSRF satisfied)', async () => {
+  const r = await membershipEncrypt(await encryptCookieReq(), COOKIE_ENV(), { allowCookie: true, makeStripe: stripeFor(() => paid) });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.envelope.aad, 'comment:20260101-abc:body');
+  assert.equal(r.body.key, undefined, 'the key must never be returned to the cookie caller either');
+});
+
+test('encrypt (Phase 3b): a cookie POST WITHOUT the X-GBTI-CSRF header is 403 (CSRF-gated)', async () => {
+  const r = await membershipEncrypt(await encryptCookieReq({ csrfHeader: null }), COOKIE_ENV(), { allowCookie: true, makeStripe: stripeFor(() => paid) });
+  assert.equal(r.status, 403);
+});
+
+test('encrypt (Phase 3b): allowCookie omitted -> a cookie caller is still 401 (cookie acceptance stays opt-in)', async () => {
+  const r = await membershipEncrypt(await encryptCookieReq(), COOKIE_ENV(), { makeStripe: stripeFor(() => paid) });
+  assert.equal(r.status, 401);
+});
+
+test('encrypt (Phase 3b): a cookie caller who is NOT paid cannot encrypt (403, fail closed)', async () => {
+  const r = await membershipEncrypt(await encryptCookieReq({ githubId: '9' }), COOKIE_ENV(), { allowCookie: true, makeStripe: stripeFor(() => null) });
+  assert.equal(r.status, 403);
 });
 
 // SOW-018: a Share asset (AAD `share:...`) grants LIMITED TRIAL ACCESS — an active trial may READ it, but a
