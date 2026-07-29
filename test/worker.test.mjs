@@ -581,6 +581,21 @@ test('sow-158: POST /auth/logout 403s without CSRF and clears both cookies with 
   assert.ok(cleared.some((c) => c.startsWith('gbti_csrf=') && /Max-Age=0/.test(c)), 'the csrf cookie is expired');
 });
 
+// web-login fix: a user who first signed in before the fix carries BOTH a stale host-only gbti_csrf and the
+// Domain=gbti.network one. The site echoes only the Domain value, which may sort second in the Cookie header;
+// logout must still succeed (match-any) and must expire BOTH variants so the stale one stops colliding.
+test('sow-158: logout succeeds with a stale+fresh gbti_csrf pair and clears host-only AND Domain csrf', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test', COOKIE_DOMAIN: 'gbti.test' });
+  const res = await worker.fetch(
+    req('POST', '/auth/logout', { headers: { Cookie: 'gbti_csrf=stale; gbti_csrf=fresh', 'X-GBTI-CSRF': 'fresh', Origin: 'https://gbti.test' } }),
+    env, {},
+  );
+  assert.equal(res.status, 200, 'the echoed header matches the second (fresh) cookie -> not a 403');
+  const cleared = res.headers.getSetCookie().filter((c) => c.startsWith('gbti_csrf=') && /Max-Age=0/.test(c));
+  assert.ok(cleared.some((c) => !/Domain=/.test(c)), 'a host-only csrf clear is emitted');
+  assert.ok(cleared.some((c) => /Domain=gbti\.test/.test(c)), 'a Domain-scoped csrf clear is emitted');
+});
+
 test('sow-158: OPTIONS /membership/status reflects an allow-listed Origin with credentials, blocks others', async () => {
   const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
   const ok = await worker.fetch(req('OPTIONS', '/membership/status', { headers: { Origin: 'https://gbti.test' } }), env, {});

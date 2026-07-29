@@ -3,7 +3,7 @@
 // defense). No network, no secrets.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateCsrfToken, csrfCookieHeader, readCsrfCookie, requireCsrf, CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
+import { generateCsrfToken, csrfCookieHeader, readCsrfCookie, readAllCsrfCookies, requireCsrf, CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
 
 const ENV = { CORS_ALLOWED_ORIGINS: 'https://gbti.network' };
 const post = ({ cookie, header, origin } = {}) => {
@@ -48,6 +48,29 @@ test('readCsrfCookie extracts the token or null', () => {
   assert.equal(readCsrfCookie('a=1; gbti_csrf=xyz; b=2'), 'xyz');
   assert.equal(readCsrfCookie('other=1'), null);
   assert.equal(readCsrfCookie(null), null);
+});
+
+test('readAllCsrfCookies returns every gbti_csrf value (host-only + Domain coexistence)', () => {
+  assert.deepEqual(readAllCsrfCookies('a=1; gbti_csrf=stale; b=2; gbti_csrf=fresh'), ['stale', 'fresh']);
+  assert.deepEqual(readAllCsrfCookies('gbti_csrf=only'), ['only']);
+  assert.deepEqual(readAllCsrfCookies('other=1'), []);
+  assert.deepEqual(readAllCsrfCookies(null), []);
+});
+
+// The web-login-fix collision: a stale host-only gbti_csrf and the Domain=gbti.network gbti_csrf are both sent to
+// signup.gbti.network. The site can only read (and echo) the Domain one, so the header must be accepted when it
+// matches EITHER present cookie, regardless of order. A strict first-cookie compare would 403 logout + all writes.
+test('requireCsrf accepts the header matching ANY present gbti_csrf (stale + fresh coexist)', () => {
+  const twoCookies = (header, order) => {
+    const cookie = order.map((v) => `${CSRF_COOKIE}=${v}`).join('; ');
+    return new Request('https://signup.gbti.network/auth/logout', { method: 'POST', headers: { Cookie: cookie, [CSRF_HEADER]: header, Origin: 'https://gbti.network' } });
+  };
+  // header matches the SECOND (fresh) cookie while a stale one sorts first -> still passes
+  assert.equal(requireCsrf(twoCookies('fresh', ['stale', 'fresh']), ENV).ok, true);
+  // header matches the FIRST cookie -> passes
+  assert.equal(requireCsrf(twoCookies('fresh', ['fresh', 'stale']), ENV).ok, true);
+  // header matches NEITHER -> still 403
+  assert.equal(requireCsrf(twoCookies('nope', ['stale', 'fresh']), ENV).status, 403);
 });
 
 test('requireCsrf passes when header === cookie AND Origin is allow-listed', () => {

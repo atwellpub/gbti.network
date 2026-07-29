@@ -48,16 +48,30 @@ export function csrfCookieHeader(token, { ttlSeconds = DEFAULT_TTL_SECONDS, secu
   return attrs.join('; ');
 }
 
-/** Extract the raw CSRF token from a Cookie request header, or null if absent. */
+/** Extract the FIRST raw CSRF token from a Cookie request header, or null if absent. */
 export function readCsrfCookie(cookieHeader) {
-  if (typeof cookieHeader !== 'string') return null;
+  const all = readAllCsrfCookies(cookieHeader);
+  return all.length ? all[0] : null;
+}
+
+/**
+ * Extract EVERY gbti_csrf value present in a Cookie header. A single browser can send more than one gbti_csrf
+ * for one host: a host-only cookie (e.g. an old signup.gbti.network one minted before the web-login fix) and the
+ * Domain=gbti.network cookie coexist and are BOTH sent to signup.gbti.network. The header naming is ambiguous, so
+ * requireCsrf must accept a header that matches ANY of them (the Origin allow-list still defeats cookie-tossing).
+ */
+export function readAllCsrfCookies(cookieHeader) {
+  const out = [];
+  if (typeof cookieHeader !== 'string') return out;
   for (const part of cookieHeader.split(';')) {
     const eq = part.indexOf('=');
     if (eq < 0) continue;
-    const name = part.slice(0, eq).trim();
-    if (name === CSRF_COOKIE) return part.slice(eq + 1).trim();
+    if (part.slice(0, eq).trim() === CSRF_COOKIE) {
+      const val = part.slice(eq + 1).trim();
+      if (val) out.push(val);
+    }
   }
-  return null;
+  return out;
 }
 
 const fail = () => ({ ok: false, status: 403, body: { error: 'forbidden', message: 'csrf check failed' } });
@@ -68,8 +82,11 @@ const fail = () => ({ ok: false, status: 403, body: { error: 'forbidden', messag
  */
 export function requireCsrf(request, env, { allowedOrigins = parseAllowedOrigins(env) } = {}) {
   const header = request.headers.get(CSRF_HEADER);
-  const cookie = readCsrfCookie(request.headers.get('Cookie'));
-  if (!header || !cookie || !timingSafeEqual(header, cookie)) return fail();
+  const cookies = readAllCsrfCookies(request.headers.get('Cookie'));
+  // Match the echoed header against ANY present gbti_csrf value. A host-only + Domain=gbti.network pair coexist
+  // for a user who first signed in before the web-login fix; the site can only read one, so a strict first-cookie
+  // compare would 403 every cookie write (logout, favorites, comments). Cookie-tossing is still blocked below.
+  if (!header || !cookies.some((c) => timingSafeEqual(header, c))) return fail();
 
   const origin = request.headers.get('Origin');
   if (!origin || !allowedOrigins.has(origin)) return fail();

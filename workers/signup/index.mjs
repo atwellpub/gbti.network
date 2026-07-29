@@ -579,9 +579,14 @@ export default {
         if (method === 'POST') {
           const csrf = requireCsrf(request, env);
           if (!csrf.ok) return json(csrf.body, csrf.status, { ...cors, 'Cache-Control': 'no-store' });
+          // Expire BOTH the Domain=gbti.network gbti_csrf AND a host-only one: a user who first signed in before
+          // the web-login fix carries a stale host-only signup.gbti.network gbti_csrf alongside the Domain cookie.
+          // Deleting only the Domain variant would leave the stale one to keep colliding on future writes.
+          const clearCsrf = [csrfCookieHeader('', { ttlSeconds: 0 })];
+          if (env.COOKIE_DOMAIN) clearCsrf.push(csrfCookieHeader('', { ttlSeconds: 0, domain: env.COOKIE_DOMAIN }));
           return json({ ok: true }, 200, { ...cors, 'Cache-Control': 'no-store' }, [
             sessionCookieHeader('', { ttlSeconds: 0 }),
-            csrfCookieHeader('', { ttlSeconds: 0, domain: env.COOKIE_DOMAIN }),
+            ...clearCsrf,
           ]);
         }
       }
