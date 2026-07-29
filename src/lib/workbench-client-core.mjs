@@ -5,7 +5,7 @@
 // builders. Mirrors the member-signal.ts / member-signal-core.mjs split.
 
 import { serializeContentFile, byCommentOldest } from '../../client/src/content-ops.mjs';
-import { splitMemberMarkdown, encAssetFor } from '../../client/src/member-content.mjs';
+import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/src/member-content.mjs';
 
 // SOW-027: the valid comment targets (mirrors operations.listComments' COMMENT_TARGET_TYPES).
 export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share']);
@@ -77,4 +77,20 @@ export function coerceCommentInput({ id, targetType, targetSlug, createdAt, upda
 export function favoritedFrom(activity, targetType, targetSlug) {
   const favs = (activity && activity.favorites) || [];
   return favs.some((f) => f.type === targetType && f.slug === targetSlug);
+}
+
+/**
+ * sow-158 Phase 3c: rebuild the FULL authoring body of a members-only item from its committed `index.md` body plus
+ * the DECRYPTED members text, so the editor shows everything and a re-publish re-splits identically. The exact
+ * inverse of planMemberFiles' split:
+ *   - Mode A/B (visibility: members): the whole body was gated, so the decrypted memberText IS the body.
+ *   - Mode C (visibility: public): the public part (the committed index.md body) + the `<!-- members-only -->`
+ *     marker + the members part.
+ * Pure. Used only when frontmatter.encryptedBody is set (the caller decrypts, then calls this).
+ */
+export function reassembleMemberBody(frontmatter, indexBody, memberText) {
+  const gated = String(memberText ?? '');
+  if ((frontmatter?.visibility ?? 'public') === 'members') return gated; // whole-item members: memberText is all
+  const pub = String(indexBody ?? '').trim();
+  return pub ? `${pub}\n\n${MEMBER_MARKER}\n\n${gated}` : `${MEMBER_MARKER}\n\n${gated}`;
 }

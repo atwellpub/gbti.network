@@ -25,9 +25,7 @@ import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from './workbench-client-core.mjs';
-
-const MEM_MARKER = '<!-- members-only -->';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from './workbench-client-core.mjs';
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
 const TYPE_LABEL: Record<string, string> = { post: 'article', product: 'product', prompt: 'prompt', profile: 'profile' };
 // members/<user>/<posts|products|prompts>/<slug>/index.md -> { type, slug }. Mirrors the folder->type mapping.
@@ -66,15 +64,6 @@ function readCsrf(): string | null {
     if (part.slice(0, eq).trim() === 'gbti_csrf') return part.slice(eq + 1).trim() || null;
   }
   return null;
-}
-
-/** Refuse a members-only publish/draft on the web (deferred to the extension). Covers Mode A/B (visibility) and
- *  Mode C (an encryptedBody reference OR an in-body marker), so re-publishing on the web can never orphan a
- *  members-only .enc section. */
-function assertPublicAuthorable(input: any, body: string): void {
-  if (input?.visibility === 'members' || input?.encryptedBody || String(body || '').includes(MEM_MARKER)) {
-    throw err('membership-required', 'Members-only content is published from the browser extension for now. Publish it as public here, or use the extension to publish member-only content.');
-  }
 }
 
 /** Seed the from-the-author intro comment (product/prompt) in the SAME publish PR, so the gate's diff-scoped
@@ -167,7 +156,6 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     if (scope === 'house' || String(path || '').startsWith('house/')) {
       throw err('bad-request', 'House content is published from the browser extension for now.');
     }
-    assertPublicAuthorable(input, body);
     let built: any;
     try {
       built = buildContentFile({ type, username: user, input: { ...input, status: (input && input.status) || 'published' }, body, scope: 'member' });
@@ -179,12 +167,17 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     if (existing && built.slug && existing.slug && built.slug !== existing.slug) {
       throw err('bad-request', 'Changing a permalink is available in the browser extension for now. Keep the current permalink to publish here.');
     }
-    const files: Array<{ path: string; content: string | null }> = [{ path: built.path, content: built.markdown }];
+    // SOW-016 / Phase 3c: a whole-item members body OR a `<!-- members-only -->` section is encrypted to a sibling
+    // .enc (via the cookie /membership/encrypt), and index.md keeps only the public teaser + the encryptedBody
+    // pointer. planMemberFiles overrides any stale encryptedBody with the deterministic path, so a re-publish
+    // overwrites the same .enc (no orphan). Plain public content returns null -> the single plaintext file.
+    const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
+    const files: Array<{ path: string; content: string | null }> = plan ? plan.files : [{ path: built.path, content: built.markdown }];
     const intro = buildIntroFile(user, built, authorNote);
     if (intro) files.push(intro);
     const title = `Publish ${TYPE_LABEL[built.type] || built.type}: ${built.frontmatter?.title || built.slug || user}`;
     const res = await workerPost('/membership/author', { itemId: hostedItemId(built.type, built.slug), files, title });
-    return { prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true };
+    return { prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true, encrypted: Boolean(plan?.encPath) };
   }
 
   async function discardDraft({ type, slug }: any) {
@@ -200,6 +193,23 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     try { envelope = JSON.parse(text); } catch { throw err('undecryptable', 'the asset envelope is invalid'); }
     const r = await workerPost('/membership/decrypt', envelope);
     return r.text;
+  }
+
+  // sow-158 Phase 3c: read an own content item and reassemble its FULL authoring body. index.md holds only the
+  // public part (Mode C) or an empty body (Mode A/B) — the gated text is in the sibling .enc. When encryptedBody is
+  // set, decrypt it and re-join via the pure reassembleMemberBody, so the editor shows everything and a re-publish
+  // re-splits identically. FAIL CLOSED: if the decrypt fails on an item that HAS an .enc, throw rather than open the
+  // editor on a partial body (a re-save from a partial body would drop the members section).
+  async function readAndReassemble(path: string) {
+    const text = await readOwnFile(path);
+    if (text == null) throw err('not-found', 'could not load that item');
+    const { frontmatter, body } = parseContentFile(text);
+    const enc = (frontmatter as any)?.encryptedBody;
+    if (!enc) return { path, frontmatter, body };
+    let memberText: string;
+    try { memberText = await decryptEnc(enc); }
+    catch { throw err('locked', 'could not load the members-only section of this item; refresh and try again'); }
+    return { path, frontmatter, body: reassembleMemberBody(frontmatter, body, memberText) };
   }
 
   // sow-158 Phase 3b: the cookie twin of member-content.mjs encryptViaWorker. POSTs plaintext to the now-cookie-
@@ -287,19 +297,9 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       return { items };
     },
 
-    async getContentItem({ path }: any) {
-      const text = await readOwnFile(path);
-      if (text == null) throw err('not-found', 'could not load that item');
-      const { frontmatter, body } = parseContentFile(text);
-      return { path, frontmatter, body };
-    },
+    getContentItem({ path }: any) { return readAndReassemble(path); },
     // SOW-031 reader parity: read any own published item (same source as getContentItem for the WorkBench).
-    async readItem({ path }: any) {
-      const text = await readOwnFile(path);
-      if (text == null) throw err('not-found', 'could not load that item');
-      const { frontmatter, body } = parseContentFile(text);
-      return { path, frontmatter, body };
-    },
+    readItem({ path }: any) { return readAndReassemble(path); },
 
     // ----- pure form/preview/validate (no network) -----
     formFields({ type }: any) { return { type, fields: fieldsFor(type) || [] }; },
@@ -316,7 +316,8 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // ----- authoring -----
     publish,
     async saveDraft({ type, input = {}, body = '', path }: any) {
-      assertPublicAuthorable(input, body); // a members-only draft cannot be published here, so refuse it up front
+      // A members-only draft is allowed: its plain body stays in the private, erasable KV draft store (SOW-157),
+      // never git; publishDraft() encrypts it at publish time. So no members refusal here.
       const slug = String((input && input.slug) || '');
       await workerPost('/membership/drafts', { op: 'put', draft: { type, slug, path: path || null, frontmatter: input, body } });
       return { state: 'staged' };

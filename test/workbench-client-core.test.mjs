@@ -3,10 +3,12 @@
 // filter/tier-gate, the comment-visibility coercion, and the favorite derivation. Uses a FAKE encrypt (no Worker).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMemberFiles, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from '../src/lib/workbench-client-core.mjs';
-import { buildCommentFile, commentId } from '../client/src/content-ops.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from '../src/lib/workbench-client-core.mjs';
+import { buildCommentFile, buildContentFile, commentId, parseContentFile } from '../client/src/content-ops.mjs';
 
 const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', aad: assetId, ct: 'CT(' + plaintext + ')' });
+// A fake decrypt that inverts fakeEncrypt (extracts the plaintext from the ct wrapper), for the round-trip test.
+const fakeDecryptCt = (ct) => String(ct).replace(/^CT\(/, '').replace(/\)$/, '');
 
 test('planMemberFiles: a members comment encrypts to a .enc + a stub .md carrying the pointer', async () => {
   const id = commentId('2026-01-02T03:04:05Z', 'abc123');
@@ -27,6 +29,34 @@ test('planMemberFiles: a public intro (no marker) returns null -> the caller com
   const id = commentId('2026-01-02T03:04:05Z', 'pub1');
   const built = buildCommentFile({ username: 'gwen', input: { id, targetType: 'product', targetSlug: 'radle', createdAt: '2026-01-02T03:04:05Z', status: 'published', visibility: 'public', authorNote: true }, body: 'why I built this' });
   assert.equal(await planMemberFiles({ built, body: 'why I built this', encrypt: fakeEncrypt }), null);
+});
+
+test('reassembleMemberBody (Mode A/B): visibility members -> the decrypted memberText is the whole body', () => {
+  assert.equal(reassembleMemberBody({ visibility: 'members' }, '', 'the whole gated body'), 'the whole gated body');
+  // a Mode B stub may carry a public teaser in index.md, but the whole authoring body is still the members text
+  assert.equal(reassembleMemberBody({ visibility: 'members' }, 'ignored teaser', 'gated'), 'gated');
+});
+
+test('reassembleMemberBody (Mode C): visibility public -> public part + marker + members part', () => {
+  assert.equal(reassembleMemberBody({ visibility: 'public' }, 'the public teaser', 'the gated tail'),
+    'the public teaser\n\n<!-- members-only -->\n\nthe gated tail');
+  // no public part -> the marker leads
+  assert.equal(reassembleMemberBody({ visibility: 'public' }, '', 'gated only'), '<!-- members-only -->\n\ngated only');
+});
+
+test('ROUND-TRIP: a Mode C body splits (planMemberFiles) and reassembles to the original', async () => {
+  const original = 'A public intro paragraph.\n\n<!-- members-only -->\n\nThe members-only continuation.';
+  const built = buildContentFile({ type: 'post', username: 'gwen', input: { slug: 'hello', title: 'Hello', visibility: 'public', status: 'published' }, body: original });
+  const plan = await planMemberFiles({ built, body: original, encrypt: fakeEncrypt });
+  assert.equal(plan.files.length, 2, 'a Mode C item commits index.md + .enc');
+  const idx = plan.files.find((f) => f.path.endsWith('index.md'));
+  const enc = plan.files.find((f) => f.path.endsWith('.enc'));
+  const publicPart = parseContentFile(idx.content).body; // what the committed index.md carries
+  assert.doesNotMatch(idx.content, /members-only/, 'the marker + gated tail never reach the committed index.md');
+  assert.doesNotMatch(idx.content, /members-only continuation/);
+  const memberText = fakeDecryptCt(JSON.parse(enc.content).ct); // what the Worker would return on decrypt
+  const rebuilt = reassembleMemberBody(parseContentFile(idx.content).frontmatter, publicPart, memberText);
+  assert.equal(rebuilt, original, 'getContentItem reassembly reproduces the exact authoring body');
 });
 
 test('coerceCommentInput: a discussion reply is coerced to members; only an author-note intro stays public', () => {
