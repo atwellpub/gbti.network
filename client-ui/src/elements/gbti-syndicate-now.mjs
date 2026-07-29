@@ -13,7 +13,7 @@ import { GbtiElement, define, esc } from '../base.mjs';
 import { renderTemplate, renderBodyTemplate, recordDestinations } from '../../../membership/syndication-format.mjs';
 import { channelForCategoryPath } from '../../../membership/news-channels.mjs';
 
-const DEST_LABEL = { discord: 'Discord', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', x: 'X', bluesky: 'Bluesky', linkedin: 'LinkedIn', mastodon: 'Mastodon' };
+const DEST_LABEL = { discord: 'Discord', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', x: 'X', bluesky: 'Bluesky', linkedin: 'LinkedIn' }; // sow-159: mastodon retired
 // SOW-137 follow-up: dev.to + Hashnode cross-post the FULL article body, so the "Message template" field is
 // actually the article TITLE (fed to the adapter as the title; the body is the fetched article + byline + CTA).
 // dev.to is the only API-driven full-body channel left; Hashnode is now manual-assist (a Social Queue task), so
@@ -434,7 +434,7 @@ class GbtiSyndicateNow extends GbtiElement {
       ${stubNote}
       ${FULL_BODY_DESTS.has(dest)
         ? `<label>Article title <span style="font-weight:400">(${esc(DEST_LABEL[dest] || dest)} cross-posts the FULL article body: this field is ONLY the post title, not the body. The body is the whole article, wrapped by the byline and CTA footer below. {title} {content-type} {category}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>`
-        : `<label>Message template <span style="font-weight:400">({title} {url} {content-type} {member-discord-username} {author} {fullName} {category} {author-note} {author-note-italic} {member-url} {short-description} {category-hashtag} {tags-hashtags} {hashtags} {member-x-handle} {member-bluesky-handle} {member-mastodon-handle} {member-reddit-handle}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>`}
+        : `<label>Message template <span style="font-weight:400">({title} {url} {content-type} {member-discord-username} {author} {fullName} {category} {author-note} {author-note-italic} {member-url} {short-description} {category-hashtag} {tags-hashtags} {hashtags} {member-x-handle} {member-bluesky-handle} {member-reddit-handle}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>`}
       <textarea data-template>${esc(template)}</textarea>
       <label>${FULL_BODY_DESTS.has(dest) ? 'Title preview' : 'Preview'}</label>
       <div class="preview" data-preview>${esc(preview)}</div>

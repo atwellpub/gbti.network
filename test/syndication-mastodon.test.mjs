@@ -26,7 +26,12 @@ test('enabled() requires the base URL + access token', () => {
   assert.equal(createMastodonAdapter({ env: {} }).enabled(), false);
 });
 
-test('a public post renders the mastodon template with the mention, url, and hashtags inline', async () => {
+// sow-159: Mastodon is RETIRED. The adapter stays on disk, but its TEMPLATE render path is dormant because
+// the config parser (normalizeChannelTemplates over TEMPLATE_CHANNELS = CHANNELS) strips a retired channel's
+// template. Re-adding 'mastodon' to CHANNELS (syndication-config-core) reactivates rendering; un-skip these
+// two render/stub tests then. The adapter's secret-gating, POST mechanics, and textOverride tests below stay
+// live, proving the adapter code itself is intact. Runbook: .data/ops/channel-ops/mastadon.md.
+test('a public post renders the mastodon template with the mention, url, and hashtags inline', { skip: 'sow-159: Mastodon retired; render path dormant until re-added to CHANNELS' }, async () => {
   const { calls, fetchImpl } = fakeFetch();
   const r = await createMastodonAdapter({ env: ENV, fetchImpl, cfg: CFG })
     .post({ ...ITEM, authorMastodon: 'https://mastodon.social/@propertunity' });
@@ -41,7 +46,7 @@ test('a public post renders the mastodon template with the mention, url, and has
   assert.ok(s.includes('#AI') && s.includes('#Prompts'), 'hashtags inline');
 });
 
-test('no mastodon handle -> the full name; a members-only item renders the stub', async () => {
+test('no mastodon handle -> the full name; a members-only item renders the stub', { skip: 'sow-159: Mastodon retired; render path dormant until re-added to CHANNELS' }, async () => {
   const noHandle = fakeFetch();
   await createMastodonAdapter({ env: ENV, fetchImpl: noHandle.fetchImpl, cfg: CFG }).post({ ...ITEM, authorName: 'Hudson Atwell' });
   assert.ok(statusOf(noHandle.calls).includes('Hudson Atwell'));

@@ -6249,7 +6249,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   define("gbti-syndication-tracker", GbtiSyndicationTracker);
 
   // membership/syndication-config-core.mjs
-  var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "mastodon", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+  var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
   var CHANNEL_CAPABILITY = Object.freeze({
     discord: "auto",
     "discord-category": "auto",
@@ -6510,7 +6510,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .chtile.on::before { content:''; position:absolute; top:11px; right:10.5px; width:7px; height:4px; border-left:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(-45deg); z-index:1; }
   .chtile.soon { opacity:.55; cursor:default; }
   .br-discord { background:#5865F2; } .br-reddit { background:#FF4500; } .br-x { background:#000; } .br-devto { background:#0a0a0a; }
-  .br-li { background:#0A66C2; } .br-masto { background:#6364FF; } .br-bsky { background:#1185FE; }
+  .br-li { background:#0A66C2; } .br-bsky { background:#1185FE; }
   .br-substack { background:#FF6719; } .br-hashnode { background:#2962FF; } .br-dailydev { background:#CE3DF3; }
 
   /* template rows + variable chips */
@@ -6589,7 +6589,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   <g id="cb-devto"><path fill="currentColor" d="M7.2 9.2c-.3-.2-.6-.3-.9-.3H5v6.3h1.3c.3 0 .6-.1.9-.3.3-.2.4-.5.4-.9v-3.9c0-.4-.1-.7-.4-.9zM3.5 7.4h2.9c.8 0 1.5.3 2 .8s.8 1.2.8 2v3.7c0 .8-.3 1.5-.8 2s-1.2.8-2 .8H3.5V7.4zm8.4 1.5v2.1h2.5v1.5h-2.5v2.1h2.9v1.5h-3.4c-.3 0-.6-.1-.8-.3-.2-.2-.3-.5-.3-.8V9c0-.3.1-.6.3-.8.2-.2.5-.3.8-.3h3.4v1.5h-2.9zm6.9 7.7c-.4 0-.8-.1-1.1-.4-.3-.3-.5-.6-.6-1L15.6 8h1.9l1.2 5.3L19.9 8h1.9l-1.6 7.2c-.1.4-.3.7-.6 1-.3.3-.7.4-1.1.4z"/></g>
   <g id="cb-x"><path fill="currentColor" d="M17.5 4h2.9l-6.3 7.2L21.5 20h-5.8l-4.5-5.9L5.9 20H3l6.7-7.7L2.8 4h5.9l4.1 5.4L17.5 4zm-1 14.3h1.6L8.1 5.6H6.3l10.2 12.7z"/></g>
   <g id="cb-linkedin"><path fill="currentColor" d="M6.1 8.6H2.9V20h3.2V8.6zM4.5 3.5a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8zM20.9 20h-3.2v-5.6c0-1.3 0-3-1.9-3s-2.1 1.4-2.1 2.9V20H10.5V8.6h3v1.6h.1c.4-.8 1.5-1.6 3-1.6 3.2 0 3.8 2.1 3.8 4.9V20z"/></g>
-  <g id="cb-mastodon"><path fill="currentColor" d="M21 8.6c0-3.1-2-4-2-4A17 17 0 0 0 12.9 3.5c-2.8-.2-5.2 0-6.3.5 0 0-2.1.9-2.1 4.1 0 3.6-.2 8 3.4 9 1.7.4 3.1.5 4.2.4 1.9-.1 2.9-.7 2.9-.7l-.1-1.4s-1.3.4-2.8.4c-1.5-.1-3-.2-3.2-2 0-.2 0-.3-.1-.5 3.3.8 6.1.4 6.9.3 2.2-.3 4.1-1.6 4.3-2.9.4-2 .3-3.6.3-3.6zm-2.6 4.3h-1.6V9c0-.9-.4-1.3-1.1-1.3-.8 0-1.2.5-1.2 1.5v2.1h-1.6V9.2c0-1-.4-1.5-1.2-1.5-.7 0-1.1.4-1.1 1.3v3.9H7.4V8.8c0-.9.2-1.6.7-2.1.5-.5 1.1-.8 1.9-.8.9 0 1.6.4 2 1l.4.7.4-.7c.4-.6 1.1-1 2-1 .8 0 1.4.3 1.9.8.5.5.7 1.2.7 2.1v4.1z"/></g>
   <g id="cb-bsky"><path fill="currentColor" d="M12 10.8C10.9 8.6 8 5.2 5.3 4 3.4 3.1 2 3.6 2 5.8c0 2.2 1.2 7.2 1.9 8.2.7 1 2 .9 3.3.7-2.2.4-2.6 1.9-1.5 3.4C7.8 21 9.7 17.9 10.2 16.7c.3-.8.5-1.4.6-1.6.1.2.3.8.6 1.6.5 1.2 2.4 4.3 4.5 1.4 1.1-1.5.7-3-1.5-3.4 1.3.2 2.6.3 3.3-.7.7-1 1.9-6 1.9-8.2 0-2.2-1.4-2.7-3.3-1.8-2.7 1.2-5.6 4.6-6.7 6.8z"/></g>
   <g id="cb-substack"><path fill="currentColor" d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.539 24V10.812H1.46zM22.539 0H1.46v2.836h21.08V0z"/></g>
   <g id="cb-hashnode"><path fill="currentColor" d="M22.351 8.019l-6.37-6.37a5.63 5.63 0 0 0-7.962 0l-6.37 6.37a5.63 5.63 0 0 0 0 7.962l6.37 6.37a5.63 5.63 0 0 0 7.962 0l6.37-6.37a5.63 5.63 0 0 0 0-7.962zM12 15.953a3.953 3.953 0 1 1 0-7.906 3.953 3.953 0 0 1 0 7.906z"/></g>
@@ -6608,7 +6607,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // SOW-135
     { id: "x", name: "X", sub: "Manual", icon: "cb-x", cls: "br-x" },
     { id: "linkedin", name: "LinkedIn", sub: "Manual", icon: "cb-linkedin", cls: "br-li" },
-    { id: "mastodon", name: "Mastodon", sub: "", icon: "cb-mastodon", cls: "br-masto" },
     { id: "bluesky", name: "Bluesky", sub: "", icon: "cb-bsky", cls: "br-bsky" },
     {
       id: "substack",
@@ -6620,7 +6618,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
   ].map((c) => ({ ...c, active: isTileActive(c.id) }));
   var MATRIX_TYPE_LABEL = { share: "Share", post: "Article", product: "Product", prompt: "Prompt" };
-  var MATRIX_CHAN_LABEL = { discord: "Discord", "discord-category": "Discord cat", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", mastodon: "Mastodon", bluesky: "Bluesky", x: "X", linkedin: "LinkedIn" };
+  var MATRIX_CHAN_LABEL = { discord: "Discord", "discord-category": "Discord cat", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", bluesky: "Bluesky", x: "X", linkedin: "LinkedIn" };
   var AUTO_MODE_LABEL = { off: "Off", on: "On-Automatic", "on-manual": "On-Manual", popular: "Popular" };
   var TMPL_TYPES = [
     { key: "share", nm: "Share", df: "reshare line" },
@@ -6648,7 +6646,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     "{hashtags}",
     "{member-x-handle}",
     "{member-bluesky-handle}",
-    "{member-mastodon-handle}",
     "{member-reddit-handle}"
   ];
   var SYND_TABS = [
@@ -11651,7 +11648,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     youtube: "M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z",
     devto: "M7.42 10.05c-.18-.16-.46-.23-.84-.23H6l.02 2.44.04 2.45.56-.02c.41 0 .63-.07.83-.26.24-.24.26-.36.26-2.2 0-1.91-.02-1.96-.29-2.18zM0 4.94v14.12h24V4.94H0zM8.56 15.3c-.44.58-1.06.77-2.53.77H4.71V8.53h1.4c1.67 0 2.16.18 2.6.9.27.43.29.6.32 2.57.05 2.23-.02 2.73-.47 3.3zm5.09-5.47h-2.47v1.77h1.52v1.28l-.72.04-.75.03v1.77l1.22.03 1.2.04v1.28h-1.6c-1.53 0-1.6-.01-1.87-.3l-.3-.28v-3.16c0-3.02.01-3.18.25-3.48.23-.31.25-.31 1.88-.31h1.64v1.3zm4.68 5.45c-.17.43-.64.79-1 .79-.18 0-.45-.15-.67-.39-.32-.32-.45-.63-.82-2.08l-.9-3.39-.45-1.67h.76c.4 0 .75.02.75.05 0 .06 1.16 4.54 1.26 4.83.04.15.32-.7.73-2.3l.66-2.52.74-.04c.4-.02.73 0 .73.04 0 .14-1.67 6.38-1.8 6.68z",
     reddit: "M12 0C5.373 0 0 5.373 0 12c0 3.314 1.343 6.314 3.515 8.485l-2.286 2.286C.775 23.225 1.097 24 1.738 24H12c6.627 0 12-5.373 12-12S18.627 0 12 0Zm4.388 3.199c1.104 0 1.999.895 1.999 1.999 0 1.105-.895 2-1.999 2-.946 0-1.739-.657-1.947-1.539v.002c-1.147.162-2.032 1.15-2.032 2.341v.007c1.776.067 3.4.567 4.686 1.363.473-.363 1.064-.58 1.707-.58 1.547 0 2.802 1.254 2.802 2.802 0 1.117-.655 2.081-1.601 2.531-.088 3.256-3.637 5.876-7.997 5.876-4.361 0-7.905-2.617-7.998-5.87-.954-.447-1.614-1.415-1.614-2.538 0-1.548 1.255-2.802 2.803-2.802.645 0 1.239.218 1.712.585 1.275-.79 2.881-1.291 4.64-1.365v-.01c0-1.663 1.263-3.034 2.88-3.207.188-.911.993-1.595 1.959-1.595Zm-8.085 8.376c-.784 0-1.459.78-1.506 1.797-.047 1.016.64 1.429 1.426 1.429.786 0 1.371-.369 1.418-1.385.047-1.017-.553-1.841-1.338-1.841Zm7.406 0c-.786 0-1.385.824-1.338 1.841.047 1.017.634 1.385 1.418 1.385.785 0 1.473-.413 1.426-1.429-.046-1.017-.721-1.797-1.506-1.797Zm-3.703 4.013c-.974 0-1.907.048-2.77.135-.147.015-.241.168-.183.305.483 1.154 1.622 1.964 2.953 1.964 1.33 0 2.47-.81 2.953-1.964.057-.137-.037-.29-.184-.305-.863-.087-1.795-.135-2.769-.135Z",
-    mastodon: "M23.268 5.313c-.35-2.578-2.617-4.61-5.304-5.004C17.51.242 15.792 0 11.813 0h-.03c-3.98 0-4.835.242-5.288.309C3.882.692 1.496 2.518.917 5.127.64 6.412.61 7.837.661 9.143c.074 1.874.088 3.745.26 5.611.118 1.24.325 2.47.62 3.68.55 2.237 2.777 4.098 4.96 4.857 2.336.792 4.849.923 7.256.38.265-.061.527-.132.786-.213.585-.184 1.27-.39 1.774-.753a.057.057 0 0 0 .023-.043v-1.809a.052.052 0 0 0-.02-.041.053.053 0 0 0-.046-.01 20.282 20.282 0 0 1-4.709.545c-2.73 0-3.463-1.284-3.674-1.818a5.593 5.593 0 0 1-.319-1.433.053.053 0 0 1 .066-.054c1.517.363 3.072.546 4.632.546.376 0 .75 0 1.125-.01 1.57-.044 3.224-.124 4.768-.422.038-.008.077-.015.11-.024 2.435-.464 4.753-1.92 4.989-5.604.008-.145.03-1.52.03-1.67.002-.512.167-3.63-.024-5.545zm-3.748 9.195h-2.561V8.29c0-1.309-.55-1.976-1.67-1.976-1.23 0-1.846.79-1.846 2.35v3.403h-2.546V8.663c0-1.56-.617-2.35-1.848-2.35-1.112 0-1.668.668-1.67 1.977v6.218H4.822V8.102c0-1.31.337-2.35 1.011-3.12.696-.77 1.608-1.164 2.74-1.164 1.311 0 2.302.5 2.962 1.498l.638 1.06.638-1.06c.66-.999 1.65-1.498 2.96-1.498 1.13 0 2.043.395 2.74 1.164.675.77 1.012 1.81 1.012 3.12z",
     discord: "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z",
     linkedin: LINKEDIN_PATH,
     website: WEBSITE_PATH,
@@ -11686,11 +11682,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" fill="currentColor"><path d="${d}"/></svg>`;
   }
   var SOCIAL_KEYS = [
+    // sow-159: 'mastodon' removed from the offered-keys enumerator (retirement); its icon path + label +
+    // URL-builder below stay on disk inert so re-enabling is just re-adding the key here.
     "github",
     "website",
     "x",
     "bluesky",
-    "mastodon",
     "linkedin",
     "youtube",
     "discord",
@@ -11725,7 +11722,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     website: "Website",
     x: "X",
     bluesky: "Bluesky",
-    mastodon: "Mastodon",
     linkedin: "LinkedIn",
     youtube: "YouTube",
     discord: "Discord",
@@ -11791,10 +11787,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     if (k === "discord") return value;
     if (k === "website") return "https://" + value.replace(/^\/+/, "");
     const handle = value.replace(/^@+/, "");
-    if (k === "mastodon") {
-      const m = handle.match(/^([^@\s]+)@([^@\s]+)$/);
-      return m ? `https://${m[2]}/@${m[1]}` : value;
-    }
     const base = SOCIAL_URL_BASE[k];
     return base ? base + handle : value;
   }
@@ -11972,7 +11964,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     ["reddit", "Reddit", "https://www.reddit.com/r/GBTI_network", "Member articles, products, and prompts syndicate to our community subreddit. Open it and hit Join.", "r/GBTI_network"],
     ["x", "X", "https://x.com/gbti_network", "Syndicated member work and network updates, as they publish.", "@gbti_network"],
     ["bluesky", "Bluesky", "https://bsky.app/profile/gbti.bsky.social", "The same syndicated stream on Bluesky.", "@gbti.bsky.social"],
-    ["mastodon", "Mastodon", "https://mastodon.social/@gbti", "The syndicated stream on the fediverse.", "@gbti@mastodon.social"],
     ["youtube", "YouTube", "https://www.youtube.com/@gbti_network", "Video sessions and walkthroughs from the network.", "@gbti_network"],
     ["github", "GitHub", "https://github.com/gbti-network", "The public content repo and our open source work.", "gbti-network"],
     ["devto", "Dev.to", "https://dev.to/gbti", "Member articles crossposted to the GBTI organization on DEV.", "@gbti"],
@@ -11981,7 +11972,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     ["linkedin", "LinkedIn", "https://www.linkedin.com/company/gbti-network/posts", "Network updates and member work on LinkedIn.", "GBTI Network"]
   ];
   var SOCIALS_STAGE_KEY = "gbti-welcome-socials";
-  var SOCIAL_STARTERS = ["x", "bluesky", "mastodon", "linkedin", "youtube", "website"];
+  var SOCIAL_STARTERS = ["x", "bluesky", "linkedin", "youtube", "website"];
   var SOCIAL_HIDDEN = /* @__PURE__ */ new Set(["github", "discord"]);
   var AV_COLORS = ["#1f9e5f", "#c98a2b", "#5a8ad6", "#9b6fd0", "#d0715f", "#3fa88a", "#c85b8e"];
   var avColor = (name) => {
@@ -14875,7 +14866,7 @@ From the author:
   }
 
   // client-ui/src/elements/gbti-syndicate-now.mjs
-  var DEST_LABEL = { discord: "Discord", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", x: "X", bluesky: "Bluesky", linkedin: "LinkedIn", mastodon: "Mastodon" };
+  var DEST_LABEL = { discord: "Discord", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", x: "X", bluesky: "Bluesky", linkedin: "LinkedIn" };
   var FULL_BODY_DESTS = /* @__PURE__ */ new Set(["devto"]);
   var LOCAL_SENDS_KEY = "gbti-synd-local-sends";
   var LOCAL_SENDS_MAX_AGE = 7 * 24 * 60 * 60 * 1e3;
@@ -15248,7 +15239,7 @@ From the author:
       const stubNote = this._isStub() && dest !== "devto" ? `<p class="warn">Members-only item: the STUB template set applies on this channel.</p>` : "";
       return `<label>Destination</label><p class="sub" style="margin:0">${esc(DEST_LABEL[dest] || dest)} <button class="ghost" type="button" data-back style="padding:2px 10px;font-size:11.5px;margin-left:8px">change</button></p>
       ${stubNote}
-      ${FULL_BODY_DESTS.has(dest) ? `<label>Article title <span style="font-weight:400">(${esc(DEST_LABEL[dest] || dest)} cross-posts the FULL article body: this field is ONLY the post title, not the body. The body is the whole article, wrapped by the byline and CTA footer below. {title} {content-type} {category}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>` : `<label>Message template <span style="font-weight:400">({title} {url} {content-type} {member-discord-username} {author} {fullName} {category} {author-note} {author-note-italic} {member-url} {short-description} {category-hashtag} {tags-hashtags} {hashtags} {member-x-handle} {member-bluesky-handle} {member-mastodon-handle} {member-reddit-handle}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>`}
+      ${FULL_BODY_DESTS.has(dest) ? `<label>Article title <span style="font-weight:400">(${esc(DEST_LABEL[dest] || dest)} cross-posts the FULL article body: this field is ONLY the post title, not the body. The body is the whole article, wrapped by the byline and CTA footer below. {title} {content-type} {category}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>` : `<label>Message template <span style="font-weight:400">({title} {url} {content-type} {member-discord-username} {author} {fullName} {category} {author-note} {author-note-italic} {member-url} {short-description} {category-hashtag} {tags-hashtags} {hashtags} {member-x-handle} {member-bluesky-handle} {member-reddit-handle}; CAPS a token to uppercase it: {CONTENT-TYPE})</span></label>`}
       <textarea data-template>${esc(template)}</textarea>
       <label>${FULL_BODY_DESTS.has(dest) ? "Title preview" : "Preview"}</label>
       <div class="preview" data-preview>${esc(preview)}</div>
@@ -15456,7 +15447,6 @@ From the author:
     ["youtube", "YouTube", "https://youtube.com/"],
     ["devto", "DEV", "https://dev.to/"],
     ["reddit", "Reddit", "https://reddit.com/user/"],
-    ["mastodon", "Mastodon", ""],
     ["linkedin", "LinkedIn", "https://linkedin.com/in/"],
     // SOW-129: the comprehensive set.
     ["instagram", "Instagram", "https://www.instagram.com/"],
@@ -16709,8 +16699,8 @@ From the author:
     if (channel === "hashnode") return "https://hashnode.com/draft";
     return null;
   };
-  var CH_LABEL = { x: "X", discord: "Discord", "discord-category": "Discord", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", linkedin: "LinkedIn", mastodon: "Mastodon", bluesky: "Bluesky" };
-  var CH_ICON = { x: "x", discord: "discord", "discord-category": "discord", reddit: "reddit", devto: "devto", hashnode: "hashnode", dailydev: "dailydev", linkedin: "linkedin", mastodon: "mastodon", bluesky: "bluesky" };
+  var CH_LABEL = { x: "X", discord: "Discord", "discord-category": "Discord", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", linkedin: "LinkedIn", bluesky: "Bluesky" };
+  var CH_ICON = { x: "x", discord: "discord", "discord-category": "discord", reddit: "reddit", devto: "devto", hashnode: "hashnode", dailydev: "dailydev", linkedin: "linkedin", bluesky: "bluesky" };
   var SRC_LABEL2 = { share: "Share", post: "Article", product: "Product", prompt: "Prompt" };
   var PAGE_SIZE2 = 12;
   var fmtDate = (ms) => {
@@ -18255,7 +18245,7 @@ From the author:
       const picker = this._addingLink && unused.length ? `<div class="picker">${unused.map((k) => `<button type="button" class="pk" data-add-link="${esc(k)}">${socialIcon(k, 15)}${esc(SOCIAL_LABELS[k] || k)}</button>`).join("")}</div>` : "";
       const addBtn = unused.length ? `<button type="button" class="addbtn" data-add-toggle>${this._addingLink ? "Close" : "+ Add a link"}</button>` : "";
       return `<section class="sec">
-      <div class="sec-h"><h3>Social links</h3><p>Your profiles across the web. Paste a full URL or a handle; we build the link. These also credit you when your content is shared to X, Bluesky, and Mastodon.</p></div>
+      <div class="sec-h"><h3>Social links</h3><p>Your profiles across the web. Paste a full URL or a handle; we build the link. These also credit you when your content is shared to X and Bluesky.</p></div>
       <div class="body">
         ${rows || '<div class="note">No links yet. Add one below.</div>'}
         ${addBtn}

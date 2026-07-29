@@ -41,8 +41,9 @@ test('socialIcon: case-insensitive key, custom size, and empty for an unknown pl
   assert.equal(socialIcon(null), '');
 });
 
-test('socialIcon: covers every author-card SOCIALS key (github/website/x/bluesky/youtube/devto/reddit/mastodon/linkedin) + discord', () => {
-  for (const key of ['github', 'website', 'x', 'bluesky', 'youtube', 'devto', 'reddit', 'mastodon', 'linkedin', 'discord']) {
+test('socialIcon: covers every author-card SOCIALS key (github/website/x/bluesky/youtube/devto/reddit/linkedin) + discord', () => {
+  // sow-159: mastodon retired (removed from the social-icon system).
+  for (const key of ['github', 'website', 'x', 'bluesky', 'youtube', 'devto', 'reddit', 'linkedin', 'discord']) {
     assert.notEqual(socialIcon(key), '', `${key} has an icon`);
   }
 });

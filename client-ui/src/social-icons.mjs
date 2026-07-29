@@ -22,7 +22,6 @@ export const SOCIAL_ICON_PATHS = {
   youtube: 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z',
   devto: 'M7.42 10.05c-.18-.16-.46-.23-.84-.23H6l.02 2.44.04 2.45.56-.02c.41 0 .63-.07.83-.26.24-.24.26-.36.26-2.2 0-1.91-.02-1.96-.29-2.18zM0 4.94v14.12h24V4.94H0zM8.56 15.3c-.44.58-1.06.77-2.53.77H4.71V8.53h1.4c1.67 0 2.16.18 2.6.9.27.43.29.6.32 2.57.05 2.23-.02 2.73-.47 3.3zm5.09-5.47h-2.47v1.77h1.52v1.28l-.72.04-.75.03v1.77l1.22.03 1.2.04v1.28h-1.6c-1.53 0-1.6-.01-1.87-.3l-.3-.28v-3.16c0-3.02.01-3.18.25-3.48.23-.31.25-.31 1.88-.31h1.64v1.3zm4.68 5.45c-.17.43-.64.79-1 .79-.18 0-.45-.15-.67-.39-.32-.32-.45-.63-.82-2.08l-.9-3.39-.45-1.67h.76c.4 0 .75.02.75.05 0 .06 1.16 4.54 1.26 4.83.04.15.32-.7.73-2.3l.66-2.52.74-.04c.4-.02.73 0 .73.04 0 .14-1.67 6.38-1.8 6.68z',
   reddit: 'M12 0C5.373 0 0 5.373 0 12c0 3.314 1.343 6.314 3.515 8.485l-2.286 2.286C.775 23.225 1.097 24 1.738 24H12c6.627 0 12-5.373 12-12S18.627 0 12 0Zm4.388 3.199c1.104 0 1.999.895 1.999 1.999 0 1.105-.895 2-1.999 2-.946 0-1.739-.657-1.947-1.539v.002c-1.147.162-2.032 1.15-2.032 2.341v.007c1.776.067 3.4.567 4.686 1.363.473-.363 1.064-.58 1.707-.58 1.547 0 2.802 1.254 2.802 2.802 0 1.117-.655 2.081-1.601 2.531-.088 3.256-3.637 5.876-7.997 5.876-4.361 0-7.905-2.617-7.998-5.87-.954-.447-1.614-1.415-1.614-2.538 0-1.548 1.255-2.802 2.803-2.802.645 0 1.239.218 1.712.585 1.275-.79 2.881-1.291 4.64-1.365v-.01c0-1.663 1.263-3.034 2.88-3.207.188-.911.993-1.595 1.959-1.595Zm-8.085 8.376c-.784 0-1.459.78-1.506 1.797-.047 1.016.64 1.429 1.426 1.429.786 0 1.371-.369 1.418-1.385.047-1.017-.553-1.841-1.338-1.841Zm7.406 0c-.786 0-1.385.824-1.338 1.841.047 1.017.634 1.385 1.418 1.385.785 0 1.473-.413 1.426-1.429-.046-1.017-.721-1.797-1.506-1.797Zm-3.703 4.013c-.974 0-1.907.048-2.77.135-.147.015-.241.168-.183.305.483 1.154 1.622 1.964 2.953 1.964 1.33 0 2.47-.81 2.953-1.964.057-.137-.037-.29-.184-.305-.863-.087-1.795-.135-2.769-.135Z',
-  mastodon: 'M23.268 5.313c-.35-2.578-2.617-4.61-5.304-5.004C17.51.242 15.792 0 11.813 0h-.03c-3.98 0-4.835.242-5.288.309C3.882.692 1.496 2.518.917 5.127.64 6.412.61 7.837.661 9.143c.074 1.874.088 3.745.26 5.611.118 1.24.325 2.47.62 3.68.55 2.237 2.777 4.098 4.96 4.857 2.336.792 4.849.923 7.256.38.265-.061.527-.132.786-.213.585-.184 1.27-.39 1.774-.753a.057.057 0 0 0 .023-.043v-1.809a.052.052 0 0 0-.02-.041.053.053 0 0 0-.046-.01 20.282 20.282 0 0 1-4.709.545c-2.73 0-3.463-1.284-3.674-1.818a5.593 5.593 0 0 1-.319-1.433.053.053 0 0 1 .066-.054c1.517.363 3.072.546 4.632.546.376 0 .75 0 1.125-.01 1.57-.044 3.224-.124 4.768-.422.038-.008.077-.015.11-.024 2.435-.464 4.753-1.92 4.989-5.604.008-.145.03-1.52.03-1.67.002-.512.167-3.63-.024-5.545zm-3.748 9.195h-2.561V8.29c0-1.309-.55-1.976-1.67-1.976-1.23 0-1.846.79-1.846 2.35v3.403h-2.546V8.663c0-1.56-.617-2.35-1.848-2.35-1.112 0-1.668.668-1.67 1.977v6.218H4.822V8.102c0-1.31.337-2.35 1.011-3.12.696-.77 1.608-1.164 2.74-1.164 1.311 0 2.302.5 2.962 1.498l.638 1.06.638-1.06c.66-.999 1.65-1.498 2.96-1.498 1.13 0 2.043.395 2.74 1.164.675.77 1.012 1.81 1.012 3.12z',
   discord: 'M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z',
   linkedin: LINKEDIN_PATH,
   website: WEBSITE_PATH,
@@ -62,7 +61,9 @@ export function socialIcon(key, size = 15) {
 // SOW-129: the comprehensive platform metadata for the profile social-links repeater. Ordered for display.
 // Keys MUST match the profile `socialLinks` schema (src/content.config.ts) + LINK_KEYS (src/lib/members-directory.mjs).
 export const SOCIAL_KEYS = [
-  'github', 'website', 'x', 'bluesky', 'mastodon', 'linkedin', 'youtube', 'discord', 'reddit', 'devto',
+  // sow-159: 'mastodon' removed from the offered-keys enumerator (retirement); its icon path + label +
+  // URL-builder below stay on disk inert so re-enabling is just re-adding the key here.
+  'github', 'website', 'x', 'bluesky', 'linkedin', 'youtube', 'discord', 'reddit', 'devto',
   'instagram', 'threads', 'tiktok', 'twitch', 'facebook', 'dailydev', 'producthunt', 'rumble',
   // SOW-131: audio, publishing, dev, and creator platforms.
   'soundcloud', 'mixcloud', 'spotify', 'bandcamp', 'wordpress', 'substack', 'medium', 'hashnode',
@@ -70,7 +71,7 @@ export const SOCIAL_KEYS = [
 ];
 
 export const SOCIAL_LABELS = {
-  github: 'GitHub', website: 'Website', x: 'X', bluesky: 'Bluesky', mastodon: 'Mastodon', linkedin: 'LinkedIn',
+  github: 'GitHub', website: 'Website', x: 'X', bluesky: 'Bluesky', linkedin: 'LinkedIn',
   youtube: 'YouTube', discord: 'Discord', reddit: 'Reddit', devto: 'Dev.to', instagram: 'Instagram',
   threads: 'Threads', tiktok: 'TikTok', twitch: 'Twitch', facebook: 'Facebook', dailydev: 'daily.dev',
   producthunt: 'Product Hunt', rumble: 'Rumble',
@@ -80,7 +81,7 @@ export const SOCIAL_LABELS = {
   kofi: 'Ko-fi', telegram: 'Telegram',
 };
 
-// Per-platform base for turning a bare handle into a full profile URL. Keys without a base (mastodon, discord,
+// Per-platform base for turning a bare handle into a full profile URL. Keys without a base (discord,
 // website, and the ID-based spotify/bandcamp/stackoverflow) are handled specially or expect a pasted URL.
 export const SOCIAL_URL_BASE = {
   github: 'https://github.com/', x: 'https://x.com/', bluesky: 'https://bsky.app/profile/',
@@ -100,7 +101,8 @@ export const SOCIAL_URL_BASE = {
 /**
  * Normalize a member's per-platform input into a FULL profile URL (so both the public profile render, which needs
  * https://, and syndication, which reads the handle, work). Passes an existing http(s) URL through unchanged;
- * discord stays a raw handle (not linkable); website is coerced to https; mastodon builds from user@instance.
+ * discord stays a raw handle (not linkable); website is coerced to https. (sow-159: the mastodon user@instance
+ * branch was removed with the Mastodon retirement.)
  */
 export function buildSocialUrl(key, raw) {
   const value = String(raw == null ? '' : raw).trim();
@@ -110,10 +112,6 @@ export function buildSocialUrl(key, raw) {
   if (k === 'discord') return value; // handles are not reliably linkable
   if (k === 'website') return 'https://' + value.replace(/^\/+/, '');
   const handle = value.replace(/^@+/, '');
-  if (k === 'mastodon') {
-    const m = handle.match(/^([^@\s]+)@([^@\s]+)$/); // user@instance -> https://instance/@user
-    return m ? `https://${m[2]}/@${m[1]}` : value;
-  }
   const base = SOCIAL_URL_BASE[k];
   return base ? base + handle : value;
 }

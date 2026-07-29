@@ -7,7 +7,6 @@ import {
   siDailydotdev,
   siDiscord,
   siReddit,
-  siMastodon,
   siInstagram,
   siThreads,
   siTiktok,
@@ -52,7 +51,7 @@ export const SOCIAL_LINKS = [
   { label: 'Daily.dev', href: 'https://daily.dev/squads/gbti_network/', path: siDailydotdev.path },
   { label: 'Discord', href: '/membership/', path: siDiscord.path },
   { label: 'Reddit', href: 'https://www.reddit.com/r/GBTI_network', path: siReddit.path },
-  { label: 'Mastodon', href: 'https://mastodon.social/@gbti', path: siMastodon.path },
+  // sow-159: Mastodon retired (2026-07-28, fediverse turn-away). The GBTI footer link is removed.
   { label: 'LinkedIn', href: 'https://www.linkedin.com/company/gbti-network/posts', path: LINKEDIN_PATH },
 ];
 
@@ -67,7 +66,8 @@ export const ICON_PATHS: Record<string, string> = {
   youtube: siYoutube.path,
   devto: siDevdotto.path,
   reddit: siReddit.path,
-  mastodon: siMastodon.path,
+  // sow-159: Mastodon retired: no icon mapping, so a member's stored mastodon handle no longer renders on
+  // profiles or member cards. The value stays inert in profile.md (owner elected to leave, not scrub).
   linkedin: LINKEDIN_PATH,
   discord: siDiscord.path,
   // SOW-129: the comprehensive set.

@@ -21241,7 +21241,7 @@ function removeFlagTerm(doc, { list, term } = {}, ctx = {}) {
 }
 
 // membership/syndication-config-core.mjs
-var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "mastodon", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
 var TEMPLATE_CHANNELS = CHANNELS;
 var CHANNEL_CAPABILITY = Object.freeze({
   discord: "auto",
@@ -21722,7 +21722,7 @@ function setTemplate(doc, { type, template, channel, stub } = {}, ctx = {}) {
   d.syndication[sharedField] = nextTemplates;
   return { next: d, changed: true, audit: auditEntry6(ctx, t, { stub: isStub || void 0, template: value || null }) };
 }
-var SYNDICATION_CHANNEL_NAMES = Object.freeze(["discord", "discord-category", "x", "linkedin", "mastodon", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+var SYNDICATION_CHANNEL_NAMES = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
 function setSyndicationSettings(doc, { enabled, requireApproval, holdMinutes, channels, autoMatrix, channelHoldMinutes } = {}, ctx = {}) {
   const d = structuredClone(doc && typeof doc === "object" ? doc : {});
   if (!d.syndication || typeof d.syndication !== "object" || Array.isArray(d.syndication)) d.syndication = {};

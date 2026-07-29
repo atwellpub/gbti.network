@@ -195,7 +195,10 @@ DISCORD_CHANNEL_SHARES = "1084632127657746452"
 # SOW-123: the Mastodon auto channel posts to the brand account @gbti on mastodon.social. This origin is
 # NON-SECRET; the MASTODON_ACCESS_TOKEN (write:statuses) is the secret, set via `wrangler secret put`. The
 # adapter requires BOTH to be present (secretsPresent), so setting this alone posts nothing.
-MASTODON_BASE_URL = "https://mastodon.social"
+# sow-159: Mastodon retired (2026-07-28). MASTODON_BASE_URL removed so the origin is not provisioned;
+# the MASTODON_ACCESS_TOKEN secret can be deleted with `wrangler secret delete MASTODON_ACCESS_TOKEN`
+# (not required: the channel is out of CHANNELS, so the drain never routes it). Re-enable: see
+# .data/ops/channel-ops/mastadon.md.
 
 # Custom domain: attach signup.gbti.network to this production worker. wrangler provisions the domain + the
 # managed DNS record on the gbti.network zone (same account) on deploy. This is the host the client/extension

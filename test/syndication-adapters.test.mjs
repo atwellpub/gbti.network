@@ -88,7 +88,7 @@ test('resolveAdapterRun splits ready (secrets) vs skipped (enabled-but-no-secret
   const env = { DISCORD_BOT_TOKEN: 't' };
   const { ready, skipped } = resolveAdapterRun({ cfg, env });
   assert.deepEqual(ready.map((a) => a.name).sort(), ['discord', 'discord-category']);
-  assert.deepEqual(skipped.sort(), ['bluesky', 'devto', 'mastodon', 'reddit']); // hashnode is MANUAL now: hard-excluded from the adapter run
+  assert.deepEqual(skipped.sort(), ['bluesky', 'devto', 'reddit']); // sow-159: mastodon retired (out of CHANNELS); hashnode is MANUAL: hard-excluded
 });
 
 // SOW-087: the second Discord post, routed by the item's category via the KV-mirrored map.

@@ -61,7 +61,7 @@ test('toSyndicationMirror returns the secret-free shape for KV', () => {
     // SOW-126: the content-engagement (`popular` engine) settings, mirrored like news_engagement.
     content_engagement: { enabled: false, threshold: 3, tier: 'signed-in', signals: { opens: true, favorites: false, upvotes: false, comments: false } },
     // SOW-088: reddit joined CHANNELS (default false) so the admin pipeline switch survives normalization.
-    channels: { discord: true, 'discord-category': false, x: false, linkedin: false, mastodon: false, bluesky: false, reddit: false, devto: false, hashnode: false, dailydev: false },
+    channels: { discord: true, 'discord-category': false, x: false, linkedin: false, bluesky: false, reddit: false, devto: false, hashnode: false, dailydev: false }, // sow-159: mastodon retired (out of CHANNELS)
     channel_templates: {},
     stub_templates: {},
     channel_templates_stub: {},
@@ -103,11 +103,11 @@ test('SOW-126: contentEngagement normalizes fail-closed (disabled, opens-on, tie
 test('SOW-126/131: popularChannelsForType returns channels whose cell is popular (matrix-only; manual needs manual_assist)', () => {
   const c = syndicationConfigFromParsed({
     manual_assist_channels: ['x'],
-    auto_matrix: { share: { discord: 'popular', bluesky: 'on', mastodon: 'popular', x: 'popular' } },
+    auto_matrix: { share: { discord: 'popular', bluesky: 'on', x: 'popular' } },
   });
-  // discord: popular auto -> in. bluesky: on (not popular) -> out. mastodon: popular auto -> IN (SOW-131: no
-  // channels gate). x: popular + manual-assist -> in (a promoted popular manual task).
-  assert.deepEqual(popularChannelsForType(c, 'share').sort(), ['discord', 'mastodon', 'x']);
+  // discord: popular auto -> in. bluesky: on (not popular) -> out. x: popular + manual-assist -> in (a promoted
+  // popular manual task). (sow-159: the mastodon cell is retired; a stray cell for it would be ignored.)
+  assert.deepEqual(popularChannelsForType(c, 'share').sort(), ['discord', 'x']);
   assert.deepEqual(popularChannelsForType(c, 'post'), []); // post defaults on everywhere, no popular cells
 });
 
@@ -151,17 +151,17 @@ test('SOW-125: autoModeFor coerces an unknown cell to the type default; unknown 
 test('SOW-125/131: isAutoOn + autoChannelsForType are MATRIX-ONLY (no channels gate)', () => {
   const c = syndicationConfigFromParsed({
     auto_matrix: {
-      post: { discord: 'on', 'discord-category': 'off', bluesky: 'popular', mastodon: 'on', reddit: 'off', devto: 'off', hashnode: 'off' },
+      post: { discord: 'on', 'discord-category': 'off', bluesky: 'popular', reddit: 'off', devto: 'off', hashnode: 'off' },
       share: { discord: 'on' },
     },
   });
   assert.equal(isAutoOn(c, 'post', 'discord'), true);
   assert.equal(isAutoOn(c, 'post', 'bluesky'), false); // popular is not "on" at publish
-  // post: discord + mastodon on, bluesky popular, the rest explicitly off -> only the on cells deliver (no channels gate).
-  assert.deepEqual(autoChannelsForType(c, 'post').sort(), ['discord', 'mastodon']);
+  // post: discord on, bluesky popular, the rest explicitly off -> only the on cells deliver (no channels gate).
+  assert.deepEqual(autoChannelsForType(c, 'post').sort(), ['discord']);
   assert.deepEqual(autoChannelsForType(c, 'share'), ['discord']); // share on for discord only (overrides default off)
-  // prompt: the default matrix is on for every AUTO channel, so all deliver.
-  assert.deepEqual(autoChannelsForType(c, 'prompt').sort(), ['bluesky', 'devto', 'discord', 'discord-category', 'mastodon', 'reddit']); // hashnode is MANUAL now (not an auto channel)
+  // prompt: the default matrix is on for every AUTO channel, so all deliver. (sow-159: mastodon retired.)
+  assert.deepEqual(autoChannelsForType(c, 'prompt').sort(), ['bluesky', 'devto', 'discord', 'discord-category', 'reddit']); // hashnode is MANUAL now (not an auto channel)
 });
 
 test('SOW-125: channelHoldMs uses the per-channel override, else the global hold', () => {

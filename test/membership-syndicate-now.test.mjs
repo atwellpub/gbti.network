@@ -93,19 +93,20 @@ test('POST validations: unknown destination, missing template/channel, missing s
 });
 
 test('POST text adapter: receives the pre-rendered override; a failed post records failed + 502', async () => {
-  // An AUTO-capability text channel (mastodon): X/LinkedIn are manual capability and always queue instead.
+  // An AUTO-capability text channel (bluesky): X/LinkedIn are manual capability and always queue instead.
+  // (sow-159: mastodon was the original fixture here; it is retired, so bluesky stands in.)
   const kv = fakeKV({ [SYND_CONFIG_KEY]: CFG });
   const seen = [];
-  const adapters = { mastodon: { name: 'mastodon', enabled: () => true, post: async (it) => { seen.push(it.textOverride); return { ok: true, id: 't1', url: 'https://m.social/t1' }; } } };
-  const env = { MASTODON_BASE_URL: 'https://m.social', MASTODON_ACCESS_TOKEN: 'a', SIGNUP_KV: kv };
-  const ok = await handleSyndicateNow(req({ destination: 'mastodon', item: ITEM, template: '{title} {url}' }), env, { kv, authorize: superadmin, adapters });
+  const adapters = { bluesky: { name: 'bluesky', enabled: () => true, post: async (it) => { seen.push(it.textOverride); return { ok: true, id: 't1', url: 'https://bsky.app/t1' }; } } };
+  const env = { BLUESKY_HANDLE: 'gbti.bsky.social', BLUESKY_APP_PASSWORD: 'a', SIGNUP_KV: kv };
+  const ok = await handleSyndicateNow(req({ destination: 'bluesky', item: ITEM, template: '{title} {url}' }), env, { kv, authorize: superadmin, adapters });
   assert.equal(ok.status, 200);
   assert.match(seen[0], /^CI Skill https:/);
-  const failing = { mastodon: { name: 'mastodon', enabled: () => true, post: async () => ({ ok: false, error: 'rate limited' }) } };
-  const bad = await handleSyndicateNow(req({ destination: 'mastodon', item: ITEM, template: '{title}' }), env, { kv, authorize: superadmin, adapters: failing });
+  const failing = { bluesky: { name: 'bluesky', enabled: () => true, post: async () => ({ ok: false, error: 'rate limited' }) } };
+  const bad = await handleSyndicateNow(req({ destination: 'bluesky', item: ITEM, template: '{title}' }), env, { kv, authorize: superadmin, adapters: failing });
   assert.equal(bad.status, 502);
   const failedRec = [...kv.store.keys()].filter((k) => k.startsWith('synd:item:')).map((k) => JSON.parse(kv.store.get(k))).find((r) => r.status === 'failed');
-  assert.equal(failedRec.channels.mastodon.status, 'failed');
+  assert.equal(failedRec.channels.bluesky.status, 'failed');
 });
 
 // SOW-088 follow-ups: the author's REAL Discord mention resolves via github login -> github_id -> the

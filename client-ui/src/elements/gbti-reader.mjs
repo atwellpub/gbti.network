@@ -65,7 +65,6 @@ const SOCIALS = [
   ['youtube', 'YouTube', 'https://youtube.com/'],
   ['devto', 'DEV', 'https://dev.to/'],
   ['reddit', 'Reddit', 'https://reddit.com/user/'],
-  ['mastodon', 'Mastodon', ''],
   ['linkedin', 'LinkedIn', 'https://linkedin.com/in/'],
   // SOW-129: the comprehensive set.
   ['instagram', 'Instagram', 'https://www.instagram.com/'],

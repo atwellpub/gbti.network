@@ -27,7 +27,13 @@ export const SYNDICATION_MIRROR_KEY = 'synd:config';
 // SOW-087: `discord-category` is the SECOND Discord post — the same item posted again to the channel mapped to
 // its category in house/content-channels.yml (the featured per-type `discord` post is unchanged). A first-class
 // channel so it gets its own on/off switch and its own per-channel idempotency in the queue.
-export const CHANNELS = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'mastodon', 'bluesky', 'reddit', 'devto', 'hashnode', 'dailydev']);
+// sow-159: Mastodon is RETIRED (the fediverse turn-away, 2026-07-28). Removing it from CHANNELS is the
+// master disconnect: MATRIX_CHANNELS, AUTO_CHANNELS, enabledChannelNames, and every auto/deliver/popular
+// routing helper derive from this list, so the drain can never route a Mastodon post again. All the
+// Mastodon infra (the adapter, CHANNEL_CAPABILITY.mastodon below, the stubs, secret keys, and the
+// {member-mastodon-handle} format plumbing) is LEFT on disk inert; re-enabling is re-adding 'mastodon' here.
+// Re-implementation runbook: .data/ops/channel-ops/mastadon.md.
+export const CHANNELS = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'bluesky', 'reddit', 'devto', 'hashnode', 'dailydev']);
 // SOW-088: the channels a per-channel TEMPLATE override may target (the admin Channels tab tiles). Same set
 // as the pipeline switches; blank/missing overrides fall back to the shared `templates` map, then built-ins.
 export const TEMPLATE_CHANNELS = CHANNELS;

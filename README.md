@@ -69,7 +69,7 @@ The network's syndication surfaces:
 - The **GBTI Discord** community
 - **GitHub** (the `gbti-network` organization)
 - **YouTube**
-- **X**, **Bluesky**, **Mastodon**, **LinkedIn**, **Reddit**, and **Dev.to**
+- **X**, **Bluesky**, **LinkedIn**, **Reddit**, and **Dev.to**
 
 ## Share in the revenue
 

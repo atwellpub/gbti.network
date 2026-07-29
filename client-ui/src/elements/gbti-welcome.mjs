@@ -36,7 +36,6 @@ const GBTI_CHANNELS = [
   ['reddit', 'Reddit', 'https://www.reddit.com/r/GBTI_network', 'Member articles, products, and prompts syndicate to our community subreddit. Open it and hit Join.', 'r/GBTI_network'],
   ['x', 'X', 'https://x.com/gbti_network', 'Syndicated member work and network updates, as they publish.', '@gbti_network'],
   ['bluesky', 'Bluesky', 'https://bsky.app/profile/gbti.bsky.social', 'The same syndicated stream on Bluesky.', '@gbti.bsky.social'],
-  ['mastodon', 'Mastodon', 'https://mastodon.social/@gbti', 'The syndicated stream on the fediverse.', '@gbti@mastodon.social'],
   ['youtube', 'YouTube', 'https://www.youtube.com/@gbti_network', 'Video sessions and walkthroughs from the network.', '@gbti_network'],
   ['github', 'GitHub', 'https://github.com/gbti-network', 'The public content repo and our open source work.', 'gbti-network'],
   ['devto', 'Dev.to', 'https://dev.to/gbti', 'Member articles crossposted to the GBTI organization on DEV.', '@gbti'],
@@ -51,7 +50,7 @@ const SOCIALS_STAGE_KEY = 'gbti-welcome-socials';
 // Shown by default: the syndication-mentioned platforms first (X / Bluesky / Mastodon get automatic handle
 // mentions today), then the common presence links. GitHub is implicit (they signed in with it) and Discord
 // connects in step 1, so neither is collected here.
-const SOCIAL_STARTERS = ['x', 'bluesky', 'mastodon', 'linkedin', 'youtube', 'website'];
+const SOCIAL_STARTERS = ['x', 'bluesky', 'linkedin', 'youtube', 'website']; // sow-159: mastodon retired
 const SOCIAL_HIDDEN = new Set(['github', 'discord']);
 
 // The member-card avatar fallback palette (the design handoff's initials discs).

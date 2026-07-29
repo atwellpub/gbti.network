@@ -101,13 +101,14 @@ test('drain retries a failed channel, then marks failed after maxAttempts', asyn
 });
 
 test('a config-enabled AUTO channel with no secret is recorded skipped, not failed', async () => {
-  // SOW-125: use mastodon (an AUTO channel) with no secret; x would be hard-excluded (manual), never "skipped".
-  const kv = fakeKV({ [SYND_CONFIG_KEY]: cfg({ discord: true, mastodon: true }) }); // mastodon enabled but no secret in env
+  // SOW-125 / sow-159: use bluesky (an AUTO channel) with no secret; x would be hard-excluded (manual), never
+  // "skipped". (mastodon was the original fixture here; it is retired, so bluesky stands in.)
+  const kv = fakeKV({ [SYND_CONFIG_KEY]: cfg({ discord: true, bluesky: true }) }); // bluesky enabled but no secret in env
   const r = await enqueue({ SIGNUP_KV: kv }, { source: 'share', targetSlug: 'a/x', url: 'https://ex.com' }, { kv, now: at(0) });
   await drainSyndication(env(), { kv, now: at(AFTER_HOLD), adapters: discordOk([]) });
   const item = await getItem(kv, r.id);
-  assert.equal(item.perChannel.mastodon.status, 'skipped');
-  assert.equal(item.status, 'sent'); // discord sent, mastodon skipped -> no failure
+  assert.equal(item.perChannel.bluesky.status, 'skipped');
+  assert.equal(item.status, 'sent'); // discord sent, bluesky skipped -> no failure
 });
 
 // SOW-058 approval model (the DEFAULT): nothing posts until a superadmin approves it.

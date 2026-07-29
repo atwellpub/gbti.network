@@ -276,7 +276,7 @@ class GbtiProfileEditor extends GbtiElement {
       : '';
     const addBtn = unused.length ? `<button type="button" class="addbtn" data-add-toggle>${this._addingLink ? 'Close' : '+ Add a link'}</button>` : '';
     return `<section class="sec">
-      <div class="sec-h"><h3>Social links</h3><p>Your profiles across the web. Paste a full URL or a handle; we build the link. These also credit you when your content is shared to X, Bluesky, and Mastodon.</p></div>
+      <div class="sec-h"><h3>Social links</h3><p>Your profiles across the web. Paste a full URL or a handle; we build the link. These also credit you when your content is shared to X and Bluesky.</p></div>
       <div class="body">
         ${rows || '<div class="note">No links yet. Add one below.</div>'}
         ${addBtn}

@@ -18,10 +18,8 @@ test('buildSocialUrl builds a full URL from a bare handle (leading @ stripped)',
   assert.equal(buildSocialUrl('bluesky', 'jane.bsky.social'), 'https://bsky.app/profile/jane.bsky.social');
 });
 
-test('buildSocialUrl resolves a Mastodon user@instance into a profile URL', () => {
-  assert.equal(buildSocialUrl('mastodon', '@jane@fosstodon.org'), 'https://fosstodon.org/@jane');
-  assert.equal(buildSocialUrl('mastodon', 'jane@fosstodon.org'), 'https://fosstodon.org/@jane');
-});
+// sow-159: Mastodon retired; buildSocialUrl no longer resolves a mastodon user@instance (the branch + the
+// key were removed). The adapter + syndication plumbing stay on disk; the social-icon entry does not.
 
 test('buildSocialUrl coerces a bare website host to https', () => {
   assert.equal(buildSocialUrl('website', 'example.com'), 'https://example.com');
@@ -40,7 +38,7 @@ test('buildSocialUrl returns empty for empty/blank/nullish input', () => {
 });
 
 test('SOCIAL_KEYS + SOCIAL_LABELS cover the comprehensive set', () => {
-  const want = ['github', 'website', 'x', 'bluesky', 'mastodon', 'linkedin', 'youtube', 'discord', 'reddit', 'devto', 'instagram', 'threads', 'tiktok', 'twitch', 'facebook', 'dailydev', 'producthunt', 'rumble'];
+  const want = ['github', 'website', 'x', 'bluesky', 'linkedin', 'youtube', 'discord', 'reddit', 'devto', 'instagram', 'threads', 'tiktok', 'twitch', 'facebook', 'dailydev', 'producthunt', 'rumble'];
   for (const k of want) {
     assert.ok(SOCIAL_KEYS.includes(k), `SOCIAL_KEYS missing ${k}`);
     assert.ok(SOCIAL_LABELS[k], `SOCIAL_LABELS missing ${k}`);

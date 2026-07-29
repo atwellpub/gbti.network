@@ -102,7 +102,7 @@ const CSS = `
   .chtile.on::before { content:''; position:absolute; top:11px; right:10.5px; width:7px; height:4px; border-left:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(-45deg); z-index:1; }
   .chtile.soon { opacity:.55; cursor:default; }
   .br-discord { background:#5865F2; } .br-reddit { background:#FF4500; } .br-x { background:#000; } .br-devto { background:#0a0a0a; }
-  .br-li { background:#0A66C2; } .br-masto { background:#6364FF; } .br-bsky { background:#1185FE; }
+  .br-li { background:#0A66C2; } .br-bsky { background:#1185FE; }
   .br-substack { background:#FF6719; } .br-hashnode { background:#2962FF; } .br-dailydev { background:#CE3DF3; }
 
   /* template rows + variable chips */
@@ -182,7 +182,6 @@ const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="
   <g id="cb-devto"><path fill="currentColor" d="M7.2 9.2c-.3-.2-.6-.3-.9-.3H5v6.3h1.3c.3 0 .6-.1.9-.3.3-.2.4-.5.4-.9v-3.9c0-.4-.1-.7-.4-.9zM3.5 7.4h2.9c.8 0 1.5.3 2 .8s.8 1.2.8 2v3.7c0 .8-.3 1.5-.8 2s-1.2.8-2 .8H3.5V7.4zm8.4 1.5v2.1h2.5v1.5h-2.5v2.1h2.9v1.5h-3.4c-.3 0-.6-.1-.8-.3-.2-.2-.3-.5-.3-.8V9c0-.3.1-.6.3-.8.2-.2.5-.3.8-.3h3.4v1.5h-2.9zm6.9 7.7c-.4 0-.8-.1-1.1-.4-.3-.3-.5-.6-.6-1L15.6 8h1.9l1.2 5.3L19.9 8h1.9l-1.6 7.2c-.1.4-.3.7-.6 1-.3.3-.7.4-1.1.4z"/></g>
   <g id="cb-x"><path fill="currentColor" d="M17.5 4h2.9l-6.3 7.2L21.5 20h-5.8l-4.5-5.9L5.9 20H3l6.7-7.7L2.8 4h5.9l4.1 5.4L17.5 4zm-1 14.3h1.6L8.1 5.6H6.3l10.2 12.7z"/></g>
   <g id="cb-linkedin"><path fill="currentColor" d="M6.1 8.6H2.9V20h3.2V8.6zM4.5 3.5a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8zM20.9 20h-3.2v-5.6c0-1.3 0-3-1.9-3s-2.1 1.4-2.1 2.9V20H10.5V8.6h3v1.6h.1c.4-.8 1.5-1.6 3-1.6 3.2 0 3.8 2.1 3.8 4.9V20z"/></g>
-  <g id="cb-mastodon"><path fill="currentColor" d="M21 8.6c0-3.1-2-4-2-4A17 17 0 0 0 12.9 3.5c-2.8-.2-5.2 0-6.3.5 0 0-2.1.9-2.1 4.1 0 3.6-.2 8 3.4 9 1.7.4 3.1.5 4.2.4 1.9-.1 2.9-.7 2.9-.7l-.1-1.4s-1.3.4-2.8.4c-1.5-.1-3-.2-3.2-2 0-.2 0-.3-.1-.5 3.3.8 6.1.4 6.9.3 2.2-.3 4.1-1.6 4.3-2.9.4-2 .3-3.6.3-3.6zm-2.6 4.3h-1.6V9c0-.9-.4-1.3-1.1-1.3-.8 0-1.2.5-1.2 1.5v2.1h-1.6V9.2c0-1-.4-1.5-1.2-1.5-.7 0-1.1.4-1.1 1.3v3.9H7.4V8.8c0-.9.2-1.6.7-2.1.5-.5 1.1-.8 1.9-.8.9 0 1.6.4 2 1l.4.7.4-.7c.4-.6 1.1-1 2-1 .8 0 1.4.3 1.9.8.5.5.7 1.2.7 2.1v4.1z"/></g>
   <g id="cb-bsky"><path fill="currentColor" d="M12 10.8C10.9 8.6 8 5.2 5.3 4 3.4 3.1 2 3.6 2 5.8c0 2.2 1.2 7.2 1.9 8.2.7 1 2 .9 3.3.7-2.2.4-2.6 1.9-1.5 3.4C7.8 21 9.7 17.9 10.2 16.7c.3-.8.5-1.4.6-1.6.1.2.3.8.6 1.6.5 1.2 2.4 4.3 4.5 1.4 1.1-1.5.7-3-1.5-3.4 1.3.2 2.6.3 3.3-.7.7-1 1.9-6 1.9-8.2 0-2.2-1.4-2.7-3.3-1.8-2.7 1.2-5.6 4.6-6.7 6.8z"/></g>
   <g id="cb-substack"><path fill="currentColor" d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.539 24V10.812H1.46zM22.539 0H1.46v2.836h21.08V0z"/></g>
   <g id="cb-hashnode"><path fill="currentColor" d="M22.351 8.019l-6.37-6.37a5.63 5.63 0 0 0-7.962 0l-6.37 6.37a5.63 5.63 0 0 0 0 7.962l6.37 6.37a5.63 5.63 0 0 0 7.962 0l6.37-6.37a5.63 5.63 0 0 0 0-7.962zM12 15.953a3.953 3.953 0 1 1 0-7.906 3.953 3.953 0 0 1 0 7.906z"/></g>
@@ -211,7 +210,6 @@ const TILE_CHANNELS = [
   { id: 'dailydev', name: 'daily.dev', sub: 'Manual', icon: 'cb-dailydev', cls: 'br-dailydev' }, // SOW-135
   { id: 'x', name: 'X', sub: 'Manual', icon: 'cb-x', cls: 'br-x' },
   { id: 'linkedin', name: 'LinkedIn', sub: 'Manual', icon: 'cb-linkedin', cls: 'br-li' },
-  { id: 'mastodon', name: 'Mastodon', sub: '', icon: 'cb-mastodon', cls: 'br-masto' },
   { id: 'bluesky', name: 'Bluesky', sub: '', icon: 'cb-bsky', cls: 'br-bsky' },
   { id: 'substack', name: 'Substack', sub: 'Manual only', icon: 'cb-substack', cls: 'br-substack',
     note: 'Substack has no public write API, so posts are cross-posted by hand. This card will never toggle on as built.' },
@@ -220,7 +218,7 @@ const TILE_CHANNELS = [
 // SOW-125: labels for the auto-share matrix (content types down the rows, deliverable channels across the top)
 // and the per-channel delay inputs.
 const MATRIX_TYPE_LABEL = { share: 'Share', post: 'Article', product: 'Product', prompt: 'Prompt' };
-const MATRIX_CHAN_LABEL = { discord: 'Discord', 'discord-category': 'Discord cat', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', mastodon: 'Mastodon', bluesky: 'Bluesky', x: 'X', linkedin: 'LinkedIn' };
+const MATRIX_CHAN_LABEL = { discord: 'Discord', 'discord-category': 'Discord cat', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', bluesky: 'Bluesky', x: 'X', linkedin: 'LinkedIn' };
 const AUTO_MODE_LABEL = { off: 'Off', on: 'On-Automatic', 'on-manual': 'On-Manual', popular: 'Popular' };
 const TMPL_TYPES = [
   { key: 'share', nm: 'Share', df: 'reshare line' },
@@ -231,7 +229,7 @@ const TMPL_TYPES = [
 const VARS = ['{memberdiscord}', '{member-discord-username}', '{fullName}', '{author}', '{title}', '{url}', '{category}', '{content-type}', '{author-note}', '{author-note-italic}', '{member-url}', '{short-description}',
   // Hashtag tokens (category + free-form tags as #Hashtags) and the per-channel member handle tokens (each
   // resolves the member's own handle for that channel, falling back to their name): documented + insertable.
-  '{category-hashtag}', '{tags-hashtags}', '{hashtags}', '{member-x-handle}', '{member-bluesky-handle}', '{member-mastodon-handle}', '{member-reddit-handle}'];
+  '{category-hashtag}', '{tags-hashtags}', '{hashtags}', '{member-x-handle}', '{member-bluesky-handle}', '{member-reddit-handle}'];
 // SOW-131: the DESTINATIONS checkbox chips (PIPE_CHIPS) were removed. Channel enablement is matrix-derived, so
 // the auto-share matrix is the single control; the channel's readiness (secrets) is still checked at drain time.
 
