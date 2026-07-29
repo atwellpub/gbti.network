@@ -1,6 +1,0 @@
-# Copy to .dev.vars (gitignored) for local `wrangler dev`. Production uses
-# `npx wrangler secret put NEWS_API_KEY` instead — secrets are NEVER committed.
-
-# The bearer token every API endpoint (except /healthz) requires. Generate a strong random value, e.g.
-#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-NEWS_API_KEY = "replace-with-a-long-random-token"
