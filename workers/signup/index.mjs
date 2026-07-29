@@ -282,7 +282,7 @@ async function handleGithubCallback(request, env) {
     : `${env.SITE_BASE_URL}/extension/?welcome=trial&u=${encodeURIComponent(githubLogin || '')}${couponParam}`;
   // sow-158 Phase 1b: mint the CSRF token cookie alongside the session so the website client can make
   // credentialed writes (double-submit). Both are set here as two Set-Cookie headers via the cookies array.
-  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken())]);
+  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken(), { domain: env.COOKIE_DOMAIN })]);
 }
 
 // SOW Part C: the DEFERRED Discord-link callback. Signup no longer hops through Discord (it is deferred), so this
@@ -332,7 +332,7 @@ async function handleDiscordCallback(request, env) {
   // started from the extension welcome, which polls /discord/link/status and advances itself once the link lands.
   const dest = env.DISCORD_INVITE_URL || `${env.SITE_BASE_URL}/extension/?linked=discord`;
   // sow-158 Phase 1b: re-issue the CSRF cookie with the refreshed session (two Set-Cookie headers).
-  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken())]);
+  return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken(), { domain: env.COOKIE_DOMAIN })]);
 }
 
 // SOW Part C: deferred Discord link, step 1. The extension welcome opens this in a tab. It authenticates the member
@@ -581,7 +581,7 @@ export default {
           if (!csrf.ok) return json(csrf.body, csrf.status, { ...cors, 'Cache-Control': 'no-store' });
           return json({ ok: true }, 200, { ...cors, 'Cache-Control': 'no-store' }, [
             sessionCookieHeader('', { ttlSeconds: 0 }),
-            csrfCookieHeader('', { ttlSeconds: 0 }),
+            csrfCookieHeader('', { ttlSeconds: 0, domain: env.COOKIE_DOMAIN }),
           ]);
         }
       }

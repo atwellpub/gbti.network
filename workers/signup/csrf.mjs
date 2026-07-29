@@ -33,12 +33,18 @@ export function generateCsrfToken() {
 }
 
 /**
- * Build a Set-Cookie value for the CSRF token. Secure + SameSite=Lax + Path=/, host-only, and deliberately
- * NOT HttpOnly (the site JS must read it via document.cookie to echo it in the header). Pass ttlSeconds:0 to
- * expire it (logout). `secure` mirrors the session cookie's dev toggle.
+ * Build a Set-Cookie value for the CSRF token. Secure + SameSite=Lax + Path=/ + NOT HttpOnly (the site JS must
+ * read it via document.cookie to echo it in the header). Pass ttlSeconds:0 to expire it (logout). `secure`
+ * mirrors the session cookie's dev toggle.
+ *
+ * sow-158 web-login fix: `domain` scopes the cookie to a REGISTRABLE domain (e.g. "gbti.network") so the STATIC
+ * SITE (gbti.network) can read it even though this Worker serves the OAuth callback from signup.gbti.network. A
+ * host-only cookie here is invisible cross-subdomain, which broke real web sign-in. Cookie-tossing from a sibling
+ * subdomain is still defeated by the Origin allow-list in requireCsrf (a tossed cookie cannot change the forged
+ * request's Origin), so a shared-domain gbti_csrf is safe. Omitting `domain` keeps the host-only behavior (dev).
  */
-export function csrfCookieHeader(token, { ttlSeconds = DEFAULT_TTL_SECONDS, secure = true } = {}) {
-  const attrs = [`${CSRF_COOKIE}=${token}`, 'Path=/', ...(secure ? ['Secure'] : []), 'SameSite=Lax', `Max-Age=${ttlSeconds}`];
+export function csrfCookieHeader(token, { ttlSeconds = DEFAULT_TTL_SECONDS, secure = true, domain } = {}) {
+  const attrs = [`${CSRF_COOKIE}=${token}`, 'Path=/', ...(domain ? [`Domain=${domain}`] : []), ...(secure ? ['Secure'] : []), 'SameSite=Lax', `Max-Age=${ttlSeconds}`];
   return attrs.join('; ');
 }
 

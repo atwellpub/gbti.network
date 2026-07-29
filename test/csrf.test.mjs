@@ -28,6 +28,20 @@ test('csrfCookieHeader is Secure + SameSite=Lax + Path=/, and deliberately NOT H
   assert.match(c, /SameSite=Lax/);
   assert.match(c, /Path=\//);
   assert.ok(!/HttpOnly/.test(c)); // the site JS must read it via document.cookie
+  assert.ok(!/Domain=/.test(c), 'no domain option -> host-only (dev / same-origin)');
+});
+
+// sow-158 web-login fix: with a domain, the readable csrf cookie is scoped to the registrable domain so the static
+// site (gbti.network) can read it while the Worker serves the OAuth callback from signup.gbti.network.
+test('csrfCookieHeader with a domain scopes it cross-subdomain (Domain=<registrable>)', () => {
+  const c = csrfCookieHeader('tok', { domain: 'gbti.network' });
+  assert.match(c, /Domain=gbti\.network/);
+  assert.match(c, /SameSite=Lax/);
+  assert.ok(!/HttpOnly/.test(c));
+  // the expiry (logout) must carry the SAME domain or the browser keeps the Domain-scoped cookie
+  const expired = csrfCookieHeader('', { ttlSeconds: 0, domain: 'gbti.network' });
+  assert.match(expired, /Domain=gbti\.network/);
+  assert.match(expired, /Max-Age=0/);
 });
 
 test('readCsrfCookie extracts the token or null', () => {
