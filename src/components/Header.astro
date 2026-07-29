@@ -59,7 +59,9 @@ const nav = [
           <div class="hm-sep" role="separator"></div>
           {/* SOW: shown only in the hint-only state (signed up, extension not installed yet) -> nudge the download. */}
           <a class="hm-item hm-download" role="menuitem" href="/extension/" hidden>Get the extension to continue &rarr;</a>
-          {/* sow-158 Phase 2: shown in the WEB menu mode (a cookie session with no extension) -> the real account page. */}
+          {/* sow-158 Phase 2/3a: shown in the WEB menu mode (a cookie session with no extension) -> the account page
+              and the website WorkBench (author + publish with no extension). */}
+          <a class="hm-item hm-workbench" role="menuitem" data-head-workbench href="/workbench/" hidden>WorkBench</a>
           <a class="hm-item hm-account" role="menuitem" data-head-account href="/account/" hidden>Account</a>
           <button class="hm-item" role="menuitem" type="button" data-open="workspace.html">My workspace</button>
           <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=post">My articles</button>
@@ -200,10 +202,12 @@ const nav = [
   function setMenuMode(mode) {
     const dl = headMenu?.querySelector('.hm-download');
     const account = headMenu?.querySelector('[data-head-account]');
+    const workbench = headMenu?.querySelector('[data-head-workbench]'); // sow-158 Phase 3a: web-mode authoring entry
     const signout = headMenu?.querySelector('[data-head-signout]');
     headMenu?.querySelectorAll('[data-open]').forEach((el) => { el.hidden = mode !== 'extension'; });
     if (dl) dl.hidden = mode !== 'hint';
     if (account) account.hidden = mode !== 'web';
+    if (workbench) workbench.hidden = mode !== 'web';
     if (signout) signout.hidden = mode === 'hint'; // web + extension both show Sign out
   }
   function applyHeaderIdentity(s) {

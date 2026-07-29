@@ -60,6 +60,22 @@ test('SOW-016: the members-only marker leaking into dist fails the build', () =>
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('sow-158 Phase 3a: the members-only marker in an app bundle (.js) is CODE, not a content leak', () => {
+  const root = tmpRoot();
+  // The client-ui authoring bundle (now part of the site build) references the marker as a string literal in
+  // the editor cheatsheet + the WorkBench adapter's split detection. That is code, never rendered content.
+  fs.writeFileSync(path.join(root, 'dist/_astro/gbti-workspace.abc123.js'), 'const MEM_MARKER="<!-- members-only -->";export{MEM_MARKER};');
+  fs.writeFileSync(path.join(root, 'dist/_astro/style.def456.css'), '/* teach the marker: <!-- members-only --> */');
+  const clean = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(clean.errors, [], 'a .js/.css bundle referencing the marker must not trip the content scan: ' + clean.errors.join('; '));
+  // But a RENDERED page still leaking the marker fails (the guard keeps its power over content output).
+  fs.mkdirSync(path.join(root, 'dist/blog/leaky2'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dist/blog/leaky2/index.html'), '<article>teaser <!-- members-only --> gated tail</article>');
+  const leaked = checkBuildSecrets({ root, env: {} });
+  assert.ok(leaked.errors.some((e) => /members-only marker leaked/.test(e)), leaked.errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('SOW-016: a Mode A item with a public page in dist fails the build', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, 'house/posts/secret'), { recursive: true });

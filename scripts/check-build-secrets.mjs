@@ -53,8 +53,13 @@ export function checkBuildSecrets({ root, distDir = path.join(root, 'dist'), env
         errors.push(`an inlined MEMBER_CONTENT_KEY assignment appears in: ${rel}`);
       }
       // SOW-016: the `<!-- members-only -->` marker is stripped at publish (the gated tail goes to the .enc),
-      // so it must NEVER reach the build output. Its presence means a publish leaked the gated section.
-      if (txt.includes('<!-- members-only -->')) {
+      // so it must NEVER reach RENDERED build output. Its presence there means a publish leaked the gated
+      // section. sow-158 Phase 3a: the client-ui authoring bundle is now part of the site build, and it
+      // references this marker as CODE (the editor's markdown cheatsheet + the WorkBench adapter's split
+      // detection), so exclude application bundles (.js/.css/.map) from this CONTENT-leak scan — a genuine
+      // leak surfaces in a rendered .html page or a content .json, never in an app chunk. The known-value +
+      // MEMBER_CONTENT_KEY scans above still cover every file type, including these bundles.
+      if (!/\.(js|css|map)$/i.test(f) && txt.includes('<!-- members-only -->')) {
         errors.push(`the members-only marker leaked into build output: ${rel} (a publish failed to split the body; the gated section may be exposed). See SOW-016.`);
       }
     }

@@ -1,0 +1,77 @@
+---
+// sow-158 Phase 3a: the website WorkBench. A signed-in member authors + publishes their own content here with
+// NO browser extension and NO GitHub token in the page. It embeds the SAME client-ui authoring surface the
+// extension uses (<gbti-lock-gate><gbti-workspace>), wired to a cookie-session adapter (src/lib/workbench-client)
+// that publishes through the SOW-156/157 hosted-authoring path (the Worker commits with GBTI's App installation
+// token; the SOW-005 gate is the only merger). noindex: this is a private authoring app, not a content page.
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+<BaseLayout title="WorkBench" description="Author and publish your GBTI Network content." noindex={true}>
+  <section class="band wb-band">
+    <div class="wrap wb-wrap">
+      <div class="wb-head">
+        <h1 class="h1">WorkBench</h1>
+        <p class="lead">Write, save, and publish your articles, prompts, and products. Publishing opens a pull request that auto-merges, then the site rebuilds, so a change reaches the live edge in about 2 to 3 minutes.</p>
+      </div>
+      <div data-wb-loading class="wb-loading">Loading your WorkBench&hellip;</div>
+      <gbti-lock-gate><gbti-workspace></gbti-workspace></gbti-lock-gate>
+    </div>
+  </section>
+
+  <script>
+    // The page is a gated authoring app: resolve the signed-in member AUTHORITATIVELY from the httpOnly-cookie
+    // session (the Worker's /membership/status oracle, credentialed) before loading the ~large client-ui bundle.
+    // A signed-out visitor (no session, or an invalid one) is redirected to /login and the bundle never loads.
+    const RETURN_TO = '/login/?return_to=%2Fworkbench%2F';
+    function readCookie(name: string): string | null {
+      for (const part of document.cookie.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+      }
+      return null;
+    }
+
+    async function mount(login: string, githubId: string | null) {
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      // Lazy + page-scoped: the adapter and the client-ui bundle load ONLY here, ONLY for a signed-in member.
+      const { createWorkbenchClient } = await import('../lib/workbench-client');
+      const { setClient } = await import('../../client-ui/src/base.mjs');
+      const adapter = createWorkbenchClient({ signupBase, login, githubId });
+      // Set the client BEFORE the elements upgrade, so <gbti-lock-gate>'s one-shot connectedCallback checks
+      // membership with the client already present (it does not re-check on the setClient fan-out).
+      setClient(adapter);
+      document.querySelector('[data-wb-loading]')?.setAttribute('hidden', '');
+      // Importing the element modules defines the custom elements, upgrading the static tags. <gbti-workspace>
+      // re-renders on the setClient SUBSCRIBERS fan-out; the client-ready race is handled in base.mjs.
+      await Promise.all([
+        import('../../client-ui/src/elements/gbti-lock-gate.mjs'),
+        import('../../client-ui/src/elements/gbti-workspace.mjs'),
+      ]);
+    }
+
+    (async () => {
+      // Cheap gate: no readable gbti_csrf means no web session at all -> straight to sign-in (no network).
+      if (!readCookie('gbti_csrf')) { location.replace(RETURN_TO); return; }
+      const base = document.documentElement.dataset.signupBase || '';
+      let payload: any = null;
+      try {
+        const res = await fetch(base + '/membership/status', { credentials: 'include' });
+        payload = res.ok ? await res.json() : null;
+      } catch { payload = null; }
+      if (payload && payload.ok === true && payload.login) {
+        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      } else {
+        // A missing/invalid session (e.g. a stale csrf cookie): fail closed to sign-in.
+        location.replace(RETURN_TO);
+      }
+    })();
+  </script>
+
+  <style>
+    .wb-wrap { max-width: 1200px; }
+    .wb-head { margin-bottom: 22px; }
+    .wb-head .lead { max-width: 720px; }
+    .wb-loading { color: var(--fg-mute); padding: 24px 2px; font-size: 15px; }
+    .wb-loading[hidden] { display: none; }
+  </style>
+</BaseLayout>
