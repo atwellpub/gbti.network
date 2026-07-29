@@ -29,18 +29,21 @@ const benefitsUrl = '/membership/';
       <p class="body-sm muted mt12" style="font-size:12.5px"><a href={benefitsUrl}>Read about member benefits</a></p>
     </div>
 
-    {/* Extension installed: a page cannot open the extension popup, so guide the user to the toolbar. */}
+    {/* Extension installed. sow-158 Phase 2 residual fix: web sign-in stays the PRIMARY path even here (it sets the
+        httpOnly session the WorkBench + web member experience need; the extension's own sign-in sets only the
+        display-only identity signal, not that cookie). The extension popup cannot be opened from a page, so its
+        sign-in is offered as a secondary "edit in place" route via the toolbar icon. */}
     <div data-state="present" hidden>
-      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-check"/></svg></span>
-      <h2 class="h3 mt12">The extension is installed</h2>
-      <p class="body-sm muted mt8">Click the GBTI icon in your browser toolbar to sign in, then edit and publish your work in place.</p>
+      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-github"/></svg></span>
+      <h2 class="h3 mt12">Sign in to GBTI Network</h2>
+      <p class="body-sm muted mt8">Sign in on the web to use your WorkBench and browse as a member. The GBTI extension is installed too: click its icon in your browser toolbar to also edit and publish your work in place.</p>
       <div class="signin-actions mt20">
+        <a class="btn btn-primary" href="/login/" data-web-signin>Sign in on the web</a>
         {/* owner QA 2026-07-22: pages that declare a reader hash (data-gbti-reader-hash on their shell)
             get a direct open-in-the-extension action, so likes/saves route the member to the page's
             in-extension view instead of a dead end. Hidden when the page declares none. */}
-        <button type="button" class="btn btn-primary" data-open-in-extension hidden>Open this page in the extension</button>
+        <button type="button" class="btn btn-ghost" data-open-in-extension hidden>Open this page in the extension</button>
         <a class="btn btn-ghost" href={benefitsUrl}>Member benefits</a>
-        <button type="button" class="btn btn-ghost" data-close>Got it</button>
       </div>
     </div>
   </div>
@@ -71,12 +74,11 @@ const benefitsUrl = '/membership/';
         e.preventDefault();
         sync();
         // sow-158 Phase 2: carry the current path into the web sign-in link so login returns the member here (the
-        // Worker re-validates return_to to a same-site path). Omit it when already on /login.
-        const web = dialog.querySelector('[data-web-signin]') as HTMLAnchorElement | null;
-        if (web) {
-          const rt = location.pathname + location.search + location.hash;
-          web.href = location.pathname.startsWith('/login') ? '/login/' : ('/login/?return_to=' + encodeURIComponent(rt));
-        }
+        // Worker re-validates return_to to a same-site path). Omit it when already on /login. Both the absent AND
+        // the present (extension-installed) states carry a [data-web-signin], so update every one.
+        const rt = location.pathname + location.search + location.hash;
+        const href = location.pathname.startsWith('/login') ? '/login/' : ('/login/?return_to=' + encodeURIComponent(rt));
+        dialog.querySelectorAll('[data-web-signin]').forEach((el) => { (el as HTMLAnchorElement).href = href; });
         // owner QA 2026-07-22: surface the open-in-extension action when the page declares a reader hash.
         const openBtn = dialog.querySelector('[data-open-in-extension]') as HTMLElement | null;
         const readerHash = document.querySelector('[data-gbti-reader-hash]')?.getAttribute('data-gbti-reader-hash') || '';
