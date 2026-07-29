@@ -29,8 +29,30 @@ test('verifies the token -> github_id and returns the Stripe-derived status (can
     makeStripe: () => ({ findCustomerByGithubId: async () => paidCustomer }),
   });
   assert.equal(r.status, 200);
-  // No SIGNUP_KV on ENV -> readCanCurate fails closed to false; the status itself is unaffected.
-  assert.deepEqual(r.body, { ok: true, github_id: '1', login: 'alice', status: 'paid', canCurate: false, couponUntil: null }); // SOW-119 QA: the grant end date field (null for Stripe-paid)
+  // No SIGNUP_KV on ENV -> readCanCurate fails closed to false + no overrides mirror, so effectiveStatus == status
+  // and role defaults to 'member'; the Stripe-derived status itself is unaffected. (sow-158: effectiveStatus + role
+  // are additive fields the static site reads.)
+  assert.deepEqual(r.body, { ok: true, github_id: '1', login: 'alice', status: 'paid', effectiveStatus: 'paid', role: 'member', canCurate: false, couponUntil: null });
+});
+
+test('sow-158: folds staff into effectiveStatus + returns the role (a superadmin with NO Stripe sub reads as paid)', async () => {
+  const now = new Date('2026-06-18T00:00:00Z');
+  const mirror = {
+    generatedAt: new Date(now.getTime() - 60_000).toISOString(),
+    bans: { bans: [] },
+    roles: { superadmins: [{ github_id: '5' }], admins: [], moderators: [], curators: [] },
+    grandfathered: { grandfathered: [] },
+  };
+  const env = { STRIPE_SECRET_KEY: 'rk_test', SIGNUP_KV: { get: async () => mirror } };
+  const r = await membershipStatus(req('Bearer good'), env, {
+    fetchUser: async () => ({ githubId: '5', githubLogin: 'sam' }),
+    makeStripe: () => ({ findCustomerByGithubId: async () => null }), // no Stripe sub -> Stripe status 'none'
+    now,
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, 'none', 'the raw Stripe-derived status stays none (the extension folds its own overrides)');
+  assert.equal(r.body.effectiveStatus, 'paid', 'staff fold: ban>staff>grandfather>Stripe makes a superadmin paid-equivalent');
+  assert.equal(r.body.role, 'superadmin', 'the resolved role lets the site reveal Admin tools on the cookie session');
 });
 
 test('SOW-046 C: canCurate is true for a roles.yml curator (read from the fresh KV overrides mirror)', async () => {

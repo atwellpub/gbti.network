@@ -59,20 +59,20 @@ const nav = [
           <div class="hm-sep" role="separator"></div>
           {/* SOW: shown only in the hint-only state (signed up, extension not installed yet) -> nudge the download. */}
           <a class="hm-item hm-download" role="menuitem" href="/extension/" hidden>Get the extension to continue &rarr;</a>
-          {/* sow-158 Phase 2/3a: shown in the WEB menu mode (a cookie session with no extension) -> the account page
-              and the website WorkBench (author + publish with no extension). */}
-          <a class="hm-item hm-workbench" role="menuitem" data-head-workbench href="/workbench/" hidden>WorkBench</a>
-          <a class="hm-item hm-account" role="menuitem" data-head-account href="/account/" hidden>Account</a>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html">My workspace</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=post">My articles</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=prompt">My prompts</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=product">My products</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=prs">My pull requests</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=saved">Saved</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="workspace.html" data-hash="tab=subs">Subscriptions</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="newtab.html">Browse the network</button>
-          <button class="hm-item" role="menuitem" type="button" data-open="account.html">Settings</button>
-          <button class="hm-item hm-admin" role="menuitem" type="button" data-open="admin.html" data-role-min hidden>Admin tools</button>
+          {/* sow-158: the signed-in member menu is now SITE-native (no extension relay). Every item is a site link;
+              the WorkBench honors #tab= deep-links (Phase 3a/3b). Shown in the 'member' menu mode (a resolved cookie
+              OR extension signal). The extension keeps its OWN avatar menu for in-place editing; the public site no
+              longer relays actions to it. Admin tools -> a /admin stub until the site admin surface lands (sow-161). */}
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/" hidden>My workspace</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=post" hidden>My articles</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=prompt" hidden>My prompts</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=product" hidden>My products</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=prs" hidden>My pull requests</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=saved" hidden>Saved</a>
+          <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=subs" hidden>Following</a>
+          <a class="hm-item hm-member" role="menuitem" href="/feeds/" hidden>Browse the network</a>
+          <a class="hm-item hm-member" role="menuitem" href="/account/" hidden>Account</a>
+          <a class="hm-item hm-member hm-admin" role="menuitem" href="/admin/" hidden>Admin tools</a>
           <div class="hm-sep" role="separator"></div>
           <button class="hm-item hm-signout" role="menuitem" type="button" data-head-signout>Sign out</button>
         </div>
@@ -190,25 +190,19 @@ const nav = [
     } catch { /* no storage */ }
     return login ? { login, hintOnly: true } : null;
   }
-  // sow-158 Phase 2: the menu has three modes. 'hint' = signed up, no extension, cookie unresolved -> nudge the
-  // download. 'web' = a cookie session with NO extension installed -> a real /account link + web Sign out (the
-  // extension-relay items are dead without the extension, so hide them). 'extension' = the extension is present ->
-  // its relay items + Sign out (unchanged; a cookie session with the extension also present keeps the relay menu).
+  // sow-158: two menu modes now. 'hint' = signed up via the signup redirect but no resolved session yet (the
+  // display-only ?u= hint) -> nudge the download, no member actions. 'member' = a resolved cookie OR extension
+  // signal -> the SITE-native member menu (WorkBench tabs, feeds, account, admin-if-staff). The web/extension split
+  // is gone: the site items work regardless of the extension (they need the cookie session, which web sign-in sets).
   function menuModeFor(eff) {
-    if (eff && eff.hintOnly) return 'hint';
-    if (eff && eff.source === 'cookie' && !document.documentElement.dataset.gbtiExtension) return 'web';
-    return 'extension';
+    return (eff && eff.hintOnly) ? 'hint' : 'member';
   }
   function setMenuMode(mode) {
     const dl = headMenu?.querySelector('.hm-download');
-    const account = headMenu?.querySelector('[data-head-account]');
-    const workbench = headMenu?.querySelector('[data-head-workbench]'); // sow-158 Phase 3a: web-mode authoring entry
     const signout = headMenu?.querySelector('[data-head-signout]');
-    headMenu?.querySelectorAll('[data-open]').forEach((el) => { el.hidden = mode !== 'extension'; });
     if (dl) dl.hidden = mode !== 'hint';
-    if (account) account.hidden = mode !== 'web';
-    if (workbench) workbench.hidden = mode !== 'web';
-    if (signout) signout.hidden = mode === 'hint'; // web + extension both show Sign out
+    headMenu?.querySelectorAll('.hm-member').forEach((el) => { el.hidden = mode !== 'member'; });
+    if (signout) signout.hidden = mode === 'hint'; // a member shows Sign out; the display-only hint does not
   }
   function applyHeaderIdentity(s) {
     if (!wrap || !signin) return;
@@ -219,8 +213,8 @@ const nav = [
       if (meName) meName.textContent = '@' + login;
       if (meAv) { meAv.src = 'https://github.com/' + encodeURIComponent(login) + '.png?size=52'; meAv.alt = '@' + login; }
       if (meProfile) meProfile.href = '/members/' + encodeURIComponent(folder) + '/';
-      if (adminItem) adminItem.hidden = (RANK[eff.role] ?? 0) < RANK.moderator;
-      setMenuMode(menuModeFor(eff));
+      setMenuMode(menuModeFor(eff)); // reveals the .hm-member items in member mode...
+      if (adminItem) adminItem.hidden = (RANK[eff.role] ?? 0) < RANK.moderator; // ...then the role gate hides Admin for non-staff (must run AFTER setMenuMode)
       wrap.hidden = false;
       signin.style.display = 'none';
     } else {
@@ -241,14 +235,9 @@ const nav = [
   document.addEventListener('click', (e) => { if (!headMenu?.hidden && !wrap?.contains(e.target)) closeMenu(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !headMenu?.hidden) { closeMenu(); me?.focus(); } });
 
-  // Management items: relay to the extension (which opens the in-extension page in a new tab). The plain-link
-  // items (My profile) navigate the site normally and are not handled here.
-  headMenu?.querySelectorAll('[data-open]').forEach((b) => {
-    b.addEventListener('click', () => {
-      document.dispatchEvent(new CustomEvent('gbti:open', { detail: { page: b.dataset.open, hash: b.dataset.hash || '' } }));
-      closeMenu();
-    });
-  });
+  // sow-158: the menu items are now plain SITE links (no extension relay). Close the dropdown when one is chosen so a
+  // same-page hash link (e.g. /workbench/#tab=post from /workbench) does not leave the menu open.
+  headMenu?.querySelectorAll('.hm-item').forEach((b) => b.addEventListener('click', () => { if (b.getAttribute('data-head-signout') === null) closeMenu(); }));
   // sow-158 Phase 2: sign out of BOTH sessions -- dispatch the extension signout (clears its token if installed)
   // AND clear the httpOnly cookie session via the Worker (no-op when there is no web session), then reload so the
   // page re-hydrates signed-out. Both are idempotent/harmless when the respective session is absent.

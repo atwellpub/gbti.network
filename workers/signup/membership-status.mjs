@@ -80,7 +80,14 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
     }
   }
   const canCurate = computeCanCurate(mirror, githubId); // SOW-046 C: UI hint only; the Worker re-checks on publish
-  // SOW-061: record the EFFECTIVE tier bucket (ban > staff > grandfather > Stripe), so the cohort matches the gate.
-  recordUsage(env, { tier: usageBucket(status, { githubId, overrides: overridesFromMirror(mirror), now }), event: 'status_check', request });
-  return { status: 200, body: { ok: true, github_id: githubId, login: login || null, status, canCurate, couponUntil } };
+  // SOW-061 + sow-158: compute the EFFECTIVE tier (ban > staff > grandfather > Stripe) ONCE, reused for the
+  // analytics cohort AND the response. The STATIC SITE cannot read the overrides mirror, so it cannot fold staff/
+  // grandfather itself (the extension/npm hosts do); returning effectiveStatus + role lets the site label + gate
+  // (e.g. show Admin tools to a superadmin, show "Paid member" for staff) correctly. `status` stays Stripe-derived
+  // so the extension/npm keep folding their own local overrides — this is purely additive.
+  const overrides = overridesFromMirror(mirror);
+  const effectiveStatus = usageBucket(status, { githubId, overrides, now });
+  const role = roleOf(githubId, overrides?.roles ?? new Map());
+  recordUsage(env, { tier: effectiveStatus, event: 'status_check', request });
+  return { status: 200, body: { ok: true, github_id: githubId, login: login || null, status, effectiveStatus, role, canCurate, couponUntil } };
 }

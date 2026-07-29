@@ -25,6 +25,21 @@ test('memberSignalFromStatus reflects trialing/expired without paid perks', () =
   assert.equal(e.canPublish, false);
 });
 
+// sow-158 follow-up: the oracle now returns effectiveStatus (staff/grandfather folded) + role, which the static
+// site cannot derive itself. The signal must prefer them so a superadmin shows as paid + reveals Admin tools.
+test('memberSignalFromStatus prefers effectiveStatus + role (a staff superadmin with Stripe status none)', () => {
+  const s = memberSignalFromStatus({ ok: true, login: 'sam', github_id: 5, status: 'none', effectiveStatus: 'paid', role: 'superadmin' });
+  assert.equal(s.membership, 'paid', 'the folded effectiveStatus wins over the raw Stripe status');
+  assert.equal(s.canPublish, true);
+  assert.equal(s.role, 'superadmin', 'the resolved role drives the header admin-item gate');
+});
+
+test('memberSignalFromStatus falls back to status + member for an older Worker (no effectiveStatus/role)', () => {
+  const s = memberSignalFromStatus({ ok: true, login: 'a', status: 'paid' });
+  assert.equal(s.membership, 'paid');
+  assert.equal(s.role, 'member');
+});
+
 test('memberSignalFromStatus returns null for a non-member payload', () => {
   assert.equal(memberSignalFromStatus(null), null);
   assert.equal(memberSignalFromStatus({ ok: false }), null);

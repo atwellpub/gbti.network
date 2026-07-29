@@ -10,15 +10,20 @@
  */
 export function memberSignalFromStatus(payload) {
   if (!payload || payload.ok !== true || !payload.login) return null;
-  const status = typeof payload.status === 'string' ? payload.status : 'unknown';
+  // sow-158 follow-up: prefer the EFFECTIVE status (the oracle folds ban > staff > grandfather > Stripe, which the
+  // static site cannot do itself) and the resolved ROLE, both added to /membership/status. Fall back to the raw
+  // Stripe `status` + 'member' for an older Worker. This drives the correct membership label AND lets the header
+  // reveal role-gated items (e.g. Admin tools) to a superadmin on the cookie session.
+  const membership = typeof payload.effectiveStatus === 'string' ? payload.effectiveStatus
+    : (typeof payload.status === 'string' ? payload.status : 'unknown');
   return {
     authenticated: true,
     login: String(payload.login),
     githubId: payload.github_id != null ? String(payload.github_id) : null,
     username: String(payload.login),
-    role: 'member',
-    membership: status,
-    canPublish: status === 'paid',
+    role: typeof payload.role === 'string' && payload.role ? payload.role : 'member',
+    membership,
+    canPublish: membership === 'paid',
     source: 'cookie',
   };
 }
