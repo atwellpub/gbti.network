@@ -22790,6 +22790,11 @@ async function handleLogin(store) {
     store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null });
   } catch {
   }
+  try {
+    await chrome.storage?.session?.set?.({ webSessionMinted: true });
+  } catch {
+  }
+  mintWebSession(accessToken);
   return { ok: true, login: u.login };
 }
 async function refreshViaWorker(refreshToken) {
@@ -22800,6 +22805,28 @@ async function refreshViaWorker(refreshToken) {
   });
   if (!res.ok) throw new Error(`refresh failed: ${res.status}`);
   return res.json();
+}
+async function mintWebSession(token) {
+  if (!token) return;
+  try {
+    await fetch(`${SIGNUP_BASE2}/auth/session-from-token`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  } catch {
+  }
+}
+async function maybeMintWebSession(store) {
+  try {
+    const token = store.get("githubToken");
+    if (!token) return;
+    const { webSessionMinted } = await chrome.storage?.session?.get?.("webSessionMinted") ?? {};
+    if (webSessionMinted) return;
+    await chrome.storage?.session?.set?.({ webSessionMinted: true });
+    await mintWebSession(token);
+  } catch {
+  }
 }
 var _refreshing = null;
 async function ensureFreshToken(store) {
@@ -22867,6 +22894,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       if (msg?.type === "api") {
         await ensureFreshToken(store);
+        maybeMintWebSession(store);
         sendResponse(await dispatch(buildExtContext(store), msg.req || {}));
       } else if (msg?.type === "login") {
         const res = await handleLogin(store);
@@ -22881,6 +22909,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const all = await chrome.storage.local.get(null);
           const keys = Object.keys(all || {}).filter((k) => k.startsWith("gbti:wb:") || k === "gbti:create-recent");
           if (keys.length) await chrome.storage.local.remove(keys);
+        } catch {
+        }
+        try {
+          await chrome.storage?.session?.remove?.("webSessionMinted");
         } catch {
         }
         broadcastAuthChanged();

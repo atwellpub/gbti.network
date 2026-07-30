@@ -84,6 +84,10 @@ async function handleLogin(store) {
   } catch {
     // leave membership unset (treated as 'unknown')
   }
+  // sow-158: also sign the member into gbti.network (mint the cookie session from this fresh token). Fire-and-forget;
+  // reset the once-per-session stamp so maybeMintWebSession will re-mint later if this call did not land.
+  try { await chrome.storage?.session?.set?.({ webSessionMinted: true }); } catch { /* best-effort */ }
+  mintWebSession(accessToken);
   return { ok: true, login: u.login };
 }
 
@@ -97,6 +101,36 @@ async function refreshViaWorker(refreshToken) {
   });
   if (!res.ok) throw new Error(`refresh failed: ${res.status}`);
   return res.json();
+}
+
+// sow-158 auth bridge: mint the gbti.network httpOnly cookie session from this member's verified token, so ONE
+// extension sign-in also signs them in on the website (WorkBench / News / account) with no separate web sign-in.
+// Bearer-authenticated -> their OWN session (no new capability). Best-effort + fire-and-forget: a failure is
+// non-fatal (web sign-in stays available). credentials:'include' so the browser stores the Set-Cookies in the
+// shared cookie jar the gbti.network page reads. The token is sent to the SAME Worker that already holds it.
+async function mintWebSession(token) {
+  if (!token) return;
+  try {
+    await fetch(`${SIGNUP_BASE}/auth/session-from-token`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch { /* non-fatal: the web can always sign in directly */ }
+}
+
+// Opportunistic mint: once per browser session, so an EXISTING signed-in member (who signed in before this shipped)
+// gets a website session without re-signing-in. chrome.storage.session clears when the browser closes, so this
+// re-mints roughly once per browser run (idempotent + rate-limited server-side).
+async function maybeMintWebSession(store) {
+  try {
+    const token = store.get('githubToken');
+    if (!token) return;
+    const { webSessionMinted } = (await chrome.storage?.session?.get?.('webSessionMinted')) ?? {};
+    if (webSessionMinted) return;
+    await chrome.storage?.session?.set?.({ webSessionMinted: true });
+    await mintWebSession(token);
+  } catch { /* best-effort */ }
 }
 
 // Single-flight proactive refresh: when the access token is at/near expiry, swap in a fresh one BEFORE the request
@@ -172,6 +206,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       if (msg?.type === 'api') {
         await ensureFreshToken(store); // SOW: refresh an about-to-expire token before the request reads GitHub
+        maybeMintWebSession(store); // sow-158: opportunistic once-per-session website sign-in (fire-and-forget)
         sendResponse(await dispatch(buildExtContext(store), msg.req || {}));
       } else if (msg?.type === 'login') {
         const res = await handleLogin(store);
@@ -188,6 +223,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const keys = Object.keys(all || {}).filter((k) => k.startsWith('gbti:wb:') || k === 'gbti:create-recent');
           if (keys.length) await chrome.storage.local.remove(keys);
         } catch { /* storage unavailable: best-effort */ }
+        // sow-158: clear the once-per-session mint stamp so a later re-sign-in re-mints the website session. (The
+        // extension does not clear the website cookie itself; the web Sign out + the 30-day TTL end it — v1 note.)
+        try { await chrome.storage?.session?.remove?.('webSessionMinted'); } catch { /* best-effort */ }
         broadcastAuthChanged();
         sendResponse({ ok: true });
       } else if (msg?.type === 'open-page') {

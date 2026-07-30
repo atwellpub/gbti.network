@@ -592,6 +592,34 @@ export default {
         }
       }
 
+      // sow-158: mint the website cookie session from the extension's ALREADY-verified GitHub token, so ONE sign-in
+      // (in the extension) also signs the member into gbti.network — no separate web sign-in. Bearer-authenticated:
+      // the token already authorizes every member endpoint AS that member, so minting THEIR OWN session grants no
+      // new capability (exactly what the OAuth callback does after verifying a token, minus the redirect). No
+      // cookie/CSRF gate (a cross-site page cannot forge a bearer token); the extension calls this via a host
+      // permission fetch. Rate-limited; never returns the token.
+      if (pathname === '/auth/session-from-token') {
+        const cors = corsHeaders(request, env, { credentials: true, methods: 'POST, OPTIONS' });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'POST') {
+          const authHeader = request.headers.get('Authorization') || '';
+          const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+          if (!token) return json({ error: 'unauthorized' }, 401, { ...cors, 'Cache-Control': 'no-store' });
+          const ip = request.headers.get('CF-Connecting-IP') || '';
+          const rl = await rateLimit({ kv: env.SIGNUP_KV, ip, limit: 30, windowSeconds: 600, prefix: 'rl:session-mint:' });
+          if (!rl.allowed) return json({ error: 'rate_limited' }, 429, { ...cors, 'Cache-Control': 'no-store' });
+          if (!env.SESSION_SECRET) return json({ error: 'misconfigured', message: 'sessions are not configured' }, 500, { ...cors, 'Cache-Control': 'no-store' });
+          let id = null;
+          try { id = await githubFetchUser(token, globalThis.fetch); } catch { id = null; }
+          if (!id || !id.githubId) return json({ error: 'unauthorized', message: 'could not verify the member identity' }, 401, { ...cors, 'Cache-Control': 'no-store' });
+          const session = await signSession({ githubId: id.githubId, githubLogin: id.githubLogin }, env.SESSION_SECRET);
+          return json({ ok: true, github_id: String(id.githubId), login: id.githubLogin || null }, 200, { ...cors, 'Cache-Control': 'no-store' }, [
+            sessionCookieHeader(session),
+            csrfCookieHeader(generateCsrfToken(), { domain: env.COOKIE_DOMAIN }),
+          ]);
+        }
+      }
+
       if (method === 'GET' && pathname === '/signup/start') return await handleStart(request, env);
       if (method === 'GET' && pathname === '/signup/github/callback') return await handleGithubCallback(request, env);
       if (method === 'GET' && pathname === '/signup/discord/callback') return await handleDiscordCallback(request, env);

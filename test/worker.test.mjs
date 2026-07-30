@@ -607,6 +607,44 @@ test('sow-158: OPTIONS /membership/status reflects an allow-listed Origin with c
   assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null);
 });
 
+// sow-158 auth bridge: mint the website cookie session from the extension's already-verified GitHub token, so one
+// extension sign-in also signs the member into gbti.network. Bearer-authenticated; token -> own-session (no escalation).
+test('sow-158: POST /auth/session-from-token mints the session + Domain-csrf cookies from a verified bearer', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test', COOKIE_DOMAIN: 'gbti.test' });
+  await withFetch(
+    (url) => (url.includes('api.github.com/user') ? { status: 200, body: { id: 42, login: 'octocat' } } : { status: 200, body: '' }),
+    async () => {
+      const res = await worker.fetch(req('POST', '/auth/session-from-token', { headers: { Authorization: 'Bearer good', Origin: 'https://gbti.test', 'CF-Connecting-IP': '1.2.3.4' } }), env, {});
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.github_id, '42');
+      assert.equal(body.login, 'octocat');
+      assert.ok(!JSON.stringify(body).includes('good'), 'the token is never echoed back');
+      const cookies = res.headers.getSetCookie();
+      assert.ok(cookies.some((c) => c.startsWith('gbti_session=') && /HttpOnly/.test(c) && !/Domain=/.test(c)), 'a host-only httpOnly session cookie is set');
+      assert.ok(cookies.some((c) => c.startsWith('gbti_csrf=') && /Domain=gbti\.test/.test(c) && !/HttpOnly/.test(c)), 'a readable Domain-scoped csrf cookie is set');
+      assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://gbti.test', 'credentialed CORS reflects the allow-listed origin');
+      assert.equal(res.headers.get('Access-Control-Allow-Credentials'), 'true');
+    },
+  );
+});
+
+test('sow-158: /auth/session-from-token 401s with no bearer or an unverifiable token, minting no cookie', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const noAuth = await worker.fetch(req('POST', '/auth/session-from-token', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.equal(noAuth.status, 401);
+  assert.equal(noAuth.headers.getSetCookie().length, 0);
+  await withFetch(
+    (url) => (url.includes('api.github.com/user') ? { status: 401, body: 'bad creds' } : { status: 200, body: '' }),
+    async () => {
+      const res = await worker.fetch(req('POST', '/auth/session-from-token', { headers: { Authorization: 'Bearer bad', Origin: 'https://gbti.test', 'CF-Connecting-IP': '1.2.3.5' } }), env, {});
+      assert.equal(res.status, 401);
+      assert.equal(res.headers.getSetCookie().length, 0, 'no session is minted on an unverifiable token');
+    },
+  );
+});
+
 // sow-158 News track: the news read + engagement routes are now cookie-readable (credentialed reflected-origin
 // CORS), so the website /news mount can call them with the session cookie. news-publish stays bearer-only (curator).
 test('sow-158 News: news routes reflect an allow-listed Origin with credentials; news-publish stays wildcard', async () => {
