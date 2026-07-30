@@ -17,7 +17,7 @@ tags:
   - planning
   - workflow
 publishedAt: '2026-07-30T19:37:31.690Z'
-updatedAt: '2026-07-30T21:12:09.922Z'
+updatedAt: '2026-07-30T21:13:53.606Z'
 status: published
 type: prompt
 author: atwellpub
@@ -25,9 +25,11 @@ author: atwellpub
 
 Claude Code loads any markdown file at `.claude/skills/<name>/SKILL.md` as a reusable slash command (a "skill"). This one gives your agent a `/qa` command that stops before it builds, pulls every unresolved decision into a single batch of questions, and refuses to write code until you have answered them.
 
-It exists because of a specific failure mode. An agent handed an ambiguous task does not stop. It picks, quietly, and the pick is invisible until the work is done and wrong. The expensive part is never the coding, it is discovering three files later that the agent assumed a different scope, a different storage location, or a different tier of user than you meant. `/qa` inverts that: the assumptions surface as questions, at the front, while changing your mind is still free.
+It exists because open questions have a habit of surfacing at the wrong end of the work. A sprint finishes, and only then does the agent raise the decisions it should have raised at the start, at exactly the point where acting on them means redoing something.
 
-The mechanism it leans on is plan mode. The agent puts ITSELF into a read-only state, does its research there, asks everything it found, and only then acts. That ordering is the whole feature.
+The obvious fix is a standing instruction: a line in your memory or project file telling the agent to take any decision that is yours into plan mode and ask first. In practice that is a weak trigger. It fires when the agent happens to notice, which is not the same as reliably, and the sessions where it does not fire are the ones that cost you. An explicit command is a strong trigger, because you pull it.
+
+So the mechanism is plan mode, invoked deliberately. The agent puts ITSELF into a read-only state, does its research there, asks everything it found in one batch, and only then acts. That ordering is the whole feature.
 
 ## Install
 
