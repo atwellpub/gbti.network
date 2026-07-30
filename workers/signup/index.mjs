@@ -891,10 +891,13 @@ export default {
       // SOW-126: the member-content detail-open engagement beacon (tallies distinct openers per item; the
       // reconcile promotes a `popular` item past the threshold). Mirrors the news beacon, minus the auto-post.
       if (pathname === '/membership/content-opened') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        // sow-158: cookie-enabled so the website /browse reader fires the open beacon over the session cookie
+        // (credentialed reflected-origin CORS + allowCookie). The extension keeps its bearer path (also allowed).
+        const cors = corsHeaders(request, env, { credentials: true, methods: 'POST, OPTIONS' });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await membershipContentOpened(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipContentOpened(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 

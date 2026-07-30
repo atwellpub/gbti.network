@@ -60,6 +60,14 @@ test('a disabled config, opens-signal off, or off-tier member is a clean no-op (
   assert.equal(paidOnly.store.has('content-opens:post:p'), false); // no KV write
 });
 
+test('sow-158: the allowCookie option is threaded to authorize (the website /browse reader path)', async () => {
+  const kv = fakeKv({ 'synd:config': CONFIG() });
+  let seenAllowCookie;
+  const spy = async (_req, _env, deps) => { seenAllowCookie = deps?.allowCookie; return { ok: true, githubId: '1', login: 'u1', status: 'paid' }; };
+  await membershipContentOpened(req({ type: 'post', slug: 'p' }), {}, { authorize: spy, kv, now: () => 1, allowCookie: true });
+  assert.equal(seenAllowCookie, true, 'allowCookie flows to the authorizer so the cookie session is accepted');
+});
+
 test('a banned/denied member never writes; a bad type or slug 400s', async () => {
   const kv = fakeKv({ 'synd:config': CONFIG() });
   const rBan = await membershipContentOpened(req({ type: 'post', slug: 'p' }), {}, { authorize: denied, kv, now: () => 1 });

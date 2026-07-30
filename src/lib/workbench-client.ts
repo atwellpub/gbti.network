@@ -428,6 +428,9 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // Best-effort engagement beacons (the reader ignores their failures); cookie POST -> CSRF via workerPost.
     newsOpened({ guid, source }: any = {}) { return workerPost('/membership/news-opened', { guid, ...(source ? { source } : {}) }); },
     newsDiscussed({ guid, source }: any = {}) { return workerPost('/membership/news-discussed', { guid, ...(source ? { source } : {}) }); },
+    // SOW-126 engagement beacon, positional (type, slug) to match the extension client. Best-effort: the reader
+    // wraps it in a .catch, and the Worker 200-no-ops off-tier, so a signed-out/off-tier open never surfaces.
+    contentOpened(type: string, slug: string) { return workerPost('/membership/content-opened', { type, slug }); },
     // Curator "Add to Discord" stays extension-only for now (news-publish is bearer/curator-gated). status() keeps
     // canCurate false on the web, so <gbti-news> never renders the button; this typed refusal is a defensive stop.
     publishNews() { throw err('curator-extension-only', 'Publishing news to Discord is available in the browser extension for now.'); },
