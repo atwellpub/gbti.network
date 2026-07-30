@@ -1,0 +1,86 @@
+---
+// sow-158 in-app browse/reader track: the extension-optional content browser on gbti.network. A signed-in member
+// (free/trial/paid) browses the co-op in one place — All / Articles / Products / Prompts / Shares / News with a
+// category drill-down — and opens any item in an inline reader that decrypts member-only bodies via the httpOnly-
+// cookie session, NO extension and NO GitHub token in the page. This mirrors the extension's <gbti-browse>; the
+// public directories (/articles, /products, /prompts, /feeds) stay the anonymous read view. noindex: per-member.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="Browse" description="Browse the GBTI Network co-op." noindex={true}>
+  <section class="band">
+    <div class="wrap browse-wrap">
+      <div class="browse-head">
+        <h1 class="h1">Browse</h1>
+        <p class="lead">The whole co-op in one place. Read articles, products, prompts, Shares, and the news feed, and open any item inline without leaving the page.</p>
+      </div>
+
+      {/* Signed-OUT prompt (also the pre-hydration state; static SSG has no request-time cookie). */}
+      <div class="browse-signin" data-browse-signedout hidden>
+        <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-grid"/></svg></span>
+        <h2 class="h2 mt16">Sign in to browse the co-op</h2>
+        <p class="lead">The in-app browser and inline reader are a member perk. Sign in with GitHub to open it.</p>
+        <a href="/login/?return_to=%2Fbrowse%2F" class="btn btn-primary btn-lg mt16">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+
+      <div data-browse-mount hidden>
+        <p class="browse-load">Loading the co-op&hellip;</p>
+        <gbti-browse></gbti-browse>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // Resolve the signed-in member from the httpOnly-cookie session, then mount the client-ui browse surface.
+    // Browse is a signed-in perk, so ANY signed-in member qualifies (the Shares/News tabs self-gate by effective
+    // status inside the components; the Worker's authorizeSignedIn admits free/trial/paid).
+    function readCookie(name: string): string | null {
+      for (const part of document.cookie.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+      }
+      return null;
+    }
+
+    const signedOut = document.querySelector('[data-browse-signedout]') as HTMLElement | null;
+    const mountEl = document.querySelector('[data-browse-mount]') as HTMLElement | null;
+
+    function showSignedOut() { if (signedOut) signedOut.hidden = false; if (mountEl) mountEl.hidden = true; }
+
+    async function mount(login: string, githubId: string | null) {
+      if (signedOut) signedOut.hidden = true;
+      if (mountEl) mountEl.hidden = false;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const { createWorkbenchClient } = await import('../../lib/workbench-client');
+      const { setClient } = await import('../../../client-ui/src/base.mjs');
+      setClient(createWorkbenchClient({ signupBase, login, githubId }));
+      document.querySelector('.browse-load')?.setAttribute('hidden', '');
+      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
+      await import('../../../client-ui/src/elements/gbti-browse.mjs');
+    }
+
+    (async () => {
+      // Cheap gate: no readable gbti_csrf means no web session -> show the sign-in prompt (no network).
+      if (!readCookie('gbti_csrf')) { showSignedOut(); return; }
+      const base = document.documentElement.dataset.signupBase || '';
+      let payload: any = null;
+      try {
+        const res = await fetch(base + '/membership/status', { credentials: 'include' });
+        payload = res.ok ? await res.json() : null;
+      } catch { payload = null; }
+      if (payload && payload.ok === true && payload.login) {
+        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      } else {
+        showSignedOut(); // a missing/invalid session falls back to the sign-in prompt
+      }
+    })();
+  </script>
+
+  <style>
+    .browse-wrap { max-width: 1040px; }
+    .browse-head { margin-bottom: 22px; }
+    .browse-head .lead { max-width: 720px; }
+    .browse-signin { text-align: center; padding: 24px 0; }
+    .browse-load { color: var(--fg-mute); padding: 16px 2px; font-size: 15px; }
+    .browse-load[hidden] { display: none; }
+  </style>
+</BaseLayout>

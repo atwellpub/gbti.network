@@ -69,8 +69,17 @@ test('reviewFileContent decodes base64, rejects non-members paths, and reports a
   assert.equal(r.status, 200);
   assert.match(r.body.text, /Hello body\./);
 
+  // sow-158 in-app reader: house CONTENT (posts/products/prompts) is readable so the browse reader can open
+  // GBTI's own items inline; the governance files under house/ stay a 400 (not a general file oracle).
+  const house = await reviewFileContent(getReq('https://w/membership/file?path=house/posts/y/index.md&ref=abc'), env, { ...base, fetchImpl });
+  assert.equal(house.status, 200, 'house content is readable for the in-app reader');
+  assert.match(house.body.text, /Hello body\./);
+
   const bad = await reviewFileContent(getReq('https://w/membership/file?path=house/roles.yml&ref=abc'), env, { ...base, fetchImpl });
-  assert.equal(bad.status, 400, 'only clean members/ paths are allowed (no general file oracle)');
+  assert.equal(bad.status, 400, 'only members/ + house content paths are allowed (no general file oracle)');
+
+  const bans = await reviewFileContent(getReq('https://w/membership/file?path=house/bans.yml&ref=abc'), env, { ...base, fetchImpl });
+  assert.equal(bans.status, 400, 'house governance files are not served');
 
   const traversal = await reviewFileContent(getReq('https://w/membership/file?path=members/alice/../../house/roles.yml&ref=abc'), env, { ...base, fetchImpl });
   assert.equal(traversal.status, 400, 'path traversal is rejected');

@@ -334,7 +334,15 @@ export async function reviewFileContent(request, env, deps = {}) {
   const ref = String(url.searchParams.get('ref') || '');
   const clean = path.length > 0 && !path.startsWith('/') && !path.includes('\\') && !path.includes('\0') &&
     path.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
-  if (!clean || !path.startsWith('members/')) return { status: 400, body: { error: 'bad_request', message: 'path must be a clean members/ content path' } };
+  // sow-158 in-app browse/reader: the reader opens ANY published item, and house content (house/posts/...) is in
+  // the per-type indexes too, so allow the house CONTENT folders alongside members/. Deliberately NOT all of
+  // house/ — the governance files (house/roles.yml, house/bans.yml, ...) stay rejected so this is not a general
+  // file oracle. Safe: the repo is public by design (house index.md/.enc are already public), the caller must be a
+  // signed-in member, a members-only house body is .enc ciphertext or a stub (no plaintext leak), and it only
+  // decrypts through the paid-gated /membership/decrypt.
+  const HOUSE_CONTENT = ['house/posts/', 'house/products/', 'house/prompts/'];
+  const allowedPrefix = path.startsWith('members/') || HOUSE_CONTENT.some((p) => path.startsWith(p));
+  if (!clean || !allowedPrefix) return { status: 400, body: { error: 'bad_request', message: 'path must be a clean members/ or house content path' } };
   if (!ref) return { status: 400, body: { error: 'bad_request', message: 'a ref is required' } };
   let instToken;
   try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
