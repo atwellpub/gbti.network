@@ -25,7 +25,9 @@ import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes } from './workbench-client-core.mjs';
+
+const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
 const TYPE_LABEL: Record<string, string> = { post: 'article', product: 'product', prompt: 'prompt', profile: 'profile' };
 // members/<user>/<posts|products|prompts>/<slug>/index.md -> { type, slug }. Mirrors the folder->type mapping.
@@ -118,6 +120,10 @@ function mapDraftRecord(rec: any) {
 export function createWorkbenchClient({ signupBase, login, githubId = null }: { signupBase: string; login: string; githubId?: string | null }) {
   const base = String(signupBase || '').replace(/\/$/, '');
   const user = String(login || '');
+  // sow-158 image upload: staged image binaries (base64), keyed by their own-folder repo path. stageImage fills
+  // this; publish() flushes the ones the content actually references into the SAME author PR, so the image + the
+  // .md land atomically and the path resolves on merge. Held in memory (a save-draft-then-reload re-picks).
+  const pendingImages = new Map<string, string>();
 
   async function parseJson(res: Response) {
     let json: any = null;
@@ -181,9 +187,15 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // pointer. planMemberFiles overrides any stale encryptedBody with the deterministic path, so a re-publish
     // overwrites the same .enc (no orphan). Plain public content returns null -> the single plaintext file.
     const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
-    const files: Array<{ path: string; content: string | null }> = plan ? plan.files : [{ path: built.path, content: built.markdown }];
+    const files: Array<{ path: string; content?: string | null; contentBase64?: string }> = plan ? plan.files : [{ path: built.path, content: built.markdown }];
     const intro = buildIntroFile(user, built, authorNote);
     if (intro) files.push(intro);
+    // sow-158 image upload: flush the pending images this item references into the same PR (binary base64 entries
+    // the Worker commits raw). Only referenced uploads ride along; each is removed from the pending set once queued.
+    for (const p of referencedImagePaths(built.frontmatter, user)) {
+      const b64 = pendingImages.get(p);
+      if (b64) { files.push({ path: p, contentBase64: b64 }); pendingImages.delete(p); }
+    }
     const title = `Publish ${TYPE_LABEL[built.type] || built.type}: ${built.frontmatter?.title || built.slug || user}`;
     const res = await workerPost('/membership/author', { itemId: hostedItemId(built.type, built.slug), files, title });
     return { prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true, encrypted: Boolean(plan?.encPath) };
@@ -476,9 +488,19 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       return { ok: true, id: cid, prNumber: res.number, prUrl: res.html_url };
     },
 
-    // ----- deferred capabilities: a clear, typed refusal the editor surfaces (never a silent failure) -----
-    stageImage() {
-      throw err('image-unsupported', 'Adding images from the website is coming soon. For now, add images with the browser extension, or paste an image URL into your content.');
+    // sow-158 image upload: stage an image binary for the next publish. The editor already shows a local data-URL
+    // preview; this validates + records the base64 (keyed by its own-folder path) and returns the path the field
+    // stores. The image is committed with the content in one PR (publish flushes referencedImagePaths). png/jpg/
+    // webp/gif only (no svg on web), <= 1 MB (the Worker + check-media re-enforce; this is the fast client refusal).
+    stageImage({ filename, dataBase64 }: any) {
+      const name = sanitizeImageName(filename);
+      if (!name) throw err('bad-request', 'Use a PNG, JPG, WEBP, or GIF image (SVG is not supported on the web).');
+      const b64 = String(dataBase64 || '');
+      if (!b64) throw err('bad-request', 'That image had no data. Try choosing it again.');
+      if (base64Bytes(b64) > MAX_IMAGE_BYTES) throw err('bad-request', 'That image is over 1 MB. Please optimize it (or pick a smaller one) first.');
+      const path = `members/${user}/images/${name}`;
+      pendingImages.set(path, b64);
+      return { ok: true, path };
     },
   };
 }

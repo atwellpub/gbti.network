@@ -74,6 +74,25 @@ test('hosted author: happy path commits to hosted/<github_id>/<itemId> on canoni
   assert.equal(pr.body.maintainer_can_modify, false);
 });
 
+test('sow-158 image upload: a binary { contentBase64 } entry PUTs the raw base64 (no re-encode), text unchanged', async () => {
+  const rec = [];
+  const imgB64 = Buffer.from('a fake image payload').toString('base64');
+  const body = {
+    itemId: 'post-hello', title: 'Publish article: Hello',
+    files: [
+      { path: 'members/atwellpub/posts/hello/index.md', content: '---\ntitle: Hello\ncoverImage: members/atwellpub/images/cover.png\n---\nbody' },
+      { path: 'members/atwellpub/images/cover.png', contentBase64: imgB64 },
+    ],
+  };
+  const r = await membershipAuthor(req(body), env, deps(rec));
+  assert.equal(r.status, 200);
+  const imgPut = rec.find((c) => c.method === 'PUT' && /\/images\/cover\.png$/.test(c.url));
+  assert.ok(imgPut, 'the image is committed');
+  assert.equal(imgPut.body.content, imgB64, 'the binary is committed as its RAW base64, not TextEncoder->btoa re-encoded');
+  const mdPut = rec.find((c) => c.method === 'PUT' && /index\.md$/.test(c.url));
+  assert.notEqual(mdPut.body.content, undefined, 'the .md still commits its text (base64 of the UTF-8 string)');
+});
+
 test('hosted author: the branch github_id is the VERIFIED identity, never body-controlled', async () => {
   const rec = [];
   const evil = { ...goodBody, githubId: '999', branch: 'hosted/999/x' }; // extra body fields are ignored

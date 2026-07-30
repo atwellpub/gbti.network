@@ -14,6 +14,24 @@ export const HOSTED_MAX_FILES = 20;
 export const HOSTED_MAX_FILE_BYTES = 100_000;
 export const HOSTED_MAX_TOTAL_BYTES = 300_000;
 export const HOSTED_BRANCH_PREFIX = 'hosted/';
+// sow-158 image upload: a BINARY image entry ({ path, contentBase64 }) has its OWN budget, separate from the
+// text caps above, so a 1 MB cover image never counts against the 100 KB text limit. 1 MB matches the
+// check-media.mjs MAX_BYTES cap, so an uploaded image never fails media-check on the auto-merged PR.
+export const HOSTED_MAX_IMAGE_BYTES = 1_048_576; // 1 MB per image (== check-media MAX_BYTES)
+export const HOSTED_MAX_IMAGE_TOTAL_BYTES = 4_194_304; // 4 MB of images per request (a hard abuse bound)
+// A binary image must be an own-folder images/ file with a WEB-IMAGE extension. NO svg (an uploaded svg is a
+// navigation-XSS vector when opened directly); the web upload is raster-only, the extension host keeps svg.
+const IMAGE_PATH_TAIL_RE = /^images\/[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp|gif)$/i;
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** The exact decoded byte length of a base64 string, or -1 if it is not well-formed base64. Node-free (no atob):
+ *  length math + a charset/padding check, so the Worker validates size WITHOUT decoding a megabyte into memory. */
+export function base64DecodedBytes(b64) {
+  if (typeof b64 !== 'string' || b64.length === 0) return -1;
+  if (b64.length % 4 !== 0 || !BASE64_RE.test(b64)) return -1;
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return (b64.length / 4) * 3 - pad;
+}
 
 // The item id becomes a branch segment AFTER the server-inserted github_id, so it must never be able to
 // shift the id parse or produce an illegal git ref: lowercase alphanumeric + hyphen only, bounded length.
@@ -78,6 +96,7 @@ export function validateHostedRequest({ files, itemId, folder } = {}) {
   const prefix = `members/${folder}/`;
   const paths = [];
   let totalBytes = 0;
+  let imageBytes = 0;
   const seen = new Set();
   for (const f of files) {
     if (!f || typeof f.path !== 'string') return bad('every file needs a path');
@@ -87,7 +106,19 @@ export function validateHostedRequest({ files, itemId, folder } = {}) {
     }
     if (seen.has(f.path)) return bad('duplicate file path');
     seen.add(f.path);
-    if (f.content !== null) {
+    const isBinary = f.contentBase64 !== undefined && f.contentBase64 !== null;
+    if (isBinary) {
+      // sow-158 image upload: a binary entry is a base64-encoded raster image, own-folder images/ only, capped.
+      if (typeof f.content === 'string') return bad('a file cannot carry both content and contentBase64');
+      const tail = f.path.slice(prefix.length);
+      if (!IMAGE_PATH_TAIL_RE.test(tail)) return bad('an uploaded image must be a png, jpg, webp, or gif under your images/ folder');
+      const bytes = base64DecodedBytes(f.contentBase64);
+      if (bytes < 0) return bad('an uploaded image is not valid base64');
+      if (bytes === 0) return bad('an uploaded image is empty');
+      if (bytes > HOSTED_MAX_IMAGE_BYTES) return bad(`an image exceeds ${HOSTED_MAX_IMAGE_BYTES} bytes (1 MB)`);
+      imageBytes += bytes;
+      if (imageBytes > HOSTED_MAX_IMAGE_TOTAL_BYTES) return bad(`the request exceeds ${HOSTED_MAX_IMAGE_TOTAL_BYTES} image bytes total`);
+    } else if (f.content !== null) {
       if (typeof f.content !== 'string') return bad('file content must be a string (or null to delete)');
       const bytes = utf8Bytes(f.content);
       if (bytes > HOSTED_MAX_FILE_BYTES) return bad(`a file exceeds ${HOSTED_MAX_FILE_BYTES} bytes`);

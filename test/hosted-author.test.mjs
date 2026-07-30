@@ -131,6 +131,49 @@ test('validateHostedRequest: rejects a bad itemId and non-string content', () =>
   assert.equal(validateHostedRequest({ files: [], itemId: 'x', folder: 'a' }).ok, false);
 });
 
+// sow-158 image upload: a binary { path, contentBase64 } entry is the ONLY way to commit a raster image, and the
+// gate is the security wall — it must stay own-folder + images/ + a web-image extension + <=1 MB, and reject
+// everything else. These are the adversarial cases.
+test('validateHostedRequest: a valid own-folder image (png base64) passes alongside a text file', () => {
+  const b64 = Buffer.from('a fake png payload').toString('base64'); // small, valid base64
+  const r = validateHostedRequest({
+    files: [
+      { path: 'members/atwellpub/posts/hello/index.md', content: '---\ntitle: Hi\n---\nbody' },
+      { path: 'members/atwellpub/images/cover.png', contentBase64: b64 },
+    ],
+    itemId: 'post-hello', folder: 'atwellpub',
+  });
+  assert.equal(r.ok, true);
+});
+
+test('validateHostedRequest: a binary image is gated to own-folder images/ + a raster extension (no svg, no escape)', () => {
+  const b64 = Buffer.from('x').toString('base64');
+  const reject = (path, folder = 'atwellpub') => validateHostedRequest({ files: [{ path, contentBase64: b64 }], itemId: 'x', folder });
+  assert.equal(reject('members/atwellpub/posts/hello/index.md').ok, false, 'binary not allowed on a non-image path');
+  assert.equal(reject('members/atwellpub/images/evil.svg').ok, false, 'svg is refused on web upload');
+  assert.equal(reject('members/atwellpub/images/evil.html').ok, false, 'a non-image extension is refused');
+  assert.equal(reject('members/other/images/x.png').ok, false, 'cannot write another member\'s images');
+  assert.equal(reject('members/atwellpub/images/../../house/x.png').ok, false, 'no traversal out of the folder');
+});
+
+test('validateHostedRequest: an image rejects bad base64, empty, and >1 MB; text + binary cannot co-carry', () => {
+  const img = (contentBase64) => validateHostedRequest({ files: [{ path: 'members/a/images/x.png', contentBase64 }], itemId: 'x', folder: 'a' });
+  assert.equal(img('not*base64!').ok, false, 'invalid base64 rejected');
+  assert.equal(img('').ok, false, 'empty rejected');
+  const overMb = 'A'.repeat(Math.ceil((1_048_577 * 4) / 3 / 4) * 4); // > 1 MB decoded, padded to a multiple of 4
+  assert.equal(img(overMb).ok, false, 'over 1 MB rejected');
+  // an entry cannot be both text and binary
+  assert.equal(validateHostedRequest({ files: [{ path: 'members/a/images/x.png', content: 'hi', contentBase64: Buffer.from('x').toString('base64') }], itemId: 'x', folder: 'a' }).ok, false);
+});
+
+test('base64DecodedBytes: exact decoded length, -1 on malformed', async () => {
+  const { base64DecodedBytes } = await import('../membership/hosted-author.mjs');
+  assert.equal(base64DecodedBytes(Buffer.from('hello').toString('base64')), 5);
+  assert.equal(base64DecodedBytes(Buffer.from('ab').toString('base64')), 2); // 'YWI=' -> 2
+  assert.equal(base64DecodedBytes('###'), -1);
+  assert.equal(base64DecodedBytes('abc'), -1); // not a multiple of 4
+});
+
 // SOW-157: the id contract is 80 chars so share itemIds (share-<stamp>-<48-char slug> = 69) fit.
 test('id contract: a share-length itemId round-trips; 81+ chars still rejected', () => {
   const shareId = 'share-20260725193000-' + 'a'.repeat(48); // 69 chars

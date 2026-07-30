@@ -11,6 +11,44 @@ import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/sr
 // sow-158 News track: 'news' enables the shared <gbti-discussion> news thread on the website (read is public;
 // posting stays paid-gated via postComment's membership check). The comments-index already carries news rows.
 export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share', 'news']);
+
+// sow-158 image upload: the frontmatter keys that hold an uploaded image path (per the editor RAIL_SCHEMA:
+// coverImage on a post; icon/featuredImage/banner on a product; image on a prompt). coverAlt is text, not a path.
+export const IMAGE_FIELD_KEYS = ['coverImage', 'image', 'banner', 'featuredImage', 'icon'];
+const WEB_IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/;
+
+/**
+ * Sanitize an uploaded image filename to a clean own-folder leaf: lowercase, only [a-z0-9._-], no path segments,
+ * no leading dot/hyphen, and it MUST end in a web-image extension (png/jpg/jpeg/webp/gif — NO svg on web upload).
+ * Returns the clean name or null (reject). Mirrors the Worker gate (validateHostedRequest IMAGE_PATH_TAIL_RE), so
+ * the client and the security wall agree on what an image filename is.
+ */
+export function sanitizeImageName(filename) {
+  const base = String(filename ?? '').trim().toLowerCase().split(/[\\/]/).pop() || '';
+  const cleaned = base.replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+/, '').replace(/-+/g, '-');
+  if (!/^[a-z0-9]/.test(cleaned) || !WEB_IMAGE_EXT_RE.test(cleaned)) return null;
+  return cleaned;
+}
+
+/** The set of own-folder image paths a content item's frontmatter references (members/<login>/images/...). Used to
+ *  flush ONLY the pending images the content actually uses into the publish PR (never an unreferenced upload). */
+export function referencedImagePaths(frontmatter, login) {
+  const prefix = `members/${login}/images/`;
+  const out = new Set();
+  for (const k of IMAGE_FIELD_KEYS) {
+    const v = frontmatter?.[k];
+    if (typeof v === 'string' && v.startsWith(prefix)) out.add(v);
+  }
+  return out;
+}
+
+/** The decoded byte length of a base64 payload (padding-aware), for the client-side 1 MB pre-check. */
+export function base64Bytes(b64) {
+  const s = String(b64 ?? '');
+  if (!s) return 0;
+  const pad = s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0;
+  return Math.floor((s.length / 4) * 3 - pad);
+}
 // SOW-078: who may READ a members-visibility comment stub (an active trial OR a paid member). Mirrors the
 // server's READ_TRIAL tier, applied here as the presentation-side gate; the Worker decrypt is authoritative.
 export const MEMBER_READ_TIER = new Set(['paid', 'trialing', 'trial']);

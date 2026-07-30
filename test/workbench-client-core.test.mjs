@@ -3,7 +3,7 @@
 // filter/tier-gate, the comment-visibility coercion, and the favorite derivation. Uses a FAKE encrypt (no Worker).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from '../src/lib/workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes } from '../src/lib/workbench-client-core.mjs';
 import { buildCommentFile, buildContentFile, buildShareFile, shareId, commentId, parseContentFile } from '../client/src/content-ops.mjs';
 
 const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', aad: assetId, ct: 'CT(' + plaintext + ')' });
@@ -124,6 +124,32 @@ test('favoritedFrom: derives favorited from the activity favorites list', () => 
   assert.equal(favoritedFrom(activity, 'post', 'x'), true);
   assert.equal(favoritedFrom(activity, 'post', 'z'), false);
   assert.equal(favoritedFrom(null, 'post', 'x'), false);
+});
+
+// sow-158 image upload: the client sanitize/flush core mirrors the Worker gate.
+test('sanitizeImageName: cleans to an own-folder leaf, rejects svg + traversal + non-images', () => {
+  assert.equal(sanitizeImageName('My Cover.PNG'), 'my-cover.png');
+  assert.equal(sanitizeImageName('a/b/../evil.jpg'), 'evil.jpg', 'path segments are dropped to the leaf');
+  assert.equal(sanitizeImageName('photo.jpeg'), 'photo.jpeg');
+  assert.equal(sanitizeImageName('x.webp'), 'x.webp');
+  assert.equal(sanitizeImageName('logo.svg'), null, 'svg is refused on the web');
+  assert.equal(sanitizeImageName('note.txt'), null, 'a non-image is refused');
+  assert.equal(sanitizeImageName('.hidden.png'), 'hidden.png', 'a leading dot is stripped');
+  assert.equal(sanitizeImageName(''), null);
+});
+
+test('referencedImagePaths: collects only own-folder image-field values', () => {
+  const fm = { coverImage: 'members/gwen/images/cover.png', icon: 'members/gwen/images/icon.gif', banner: 'https://cdn/x.png', title: 'x', coverAlt: 'alt text' };
+  const got = referencedImagePaths(fm, 'gwen');
+  assert.ok(got.has('members/gwen/images/cover.png') && got.has('members/gwen/images/icon.gif'));
+  assert.equal(got.has('https://cdn/x.png'), false, 'an off-folder / remote image is not flushed');
+  assert.equal(referencedImagePaths({ coverImage: 'members/other/images/x.png' }, 'gwen').size, 0, 'another member\'s path is ignored');
+});
+
+test('base64Bytes: padding-aware decoded length', () => {
+  assert.equal(base64Bytes(Buffer.from('hello').toString('base64')), 5);
+  assert.equal(base64Bytes(Buffer.from('ab').toString('base64')), 2);
+  assert.equal(base64Bytes(''), 0);
 });
 
 test('the shared tier + target sets are as expected', () => {

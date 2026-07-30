@@ -146,7 +146,8 @@ async function applyFile(fetchImpl, instToken, upstream, branch, f, attempt = 0)
   const url = `${GH}/repos/${upstream}/contents/${f.path}`;
   const existing = await ghJson(fetchImpl, `${url}?ref=${encodeURIComponent(branch)}`, { headers: GH_HEADERS(instToken) });
   const sha = existing.res.ok ? existing.data?.sha : undefined;
-  if (f.content === null) {
+  const isBinary = f.contentBase64 !== undefined && f.contentBase64 !== null;
+  if (f.content === null && !isBinary) {
     if (!sha) return { ok: true, skipped: true }; // deleting a file that does not exist is a no-op
     const res = await fetchImpl(url, {
       method: 'DELETE', headers: { ...GH_HEADERS(instToken), 'Content-Type': 'application/json' },
@@ -155,9 +156,13 @@ async function applyFile(fetchImpl, instToken, upstream, branch, f, attempt = 0)
     if (res.status === 409 && attempt === 0) return applyFile(fetchImpl, instToken, upstream, branch, f, 1);
     return { ok: res.ok };
   }
+  // sow-158 image upload: a binary entry is ALREADY base64 (a raster image, validated own-folder + capped in
+  // validateHostedRequest); the Contents API takes base64 bytes directly, so pass it through un-re-encoded. A
+  // text entry base64-encodes its UTF-8 string as before.
+  const encoded = isBinary ? String(f.contentBase64) : b64utf8(f.content);
   const res = await fetchImpl(url, {
     method: 'PUT', headers: { ...GH_HEADERS(instToken), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: `content: update ${f.path}`, content: b64utf8(f.content), branch, ...(sha ? { sha } : {}) }),
+    body: JSON.stringify({ message: `content: update ${f.path}`, content: encoded, branch, ...(sha ? { sha } : {}) }),
   });
   if (res.status === 409 && attempt === 0) return applyFile(fetchImpl, instToken, upstream, branch, f, 1);
   return { ok: res.ok };
