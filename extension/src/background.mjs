@@ -133,6 +133,22 @@ async function maybeMintWebSession(store) {
   } catch { /* best-effort */ }
 }
 
+// sow-158: the sign-out counterpart of mintWebSession. When the member signs OUT of the extension, tell the Worker
+// to expire the bridged website cookie session so ONE sign-out ends both surfaces. Bearer-gated server-side (clearing
+// cookies is capability-free); credentials:'include' so the browser drops the Set-Cookie Max-Age=0 deletions. Pass
+// the token BEFORE it is nulled locally. Best-effort: a failure just leaves the web cookie to its 30-day TTL / web
+// Sign out, the prior v1 behavior.
+async function clearWebSession(token) {
+  if (!token) return;
+  try {
+    await fetch(`${SIGNUP_BASE}/auth/session-clear`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch { /* non-fatal */ }
+}
+
 // Single-flight proactive refresh: when the access token is at/near expiry, swap in a fresh one BEFORE the request
 // runs, so no read ever 401s on a merely-expired token. Concurrent api calls share ONE in-flight refresh (the
 // refresh token rotates, so parallel refreshes would invalidate each other). A failed refresh is swallowed: the
@@ -215,6 +231,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (res?.ok) { broadcastAuthChanged(); await focusTab(sender?.tab?.id, sender?.tab?.windowId); }
         sendResponse(res);
       } else if (msg?.type === 'signout') {
+        // sow-158: end the bridged website cookie session too. Capture the token BEFORE nulling it, so the bearer
+        // reaches the clear route; fire-and-forget so a slow/failed clear never blocks local sign-out.
+        clearWebSession(store.get('githubToken'));
         store.set({ githubToken: null, githubRefreshToken: null, githubTokenExpiresAt: null, identity: null });
         // SOW-073: clear the local content caches (the workbench SWR cache gbti:wb:* and the SOW-064 create-recent
         // cache) so a signed-out member's owned-content metadata never survives on the device into another session.
@@ -223,8 +242,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const keys = Object.keys(all || {}).filter((k) => k.startsWith('gbti:wb:') || k === 'gbti:create-recent');
           if (keys.length) await chrome.storage.local.remove(keys);
         } catch { /* storage unavailable: best-effort */ }
-        // sow-158: clear the once-per-session mint stamp so a later re-sign-in re-mints the website session. (The
-        // extension does not clear the website cookie itself; the web Sign out + the 30-day TTL end it — v1 note.)
+        // sow-158: clear the once-per-session mint stamp so a later re-sign-in re-mints the website session. The
+        // bridged website cookie itself is expired above via clearWebSession (best-effort).
         try { await chrome.storage?.session?.remove?.('webSessionMinted'); } catch { /* best-effort */ }
         broadcastAuthChanged();
         sendResponse({ ok: true });

@@ -620,6 +620,32 @@ export default {
         }
       }
 
+      // sow-158: the sign-out counterpart of session-from-token. When a member signs OUT of the extension, this
+      // clears the bridged website cookie session so ONE sign-out ends both surfaces (otherwise the httpOnly
+      // cookie would linger until the web Sign out or the 30-day TTL). Bearer-gated only to block a gratuitous
+      // cross-site forced-logout: clearing cookies is capability-free (it deletes the CALLER'S OWN cookies and
+      // grants nothing), so we require a present bearer but do NOT verify it against GitHub. The extension may be
+      // signing out a token that is already being revoked, and the clear must still succeed. Mirrors /auth/logout's
+      // dual-clear (host-only + Domain csrf, host-only session), minus the CSRF gate (there is no cookie read here).
+      if (pathname === '/auth/session-clear') {
+        const cors = corsHeaders(request, env, { credentials: true, methods: 'POST, OPTIONS' });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'POST') {
+          const authHeader = request.headers.get('Authorization') || '';
+          const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+          if (!token) return json({ error: 'unauthorized' }, 401, { ...cors, 'Cache-Control': 'no-store' });
+          const ip = request.headers.get('CF-Connecting-IP') || '';
+          const rl = await rateLimit({ kv: env.SIGNUP_KV, ip, limit: 30, windowSeconds: 600, prefix: 'rl:session-clear:' });
+          if (!rl.allowed) return json({ error: 'rate_limited' }, 429, { ...cors, 'Cache-Control': 'no-store' });
+          const clearCsrf = [csrfCookieHeader('', { ttlSeconds: 0 })];
+          if (env.COOKIE_DOMAIN) clearCsrf.push(csrfCookieHeader('', { ttlSeconds: 0, domain: env.COOKIE_DOMAIN }));
+          return json({ ok: true }, 200, { ...cors, 'Cache-Control': 'no-store' }, [
+            sessionCookieHeader('', { ttlSeconds: 0 }),
+            ...clearCsrf,
+          ]);
+        }
+      }
+
       if (method === 'GET' && pathname === '/signup/start') return await handleStart(request, env);
       if (method === 'GET' && pathname === '/signup/github/callback') return await handleGithubCallback(request, env);
       if (method === 'GET' && pathname === '/signup/discord/callback') return await handleDiscordCallback(request, env);

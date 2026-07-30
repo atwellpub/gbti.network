@@ -645,6 +645,28 @@ test('sow-158: /auth/session-from-token 401s with no bearer or an unverifiable t
   );
 });
 
+// sow-158 auth bridge, sign-out counterpart: an extension sign-out expires the bridged website cookie session.
+// Clearing cookies is capability-free, so it does NOT verify the token against GitHub (a signing-out token may be
+// mid-revocation) -> it clears with any present bearer, and mirrors /auth/logout's dual host-only + Domain clear.
+test('sow-158: POST /auth/session-clear expires the session + both csrf cookies with a present bearer', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test', COOKIE_DOMAIN: 'gbti.test' });
+  const res = await worker.fetch(req('POST', '/auth/session-clear', { headers: { Authorization: 'Bearer anything', Origin: 'https://gbti.test', 'CF-Connecting-IP': '1.2.3.6' } }), env, {});
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+  const cookies = res.headers.getSetCookie();
+  assert.ok(cookies.some((c) => c.startsWith('gbti_session=') && /Max-Age=0/.test(c) && !/Domain=/.test(c)), 'host-only session cleared');
+  assert.ok(cookies.some((c) => c.startsWith('gbti_csrf=') && /Max-Age=0/.test(c) && !/Domain=/.test(c)), 'host-only csrf cleared');
+  assert.ok(cookies.some((c) => c.startsWith('gbti_csrf=') && /Max-Age=0/.test(c) && /Domain=gbti\.test/.test(c)), 'Domain csrf cleared');
+  assert.equal(res.headers.get('Access-Control-Allow-Credentials'), 'true');
+});
+
+test('sow-158: /auth/session-clear 401s with no bearer, clearing nothing', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test', COOKIE_DOMAIN: 'gbti.test' });
+  const res = await worker.fetch(req('POST', '/auth/session-clear', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.equal(res.status, 401);
+  assert.equal(res.headers.getSetCookie().length, 0, 'no clear without a bearer');
+});
+
 // sow-158 News track: the news read + engagement routes are now cookie-readable (credentialed reflected-origin
 // CORS), so the website /news mount can call them with the session cookie. news-publish stays bearer-only (curator).
 test('sow-158 News: news routes reflect an allow-listed Origin with credentials; news-publish stays wildcard', async () => {

@@ -22828,6 +22828,17 @@ async function maybeMintWebSession(store) {
   } catch {
   }
 }
+async function clearWebSession(token) {
+  if (!token) return;
+  try {
+    await fetch(`${SIGNUP_BASE2}/auth/session-clear`, {
+      method: "POST",
+      credentials: "include",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  } catch {
+  }
+}
 var _refreshing = null;
 async function ensureFreshToken(store) {
   const state = { githubToken: store.get("githubToken"), githubRefreshToken: store.get("githubRefreshToken"), githubTokenExpiresAt: store.get("githubTokenExpiresAt") };
@@ -22904,6 +22915,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         sendResponse(res);
       } else if (msg?.type === "signout") {
+        clearWebSession(store.get("githubToken"));
         store.set({ githubToken: null, githubRefreshToken: null, githubTokenExpiresAt: null, identity: null });
         try {
           const all = await chrome.storage.local.get(null);
