@@ -13870,6 +13870,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .head h3 { margin:0; font-family:var(--font-display, var(--font-body)); font-size:16px; }
   .refresh { background:transparent; border:0; color:var(--muted); cursor:pointer; font:inherit; font-size:13px; }
   .refresh:hover { color:var(--brand); }
+  .pager { display:flex; justify-content:center; margin-top:14px; }
+  .load-older { background:var(--panel); border:1.5px solid var(--line); border-radius:10px; color:var(--fg); cursor:pointer; font:inherit; font-size:13px; padding:8px 18px; }
+  .load-older:hover { border-color:var(--brand); color:var(--brand); }
+  .load-older:disabled { opacity:.6; cursor:default; }
   .muted { color:var(--muted); font-size:13.5px; }
   /* SOW-092: a share whose link is a recognized video plays inline in place of the static image. */
   .share-embed { position:relative; aspect-ratio:16/9; overflow:hidden; background:#000; border-radius:10px; margin-top:10px; }
@@ -14004,7 +14008,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._locked = LOCKED4.has(membership);
       if (this._locked) return quiet ? void 0 : this._splash();
       try {
-        this._items = (await this.client.listShares())?.items ?? [];
+        const r = await this.client.listShares();
+        this._items = r?.items ?? [];
+        this._nextBefore = r?.nextBefore ?? null;
       } catch {
         if (!quiet) this.set(this.css(CSS29) + `<p class="muted">Could not load Shares right now.</p>`);
         return;
@@ -14034,8 +14040,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.on(".refresh", "click", () => this.reload());
         return;
       }
-      this.set(this.css(CSS29) + head + `<div data-list></div>`);
+      const pager = this._nextBefore ? `<div class="pager"><button class="load-older" type="button" data-load-older>Load older</button></div>` : "";
+      this.set(this.css(CSS29) + head + `<div data-list></div>${pager}`);
       this.on(".refresh", "click", () => this.reload());
+      if (this._nextBefore) this.on("[data-load-older]", "click", () => this._loadOlder());
       const list = document.createElement("gbti-card-list");
       list.mode = "detailed";
       list.items = items.map((it) => shareToItem(it));
@@ -14047,6 +14055,30 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         }
       });
       this.$("[data-list]")?.replaceChildren(list);
+    }
+    /** Append the next older page (website cookie adapter only; feature-detected by the nextBefore cursor). */
+    async _loadOlder() {
+      if (!this._nextBefore || this._loadingMore) return;
+      this._loadingMore = true;
+      const btn = this.$("[data-load-older]");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Loading…";
+      }
+      try {
+        const r = await this.client.listShares({ before: this._nextBefore });
+        this._items = [...this._items || [], ...r && r.items || []];
+        this._nextBefore = r?.nextBefore ?? null;
+      } catch {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Load older";
+        }
+        this._loadingMore = false;
+        return;
+      }
+      this._loadingMore = false;
+      this.render();
     }
     // The focused reading view: the Share's body + an always-open discussion thread.
     _renderReading(share) {

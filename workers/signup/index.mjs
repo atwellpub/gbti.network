@@ -80,6 +80,7 @@ import { membershipNewsOpened } from './membership-news-opened.mjs'; // SOW-111:
 import { membershipContentOpened } from './membership-content-opened.mjs'; // SOW-126: the content-open engagement beacon
 import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
+import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
@@ -892,6 +893,16 @@ export default {
         if (method === 'GET') {
           const r = await memberPrStatus(request, env);
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+      // sow-158 Part 3: the community Shares feed for the /account hub. Tier-gated (paid/trial see the members
+      // stream; free/banned see PUBLIC shares only), members bodies pointer-only. Cookie-or-bearer, per-caller.
+      if (pathname === '/membership/shares') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await listSharesFeed(request, env);
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 

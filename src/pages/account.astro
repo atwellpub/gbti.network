@@ -1,28 +1,88 @@
 ---
+// sow-158 Part 3: the /account member hub. Signed-out visitors get the sign-in prompt; a signed-in member gets a
+// grid of membership surfaces, a Share composer (members-only by default), and the tier-gated community Shares
+// stream. The composer + feed are the SAME client-ui components the extension uses, wired to the cookie-session
+// adapter (src/lib/workbench-client) -- no GitHub token in the page. noindex: a private, per-member surface.
 import BaseLayout from '../layouts/BaseLayout.astro';
+
+// The membership button grid. Icons come from the site sprite (#ico-*). `#tab=` deep-links land in the WorkBench.
+const GRID = [
+  { icon: 'coin', label: 'Membership', href: '/membership/' },
+  { icon: 'grid', label: 'My Workspace', href: '/workbench/' },
+  { icon: 'pencil', label: 'New article', href: '/workbench/#tab=post' },
+  { icon: 'box', label: 'New product', href: '/workbench/#tab=product' },
+  { icon: 'terminal', label: 'New prompt', href: '/workbench/#tab=prompt' },
+  { icon: 'merge', label: 'My pull requests', href: '/workbench/#tab=prs' },
+  { icon: 'heart', label: 'Saved', href: '/workbench/#tab=saved' },
+  { icon: 'users', label: 'Following', href: '/workbench/#tab=subs' },
+  { icon: 'globe', label: 'Browse the network', href: '/feeds/' },
+  { icon: 'search', label: 'Member directory', href: '/members/' },
+  { icon: 'chat', label: 'Community', href: '/membership/' },
+  { icon: 'chart', label: 'Revenue model', href: '/revenue-model/' },
+];
 ---
 <BaseLayout title="Account" description="Your GBTI Network account." noindex={true}>
   <section class="band">
     <div class="wrap acct-wrap">
-      {/* sow-158 Phase 2: signed-OUT fallback (also the pre-hydration state; static SSG has no request-time cookie). */}
+      {/* Signed-OUT fallback (also the pre-hydration state; static SSG has no request-time cookie). */}
       <div class="sec-head center" data-account-signedout>
         <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-id"/></svg></span>
         <h1 class="h1 mt24">Your account</h1>
         <p class="lead">
-          Sign in with GitHub to manage your GBTI Network membership. Save, collect, and follow on the web; add the
-          browser extension to edit and publish your content in place.
+          Sign in with GitHub to manage your GBTI Network membership, post to the co-op stream, and follow the
+          community. Add the browser extension to edit and publish your content in place.
         </p>
         <a href="/login/?return_to=%2Faccount%2F" class="btn btn-primary btn-lg mt24">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
       </div>
 
-      {/* sow-158 Phase 2: signed-IN view, hydrated client-side from the httpOnly-cookie session (member-signal.ts). */}
-      <div class="sec-head center" data-account-signedin hidden>
-        <img class="acct-av" data-account-av alt="" width="64" height="64" decoding="async" />
-        <h1 class="h1 mt16">Welcome, <span data-account-name>@you</span></h1>
-        <p class="lead">Membership: <strong data-account-status>…</strong></p>
-        <div class="acct-actions mt24">
-          <a href="/membership/" class="btn btn-ghost">Membership</a>
-          <button type="button" class="btn btn-primary" data-account-signout>Sign out</button>
+      {/* Signed-IN hub, hydrated client-side from the httpOnly-cookie session (member-signal.ts). */}
+      <div data-account-signedin hidden>
+        <div class="sec-head center">
+          <img class="acct-av" data-account-av alt="" width="64" height="64" decoding="async" />
+          <h1 class="h1 mt16">Welcome, <span data-account-name>@you</span></h1>
+          <p class="lead">Membership: <strong data-account-status>&hellip;</strong></p>
+          <div class="acct-actions mt16">
+            <a href="/membership/" class="btn btn-ghost">Membership</a>
+            <button type="button" class="btn btn-primary" data-account-signout>Sign out</button>
+          </div>
+        </div>
+
+        {/* The membership button grid. */}
+        <div class="grid" role="list">
+          {GRID.map((g) => (
+            <a class="tile" role="listitem" href={g.href}>
+              <span class="tile-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href={`#ico-${g.icon}`}/></svg></span>
+              <span class="tile-lb">{g.label}</span>
+            </a>
+          ))}
+          <a class="tile" role="listitem" href="/members/" data-account-profile hidden>
+            <span class="tile-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-github"/></svg></span>
+            <span class="tile-lb">My profile</span>
+          </a>
+          <a class="tile tile-admin" role="listitem" href="/admin/" data-account-admin hidden>
+            <span class="tile-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock"/></svg></span>
+            <span class="tile-lb">Admin tools</span>
+          </a>
+        </div>
+
+        {/* Share composer (members-only by default) + the community stream. Mounted on the cookie adapter. */}
+        <div class="hub-cols">
+          <div class="hub-card">
+            <h2 class="hub-h">Share with the community</h2>
+            <p class="hub-sub">Post a note or a link to the members stream. Members-only is the default; switch to public to share it on the site feed.</p>
+            <div data-share-mount>
+              <p class="hub-load">Loading the composer&hellip;</p>
+              <gbti-share-composer></gbti-share-composer>
+            </div>
+          </div>
+          <div class="hub-card">
+            <h2 class="hub-h">Latest Shares</h2>
+            <p class="hub-sub">The most recent posts from the co-op. Load older to page back through the stream.</p>
+            <div data-feed-mount>
+              <p class="hub-load">Loading the stream&hellip;</p>
+              <gbti-shares-feed></gbti-shares-feed>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -30,21 +90,48 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
   <script>
     import { onMemberSignal, currentIdentity, readMemberSignal, signOutWeb } from '../lib/member-signal';
+
     const out = document.querySelector('[data-account-signedout]');
-    const inn = document.querySelector('[data-account-signedin]');
+    const inn = document.querySelector('[data-account-signedin]') as HTMLElement | null;
     const nameEl = document.querySelector('[data-account-name]');
     const av = document.querySelector('[data-account-av]') as HTMLImageElement | null;
     const statusEl = document.querySelector('[data-account-status]');
+    const profileTile = document.querySelector('[data-account-profile]') as HTMLAnchorElement | null;
+    const adminTile = document.querySelector('[data-account-admin]') as HTMLElement | null;
     const LABELS: Record<string, string> = { paid: 'Paid member', trialing: 'Free trial', expired: 'Expired', cancelled: 'Cancelled', none: 'No active membership', banned: 'Suspended', unknown: 'Signed in' };
-    function render(s) {
+    const RANK: Record<string, number> = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
+
+    let mounted = false; // the client-ui composer + feed load once, on the first signed-in signal
+
+    function render(s: any) {
       const signedIn = !!(s && s.login);
-      if (out) out.hidden = signedIn;
+      if (out) (out as HTMLElement).hidden = signedIn;
       if (inn) inn.hidden = !signedIn;
       if (!signedIn) return;
       if (nameEl) nameEl.textContent = '@' + s.login;
       if (av) { av.src = 'https://github.com/' + encodeURIComponent(s.login) + '.png?size=128'; av.alt = '@' + s.login; }
       if (statusEl) statusEl.textContent = LABELS[s.membership] || LABELS.unknown;
+      if (profileTile) { profileTile.href = '/members/' + encodeURIComponent(s.login) + '/'; profileTile.hidden = false; }
+      if (adminTile) adminTile.hidden = (RANK[s.role] ?? 0) < RANK.moderator; // staff-only, role from the oracle
+      mountHub(s);
     }
+
+    async function mountHub(s: any) {
+      if (mounted) return;
+      mounted = true;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const { createWorkbenchClient } = await import('../lib/workbench-client');
+      const { setClient } = await import('../../client-ui/src/base.mjs');
+      const adapter = createWorkbenchClient({ signupBase, login: String(s.login), githubId: s.githubId != null ? String(s.githubId) : null });
+      setClient(adapter);
+      document.querySelectorAll('.hub-load').forEach((el) => el.setAttribute('hidden', ''));
+      // Defining the elements upgrades the static tags; they render on the setClient subscriber fan-out.
+      await Promise.all([
+        import('../../client-ui/src/elements/gbti-share-composer.mjs'),
+        import('../../client-ui/src/elements/gbti-shares-feed.mjs'),
+      ]);
+    }
+
     av?.addEventListener('error', () => { if (av) av.src = '/favicon-32x32.png'; });
     render(currentIdentity(readMemberSignal()));
     onMemberSignal(render); // BaseLayout invokes hydrateMemberSignal(); the cookie member arrives here
@@ -56,8 +143,24 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   </script>
 
   <style>
-    .acct-wrap { max-width: 560px; }
+    .acct-wrap { max-width: 1040px; }
     .acct-av { border-radius: 50%; border: 2px solid var(--line-2); margin: 0 auto; }
     .acct-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 32px; }
+    .tile { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--fg); text-decoration: none; text-align: center; transition: border-color .12s, transform .12s; }
+    .tile:hover { border-color: var(--brand); transform: translateY(-1px); }
+    .tile-ic { display: inline-flex; }
+    .tile-ic svg { width: 26px; height: 26px; color: var(--brand); }
+    .tile-lb { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+    .tile-admin .tile-ic svg { color: var(--fg-mute); }
+
+    .hub-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; align-items: start; }
+    .hub-card { border: 1.5px solid var(--line); border-radius: 16px; background: var(--panel); padding: 20px; }
+    .hub-h { font-size: 18px; margin: 0 0 4px; }
+    .hub-sub { color: var(--fg-mute); font-size: 13.5px; margin: 0 0 16px; }
+    .hub-load { color: var(--fg-mute); font-size: 14px; }
+    .hub-load[hidden] { display: none; }
+    @media (max-width: 860px) { .hub-cols { grid-template-columns: 1fr; } }
   </style>
 </BaseLayout>

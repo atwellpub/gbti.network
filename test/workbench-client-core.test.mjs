@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER } from '../src/lib/workbench-client-core.mjs';
-import { buildCommentFile, buildContentFile, commentId, parseContentFile } from '../client/src/content-ops.mjs';
+import { buildCommentFile, buildContentFile, buildShareFile, shareId, commentId, parseContentFile } from '../client/src/content-ops.mjs';
 
 const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', aad: assetId, ct: 'CT(' + plaintext + ')' });
 // A fake decrypt that inverts fakeEncrypt (extracts the plaintext from the ct wrapper), for the round-trip test.
@@ -23,6 +23,27 @@ test('planMemberFiles: a members comment encrypts to a .enc + a stub .md carryin
   assert.doesNotMatch(md.content, /a members-only reply/, 'the plaintext members body must NOT appear in the committed .md');
   assert.match(enc.content, /CT\(a members-only reply\)/, 'the ciphertext envelope carries the encrypted body');
   assert.equal(plan.encPath, enc.path);
+});
+
+// sow-158 Part 3: the account-page Share composer defaults to members-only. postShare() planning must encrypt the
+// whole body to a .enc and leave the stub .md plaintext-free (the same invariant the Worker feed relies on).
+test('planMemberFiles: a members Share (composer default) encrypts to .enc + a plaintext-free stub .md', async () => {
+  const id = shareId('2026-03-01T00:00:00Z', 'astro is great');
+  const built = buildShareFile({ username: 'gwen', input: { id, createdAt: '2026-03-01T00:00:00Z', title: 'Astro is great', visibility: 'members' }, body: 'my secret members-only take' });
+  const plan = await planMemberFiles({ built, body: 'my secret members-only take', encrypt: fakeEncrypt });
+  assert.equal(plan.files.length, 2);
+  const md = plan.files.find((f) => f.path.endsWith('.md'));
+  const enc = plan.files.find((f) => f.path.endsWith('.enc'));
+  assert.equal(md.path, `members/gwen/shares/${id}.md`);
+  assert.match(md.content, /encryptedBody:/);
+  assert.doesNotMatch(md.content, /my secret members-only take/, 'the members share plaintext must NOT reach the committed .md');
+  assert.match(enc.content, /CT\(my secret members-only take\)/);
+});
+
+test('planMemberFiles: a PUBLIC Share returns null -> the caller commits a single plaintext .md', async () => {
+  const id = shareId('2026-03-01T00:00:00Z', 'public note');
+  const built = buildShareFile({ username: 'gwen', input: { id, createdAt: '2026-03-01T00:00:00Z', title: 'Public note', visibility: 'public' }, body: 'a public link share' });
+  assert.equal(await planMemberFiles({ built, body: 'a public link share', encrypt: fakeEncrypt }), null);
 });
 
 test('planMemberFiles: a public intro (no marker) returns null -> the caller commits the plaintext .md', async () => {

@@ -20,7 +20,7 @@
 //   - HOUSE scope: house content publishes through fork mode (operations re-checks superadmin server-side).
 //   - IMAGE upload: /membership/author commits UTF-8 text only.
 
-import { buildContentFile, buildCommentFile, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
+import { buildContentFile, buildCommentFile, buildShareFile, shareId as makeShareId, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
@@ -267,13 +267,18 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     async status() {
       let payload: any = null;
       try { payload = await workerGet('/membership/status'); } catch { payload = null; }
-      const membership = typeof payload?.status === 'string' ? payload.status : 'unknown';
+      // sow-158 follow-up: prefer the oracle's effectiveStatus (ban>staff>grandfather>Stripe, folded server-side)
+      // + role, which the static site cannot derive itself. So a staff/grandfathered member reads as paid and
+      // staff surfaces the role for the admin gate. Falls back to the raw Stripe status for an older Worker.
+      const membership = typeof payload?.effectiveStatus === 'string' ? payload.effectiveStatus
+        : (typeof payload?.status === 'string' ? payload.status : 'unknown');
+      const role = typeof payload?.role === 'string' && payload.role ? payload.role : 'member';
       const lg = payload?.login || user;
       const gid = payload?.github_id != null ? String(payload.github_id) : githubId;
       return {
         authenticated: payload?.ok === true,
         membership,
-        role: 'member', // the status oracle carries no role; the cookie header is role-less (Phase 2), extension-relay-only
+        role,
         canPublish: canPublish(membership),
         canStageDrafts: canStageDrafts(membership),
         couponUntil: payload?.couponUntil ?? null,
@@ -362,6 +367,32 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       return { prs: Array.isArray(r?.items) ? r.items : [] }; // the Worker returns { items }; the components read { prs }
     },
     prStatus({ number }: any) { return workerGet(`/membership/pr-status?number=${encodeURIComponent(number)}`); },
+
+    // ----- SOW-018 Shares: post (members-default, encrypted) + read the tier-gated community stream -----
+    // Post a Share through the SAME hosted-authoring PR path as content. A members share (the composer's default
+    // visibility) encrypts its whole body to a sibling .enc via the cookie /membership/encrypt; the stub .md
+    // carries only the pointer. Mirrors operations.publishShare. Returns the PR handle the composer's ack reads.
+    async postShare({ input = {}, body = '' }: any) {
+      const createdAt = new Date().toISOString();
+      const id_ = (input && input.id) || makeShareId(createdAt, input?.title);
+      let built: any;
+      try { built = buildShareFile({ username: user, input: { ...input, id: id_, createdAt }, body }); }
+      catch (e: any) { throw new WorkbenchClientError('invalid-content', e?.message || 'the share is invalid'); }
+      const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
+      const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
+      const title = `New Share${built.frontmatter?.title ? `: ${built.frontmatter.title}` : ''}`;
+      const res = await workerPost('/membership/author', { itemId: `share-${id_}`, files, title });
+      return { id: id_, path: built.path, visibility: built.frontmatter?.visibility ?? 'members', encrypted: Boolean(plan?.encPath), prNumber: res.number, prUrl: res.html_url, updated: !!res.already };
+    },
+    // The community Shares stream, tier-gated server-side (paid/trial see members + public; else public only).
+    // Members bodies arrive pointer-only (encryptedBody); <gbti-shares-feed> decrypts on expand via decrypt().
+    async listShares({ limit, before }: any = {}) {
+      const qs = new URLSearchParams();
+      if (limit) qs.set('limit', String(limit));
+      if (before) qs.set('before', String(before));
+      const r = await workerGet('/membership/shares' + (qs.toString() ? `?${qs.toString()}` : ''));
+      return { items: Array.isArray(r?.items) ? r.items : [], nextBefore: r?.nextBefore ?? null, canSeeMembers: r?.canSeeMembers ?? false };
+    },
 
     // ----- members-only READ (a paid/trial member reading an existing own members-only body) -----
     async decrypt({ encPath }: any) { return { text: await decryptEnc(encPath) }; },

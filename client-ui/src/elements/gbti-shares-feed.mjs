@@ -27,6 +27,10 @@ const CSS = `
   .head h3 { margin:0; font-family:var(--font-display, var(--font-body)); font-size:16px; }
   .refresh { background:transparent; border:0; color:var(--muted); cursor:pointer; font:inherit; font-size:13px; }
   .refresh:hover { color:var(--brand); }
+  .pager { display:flex; justify-content:center; margin-top:14px; }
+  .load-older { background:var(--panel); border:1.5px solid var(--line); border-radius:10px; color:var(--fg); cursor:pointer; font:inherit; font-size:13px; padding:8px 18px; }
+  .load-older:hover { border-color:var(--brand); color:var(--brand); }
+  .load-older:disabled { opacity:.6; cursor:default; }
   .muted { color:var(--muted); font-size:13.5px; }
   /* SOW-092: a share whose link is a recognized video plays inline in place of the static image. */
   .share-embed { position:relative; aspect-ratio:16/9; overflow:hidden; background:#000; border-radius:10px; margin-top:10px; }
@@ -143,7 +147,10 @@ class GbtiSharesFeed extends GbtiElement {
     try { const st = await this.client.status(); membership = st?.membership ?? 'unknown'; this._role = st?.role ?? 'member'; this._me = String(st?.identity?.username || st?.identity?.login || '').toLowerCase(); } catch { membership = 'unknown'; this._role = 'member'; this._me = ''; }
     this._locked = LOCKED.has(membership);
     if (this._locked) return quiet ? undefined : this._splash();
-    try { this._items = (await this.client.listShares())?.items ?? []; }
+    // A host whose listShares returns a `nextBefore` cursor (the website cookie adapter) enables the "Load older"
+    // pager; a host that returns only { items } (the extension GitHub reader) leaves it null, so the pager never
+    // shows there -- an additive, feature-detected enhancement with no change to the extension surfaces.
+    try { const r = await this.client.listShares(); this._items = r?.items ?? []; this._nextBefore = r?.nextBefore ?? null; }
     catch { if (!quiet) this.set(this.css(CSS) + `<p class="muted">Could not load Shares right now.</p>`); return; }
     // SOW-092: resolve a pending deep link against the freshly loaded stream (silently falls back to the
     // list when the target is not there, e.g. an old link to a removed share).
@@ -171,14 +178,33 @@ class GbtiSharesFeed extends GbtiElement {
       this.on('.refresh', 'click', () => this.reload());
       return;
     }
-    this.set(this.css(CSS) + head + `<div data-list></div>`);
+    // The "Load older" pager shows only when the host handed back a cursor (the website cookie adapter). It calls
+    // listShares({ before }) and appends, so the account hub can page past the newest window.
+    const pager = this._nextBefore ? `<div class="pager"><button class="load-older" type="button" data-load-older>Load older</button></div>` : '';
+    this.set(this.css(CSS) + head + `<div data-list></div>${pager}`);
     this.on('.refresh', 'click', () => this.reload());
+    if (this._nextBefore) this.on('[data-load-older]', 'click', () => this._loadOlder());
     const list = document.createElement('gbti-card-list');
     list.mode = 'detailed';
     // Carry the full Share through the shared projection so card-open returns it (the card only reads a few fields).
     list.items = items.map((it) => shareToItem(it));
     list.addEventListener('card-open', (e) => { const it = e.detail?.item; if (it) { this._reading = it; this.render(); } });
     this.$('[data-list]')?.replaceChildren(list);
+  }
+
+  /** Append the next older page (website cookie adapter only; feature-detected by the nextBefore cursor). */
+  async _loadOlder() {
+    if (!this._nextBefore || this._loadingMore) return;
+    this._loadingMore = true;
+    const btn = this.$('[data-load-older]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+      const r = await this.client.listShares({ before: this._nextBefore });
+      this._items = [...(this._items || []), ...((r && r.items) || [])];
+      this._nextBefore = r?.nextBefore ?? null;
+    } catch { if (btn) { btn.disabled = false; btn.textContent = 'Load older'; } this._loadingMore = false; return; }
+    this._loadingMore = false;
+    this.render();
   }
 
   // The focused reading view: the Share's body + an always-open discussion thread.
