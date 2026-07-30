@@ -1,50 +1,39 @@
 ---
-title: 'Resolve Open Questions: a /qa Skill for Claude Code and Codex'
+title: 'Resolve Open Questions: a /qa Skill for Claude Code'
 slug: qa-skill-for-claude-code-and-codex
 shortDescription: >-
-  A drop-in /qa skill that forces every unresolved decision into one batch of questions before any
-  code is written: audit the repo first, ask only what the code cannot answer, recommend an option
-  for each, then build. One SKILL.md, installs in both Claude Code and Codex.
+  A drop-in /qa skill for Claude Code that forces every unresolved decision into one batch of
+  questions before any code is written: hold plan mode, audit the repo first, ask only what the code
+  cannot answer, recommend an option for each, then build.
 targets:
   - Claude Code
-  - Codex
 categories:
   - ai
   - prompts
   - skill
 tags:
   - claude-code
-  - codex
   - agent-skills
   - planning
   - workflow
 publishedAt: '2026-07-30T19:37:31.690Z'
+updatedAt: '2026-07-30T21:12:09.922Z'
 status: published
 type: prompt
 author: atwellpub
 ---
 
-Claude Code and Codex both load a markdown file at `<skills-dir>/<name>/SKILL.md` as a reusable skill, and both read the same two frontmatter keys: `name` and `description`. That means one file, dropped into two directories, gives you the same command in both agents. This one is `/qa`: it stops the agent, pulls every unresolved decision into a single batch of questions, and refuses to write code until you have answered them.
+Claude Code loads any markdown file at `.claude/skills/<name>/SKILL.md` as a reusable slash command (a "skill"). This one gives your agent a `/qa` command that stops before it builds, pulls every unresolved decision into a single batch of questions, and refuses to write code until you have answered them.
 
 It exists because of a specific failure mode. An agent handed an ambiguous task does not stop. It picks, quietly, and the pick is invisible until the work is done and wrong. The expensive part is never the coding, it is discovering three files later that the agent assumed a different scope, a different storage location, or a different tier of user than you meant. `/qa` inverts that: the assumptions surface as questions, at the front, while changing your mind is still free.
 
+The mechanism it leans on is plan mode. The agent puts ITSELF into a read-only state, does its research there, asks everything it found, and only then acts. That ordering is the whole feature.
+
 ## Install
 
-The same `SKILL.md` works in both agents. Pick your host, or install it in both.
-
-**Claude Code**
-
-1. Create `.claude/skills/qa/` in your repo, or `~/.claude/skills/qa/` to have it everywhere.
+1. Create `.claude/skills/qa/` in your repo, or `~/.claude/skills/qa/` to have it in every project.
 2. Save the file below as `SKILL.md` inside it.
 3. Type `/qa` in Claude Code.
-
-**Codex**
-
-1. Create `.agents/skills/qa/` in your repo, or `$HOME/.agents/skills/qa/` to have it everywhere. Codex scans `.agents/skills` from the working directory upward to the repository root.
-2. Save the same file as `SKILL.md` inside it.
-3. Type `$qa` in Codex, or just describe what you want and let Codex match the skill implicitly from its description.
-
-A note on the Codex side: custom prompts under `~/.codex/prompts/`, invoked as `/prompts:qa`, are deprecated in favor of skills. Skills are the current mechanism, they can be invoked implicitly, and they travel with the repository. Install this as a skill, not a prompt.
 
 Nothing to configure. The skill reads your project, not a config file.
 
@@ -56,10 +45,10 @@ name: qa
 description: >
   Surface and resolve every outstanding question before the work proceeds. Invoke for "/qa",
   "/qa continue", "/qa proceed", "/qa <topic>", or when the user asks you to ask all your questions
-  first, question everything unresolved, or clarify requirements before building. Every mode holds a
-  read-only planning state and asks every open question at once. Bare "/qa" then presents a plan for
-  approval; "/qa continue" and "/qa proceed" skip that approval round and build straight from the
-  answers. Any other trailing text is a context-rich instruction that scopes what to interrogate.
+  first, question everything unresolved, or clarify requirements before building. Every mode enters
+  plan mode and asks every open question at once. Bare "/qa" then presents a plan for approval;
+  "/qa continue" and "/qa proceed" skip that approval round and build straight from the answers. Any
+  other trailing text is a context-rich instruction that scopes what to interrogate.
 ---
 
 # /qa: resolve the open questions before building
@@ -68,27 +57,17 @@ The point of this command is to move every decision that is the user's call OUT 
 into one batch of questions, answered before any code is written. No silent defaults, no drip of
 ad-hoc questions later.
 
-## Hold a planning state while you ask
-
-Whatever your host calls it, change nothing between the invocation and the answers. Read, search and
-trace freely; write nothing.
-
-- **Claude Code:** enter plan mode (`EnterPlanMode`) and leave it with `ExitPlanMode`. Invoked `/qa`.
-- **Codex:** stay in a read-only approval mode and apply no edits. Invoked `$qa`.
-
-The argument conventions below are identical on both.
-
 ## Read the argument first, it selects the mode
 
 | Invocation | Mode |
 |---|---|
-| `/qa` | **Ask and hold.** Enter the planning state, ask every outstanding question, then present a plan for approval. Write nothing until approved. |
-| `/qa continue` or `/qa proceed` | **Ask and go.** Same planning state, same questions. What it skips is the confirmation before acting, so once the answers land you build straight from them, with no plan written for review. |
-| `/qa <anything else>` | **Scoped.** The trailing text is a context-rich instruction naming the subject to interrogate. Planning state either way; default to ask-and-hold, unless the text also says continue or proceed, which drops the approval round for that scoped subject. |
+| `/qa` | **Ask and hold.** Enter plan mode (`EnterPlanMode`), ask every outstanding question, then present a plan for approval (`ExitPlanMode`). Write nothing until approved. |
+| `/qa continue` or `/qa proceed` | **Ask and go.** Still plan mode: enter it and ask the same questions. What it skips is the confirmation before acting, so once the answers land you build straight from them, with no plan written for review. |
+| `/qa <anything else>` | **Scoped.** The trailing text is a context-rich instruction naming the subject to interrogate. Plan mode either way; default to ask-and-hold, unless the text also says continue or proceed, which drops the approval round for that scoped subject. |
 
-Every mode holds the planning state until the questions are answered. The modes differ ONLY in
-whether a plan gets approved before you act, and the question-gathering work below is identical in
-all of them.
+Every mode enters plan mode and holds its read-only discipline until the questions are answered. The
+modes differ ONLY in whether a plan gets approved before you act, and the question-gathering work
+below is identical in all of them.
 
 ## Step 1: audit before you ask
 
@@ -129,16 +108,16 @@ Sweep all of these, not just the obvious one:
 - **Do not re-ask.** Answered means settled; carry it forward without relitigating.
 - **Record the resolutions where they belong.** If a planning doc raised the question, write the
   answer back into it so it reads as resolved, not still open.
-- In ask-and-hold mode, present the plan for approval. In continue/proceed mode, leave the planning
-  state as soon as the answers land and build, without composing a plan for review. Some hosts still
-  surface a single confirmation on the way out; that is a formality, not a review round, so keep
-  what you write there to a line or two.
+- In ask-and-hold mode, present the plan for approval. In continue/proceed mode, leave plan mode as
+  soon as the answers land and build, without composing a plan for review. The harness still
+  surfaces a single prompt on the way out of plan mode; that is a formality, not a review round, so
+  keep what you write there to a line or two.
 - If something genuinely new surfaces mid-build, finish everything that does not depend on it, then
   raise the one question at the right moment.
 
 ## Reminders
 
-- Follow the project's own conventions for planning and for writing.
+- Follow the project's own plan-mode and writing conventions throughout.
 - The command is about decisions, not permission. Do not turn it into a request to confirm work the
   user already asked for.
 ````
@@ -147,17 +126,17 @@ Sweep all of these, not just the obvious one:
 
 The argument selects the mode, and the only difference between them is whether a plan gets approved before the agent acts.
 
-- **`/qa`** is ask and hold. The agent enters a read-only planning state, asks everything, then presents a plan for your approval. Use it when the work is large enough that you want to see the shape before it starts.
-- **`/qa continue`** or **`/qa proceed`** is ask and go. Same planning state, same questions, but once you answer it builds straight from your answers with no plan to approve. This is the everyday mode: you still get interrogated, you just do not get asked twice.
+- **`/qa`** is ask and hold. The agent enters plan mode, asks everything, then presents a plan for your approval. Use it when the work is large enough that you want to see the shape before it starts.
+- **`/qa continue`** or **`/qa proceed`** is ask and go. Same plan mode, same questions, but once you answer it builds straight from your answers with no plan to approve. This is the everyday mode: you still get interrogated, you just do not get asked twice.
 - **`/qa <anything else>`** scopes the interrogation. `"/qa the rate limiter"` asks everything unresolved about the rate limiter specifically, rather than the whole task.
 
 ## Making it yours
 
-**Map the planning state to your host.** The skill states the rule behaviorally, that nothing changes between the invocation and the answers, and then names each host's mechanism: plan mode in Claude Code, a read-only approval mode in Codex. If your setup uses different approval gates, edit those two lines and leave the rest alone.
-
 **Tune where questions hide.** Step 2 lists six places to sweep. The list is deliberately generic, so add the categories your projects actually produce. A team with a design system adds "which token or component does this reuse". A team with a data model adds "does this change a stored shape, and what happens to existing rows". A regulated project adds an approvals category. The sweep is only as good as its list.
 
 **Point it at your planning docs.** The highest-yield item in the sweep is a governing document with an open-questions section, since those questions are already written and already yours to answer. If your project keeps scopes of work, tickets or design docs, name that location explicitly in step 2 so the agent reads it every time.
+
+**Decide how hard the hold is.** As written, bare `/qa` will not touch a file until you approve a plan. If that is heavier than you want for routine work, make `continue` the implied default in your copy and reserve the plan-approval round for large changes.
 
 ## Why the odd details are in there
 
