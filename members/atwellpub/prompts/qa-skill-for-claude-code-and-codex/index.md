@@ -17,7 +17,7 @@ tags:
   - planning
   - workflow
 publishedAt: '2026-07-30T19:37:31.690Z'
-updatedAt: '2026-07-30T21:35:51.416Z'
+updatedAt: '2026-07-30T21:47:30.813Z'
 status: published
 type: prompt
 author: atwellpub
@@ -27,9 +27,7 @@ Claude Code loads any markdown file at `.claude/skills/<name>/SKILL.md` as a reu
 
 It exists because open questions have a habit of surfacing at the wrong end of the work. A sprint finishes, and only then does the agent raise the decisions it should have raised at the start, at exactly the point where acting on them means redoing something.
 
-The obvious fix is a standing instruction: a line in your memory or project file telling the agent to take any decision that is yours into plan mode and ask first. In practice that is a weak trigger. It fires when the agent happens to notice, which is not the same as reliably, and the sessions where it does not fire are the ones that cost you. An explicit command is a strong trigger, because you pull it.
-
-So the mechanism is plan mode, invoked deliberately. The agent puts ITSELF into a read-only state, does its research there, asks everything it found in one batch, and only then acts. That ordering is the whole feature.
+The mechanism is plan mode, invoked deliberately. The agent puts ITSELF into a read-only state, does its research there, asks everything it found in one batch, and only then acts. That ordering is the whole feature.
 
 ## Install
 
