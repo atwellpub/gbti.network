@@ -17,7 +17,7 @@ tags:
   - planning
   - workflow
 publishedAt: '2026-07-30T19:37:31.690Z'
-updatedAt: '2026-07-30T21:47:30.813Z'
+updatedAt: '2026-07-30T21:50:33.942Z'
 status: published
 type: prompt
 author: atwellpub
@@ -164,15 +164,3 @@ The narrow default is the important design choice. An exhaustive sweep on every 
 **Decide how hard the hold is.** As written, bare `/qa` will not touch a file until you approve a plan. If that is heavier than you want for routine work, make `continue` the implied default in your copy and reserve the plan-approval round for large changes.
 
 **Decide what "last reply" means to you.** The default reads the agent's most recent message and treats everything it left open as the batch. If your sessions tend to sprawl across several exchanges before you reach for `/qa`, widen that to the current thread of work, or just type `/qa deep` when the narrow read would miss something.
-
-## Why the odd details are in there
-
-Three rules in the file look like padding and are not. Each one is a failure mode that shows up the moment you make an agent ask questions.
-
-**"Never ask what the repository can answer."** The first thing an unconstrained question-asking agent does is ask you things that are written in the code. Where does this live, what is this called, does this exist. It feels thorough and it is worthless, and after two rounds of it you stop using the command. The audit-first rule forces the agent to earn the right to ask.
-
-**"Do not manufacture questions to justify the command."** A skill whose stated purpose is asking questions will always find some. Without an explicit escape hatch, an agent that has genuinely resolved everything will invent an ambiguity rather than report a clean audit. The rule gives it permission to come back and say there is nothing to decide, here are the assumptions I am proceeding under, which is frequently the correct answer.
-
-**"Give each question a recommendation and its stakes."** A bare question transfers the whole decision to you, including the research. A question that names the option the agent would take, why, and what changes if you choose otherwise, lets you answer "your call" on the ones you do not care about and spend your attention on the ones you do. It also exposes bad questions: if the agent cannot say what changes based on the answer, the question should not have been asked.
-
-The batching matters too. Questions arriving one at a time, mid-build, are the thing this replaces. Each one costs a context switch, and by the third one the agent has already written code against its guess at the first. One batch, up front, answered together, then a clean run.
