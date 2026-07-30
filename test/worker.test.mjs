@@ -607,6 +607,23 @@ test('sow-158: OPTIONS /membership/status reflects an allow-listed Origin with c
   assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null);
 });
 
+// sow-158 News track: the news read + engagement routes are now cookie-readable (credentialed reflected-origin
+// CORS), so the website /news mount can call them with the session cookie. news-publish stays bearer-only (curator).
+test('sow-158 News: news routes reflect an allow-listed Origin with credentials; news-publish stays wildcard', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  for (const path of ['/membership/news', '/membership/news-categories', '/membership/news-sources', '/membership/news-opened', '/membership/news-discussed']) {
+    const ok = await worker.fetch(req('OPTIONS', path, { headers: { Origin: 'https://gbti.test' } }), env, {});
+    assert.equal(ok.status, 204, `${path} preflight`);
+    assert.equal(ok.headers.get('Access-Control-Allow-Origin'), 'https://gbti.test', `${path} reflects the origin`);
+    assert.equal(ok.headers.get('Access-Control-Allow-Credentials'), 'true', `${path} allows credentials`);
+    const blocked = await worker.fetch(req('OPTIONS', path, { headers: { Origin: 'https://evil.example' } }), env, {});
+    assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null, `${path} blocks a foreign origin`);
+  }
+  // news-publish is the curator (bearer-only) path: it keeps the wildcard MEMBERSHIP_CORS, never credentialed.
+  const pub = await worker.fetch(req('OPTIONS', '/membership/news-publish', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.notEqual(pub.headers.get('Access-Control-Allow-Credentials'), 'true', 'news-publish must not be credentialed');
+});
+
 // ---- sow-158 Phase 2: website login return_to ----
 
 test('sow-158 Phase 2: safeReturnTo allows a same-site path and rejects open-redirect attempts', () => {

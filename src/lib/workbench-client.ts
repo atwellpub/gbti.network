@@ -139,6 +139,15 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       body: JSON.stringify(body),
     }));
   }
+  // sow-158 News: a status-aware GET for the news read routes. <gbti-news> drives its view from the ERROR CODE
+  // (not-authenticated -> sign-in nudge, membership-required -> locked nudge, else the feed), so map the HTTP
+  // status to those codes (mirrors operations.mapNewsErr). A signed-in member gets 200 -> the feed renders.
+  async function newsGet(path: string) {
+    const res = await fetch(base + path, { credentials: 'include' });
+    if (res.status === 401) throw err('not-authenticated', 'Sign in to read the news.');
+    if (res.status === 403) throw err('membership-required', 'News is a members-only perk.');
+    return parseJson(res);
+  }
   // A same-origin build-artifact index JSON (public, no credentials needed).
   async function sameOriginJson(path: string) {
     const res = await fetch(path, { credentials: 'same-origin' });
@@ -393,6 +402,23 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const r = await workerGet('/membership/shares' + (qs.toString() ? `?${qs.toString()}` : ''));
       return { items: Array.isArray(r?.items) ? r.items : [], nextBefore: r?.nextBefore ?? null, canSeeMembers: r?.canSeeMembers ?? false };
     },
+
+    // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
+    getNews({ category, since, limit }: any = {}) {
+      const qs = new URLSearchParams();
+      if (category) qs.set('category', String(category));
+      if (since) qs.set('since', String(since));
+      if (limit) qs.set('limit', String(limit));
+      return newsGet('/membership/news' + (qs.toString() ? `?${qs.toString()}` : ''));
+    },
+    getNewsSources() { return newsGet('/membership/news-sources'); },
+    getNewsCategories() { return newsGet('/membership/news-categories'); },
+    // Best-effort engagement beacons (the reader ignores their failures); cookie POST -> CSRF via workerPost.
+    newsOpened({ guid, source }: any = {}) { return workerPost('/membership/news-opened', { guid, ...(source ? { source } : {}) }); },
+    newsDiscussed({ guid, source }: any = {}) { return workerPost('/membership/news-discussed', { guid, ...(source ? { source } : {}) }); },
+    // Curator "Add to Discord" stays extension-only for now (news-publish is bearer/curator-gated). status() keeps
+    // canCurate false on the web, so <gbti-news> never renders the button; this typed refusal is a defensive stop.
+    publishNews() { throw err('curator-extension-only', 'Publishing news to Discord is available in the browser extension for now.'); },
 
     // ----- members-only READ (a paid/trial member reading an existing own members-only body) -----
     async decrypt({ encPath }: any) { return { text: await decryptEnc(encPath) }; },

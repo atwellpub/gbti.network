@@ -128,5 +128,6 @@ test('favoritedFrom: derives favorited from the activity favorites list', () => 
 
 test('the shared tier + target sets are as expected', () => {
   assert.ok(COMMENT_TARGET_TYPES.has('share') && COMMENT_TARGET_TYPES.has('post'));
+  assert.ok(COMMENT_TARGET_TYPES.has('news'), 'sow-158 News: the website discussion supports news threads');
   assert.ok(MEMBER_READ_TIER.has('paid') && MEMBER_READ_TIER.has('trialing') && !MEMBER_READ_TIER.has('none'));
 });

@@ -42,12 +42,13 @@ export async function membershipNewsOpened(request, env, {
   discord = null,
   now = Date.now,
   postOnce = postNewsItemOnce,
+  allowCookie = false, // sow-158: the website cookie session opts in (a POST, so CSRF is enforced in resolveIdentity)
 } = {}) {
   if (request.method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } };
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the open store is not configured' } };
 
   // Non-banned member gate first (a banned account never writes KV, SOW-077 posture).
-  const auth = await authorize(request, env, { fetchImpl });
+  const auth = await authorize(request, env, { fetchImpl, allowCookie });
   if (!auth.ok) return auth;
 
   let payload;

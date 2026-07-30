@@ -779,12 +779,13 @@ export default {
       // SOW-043: the members-only news proxy. Effective-paid gated; the news worker's NEWS_API_KEY is held by this
       // Worker and never reaches the client. Per-token body, so never cached and varied on the bearer.
       if (pathname === '/membership/news' || pathname === '/membership/news-categories' || pathname === '/membership/news-sources') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158: cookie-readable (the website /news mount)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
-          const r = pathname === '/membership/news' ? await membershipNews(request, env)
-            : pathname === '/membership/news-sources' ? await membershipNewsSources(request, env)
-            : await membershipNewsCategories(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = pathname === '/membership/news' ? await membershipNews(request, env, { allowCookie: true })
+            : pathname === '/membership/news-sources' ? await membershipNewsSources(request, env, { allowCookie: true })
+            : await membershipNewsCategories(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 
@@ -814,20 +815,22 @@ export default {
       // appends a one-time "members are discussing this" notice to the curator-posted message. No-op if the item
       // was never posted to Discord. Per-token, so never cached, varied on bearer.
       if (pathname === '/membership/news-discussed') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158: cookie-writable (POST -> CSRF gate)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await membershipNewsDiscussed(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipNewsDiscussed(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 
       // SOW-111: the news detail-open engagement beacon. Tier-gated by the mirrored news_engagement config; at
       // the open threshold the item auto-posts ONCE to its mapped category channel (the shared post-once core).
       if (pathname === '/membership/news-opened') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158: cookie-writable (POST -> CSRF gate)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await membershipNewsOpened(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipNewsOpened(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 

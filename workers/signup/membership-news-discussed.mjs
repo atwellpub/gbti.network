@@ -24,8 +24,8 @@ const NOTICE = '\n\n💬 Members are discussing this in the GBTI extension.';
 
 /** POST /membership/news-discussed { guid, source? } -> auto-posts on the first comment (SOW-111) and appends
  *  the discussion notice to the news item's Discord post once. */
-export async function membershipNewsDiscussed(request, env, { authorize = authorizePaid, fetch = globalThis.fetch, kv = env?.SIGNUP_KV, discord = null, now = () => new Date().toISOString(), postOnce = postNewsItemOnce } = {}) {
-  const auth = await authorize(request, env);
+export async function membershipNewsDiscussed(request, env, { authorize = authorizePaid, fetch = globalThis.fetch, kv = env?.SIGNUP_KV, discord = null, now = () => new Date().toISOString(), postOnce = postNewsItemOnce, allowCookie = false } = {}) {
+  const auth = await authorize(request, env, { allowCookie }); // sow-158: website cookie opts in (POST -> CSRF gate)
   if (!auth.ok) return { status: auth.status, body: auth.body };
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the dedupe store is not configured' } };
 

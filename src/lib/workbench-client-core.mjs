@@ -8,7 +8,9 @@ import { serializeContentFile, byCommentOldest } from '../../client/src/content-
 import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/src/member-content.mjs';
 
 // SOW-027: the valid comment targets (mirrors operations.listComments' COMMENT_TARGET_TYPES).
-export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share']);
+// sow-158 News track: 'news' enables the shared <gbti-discussion> news thread on the website (read is public;
+// posting stays paid-gated via postComment's membership check). The comments-index already carries news rows.
+export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share', 'news']);
 // SOW-078: who may READ a members-visibility comment stub (an active trial OR a paid member). Mirrors the
 // server's READ_TRIAL tier, applied here as the presentation-side gate; the Worker decrypt is authoritative.
 export const MEMBER_READ_TIER = new Set(['paid', 'trialing', 'trial']);

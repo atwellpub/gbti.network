@@ -1,0 +1,84 @@
+---
+// sow-158 News track: the interactive News experience on gbti.network, extension-optional. A signed-in member
+// (free/trial/paid) reads the classified feed, follows news channels, opens the reader, and joins the discussion,
+// all over the httpOnly-cookie session with NO extension and NO GitHub token in the page. The public news LIST
+// stays at /feeds/news/; this is the gated interactive layer. noindex: a per-member surface.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="News" description="The GBTI Network members news feed." noindex={true}>
+  <section class="band">
+    <div class="wrap news-wrap">
+      <div class="news-head">
+        <h1 class="h1">News</h1>
+        <p class="lead">The classified developer news feed. Follow channels to tune it, open a story to read the summary, and discuss it with the co-op.</p>
+      </div>
+
+      {/* Signed-OUT prompt (also the pre-hydration state; static SSG has no request-time cookie). */}
+      <div class="news-signin" data-news-signedout hidden>
+        <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-mega"/></svg></span>
+        <h2 class="h2 mt16">Sign in to read the news</h2>
+        <p class="lead">The news feed and channel follows are a free member perk. Sign in with GitHub to open it.</p>
+        <a href="/login/?return_to=%2Fnews%2F" class="btn btn-primary btn-lg mt16">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+
+      <div data-news-mount hidden>
+        <p class="news-load">Loading the news feed&hellip;</p>
+        <gbti-news></gbti-news>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // Resolve the signed-in member from the httpOnly-cookie session, then mount the client-ui news surface. News
+    // is a FREE-tier perk, so ANY signed-in member qualifies (the Worker's authorizeSignedIn admits free/trial/paid).
+    function readCookie(name: string): string | null {
+      for (const part of document.cookie.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+      }
+      return null;
+    }
+
+    const signedOut = document.querySelector('[data-news-signedout]') as HTMLElement | null;
+    const mountEl = document.querySelector('[data-news-mount]') as HTMLElement | null;
+
+    function showSignedOut() { if (signedOut) signedOut.hidden = false; if (mountEl) mountEl.hidden = true; }
+
+    async function mount(login: string, githubId: string | null) {
+      if (signedOut) signedOut.hidden = true;
+      if (mountEl) mountEl.hidden = false;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const { createWorkbenchClient } = await import('../../lib/workbench-client');
+      const { setClient } = await import('../../../client-ui/src/base.mjs');
+      setClient(createWorkbenchClient({ signupBase, login, githubId }));
+      document.querySelector('.news-load')?.setAttribute('hidden', '');
+      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
+      await import('../../../client-ui/src/elements/gbti-news.mjs');
+    }
+
+    (async () => {
+      // Cheap gate: no readable gbti_csrf means no web session -> show the sign-in prompt (no network).
+      if (!readCookie('gbti_csrf')) { showSignedOut(); return; }
+      const base = document.documentElement.dataset.signupBase || '';
+      let payload: any = null;
+      try {
+        const res = await fetch(base + '/membership/status', { credentials: 'include' });
+        payload = res.ok ? await res.json() : null;
+      } catch { payload = null; }
+      if (payload && payload.ok === true && payload.login) {
+        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      } else {
+        showSignedOut(); // a missing/invalid session falls back to the sign-in prompt
+      }
+    })();
+  </script>
+
+  <style>
+    .news-wrap { max-width: 1040px; }
+    .news-head { margin-bottom: 22px; }
+    .news-head .lead { max-width: 720px; }
+    .news-signin { text-align: center; padding: 24px 0; }
+    .news-load { color: var(--fg-mute); padding: 16px 2px; font-size: 15px; }
+    .news-load[hidden] { display: none; }
+  </style>
+</BaseLayout>
