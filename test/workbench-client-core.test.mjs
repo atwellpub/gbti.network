@@ -3,8 +3,8 @@
 // filter/tier-gate, the comment-visibility coercion, and the favorite derivation. Uses a FAKE encrypt (no Worker).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes } from '../src/lib/workbench-client-core.mjs';
-import { buildCommentFile, buildContentFile, buildShareFile, shareId, commentId, parseContentFile } from '../client/src/content-ops.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles } from '../src/lib/workbench-client-core.mjs';
+import { buildCommentFile, buildContentFile, buildShareFile, shareId, commentId, parseContentFile, serializeContentFile } from '../client/src/content-ops.mjs';
 
 const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', aad: assetId, ct: 'CT(' + plaintext + ')' });
 // A fake decrypt that inverts fakeEncrypt (extracts the plaintext from the ct wrapper), for the round-trip test.
@@ -156,4 +156,64 @@ test('the shared tier + target sets are as expected', () => {
   assert.ok(COMMENT_TARGET_TYPES.has('share') && COMMENT_TARGET_TYPES.has('post'));
   assert.ok(COMMENT_TARGET_TYPES.has('news'), 'sow-158 News: the website discussion supports news threads');
   assert.ok(MEMBER_READ_TIER.has('paid') && MEMBER_READ_TIER.has('trialing') && !MEMBER_READ_TIER.has('none'));
+});
+
+// ---- sow-158 permalink rename (rename-at-publish) pure helpers ----
+
+test('renameOriginOf: resolves an own item of the same type, else null', () => {
+  assert.deepEqual(
+    renameOriginOf({ path: 'members/gwen/posts/old-slug/index.md', username: 'gwen', type: 'post' }),
+    { oldSlug: 'old-slug', oldPath: 'members/gwen/posts/old-slug/index.md' },
+  );
+  // Case-insensitive username match (the folder is lowercase).
+  assert.ok(renameOriginOf({ path: 'members/gwen/products/x/index.md', username: 'Gwen', type: 'product' }));
+  // Another member's path -> null (you may only rename your own).
+  assert.equal(renameOriginOf({ path: 'members/alice/posts/x/index.md', username: 'gwen', type: 'post' }), null);
+  // Wrong type (a product path while publishing a post) -> null.
+  assert.equal(renameOriginOf({ path: 'members/gwen/products/x/index.md', username: 'gwen', type: 'post' }), null);
+  // A non-item path (a comment, or house) -> null.
+  assert.equal(renameOriginOf({ path: 'members/gwen/comments/intro-x.md', username: 'gwen', type: 'post' }), null);
+  assert.equal(renameOriginOf({ path: 'house/posts/x/index.md', username: 'gwen', type: 'post' }), null);
+  assert.equal(renameOriginOf({ path: undefined, username: 'gwen', type: 'post' }), null);
+});
+
+test('mergedRedirectFrom: a rename appends + dedupes the old URL; a plain re-publish KEEPS the old redirects', () => {
+  // Rename: the old public URL is appended to the existing set (deduped).
+  assert.deepEqual(
+    mergedRedirectFrom({ oldFm: { redirectFrom: ['/articles/older/'] }, inputRedirectFrom: [], renaming: true, type: 'post', oldSlug: 'old' }),
+    ['/articles/older/', '/articles/old/'],
+  );
+  // Already-present old URL is not duplicated.
+  assert.deepEqual(
+    mergedRedirectFrom({ oldFm: { redirectFrom: ['/articles/old/'] }, inputRedirectFrom: [], renaming: true, type: 'post', oldSlug: 'old' }),
+    ['/articles/old/'],
+  );
+  // Product base.
+  assert.deepEqual(
+    mergedRedirectFrom({ oldFm: {}, inputRedirectFrom: [], renaming: true, type: 'product', oldSlug: 'gizmo' }),
+    ['/products/gizmo/'],
+  );
+  // REGRESSION: a plain re-publish (no rename) must PRESERVE the item's existing redirectFrom, not drop it.
+  assert.deepEqual(
+    mergedRedirectFrom({ oldFm: { redirectFrom: ['/articles/prev/'] }, inputRedirectFrom: [], renaming: false, type: 'post', oldSlug: 'cur' }),
+    ['/articles/prev/'],
+  );
+  // No oldFm + no input -> undefined (nothing to write).
+  assert.equal(mergedRedirectFrom({ oldFm: null, inputRedirectFrom: [], renaming: false, type: 'post', oldSlug: 'x' }), undefined);
+});
+
+test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or no-intro is empty', () => {
+  const introText = serializeContentFile({ id: 'intro-old', targetType: 'product', targetSlug: 'old', authorNote: true, visibility: 'public' }, 'From the author.');
+  const files = renameIntroMoveFiles({ username: 'gwen', type: 'product', oldSlug: 'old', newSlug: 'new', introText });
+  assert.equal(files.length, 2);
+  assert.equal(files[0].path, 'members/gwen/comments/intro-new.md');
+  const movedFm = parseContentFile(files[0].content).frontmatter;
+  assert.equal(movedFm.id, 'intro-new');
+  assert.equal(movedFm.targetSlug, 'new');
+  assert.equal(files[1].path, 'members/gwen/comments/intro-old.md');
+  assert.equal(files[1].content, null, 'the old intro is deleted');
+  // A post has no intro-comment requirement.
+  assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'post', oldSlug: 'old', newSlug: 'new', introText }), []);
+  // No existing intro (introText null) -> nothing to move.
+  assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'product', oldSlug: 'old', newSlug: 'new', introText: null }), []);
 });

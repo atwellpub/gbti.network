@@ -4,7 +4,7 @@
 // lives here so `node --test` (which has no TS loader) can exercise it. Node-free: it imports only the shared pure
 // builders. Mirrors the member-signal.ts / member-signal-core.mjs split.
 
-import { serializeContentFile, byCommentOldest } from '../../client/src/content-ops.mjs';
+import { serializeContentFile, parseContentFile, byCommentOldest } from '../../client/src/content-ops.mjs';
 import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/src/member-content.mjs';
 
 // SOW-027: the valid comment targets (mirrors operations.listComments' COMMENT_TARGET_TYPES).
@@ -133,4 +133,51 @@ export function reassembleMemberBody(frontmatter, indexBody, memberText) {
   if ((frontmatter?.visibility ?? 'public') === 'members') return gated; // whole-item members: memberText is all
   const pub = String(indexBody ?? '').trim();
   return pub ? `${pub}\n\n${MEMBER_MARKER}\n\n${gated}` : `${MEMBER_MARKER}\n\n${gated}`;
+}
+
+// ---- sow-158 permalink rename (rename-at-publish). PURE mirrors of client/src/operations.mjs so the website
+// hosted publish renames exactly like the extension. Client-side FILE PLANNING only — the real boundaries
+// (isCleanPath / validateHostedRequest / the SOW-005 gate) are shared + unchanged. Converge operations.mjs onto
+// these later; the extension path is deliberately left untouched here (zero regression risk). ----
+
+// The public URL base per content type; a rename records the OLD url in redirectFrom so the build 301s it.
+export const RENAME_URL_BASE = { post: '/articles', product: '/products', prompt: '/prompts' };
+const OWN_ITEM_PATH_RE = /^members\/([a-z0-9][a-z0-9-]*)\/(posts|products|prompts)\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
+
+// Resolve the ORIGIN of an edit: the canonical own-folder item the editor loaded (`path`). Returns
+// { oldSlug, oldPath } when the path is the member's own item of the SAME type, else null. Mirrors
+// operations.mjs renameOriginOf. The slug in the FORM is the (possibly new) value; the path names what it was.
+export function renameOriginOf({ path, username, type }) {
+  const m = OWN_ITEM_PATH_RE.exec(String(path || ''));
+  if (!m) return null;
+  if (m[1] !== String(username ?? '').toLowerCase()) return null;
+  if (m[2].slice(0, -1) !== type) return null;
+  return { oldSlug: m[3], oldPath: String(path) };
+}
+
+// Merge the redirectFrom set for a publish: the old file's entries + any input entries + (when renaming) the old
+// item's public URL, deduped. Returns the array or undefined (nothing to write). Mirrors operations.mjs:548-552 —
+// which ALSO fixes a plain re-publish silently DROPPING the item's existing redirects. `oldFm` null (a fresh item
+// or an unreadable original) leaves only the input entries.
+export function mergedRedirectFrom({ oldFm, inputRedirectFrom, renaming, type, oldSlug } = {}) {
+  const keep = Array.isArray(oldFm?.redirectFrom) ? oldFm.redirectFrom : [];
+  const fromInput = Array.isArray(inputRedirectFrom) ? inputRedirectFrom : [];
+  const oldUrl = renaming ? `${RENAME_URL_BASE[type]}/${oldSlug}/` : null;
+  const merged = [...new Set([...keep, ...fromInput, ...(oldUrl ? [oldUrl] : [])])];
+  return merged.length ? merged : undefined;
+}
+
+// The from-the-author intro-comment MOVE files for a rename (product/prompt only): read intro-<old>.md, rewrite its
+// id + targetSlug to the new slug, emit the new file + the old-path delete. `[]` for a post, or when the item has
+// no intro (introText null). Pure given the already-read introText. Mirrors operations.mjs introMoveFiles.
+export function renameIntroMoveFiles({ username, type, oldSlug, newSlug, introText } = {}) {
+  if (!['product', 'prompt'].includes(type)) return [];
+  if (introText == null) return [];
+  const oldIntro = `members/${username}/comments/intro-${oldSlug}.md`;
+  const intro = parseContentFile(introText);
+  const introFm = { ...(intro.frontmatter ?? {}), id: `intro-${newSlug}`, targetSlug: newSlug };
+  return [
+    { path: `members/${username}/comments/intro-${newSlug}.md`, content: serializeContentFile(introFm, intro.body) },
+    { path: oldIntro, content: null },
+  ];
 }

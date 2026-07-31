@@ -12,20 +12,17 @@
 // OPTIONAL-CHAINED there (getActivity, getFollows, listContributions, listComments, admin, ...), so its absence
 // degrades gracefully to an empty state — deferred to a later phase per the SOW.
 //
-// Deliberately refused (typed errors the editor surfaces, deferred to the extension for now):
-//   - members-only PUBLISH (needs /membership/encrypt, kept bearer-only): visibility:members, an encryptedBody
-//     reference (a Mode B/C item, so re-publishing on the web cannot orphan its .enc section), or a `<!--
-//     members-only -->` body marker.
-//   - RENAME (a changed permalink): the fork-branch rename dance is extension-only for now.
+// Now live on the web (earlier phases): members-only PUBLISH (via the cookie /membership/encrypt), IMAGE upload
+// (binary base64 entries), and PERMALINK RENAME (rename-at-publish, SOW-112 v2 — a changed permalink field makes
+// the publish a rename: the new path + the old-path deletes + redirectFrom in ONE hosted PR). Still refused:
 //   - HOUSE scope: house content publishes through fork mode (operations re-checks superadmin server-side).
-//   - IMAGE upload: /membership/author commits UTF-8 text only.
 
 import { buildContentFile, buildCommentFile, buildShareFile, shareId as makeShareId, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles } from './workbench-client-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
@@ -167,25 +164,47 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
   }
 
   // The core publish: build the file set from PURE builders and POST it to the hosted-authoring endpoint.
+  // sow-158 permalink rename (SOW-112 v2, owner-directed rename-at-publish): `path` names the canonical item this
+  // edit was loaded from; a submitted slug that differs makes this publish a RENAME (one hosted PR: the new path,
+  // the old path + old .enc deleted, the old URL in redirectFrom so the build 301s, the intro moved). Even without
+  // a slug change the old file's redirectFrom is merged in (a plain re-publish used to DROP it). Mirrors the
+  // isHostedCtx branch of client/src/operations.mjs publish(); the website is hosted-only, so the fork dance does
+  // not apply (the hosted branch is always fresh-based on live main).
   async function publish({ type, input = {}, body = '', authorNote, path, scope }: any) {
     if (scope === 'house' || String(path || '').startsWith('house/')) {
       throw err('bad-request', 'House content is published from the browser extension for now.');
     }
+    // Resolve the rename origin (the own item the editor loaded) and read its frontmatter for the redirectFrom
+    // merge, the publishedAt preservation, and the old .enc path.
+    const origin = renameOriginOf({ path, username: user, type });
+    let oldFm: any = null;
+    if (origin) {
+      const oldText = await readOwnFile(origin.oldPath);
+      if (oldText != null) { try { oldFm = parseContentFile(oldText).frontmatter ?? {}; } catch { oldFm = null; } }
+    }
+    const renaming = Boolean(oldFm) && typeof input?.slug === 'string' && input.slug !== origin!.oldSlug;
+    const effInput: any = { ...input };
+    const redirects = mergedRedirectFrom({ oldFm, inputRedirectFrom: input?.redirectFrom, renaming, type, oldSlug: origin?.oldSlug });
+    if (redirects) effInput.redirectFrom = redirects;
+    // A rename must not re-stamp publishedAt (feeds stay stable; the item is not new). The editor stamps it on
+    // every publish, so restore the original for the rename case only.
+    if (renaming && oldFm?.publishedAt) effInput.publishedAt = oldFm.publishedAt;
+
     let built: any;
     try {
-      built = buildContentFile({ type, username: user, input: { ...input, status: (input && input.status) || 'published' }, body, scope: 'member' });
+      built = buildContentFile({ type, username: user, input: { ...effInput, status: effInput.status || 'published' }, body, scope: 'member' });
     } catch (e: any) {
       throw new WorkbenchClientError('invalid-content', e?.message || 'the content is invalid');
     }
-    // Rename guard: a changed permalink is extension-only for now (the fork-branch rename dance).
-    const existing = path ? parseContentPath(path) : null;
-    if (existing && built.slug && existing.slug && built.slug !== existing.slug) {
-      throw err('bad-request', 'Changing a permalink is available in the browser extension for now. Keep the current permalink to publish here.');
+    if (renaming) {
+      // The new path must not already exist (the CI unique-slug guard is the backstop).
+      const collision = await readOwnFile(built.path);
+      if (collision != null) throw err('bad-request', `the permalink "${built.slug}" is already taken`);
     }
     // SOW-016 / Phase 3c: a whole-item members body OR a `<!-- members-only -->` section is encrypted to a sibling
     // .enc (via the cookie /membership/encrypt), and index.md keeps only the public teaser + the encryptedBody
     // pointer. planMemberFiles overrides any stale encryptedBody with the deterministic path, so a re-publish
-    // overwrites the same .enc (no orphan). Plain public content returns null -> the single plaintext file.
+    // overwrites the same .enc (no orphan). On a rename it writes the NEW-slug .enc; the OLD one is deleted below.
     const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
     const files: Array<{ path: string; content?: string | null; contentBase64?: string }> = plan ? plan.files : [{ path: built.path, content: built.markdown }];
     const intro = buildIntroFile(user, built, authorNote);
@@ -196,9 +215,28 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const b64 = pendingImages.get(p);
       if (b64) { files.push({ path: p, contentBase64: b64 }); pendingImages.delete(p); }
     }
+    // Rename cleanup: delete the old index.md + old .enc, and move the from-the-author intro (product/prompt),
+    // all in the same PR. Fail closed if the original vanished from main (never a half-move).
+    if (renaming) {
+      const onMain = (await readOwnFile(origin!.oldPath)) != null;
+      if (!onMain) throw err('bad-request', 'the original item could not be found on the network; refresh and try the rename again');
+      files.push({ path: origin!.oldPath, content: null });
+      if (typeof oldFm?.encryptedBody === 'string' && oldFm.encryptedBody) files.push({ path: oldFm.encryptedBody, content: null });
+      if (!intro) {
+        const oldIntroText = await readOwnFile(`members/${user}/comments/intro-${origin!.oldSlug}.md`);
+        files.push(...renameIntroMoveFiles({ username: user, type, oldSlug: origin!.oldSlug, newSlug: built.slug, introText: oldIntroText }));
+      } else {
+        const oldIntro = `members/${user}/comments/intro-${origin!.oldSlug}.md`;
+        if ((await readOwnFile(oldIntro)) != null) files.push({ path: oldIntro, content: null });
+      }
+    }
     const title = `Publish ${TYPE_LABEL[built.type] || built.type}: ${built.frontmatter?.title || built.slug || user}`;
-    const res = await workerPost('/membership/author', { itemId: hostedItemId(built.type, built.slug), files, title });
-    return { prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true, encrypted: Boolean(plan?.encPath) };
+    const itemId = hostedItemId(built.type, renaming ? origin!.oldSlug : built.slug);
+    const res = await workerPost('/membership/author', { itemId, files, title });
+    return {
+      prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true,
+      encrypted: Boolean(plan?.encPath), ...(renaming ? { renamed: { from: origin!.oldSlug, to: built.slug } } : {}),
+    };
   }
 
   async function discardDraft({ type, slug }: any) {
