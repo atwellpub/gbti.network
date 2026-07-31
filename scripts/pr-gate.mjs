@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import { deriveStatus } from '../membership/derive-status.mjs';
 import { loadOverrides, roleOf, effectiveStatus } from '../membership/overrides.mjs';
 import { ownedFolderFor, decide, contributionTarget } from '../membership/classify-pr.mjs';
-import { parseHostedRef } from '../membership/hosted-author.mjs'; // SOW-156: hosted canonical-head branch identity
+import { parseHostedRef, parseAdminHostedRef } from '../membership/hosted-author.mjs'; // SOW-156 hosted content + sow-161 hosted-admin canonical-head identity
 
 import { createStripeClient } from '../clients/stripe.mjs';
 import { createGitHubClient } from '../clients/github.mjs';
@@ -155,7 +155,12 @@ export function parseEvent(event, botId = null) {
   const sameRepoHead = headRepoId != null && String(headRepoId) === String(baseRepoId);
   let author;
   if (botOpened && sameRepoHead) {
-    author = parseHostedRef(pr.head?.ref); // hosted branch id, or null (hard fail; never the org owner id)
+    // A bot-opened canonical-head PR carries the requesting id in the branch: `hosted/<id>/...` (own-folder
+    // member content, SOW-156) or `hosted-admin/<id>/...` (a sow-161 admin mutation). Either resolves the
+    // author id; a non-matching ref yields null -> the gate hard-fails (never the org owner id). decide()
+    // then re-checks that id's git-native role against the touched paths, so an admin branch cannot merge
+    // beyond the id's actual role.
+    author = parseHostedRef(pr.head?.ref) ?? parseAdminHostedRef(pr.head?.ref);
   } else if (botOpened) {
     author = pr.head?.repo?.owner?.id ?? pr.head?.user?.id ?? null; // fork head: the fork owner is the author
   } else {

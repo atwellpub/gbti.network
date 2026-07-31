@@ -9,6 +9,8 @@ import {
   parseMembersIndex,
   hostedBranchFor,
   parseHostedRef,
+  adminHostedBranchFor,
+  parseAdminHostedRef,
   validateHostedRequest,
   HOSTED_MAX_FILES,
   HOSTED_MAX_FILE_BYTES,
@@ -61,6 +63,32 @@ test('parseHostedRef: a crafted ref cannot shift the id parse (fail closed to nu
   assert.equal(parseHostedRef('gbti/ban-999'), null);
   assert.equal(parseHostedRef('main'), null);
   assert.equal(parseHostedRef(null), null);
+});
+
+// ---- sow-161 admin-hosted branch contract ----
+
+test('adminHostedBranchFor + parseAdminHostedRef round-trip', () => {
+  const branch = adminHostedBranchFor('2002207', 'deplatform-my-post');
+  assert.equal(branch, 'hosted-admin/2002207/deplatform-my-post');
+  assert.equal(parseAdminHostedRef(branch), '2002207');
+});
+
+test('adminHostedBranchFor: rejects a non-numeric id and a bad action slug', () => {
+  assert.equal(adminHostedBranchFor('org-name', 'x'), null);
+  assert.equal(adminHostedBranchFor('123', 'Has Space'), null);
+  assert.equal(adminHostedBranchFor('123', 'a/../b'), null);
+  assert.equal(adminHostedBranchFor('123', ''), null);
+});
+
+test('parseAdminHostedRef: fails closed, and the two hosted namespaces do NOT cross-parse', () => {
+  assert.equal(parseAdminHostedRef('hosted-admin/999/evil/2002207/x'), null); // extra segment
+  assert.equal(parseAdminHostedRef('hosted-admin/2002207'), null); // no action segment
+  assert.equal(parseAdminHostedRef('hosted-admin//x'), null);
+  assert.equal(parseAdminHostedRef('hosted-admin/abc/x'), null);
+  assert.equal(parseAdminHostedRef(null), null);
+  // a member content branch is NOT an admin branch, and vice-versa (distinct namespaces)
+  assert.equal(parseAdminHostedRef('hosted/2002207/my-post'), null);
+  assert.equal(parseHostedRef('hosted-admin/2002207/ban-1'), null);
 });
 
 // ---- request validation ----

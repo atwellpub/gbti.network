@@ -74,6 +74,26 @@ test('SOW-156: a bot-opened FORK-head PR still resolves the fork owner (unchange
   assert.equal(r.author, 42, 'a fork head trusts the fork owner; the ref cannot spoof an id');
 });
 
+// ---- sow-161: hosted-admin canonical-head PRs (a Worker-opened admin mutation) ----
+
+test('sow-161: a bot-opened canonical-head PR resolves the admin author from a hosted-admin branch name', () => {
+  const r = parseEvent(hostedEv({ ref: 'hosted-admin/2002207/deplatform-a-post' }), BOT);
+  assert.equal(r.author, '2002207', 'the requesting admin id comes from the branch, not the bot opener');
+  assert.equal(r.botOpened, true);
+});
+
+test('sow-161: a malformed hosted-admin ref fails closed to null (never the org owner id)', () => {
+  for (const ref of ['hosted-admin/2002207', 'hosted-admin/abc/x', 'hosted-admin/999/evil/2002207/x', 'hosted-admin//x']) {
+    const r = parseEvent(hostedEv({ ref }), BOT);
+    assert.equal(r.author, null, `ref ${ref} must fail closed`);
+  }
+});
+
+test('sow-161: a hosted-admin ref on a FORK head cannot spoof an id (fork owner wins)', () => {
+  const r = parseEvent(hostedEv({ ref: 'hosted-admin/999/role-1', headRepoId: 12345, headOwnerId: 42 }), BOT);
+  assert.equal(r.author, 42, 'a fork head trusts the fork owner; the admin ref only attributes on a canonical bot head');
+});
+
 test('SOW-156: a NON-bot canonical-head PR (a superadmin pushing a branch) resolves the opener as always', () => {
   const r = parseEvent(hostedEv({ openerId: 7, ref: 'hosted/999/spoof' }), BOT);
   assert.equal(r.author, 7, 'a human opener is the author; the hosted rule only fires for the bot');

@@ -77,6 +77,35 @@ export function parseHostedRef(ref) {
   return m ? m[1] : null;
 }
 
+// sow-161 server-side admin authoring: a DISTINCT branch prefix for a Worker-opened ADMIN mutation PR
+// (moderation, ban/grandfather, role assignment, config), so it is not confused with own-folder member
+// content (`hosted/...`). Like the member case, the github_id is ALWAYS server-inserted from the verified
+// session identity, never the request body, and the action slug names what the PR does. The gate resolves
+// this id -> the git-native role and runs the SAME decide() anti-escalation: the id must independently hold
+// the role for every touched path tier (moderator to touch others' content, admin for Tier A house/**,
+// superadmin for Tier S roles.yml), so a wrong/forged id cannot escalate. Members cannot mint this branch:
+// only the Worker (installation token) pushes canonical branches and opens the bot PR.
+export const ADMIN_HOSTED_BRANCH_PREFIX = 'hosted-admin/';
+// The action slug is a bounded lowercase token (e.g. `deplatform-my-post`, `ban-12345`, `role-12345`); it is
+// cosmetic for the gate (the touched PATHS + the id's role decide the merge), but it is validated so it can
+// never shift the id parse or produce an illegal git ref.
+const ADMIN_ACTION_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,79}$/;
+
+/** The per-admin canonical mutation branch. The github_id segment is ALWAYS server-inserted from the verified
+ *  identity (never the request body). Returns null if the id or the action slug is not well-formed. */
+export function adminHostedBranchFor(githubId, actionSlug) {
+  if (!GITHUB_ID_RE.test(String(githubId ?? ''))) return null;
+  if (!ADMIN_ACTION_SLUG_RE.test(String(actionSlug ?? ''))) return null;
+  return `${ADMIN_HOSTED_BRANCH_PREFIX}${githubId}/${actionSlug}`;
+}
+
+/** The gate-side inverse of adminHostedBranchFor: resolve the requesting admin github_id from a
+ *  `hosted-admin/<github_id>/<action-slug>` ref, or null. Fail closed (a non-match hard-fails the author). */
+export function parseAdminHostedRef(ref) {
+  const m = /^hosted-admin\/(\d{1,20})\/[a-z0-9][a-z0-9-]{0,79}$/.exec(String(ref ?? ''));
+  return m ? m[1] : null;
+}
+
 function utf8Bytes(s) {
   return new TextEncoder().encode(s).length;
 }
