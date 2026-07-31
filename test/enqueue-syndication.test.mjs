@@ -164,3 +164,41 @@ test('apply enqueues the share when its only deliverable cell is on-manual (the 
   const r = await main({ argv: ['--apply'], env: { ...ENV, SYNDICATE_ADDED: 'members/alice/shares/s1.md' }, deps: deps(store, cfg) });
   assert.equal(r.enqueued, 1, 'an on-manual cell delivers (as a Social Queue task at drain time)');
 });
+
+// SOW-014 + the Reddit first comment: the AUTO rail must carry the from-the-author intro so
+// {author-note}, {author-note-italic} and {author-note-block} render. It never did, so the stored
+// reddit-comment template (which quotes the note) rendered a bare "".
+test('the intro comment body is carried onto the queue item as authorNote', async () => {
+  const files = {
+    'members/alice/prompts/p1/index.md': `---\ntitle: A Prompt\nstatus: published\nvisibility: public\nauthor: alice\nshortDescription: Blurb.\n---\nBody.`,
+    'members/alice/comments/intro-p1.md': `---\ntype: comment\nid: intro-p1\nauthor: alice\ntargetType: prompt\ntargetSlug: p1\nauthorNote: true\nvisibility: public\nstatus: published\ncreatedAt: 2026-07-30\n---\nWhy I built it.`,
+    'members/alice/profile.md': PROFILE,
+  };
+  const store = new Map();
+  const r = await main({ argv: [], env: { ...ENV, SYNDICATE_ADDED: 'members/alice/prompts/p1/index.md' }, deps: {
+    readFile: (rel) => files[rel] ?? null,
+    resolveMention: async (a) => `@${a}`,
+    enqueueFetch: fakeKvFetch(store),
+    config: syndicationConfigFromParsed({ enabled: true, channels: { discord: true } }),
+  } });
+  assert.equal(r.inputs.length, 1);
+  assert.equal(r.inputs[0].authorNote, 'Why I built it.');
+});
+
+// A members-visibility or unflagged comment is NOT the intro and must never reach an off-network channel.
+test('a non-authorNote or members intro is not carried as authorNote', async () => {
+  const base = `---\ntitle: A Prompt\nstatus: published\nvisibility: public\nauthor: alice\nshortDescription: Blurb.\n---\nBody.`;
+  const run = async (intro) => {
+    const files = { 'members/alice/prompts/p1/index.md': base, 'members/alice/profile.md': PROFILE, ...(intro ? { 'members/alice/comments/intro-p1.md': intro } : {}) };
+    const r = await main({ argv: [], env: { ...ENV, SYNDICATE_ADDED: 'members/alice/prompts/p1/index.md' }, deps: {
+      readFile: (rel) => files[rel] ?? null,
+      resolveMention: async (a) => `@${a}`,
+      enqueueFetch: fakeKvFetch(new Map()),
+      config: syndicationConfigFromParsed({ enabled: true, channels: { discord: true } }),
+    } });
+    return r.inputs[0].authorNote;
+  };
+  assert.equal(await run(null), null, 'no intro file');
+  assert.equal(await run(`---\ntype: comment\nid: intro-p1\nauthor: alice\ntargetType: prompt\ntargetSlug: p1\nauthorNote: true\nvisibility: members\nstatus: published\ncreatedAt: 2026-07-30\n---\nSecret.`), null, 'members visibility');
+  assert.equal(await run(`---\ntype: comment\nid: intro-p1\nauthor: alice\ntargetType: prompt\ntargetSlug: p1\nvisibility: public\nstatus: published\ncreatedAt: 2026-07-30\n---\nJust a reply.`), null, 'not flagged authorNote');
+});

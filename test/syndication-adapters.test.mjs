@@ -282,6 +282,45 @@ test('reddit: commentText posts as the first comment alongside the native body',
   assert.equal(r.comment.id, 'c9');
 });
 
+// The AUTO rail renders the stored `reddit-comment` template itself: nothing but the manual rail
+// (membership-syndicate-now) ever sets item.commentText, so without a cfg fallback an auto-published item
+// could never post a first comment at all.
+test('reddit: the auto rail renders the stored reddit-comment template when the item carries no commentText', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    if (url.includes('/api/v1/access_token')) return { ok: true, status: 200, json: async () => ({ access_token: 'at1' }) };
+    if (url.includes('/api/comment')) return { ok: true, status: 200, json: async () => ({ json: { errors: [], data: { things: [{ data: { id: 'c7' } }] } } }) };
+    return { ok: true, status: 200, json: async () => ({ json: { errors: [], data: { id: 'x2', name: 't3_x2', url: 'https://r/x2' } } }) };
+  };
+  const env = { REDDIT_CLIENT_ID: 'id', REDDIT_CLIENT_SECRET: 'sec', REDDIT_REFRESH_TOKEN: 'rt', REDDIT_SUBREDDIT: 'GBTI_network' };
+  const cfg = { channel_templates: { reddit: { 'reddit-comment': 'Shared by {member-reddit-handle}: "{author-note-italic}"' } } };
+  const { createRedditAdapter } = await import('../clients/syndication/reddit.mjs');
+  const rd = createRedditAdapter({ env, fetchImpl, cfg });
+  const r = await rd.post({ ...item, redditKind: 'link', authorReddit: 'https://www.reddit.com/u/atwellpub/', authorNote: 'why I built it' });
+  const comment = calls.find((c) => String(c.url).includes('/api/comment'));
+  assert.ok(comment, 'the auto rail posts a first comment with no commentText on the item');
+  assert.match(new URLSearchParams(comment.opts.body).get('text'), /why I built it/);
+  assert.equal(r.comment.id, 'c7');
+});
+
+// The MANUAL rail passes no cfg, so an item with no pre-rendered commentText posts no comment. (With a cfg
+// present the built-in DEFAULT_REDDIT_COMMENT applies, which is the auto-rail case covered above.)
+test('reddit: no first comment when there is no cfg and no manual commentText', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    if (url.includes('/api/v1/access_token')) return { ok: true, status: 200, json: async () => ({ access_token: 'at1' }) };
+    return { ok: true, status: 200, json: async () => ({ json: { errors: [], data: { id: 'x3', name: 't3_x3', url: 'https://r/x3' } } }) };
+  };
+  const env = { REDDIT_CLIENT_ID: 'id', REDDIT_CLIENT_SECRET: 'sec', REDDIT_REFRESH_TOKEN: 'rt', REDDIT_SUBREDDIT: 'GBTI_network' };
+  const { createRedditAdapter } = await import('../clients/syndication/reddit.mjs');
+  const rd = createRedditAdapter({ env, fetchImpl });
+  const r = await rd.post({ ...item, redditKind: 'link' });
+  assert.equal(calls.filter((c) => String(c.url).includes('/api/comment')).length, 0);
+  assert.equal(r.comment, undefined);
+});
+
 // SOW-088 Proposal A: a members-only item renders the channel's STUB template on both Discord legs.
 test('discord legs render the stub template for members items', async () => {
   const { createDiscordAdapter, createDiscordCategoryAdapter } = await import('../clients/syndication/discord-channel.mjs');
@@ -314,11 +353,14 @@ test('reddit auto rail renders templates: public {title} default and the members
   };
   const env = { REDDIT_CLIENT_ID: 'i', REDDIT_CLIENT_SECRET: 's', REDDIT_REFRESH_TOKEN: 'r', REDDIT_SUBREDDIT: 'GBTI_network' };
   const rd = createRedditAdapter({ env, fetchImpl, cfg });
+  // Index by URL, not position: the auto rail also posts a first comment, so submit calls are not at fixed
+  // offsets any more.
+  const submits = () => calls.filter((c) => String(c.url).includes('/api/submit'));
   await rd.post({ source: 'prompt', title: 'Public Skill', author: 'a', url: 'https://x/y', visibility: 'public' });
-  let p = new URLSearchParams(calls[1].opts.body);
+  let p = new URLSearchParams(submits()[0].opts.body);
   assert.equal(p.get('title'), 'Public Skill', 'public auto title = the {title} channel default');
   await rd.post({ source: 'prompt', title: 'Secret Skill', author: 'a', url: 'https://x/y', visibility: 'members', membersOnly: true, blurb: 'Teaser.' });
-  p = new URLSearchParams(calls[3].opts.body);
+  p = new URLSearchParams(submits()[1].opts.body);
   assert.match(p.get('title'), /Secret Skill.*members-only prompt from the GBTI Network/, 'members auto title = the reddit title stub');
   assert.match(p.get('text') || '', /members library/, 'members auto body = the reddit-body stub');
 });

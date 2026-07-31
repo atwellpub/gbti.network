@@ -150,7 +150,16 @@ export async function drainSyndication(env, {
         // SOW-087: a clean per-item no-op (e.g. no category channel mapped). Terminal, never retried.
         item = recordChannel(item, adapter.name, { status: 'skipped', reason: result.reason || 'skipped', at: Number(now()) });
       } else if (result?.ok) {
-        item = recordChannel(item, adapter.name, { status: 'sent', id: result.id || null, url: result.url || null, at: Number(now()) });
+        // An adapter may report a fail-soft SIDE result alongside a successful post (reddit's first comment,
+        // reddit.mjs). It never un-sends the post, but dropping it made a failed comment invisible in the
+        // tracker, so carry it onto the per-channel record.
+        item = recordChannel(item, adapter.name, {
+          status: 'sent',
+          id: result.id || null,
+          url: result.url || null,
+          ...(result.comment ? { comment: result.comment } : {}),
+          at: Number(now()),
+        });
       } else {
         anyFail = true;
         item = recordChannel(item, adapter.name, { status: 'failed', error: result?.error || 'post failed', at: Number(now()) });

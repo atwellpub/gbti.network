@@ -16,13 +16,21 @@ export const DEVTO_CDN_BASE = 'https://cdn.jsdelivr.net/gh/gbti-network/gbti.net
 export const MEMBERS_MARKER = '<!-- members-only -->';
 const SUB = { post: 'posts', product: 'products', prompt: 'prompts' };
 
-/** The canonical repo path for a content item; null for shares (a share has no article body). */
+/**
+ * The canonical repo path for a content item; null for shares (a share has no article body).
+ *
+ * `targetSlug` arrives in TWO shapes. The manual rail passes a BARE slug ("my-post"), while the auto rail
+ * passes the queue path-key, which is already the full folder path ("members/alice/posts/my-post", see
+ * pathKey in scripts/enqueue-syndication.mjs). Wrapping the second shape produced a doubled path and a
+ * hard 404 on every auto-rail crosspost, so accept either.
+ */
 export function contentPathFor(item) {
   const sub = SUB[item?.source];
   const author = String(item?.author || '').trim();
   const slug = String(item?.targetSlug || '').trim();
   if (!sub || !author || !slug) return null;
-  return `members/${author}/${sub}/${slug}/index.md`;
+  const base = (slug.startsWith('members/') || slug.startsWith('house/')) ? slug : `members/${author}/${sub}/${slug}`;
+  return `${base}/index.md`;
 }
 
 /** dev.to tags: lowercase alphanumeric only, deduped, max 4. Fallback: the taxonomy path leaves. */

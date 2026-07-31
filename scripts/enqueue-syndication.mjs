@@ -72,7 +72,7 @@ export function categoryOf(item, fm) {
 }
 
 /** Map a buildSyndicationItem result + its frontmatter to a buildQueueItem INPUT (metadata only, never the body). */
-export function toQueueInput({ item, fm, rel, mention, siteOrigin, authorName = null, authorDiscord = null, authorX = null, authorBluesky = null, authorMastodon = null, authorReddit = null, authorDevto = null, moderation = null }) {
+export function toQueueInput({ item, fm, rel, mention, siteOrigin, authorName = null, authorDiscord = null, authorX = null, authorBluesky = null, authorMastodon = null, authorReddit = null, authorDevto = null, authorNote = null, moderation = null }) {
   const title = item.title;
   const blurb = (fm.shortDescription || fm.excerpt || fm.description || '').toString().trim() || null;
   return {
@@ -87,6 +87,11 @@ export function toQueueInput({ item, fm, rel, mention, siteOrigin, authorName = 
     authorMastodon: authorMastodon || null, // SOW-123: the public profile Mastodon handle, feeds {member-mastodon-handle}
     authorReddit: authorReddit || null, // the public profile Reddit username, feeds {member-reddit-handle}
     authorDevto: authorDevto || null, // SOW-140: the public profile dev.to handle, feeds {member-devto-handle}
+    // SOW-014: the from-the-author intro comment body, feeding {author-note}, {author-note-italic} and
+    // {author-note-block}. The AUTO rail never supplied it, so every template referencing the note rendered
+    // empty (the stored reddit-comment template quotes it, so it rendered a bare ""). buildQueueItem clamps
+    // it to 4000 chars and drops it entirely for a members-only item.
+    authorNote: authorNote || null,
     tags: Array.isArray(fm.tags) ? fm.tags.filter((t) => typeof t === 'string') : null, // SOW-120: feeds {tags-hashtags}
     title,
     blurb,
@@ -197,6 +202,25 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
   const resolveAuthorReddit = deps.resolveAuthorReddit ?? ((author) => readProfileFm(author)?.links?.reddit || null);
   // SOW-140: the profile's PUBLIC dev.to handle feeds {member-devto-handle} (the dev.to byline mention).
   const resolveAuthorDevto = deps.resolveAuthorDevto ?? ((author) => readProfileFm(author)?.links?.devto || null);
+  // SOW-014: the from-the-author intro comment for a post/product/prompt. Its id is deterministic
+  // (intro-<slug>), and a house item keeps its notes under house/comments/. Only a PUBLIC authorNote:true
+  // comment qualifies (a members note must never reach an off-network channel); shares have no intro.
+  const resolveAuthorNote = deps.resolveAuthorNote ?? ((item) => {
+    if (!item || item.type === 'share') return null;
+    const author = String(item.author || '');
+    const slug = String(item.slug || '');
+    if (!author || !slug) return null;
+    const dir = (author === 'gbti' || author === 'house') ? 'house/comments' : `members/${author}/comments`;
+    try {
+      const text = readFile(`${dir}/intro-${slug}.md`);
+      if (text == null) return null;
+      const { frontmatter, body } = parseContentFile(text);
+      if (frontmatter?.authorNote !== true) return null;
+      if ((frontmatter?.visibility ?? 'public') !== 'public') return null;
+      if ((frontmatter?.status ?? 'published') !== 'published') return null;
+      return String(body || '').trim() || null;
+    } catch { return null; }
+  });
 
   const inputs = [];
   for (const b of built) {
@@ -211,6 +235,7 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
       authorMastodon: resolveAuthorMastodon(b.item.author),
       authorReddit: resolveAuthorReddit(b.item.author),
       authorDevto: resolveAuthorDevto(b.item.author),
+      authorNote: resolveAuthorNote(b.item),
       moderation,
     }));
   }

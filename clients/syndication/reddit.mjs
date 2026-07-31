@@ -72,13 +72,21 @@ export function createRedditAdapter({ env = {}, fetchImpl = globalThis.fetch, cf
       const out = { ok: true, id, url };
       // The separately-templated FIRST COMMENT (owner-directed: independent of the post body/description).
       // Fail-soft: a comment miss never un-sends the post; the result surfaces it.
-      if (item.commentText && id) {
+      // The AUTO rail renders the stored `reddit-comment` template from cfg exactly as the title (line 42)
+      // and body (line 53) do; only the MANUAL rail pre-renders item.commentText. Without this fallback the
+      // auto rail could never post a first comment at all, because nothing but membership-syndicate-now.mjs
+      // ever sets commentText.
+      const autoComment = (!item.commentText && cfg)
+        ? renderTemplate(templateFor(cfg, 'reddit-comment', 'reddit', { stub: stubish }) || '', item, { limit: 9500 })
+        : '';
+      const commentText = String(item.commentText || autoComment || '').trim();
+      if (commentText && id) {
         const thing = String(body?.json?.data?.name || (String(id).startsWith('t3_') ? id : `t3_${id}`));
         try {
           const cRes = await fetchImpl('https://oauth.reddit.com/api/comment', {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
-            body: new URLSearchParams({ api_type: 'json', thing_id: thing, text: String(item.commentText) }).toString(),
+            body: new URLSearchParams({ api_type: 'json', thing_id: thing, text: commentText }).toString(),
           });
           const cBody = await cRes.json().catch(() => ({}));
           const cErrors = cBody?.json?.errors;

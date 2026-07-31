@@ -29,6 +29,20 @@ And one without the dot: ![x](images/two.png)
 SECRET members part.
 `;
 
+// The AUTO rail's targetSlug is the queue PATH KEY (already the full folder path, see pathKey in
+// scripts/enqueue-syndication.mjs), while the manual rail passes a bare slug. Wrapping the first shape
+// produced a doubled path and a hard 404 on every auto-rail crosspost.
+test('contentPathFor accepts a targetSlug that is already a full path', () => {
+  assert.equal(
+    contentPathFor({ ...ITEM, targetSlug: 'members/atwellpub/posts/my-article' }),
+    'members/atwellpub/posts/my-article/index.md',
+  );
+  assert.equal(
+    contentPathFor({ ...ITEM, source: 'prompt', author: 'gbti', targetSlug: 'house/prompts/p1' }),
+    'house/prompts/p1/index.md',
+  );
+});
+
 test('contentPathFor maps the sub folder per type and refuses shares', () => {
   assert.equal(contentPathFor(ITEM), 'members/atwellpub/posts/my-article/index.md');
   assert.equal(contentPathFor({ ...ITEM, source: 'prompt' }), 'members/atwellpub/prompts/my-article/index.md');
