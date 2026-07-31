@@ -17,7 +17,7 @@ tags:
   - planning
   - workflow
 publishedAt: '2026-07-30T19:37:31.690Z'
-updatedAt: '2026-07-30T21:50:33.942Z'
+updatedAt: '2026-07-31T02:55:24.931Z'
 status: published
 type: prompt
 author: atwellpub
