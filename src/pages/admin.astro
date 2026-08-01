@@ -70,22 +70,29 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       }
     }
 
-    (async () => {
+    // sow-158 re-login fix: on a TRANSIENT status failure (deploy window / network blip) keep the valid session
+    // and show a soft retry in the gate, instead of bouncing a signed-in staff member to /account.
+    async function runGate() {
       // Cheap gate: no readable gbti_csrf means no web session -> not staff -> bounce (no network).
       if (!readCookie('gbti_csrf')) { bounce(); return; }
       const base = document.documentElement.dataset.signupBase || '';
-      let payload: any = null;
-      try {
-        const res = await fetch(base + '/membership/status', { credentials: 'include' });
-        payload = res.ok ? await res.json() : null;
-      } catch { payload = null; }
-      const rank = RANK[payload?.role ?? 'member'] ?? 0;
-      if (payload && payload.ok === true && payload.login && rank >= RANK.moderator) {
-        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null, rank);
+      const { resolveMemberSession } = await import('../lib/member-gate');
+      const s = await resolveMemberSession({ base });
+      if (s.state === 'in') {
+        const rank = RANK[s.payload.role ?? 'member'] ?? 0;
+        if (s.payload.login && rank >= RANK.moderator) {
+          mount(String(s.payload.login), s.payload.github_id != null ? String(s.payload.github_id) : null, rank);
+        } else {
+          bounce(); // signed in but not staff -> no admin surface
+        }
+      } else if (s.state === 'error') {
+        if (gate) gate.innerHTML = '<h1 class="h1 mt24">Cannot reach the server right now.</h1><p class="lead">Your session is still active. <button type="button" data-admin-retry>Retry</button></p>';
+        gate?.querySelector('[data-admin-retry]')?.addEventListener('click', () => location.reload());
       } else {
-        bounce(); // a signed-in non-staff member (or an invalid session) has no admin surface
+        bounce(); // definitive signed-out / stale csrf
       }
-    })();
+    }
+    runGate();
   </script>
 
   <style>

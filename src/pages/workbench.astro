@@ -14,6 +14,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <p class="lead">Write, save, and publish your articles, prompts, and products. Publishing opens a pull request that auto-merges, then the site rebuilds, so a change reaches the live edge in about 2 to 3 minutes.</p>
       </div>
       <div data-wb-loading class="wb-loading">Loading your WorkBench&hellip;</div>
+      <div data-wb-error class="wb-loading" hidden>Cannot reach the server right now. Your session is still active. <button type="button" data-wb-retry class="wb-retry">Retry</button></div>
       <gbti-lock-gate><gbti-workspace></gbti-workspace></gbti-lock-gate>
     </div>
   </section>
@@ -49,22 +50,30 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       ]);
     }
 
-    (async () => {
+    // sow-158 re-login fix: distinguish a DEFINITIVE signed-out (401 / no login -> redirect) from a TRANSIENT
+    // status failure (a Worker deploy window, a network blip). On transient, keep the valid session and show a
+    // soft retry instead of bouncing a signed-in member to /login. resolveMemberSession retries the transient case.
+    async function gate() {
       // Cheap gate: no readable gbti_csrf means no web session at all -> straight to sign-in (no network).
       if (!readCookie('gbti_csrf')) { location.replace(RETURN_TO); return; }
       const base = document.documentElement.dataset.signupBase || '';
-      let payload: any = null;
-      try {
-        const res = await fetch(base + '/membership/status', { credentials: 'include' });
-        payload = res.ok ? await res.json() : null;
-      } catch { payload = null; }
-      if (payload && payload.ok === true && payload.login) {
-        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      const { resolveMemberSession } = await import('../lib/member-gate');
+      const s = await resolveMemberSession({ base });
+      if (s.state === 'in') {
+        mount(String(s.payload.login), s.payload.github_id != null ? String(s.payload.github_id) : null);
+      } else if (s.state === 'error') {
+        document.querySelector('[data-wb-loading]')?.setAttribute('hidden', '');
+        (document.querySelector('[data-wb-error]') as HTMLElement | null)?.removeAttribute('hidden');
       } else {
-        // A missing/invalid session (e.g. a stale csrf cookie): fail closed to sign-in.
-        location.replace(RETURN_TO);
+        location.replace(RETURN_TO); // definitive signed-out
       }
-    })();
+    }
+    document.querySelector('[data-wb-retry]')?.addEventListener('click', () => {
+      document.querySelector('[data-wb-error]')?.setAttribute('hidden', '');
+      document.querySelector('[data-wb-loading]')?.removeAttribute('hidden');
+      gate();
+    });
+    gate();
   </script>
 
   <style>

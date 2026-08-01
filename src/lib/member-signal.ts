@@ -140,14 +140,15 @@ export async function hydrateMemberSignal(base: string = readSignupBase()): Prom
   // response is no-store and hits Stripe per call). Keyed by the csrf value so a re-login misses the old cache.
   let signal: MemberSignal | null | undefined = readStatusCache(csrf);
   if (signal === undefined) {
-    signal = null;
-    try {
-      const res = await fetch(base + '/membership/status', { credentials: 'include' });
-      if (res.ok) signal = memberSignalFromStatus(await res.json()) as MemberSignal | null;
-    } catch {
-      signal = null; // fail closed: stay signed-out
-    }
-    writeStatusCache(csrf, signal);
+    // sow-158 re-login fix: resolveMemberSession distinguishes a DEFINITIVE signed-out (401 / no login) from a
+    // TRANSIENT failure (a Worker deploy window, a network blip), retrying the transient case. CRITICAL: on a
+    // transient error we do NOT write the cache, so one blip on first load cannot POISON the whole browser
+    // session into a signed-out header (the old code cached the null and forced a re-login until re-auth).
+    const { resolveMemberSession } = await import('./member-gate-core.mjs');
+    const s = await resolveMemberSession({ base, fetchImpl: fetch });
+    if (s.state === 'in') { signal = memberSignalFromStatus(s.payload) as MemberSignal | null; writeStatusCache(csrf, signal); }
+    else if (s.state === 'out') { signal = null; writeStatusCache(csrf, signal); }
+    else { signal = null; /* transient: leave the cache UNSET so the next navigation retries */ }
   }
   cookieResolved = true;
   cookieSignal = signal;

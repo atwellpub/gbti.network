@@ -62,15 +62,14 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
       // Cheap gate: no readable gbti_csrf means no web session -> show the sign-in prompt (no network).
       if (!readCookie('gbti_csrf')) { showSignedOut(); return; }
       const base = document.documentElement.dataset.signupBase || '';
-      let payload: any = null;
-      try {
-        const res = await fetch(base + '/membership/status', { credentials: 'include' });
-        payload = res.ok ? await res.json() : null;
-      } catch { payload = null; }
-      if (payload && payload.ok === true && payload.login) {
-        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      // sow-158 re-login fix: resolveMemberSession retries a TRANSIENT status failure so a blip does not read as
+      // signed-out; only a DEFINITIVE signed-out (or a persistent error) falls back to the sign-in prompt.
+      const { resolveMemberSession } = await import('../../lib/member-gate');
+      const s = await resolveMemberSession({ base });
+      if (s.state === 'in') {
+        mount(String(s.payload.login), s.payload.github_id != null ? String(s.payload.github_id) : null);
       } else {
-        showSignedOut(); // a missing/invalid session falls back to the sign-in prompt
+        showSignedOut(); // definitive signed-out, or a persistent transient error (reload retries)
       }
     })();
   </script>
