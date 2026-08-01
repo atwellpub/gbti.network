@@ -2,7 +2,7 @@
 // -> role from the SIGNUP_KV overrides mirror) + the Stripe enumeration. Pure over injected deps; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeAdmin, membershipAdminStatuses } from '../workers/signup/membership-admin.mjs';
+import { authorizeAdmin, authorizeStaff, membershipAdminStatuses } from '../workers/signup/membership-admin.mjs';
 import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 1b: mint a website session cookie
 
 const req = (token) => ({ headers: { get: (k) => (k === 'Authorization' && token ? `Bearer ${token}` : null) } });
@@ -40,6 +40,41 @@ test('sow-158 Phase 1b: a session cookie alone does NOT authorize admin (the gat
   assert.equal(r.ok, false);
   assert.equal(r.status, 401);
   assert.equal(r.body.message, 'a GitHub bearer token is required');
+});
+
+// sow-161: the website admin surface opts the admin gate INTO cookie auth (allowCookie:true). A valid staff
+// session then authorizes over the httpOnly-cookie session, with the SAME fail-closed mirror/role checks.
+test('sow-161: authorizeAdmin with allowCookie accepts a valid superadmin session cookie (GET, no CSRF)', async () => {
+  const session = await signSession({ githubId: '1', githubLogin: 'super' }, 'secret');
+  const reqCookie = new Request('https://signup.gbti.network/membership/admin/statuses', { headers: { Cookie: 'gbti_session=' + session } });
+  const env = { ...envWith(freshMirror()), SESSION_SECRET: 'secret' };
+  const r = await authorizeAdmin(reqCookie, env, { allowCookie: true, now });
+  assert.equal(r.ok, true);
+  assert.equal(r.role, 'superadmin');
+  assert.equal(r.githubId, '1');
+});
+
+test('sow-161: authorizeAdmin with allowCookie still 403s a non-admin (member) session', async () => {
+  const session = await signSession({ githubId: '9', githubLogin: 'member' }, 'secret');
+  const reqCookie = new Request('https://signup.gbti.network/membership/admin/statuses', { headers: { Cookie: 'gbti_session=' + session } });
+  const env = { ...envWith(freshMirror()), SESSION_SECRET: 'secret' };
+  const r = await authorizeAdmin(reqCookie, env, { allowCookie: true, now });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+});
+
+test('sow-161: authorizeStaff admits a moderator (bearer + cookie) but forbids a plain member', async () => {
+  const env = { ...envWith(freshMirror()), SESSION_SECRET: 'secret' };
+  const rb = await authorizeStaff(req('mod'), env, { fetchUser, now });
+  assert.equal(rb.ok, true);
+  assert.equal(rb.role, 'moderator');
+  const session = await signSession({ githubId: '3', githubLogin: 'mod' }, 'secret');
+  const rc = await authorizeStaff(new Request('https://signup.gbti.network/x', { headers: { Cookie: 'gbti_session=' + session } }), env, { allowCookie: true, now });
+  assert.equal(rc.ok, true);
+  assert.equal(rc.role, 'moderator');
+  const rm = await authorizeStaff(req('member'), env, { fetchUser, now });
+  assert.equal(rm.ok, false);
+  assert.equal(rm.status, 403);
 });
 
 test('authorizeAdmin: admin + superadmin pass; moderator + member are forbidden', async () => {

@@ -736,11 +736,14 @@ export default {
 
       // SOW-038 P2: admin-only per-member Stripe status for the superadmin dashboard. Sensitive billing status,
       // so admin-gated (fail-closed via the overrides mirror) + never cached, varied on the bearer.
+      // sow-161: cookie-enabled (credentialed reflected-origin CORS + allowCookie) so the website admin dashboard
+      // reads it over the session; a GET carries no CSRF (safe method). The extension bearer path is unchanged.
       if (pathname === '/membership/admin/statuses') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
-          const r = await membershipAdminStatuses(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipAdminStatuses(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }
 

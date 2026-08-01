@@ -10,6 +10,7 @@
 // reaches a non-admin and is never cached. Pure over injected deps so it unit-tests with no network/secrets.
 
 import { githubFetchUser } from './oauth.mjs';
+import { resolveIdentity } from './identity.mjs'; // sow-161: cookie-session identity for the website admin surface
 import { rolesFromParsed, roleOf, isAdminRole, curatorsFromParsed, isCurator, canCurateNews, bansFromParsed, isBanned } from '../../membership/overrides-core.mjs';
 import { deriveStatusFromCustomer } from '../../membership/derive-status.mjs';
 import { createStripeClient } from '../../clients/stripe.mjs';
@@ -26,24 +27,35 @@ const fail = (status, error, message) => ({ ok: false, status, body: { error, me
  */
 // Verify the token -> github_id and read the fresh overrides mirror, returning the caller's role + curator flag.
 // Shared, fail-closed prefix for authorizeAdmin + authorizeCurator. Returns { ok, githubId, role, isCurator, mirror }.
-async function resolveCaller(request, env, { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, now = new Date() } = {}) {
+async function resolveCaller(request, env, { fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, verifyCookie, now = new Date(), allowCookie = false } = {}) {
   const auth = request.headers.get('Authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return fail(401, 'unauthorized', 'a GitHub bearer token is required');
-
-  let user;
-  // SOW-126 review fix: the admin gate is RARE and fails closed with a hard 401 (no fallback), so it explicitly
-  // opts IN to the bounded transient retry (403/429/5xx). Hot paths keep the retries=0 default.
-  try { user = await fetchUser(token, fetchImpl, { retries: 2 }); }
-  catch (e) {
-    // Surface GitHub's real status so a transient rate-limit (403/429/5xx, retried in githubFetchUser) is not
-    // confused with a genuinely bad token (401). Never echo the response body (it can carry sensitive detail).
-    wlog('admin', 'token verify failed', { githubStatus: e?.status ?? null }); // SOW-124
-    const gh = Number.isFinite(e?.status) && e.status ? ` (github ${e.status})` : '';
-    return fail(401, 'unauthorized', `could not verify the GitHub token${gh}`);
+  let githubId;
+  if (token) {
+    let user;
+    // SOW-126 review fix: the admin gate is RARE and fails closed with a hard 401 (no fallback), so it explicitly
+    // opts IN to the bounded transient retry (403/429/5xx). Hot paths keep the retries=0 default.
+    try { user = await fetchUser(token, fetchImpl, { retries: 2 }); }
+    catch (e) {
+      // Surface GitHub's real status so a transient rate-limit (403/429/5xx, retried in githubFetchUser) is not
+      // confused with a genuinely bad token (401). Never echo the response body (it can carry sensitive detail).
+      wlog('admin', 'token verify failed', { githubStatus: e?.status ?? null }); // SOW-124
+      const gh = Number.isFinite(e?.status) && e.status ? ` (github ${e.status})` : '';
+      return fail(401, 'unauthorized', `could not verify the GitHub token${gh}`);
+    }
+    if (!user?.githubId) return fail(401, 'unauthorized', 'the GitHub token has no user id');
+    githubId = String(user.githubId);
+  } else if (allowCookie) {
+    // sow-161: the website admin surface authorizes over the httpOnly-cookie session (no bearer token).
+    // resolveIdentity verifies the signed session HMAC and, on a non-safe method (a mutation), enforces the
+    // double-submit CSRF gate; the role is then read from the mirror below exactly as for a bearer caller.
+    // Fail-closed: an absent/invalid/CSRF-failing session returns its own 401/403 body, never a role.
+    const id = await resolveIdentity(request, env, { fetchImpl, fetchUser, ...(verifyCookie ? { verifyCookie } : {}), now, allowCookie: true, retries: 2 });
+    if (!id.ok) return { ok: false, status: id.status, body: id.body };
+    githubId = String(id.githubId);
+  } else {
+    return fail(401, 'unauthorized', 'a GitHub bearer token is required');
   }
-  if (!user?.githubId) return fail(401, 'unauthorized', 'the GitHub token has no user id');
-  const githubId = String(user.githubId);
 
   let mirror = null;
   try { mirror = await env.SIGNUP_KV.get(OVERRIDES_KV_KEY, 'json'); } catch { mirror = null; }
@@ -72,6 +84,20 @@ export async function authorizeAdmin(request, env, deps = {}) {
   const r = await resolveCaller(request, env, deps);
   if (!r.ok) return r;
   if (!isAdminRole(r.role)) return fail(403, 'forbidden', 'admin access is required');
+  return { ok: true, githubId: r.githubId, role: r.role };
+}
+
+/**
+ * sow-161: authorize a STAFF caller (moderator OR admin OR superadmin) for content moderation. Same fail-closed
+ * mirror gate as authorizeAdmin (identity from the verified token/cookie, role from the fresh mirror, banned
+ * denied), but the floor is moderator, not admin, so a moderator can deplatform/republish/remove content. The
+ * per-PATH authority is still re-checked independently by the SOW-005 gate (decide()), so this is the endpoint
+ * half of the two-authority model. Returns { ok:true, githubId, role } or { ok:false, status, body }.
+ */
+export async function authorizeStaff(request, env, deps = {}) {
+  const r = await resolveCaller(request, env, deps);
+  if (!r.ok) return r;
+  if (!(r.role === 'moderator' || isAdminRole(r.role))) return fail(403, 'forbidden', 'moderator access is required');
   return { ok: true, githubId: r.githubId, role: r.role };
 }
 

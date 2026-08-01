@@ -684,6 +684,18 @@ test('sow-158 News: news routes reflect an allow-listed Origin with credentials;
   assert.notEqual(pub.headers.get('Access-Control-Allow-Credentials'), 'true', 'news-publish must not be credentialed');
 });
 
+// sow-161 admin surface (read): the per-member Stripe status route is cookie-enabled (credentialed reflected-origin
+// CORS) so the website admin dashboard reads it over the session; a foreign origin is not reflected.
+test('sow-161: /membership/admin/statuses reflects an allow-listed Origin with credentials', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const ok = await worker.fetch(req('OPTIONS', '/membership/admin/statuses', { headers: { Origin: 'https://gbti.test' } }), env, {});
+  assert.equal(ok.status, 204);
+  assert.equal(ok.headers.get('Access-Control-Allow-Origin'), 'https://gbti.test');
+  assert.equal(ok.headers.get('Access-Control-Allow-Credentials'), 'true');
+  const blocked = await worker.fetch(req('OPTIONS', '/membership/admin/statuses', { headers: { Origin: 'https://evil.example' } }), env, {});
+  assert.equal(blocked.headers.get('Access-Control-Allow-Origin'), null, 'a foreign origin is blocked');
+});
+
 // sow-158 in-app browse reader: the content-open engagement beacon is cookie-enabled so the website /browse reader
 // fires it over the session cookie (credentialed reflected-origin CORS), reflecting only an allow-listed origin.
 test('sow-158: /membership/content-opened reflects an allow-listed Origin with credentials', async () => {

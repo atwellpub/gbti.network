@@ -453,6 +453,10 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       return { items: Array.isArray(r?.items) ? r.items : [], nextBefore: r?.nextBefore ?? null, canSeeMembers: r?.canSeeMembers ?? false };
     },
 
+    // ----- sow-161 admin surface (read): the per-member Stripe status map for the dashboard roster. Admin-gated
+    // server-side over the cookie session (authorizeAdmin + allowCookie); a non-admin session 403s. -----
+    adminStatuses() { return workerGet('/membership/admin/statuses'); }, // { ok, statuses: { <github_id>: '<status>' } }
+
     // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
     getNews({ category, since, limit }: any = {}) {
       const qs = new URLSearchParams();
