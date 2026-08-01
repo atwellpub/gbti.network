@@ -127,3 +127,40 @@ test('reader: footnote-looking text inside a code span or a link stays untouched
   const asLink = renderMarkdown('[^caret](https://example.com/caret)');
   assert.match(asLink, /<a href="https:\/\/example\.com\/caret"[^>]*>\^caret<\/a>/); // no def -> the link rule wins
 });
+
+// sow-062 review feedback (2026-08-01): the preview renderer had no table branch at all, so a GFM table fell
+// through to the paragraph gather and rendered as literal pipes while the site build (Astro + GFM) rendered a
+// real table. The preview disagreeing with the published page defeats the point of a preview.
+test('reader: a GFM table renders a real table, not literal pipes', () => {
+  const html = renderMarkdown(['## Commands', '', '| Command | Default key |', '|---|---|', '| Reset Layout | none |'].join('\n'));
+  assert.match(html, /<table><thead><tr><th>Command<\/th><th>Default key<\/th><\/tr><\/thead>/);
+  assert.match(html, /<tbody><tr><td>Reset Layout<\/td><td>none<\/td><\/tr><\/tbody>/);
+  assert.doesNotMatch(html, /<p>\| Command/); // never the old paragraph fallback
+});
+
+test('reader: table delimiter colons set per-column alignment', () => {
+  const html = renderMarkdown(['| L | C | R |', '|:--|:-:|--:|', '| a | b | c |'].join('\n'));
+  assert.match(html, /<th style="text-align:left">L<\/th>/);
+  assert.match(html, /<th style="text-align:center">C<\/th>/);
+  assert.match(html, /<th style="text-align:right">R<\/th>/);
+  assert.match(html, /<td style="text-align:right">c<\/td>/);
+});
+
+test('reader: an escaped pipe stays inside its cell, and inline formatting still applies', () => {
+  const html = renderMarkdown(['| A | B |', '|---|---|', '| a \\| b | **bold** |'].join('\n'));
+  assert.match(html, /<td>a \| b<\/td>/);
+  assert.match(html, /<td><strong>bold<\/strong><\/td>/);
+});
+
+test('reader: pipes without a delimiter row are NOT a table (and a header-only table still renders)', () => {
+  assert.match(renderMarkdown('| just | pipes |'), /<p>\| just \| pipes \|<\/p>/);
+  const headOnly = renderMarkdown(['| A | B |', '|---|---|'].join('\n'));
+  assert.match(headOnly, /<table><thead>/);
+  assert.doesNotMatch(headOnly, /<tbody>/); // no rows -> no empty tbody
+});
+
+test('reader: a table is escaped like every other block (no author HTML executes)', () => {
+  const html = renderMarkdown(['| A |', '|---|', '| <img src=x onerror=alert(1)> |'].join('\n'));
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});

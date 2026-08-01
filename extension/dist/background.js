@@ -20708,6 +20708,33 @@ function renderFence(lang, buf, fn = null) {
   }
   return `${codeOpen(lang)}${escapeHtml(body)}</code></pre>`;
 }
+function splitTableRow(line) {
+  const s = String(line).trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let cur = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "\\" && s[i + 1] === "|") {
+      cur += "|";
+      i++;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+function tableAlignments(line) {
+  if (!/\|/.test(String(line ?? ""))) return null;
+  const cells = splitTableRow(line);
+  if (!cells.length || cells.some((c) => !/^:?-+:?$/.test(c))) return null;
+  return cells.map((c) => c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : "");
+}
 function renderMarkdown(md) {
   const lines = String(md ?? "").replace(/\r\n/g, "\n").split("\n");
   const out = [];
@@ -20804,6 +20831,22 @@ function renderMarkdown(md) {
       flushList();
       out.push("<hr/>");
       i++;
+      continue;
+    }
+    const aligns = i + 1 < lines.length ? tableAlignments(lines[i + 1]) : null;
+    if (aligns && line.includes("|")) {
+      flushList();
+      const cell = (c) => inline(escapeHtml(c), fn);
+      const cols = (row, tag) => row.map((c, n) => `<${tag}${aligns[n] ? ` style="text-align:${aligns[n]}"` : ""}>${cell(c)}</${tag}>`).join("");
+      const head = `<thead><tr>${cols(splitTableRow(line), "th")}</tr></thead>`;
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes("|") && !/^\s*$/.test(lines[i])) {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
+      const body = rows.length ? `<tbody>${rows.map((r) => `<tr>${cols(r, "td")}</tr>`).join("")}</tbody>` : "";
+      out.push(`<table>${head}${body}</table>`);
       continue;
     }
     if (/^\s*$/.test(line)) {

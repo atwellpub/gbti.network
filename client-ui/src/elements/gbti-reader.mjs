@@ -137,6 +137,11 @@ const CSS = `
   .body img { max-width:100%; height:auto; border-radius:10px; }
   .body ul,.body ol { padding-left:1.4em; margin:0 0 1em; }
   .body blockquote { margin:0 0 1em; padding:2px 0 2px 14px; border-left:3px solid var(--line); color:var(--muted); }
+  /* sow-062 review feedback: GFM tables now render as real tables, so they need borders and, on a phone,
+     their own horizontal scroll rather than pushing the article wider than the viewport. */
+  .body table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.2em; font-size:14.5px; }
+  .body table th, .body table td { border:1px solid var(--line); padding:7px 11px; text-align:left; vertical-align:top; }
+  .body table th { background:var(--hover); font-weight:700; white-space:nowrap; }
   .body > pre, .body code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .body :not(pre) > code { background:var(--hover); border:1px solid var(--line); border-radius:5px; padding:.08em .35em; font-size:.9em; }
   /* SOW-062 5d: body callout + embed blocks (rendered by client/src/markdown.mjs) */

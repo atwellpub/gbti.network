@@ -93,6 +93,31 @@ function renderFence(lang, buf, fn = null) {
   return `${codeOpen(lang)}${escapeHtml(body)}</code></pre>`;
 }
 
+// GFM tables. Split a row on UNESCAPED pipes, dropping the optional leading/trailing pipe. A manual scan
+// rather than a lookbehind regex, so the bundle stays safe on older Safari; `\|` becomes a literal pipe.
+// Matching GFM, a pipe inside a code span DOES split a cell unless it is escaped.
+export function splitTableRow(line) {
+  const s = String(line).trim().replace(/^\|/, '').replace(/\|$/, '');
+  const cells = [];
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && s[i + 1] === '|') { cur += '|'; i++; continue; }
+    if (ch === '|') { cells.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+/** A GFM delimiter row: every cell is `-`, `:-`, `-:` or `:-:`. Returns per-column alignment, or null. */
+export function tableAlignments(line) {
+  if (!/\|/.test(String(line ?? ''))) return null;
+  const cells = splitTableRow(line);
+  if (!cells.length || cells.some((c) => !/^:?-+:?$/.test(c))) return null;
+  return cells.map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : c.startsWith(':') ? 'left' : ''));
+}
+
 export function renderMarkdown(md) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n');
   const out = [];
@@ -144,6 +169,24 @@ export function renderMarkdown(md) {
     if (/^\s*\d+\.\s+/.test(line)) { if (listType !== 'ol') { flushList(); listType = 'ol'; } listBuf.push(`<li>${inline(escapeHtml(line.replace(/^\s*\d+\.\s+/, '')), fn)}</li>`); i++; continue; }
     if (/^\s*>\s?/.test(line)) { flushList(); out.push(`<blockquote>${inline(escapeHtml(line.replace(/^\s*>\s?/, '')), fn)}</blockquote>`); i++; continue; }
     if (/^\s*(---|\*\*\*)\s*$/.test(line)) { flushList(); out.push('<hr/>'); i++; continue; }
+    // GFM table: a header row followed by a delimiter row, then body rows until a blank line or a row with
+    // no pipe. Without this the pipes fell through to the paragraph gather and rendered as literal text,
+    // while the site build (Astro + GFM) rendered a real table, so the preview disagreed with the page.
+    const aligns = i + 1 < lines.length ? tableAlignments(lines[i + 1]) : null;
+    if (aligns && line.includes('|')) {
+      flushList();
+      const cell = (c) => inline(escapeHtml(c), fn);
+      const cols = (row, tag) => row
+        .map((c, n) => `<${tag}${aligns[n] ? ` style="text-align:${aligns[n]}"` : ''}>${cell(c)}</${tag}>`)
+        .join('');
+      const head = `<thead><tr>${cols(splitTableRow(line), 'th')}</tr></thead>`;
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && !/^\s*$/.test(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
+      const body = rows.length ? `<tbody>${rows.map((r) => `<tr>${cols(r, 'td')}</tr>`).join('')}</tbody>` : '';
+      out.push(`<table>${head}${body}</table>`);
+      continue;
+    }
     if (/^\s*$/.test(line)) { flushList(); i++; continue; }
 
     // paragraph: gather consecutive plain lines

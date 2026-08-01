@@ -2110,6 +2110,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .notice a { color:var(--s-green-fg); }
         #out { margin-top:14px; }
         .preview { background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:10px; padding:12px 14px; color:var(--s-fg); margin-top:12px; }
+        /* sow-062 review feedback: tables render for real now; give them borders and their own horizontal
+           scroll so a wide table never widens the editor column on a phone. */
+        .preview table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.1em; font-size:14px; }
+        .preview table th, .preview table td { border:1px solid var(--s-line); padding:6px 10px; text-align:left; vertical-align:top; }
+        .preview table th { background:var(--s-surface); font-weight:700; white-space:nowrap; }
         .rail { display:flex; flex-direction:column; gap:14px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow-y:auto; }
         /* The rail is a height-capped flex column and .rsec has overflow:hidden (zero min size), so without
            this the flex algorithm SHRINKS the section cards to fit instead of scrolling: every card clipped
@@ -15539,6 +15544,11 @@ From the author:
   .body img { max-width:100%; height:auto; border-radius:10px; }
   .body ul,.body ol { padding-left:1.4em; margin:0 0 1em; }
   .body blockquote { margin:0 0 1em; padding:2px 0 2px 14px; border-left:3px solid var(--line); color:var(--muted); }
+  /* sow-062 review feedback: GFM tables now render as real tables, so they need borders and, on a phone,
+     their own horizontal scroll rather than pushing the article wider than the viewport. */
+  .body table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.2em; font-size:14.5px; }
+  .body table th, .body table td { border:1px solid var(--line); padding:7px 11px; text-align:left; vertical-align:top; }
+  .body table th { background:var(--hover); font-weight:700; white-space:nowrap; }
   .body > pre, .body code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .body :not(pre) > code { background:var(--hover); border:1px solid var(--line); border-radius:5px; padding:.08em .35em; font-size:.9em; }
   /* SOW-062 5d: body callout + embed blocks (rendered by client/src/markdown.mjs) */
