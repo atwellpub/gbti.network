@@ -456,6 +456,10 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // ----- sow-161 admin surface (read): the per-member Stripe status map for the dashboard roster. Admin-gated
     // server-side over the cookie session (authorizeAdmin + allowCookie); a non-admin session 403s. -----
     adminStatuses() { return workerGet('/membership/admin/statuses'); }, // { ok, statuses: { <github_id>: '<status>' } }
+    // sow-161 admin mutation dispatch (increment 1: content moderation deplatform/republish/remove with { path }).
+    // The Worker computes the change server-side + gates by role; a non-staff session 403s, an unsupported action
+    // 400s (ban/role land in later increments). Cookie POST -> CSRF enforced by workerPost.
+    admin(action: string, args: any = {}) { return workerPost('/membership/admin/author', { action, ...args }); },
 
     // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
     getNews({ category, since, limit }: any = {}) {

@@ -83,6 +83,7 @@ import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForRev
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
+import { membershipAdminAuthor } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations (moderation)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF
 
@@ -925,6 +926,19 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
           const r = await membershipAuthor(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+
+      // sow-161: server-side admin mutations (increment 1: content moderation). Staff (moderator+) names an action
+      // + a target path; the Worker computes the change server-side and opens a hosted-admin PR with the
+      // installation token; the SOW-005 gate re-checks the caller's role vs the path and merges. Cookie-enabled
+      // (credentialed CORS + allowCookie; the POST enforces CSRF in resolveIdentity); the extension bearer path also works.
+      if (pathname === '/membership/admin/author') {
+        const cors = corsHeaders(request, env, { credentials: true, methods: 'POST, OPTIONS' });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'POST') {
+          const r = await membershipAdminAuthor(request, env, { allowCookie: true });
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
