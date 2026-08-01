@@ -17,6 +17,7 @@ const signJwt = async () => 'fake.jwt.sig';
 const allow = async () => ({ allowed: true });
 const staffMod = async () => ({ ok: true, githubId: '3', role: 'moderator' }); // a moderator
 const staffAdmin = async () => ({ ok: true, githubId: '2', role: 'admin' }); // an admin
+const staffSuper = async () => ({ ok: true, githubId: '1', role: 'superadmin' }); // a superadmin
 const denied = async () => ({ ok: false, status: 403, body: { error: 'forbidden', message: 'moderator access is required' } });
 const req = (body) => ({ headers: { get: () => 'Bearer tok' }, json: async () => body });
 const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
@@ -31,7 +32,7 @@ function ghFetch(record, { mainFile = fileWithStatus('published'), govFile = 'ba
   return async (url, init = {}) => {
     const method = init.method || 'GET';
     if (/\/access_tokens$/.test(url)) return { ok: true, status: 201, async json() { return { token: 'ghs_inst', expires_at: new Date(Date.now() + 3600e3).toISOString() }; } };
-    if (/\/contents\/house\/(?:bans|grandfathered)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance file (increment 2)
+    if (/\/contents\/house\/(?:bans|grandfathered|roles)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance file (increments 2-3)
       return govFile == null ? { ok: false, status: 404, async json() { return {}; } } : { ok: true, status: 200, async json() { return { content: b64(govFile) }; } };
     }
     if (/\/contents\/.+\?ref=main$/.test(url) && method === 'GET') {
@@ -178,9 +179,55 @@ test('sow-161: a malformed governance file fails CLOSED (502), never silently re
   assert.equal(record.length, 0, 'no write when the file cannot be parsed as a map');
 });
 
+test('sow-161: a governance file that THROWS on parse fails CLOSED (502), never wiping the list (review regression)', async () => {
+  // Genuinely un-parseable YAML makes yaml.load THROW (distinct from a value that parses to a non-map). Both must
+  // 502; the earlier bug conflated a throw with an empty file and would have reset the list on write.
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record, { govFile: 'bans:\n  - github_id: "999\n    reason: [unterminated' }), authorize: staffAdmin });
+  assert.equal(r.status, 502);
+  assert.equal(record.length, 0, 'a parse throw writes nothing');
+});
+
 test('sow-161: a missing governance file (404) is a legitimate fresh start (the ban still lands)', async () => {
   const record = [];
   const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record, { govFile: null }), authorize: staffAdmin });
   assert.equal(r.status, 200);
   assert.match(deB64(record.find((c) => c.method === 'PUT').body.content), /github_id: '?999'?/);
+});
+
+// ---- sow-161 increment 3: role assignment (house/roles.yml = ROOT OF TRUST), SUPERADMIN-tier ----
+
+const ROLES_YML = 'superadmins: []\nadmins: []\nmoderators: []\n';
+
+test('sow-161: an ADMIN cannot assign roles (403) and writes nothing (roles.yml is superadmin-only)', async () => {
+  const record = [];
+  const r = await run({ action: 'role', githubId: '55', role: 'moderator' }, { fetchImpl: ghFetch(record, { govFile: ROLES_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 403);
+  assert.equal(record.length, 0, 'an admin is rejected at the endpoint before touching roles.yml');
+});
+
+test('sow-161: a superadmin assigns a role -> writes house/roles.yml on a caller-keyed branch', async () => {
+  const record = [];
+  const r = await run({ action: 'role', githubId: '55', role: 'moderator' }, { fetchImpl: ghFetch(record, { govFile: ROLES_YML }), authorize: staffSuper });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.number, 42);
+  const createRef = record.find((c) => /\/git\/refs$/.test(c.url));
+  assert.equal(createRef.body.ref, 'refs/heads/hosted-admin/1/role-55', 'branch = the superadmin id (1) + role-<targetId>');
+  const put = record.find((c) => c.method === 'PUT');
+  assert.match(put.url, /house\/roles\.yml$/);
+  assert.match(deB64(put.body.content), /github_id: '?55'?/, 'the target is written into roles.yml');
+});
+
+test('sow-161: an invalid role value is 400 (never reaches roles.yml)', async () => {
+  const record = [];
+  const r = await run({ action: 'role', githubId: '55', role: 'root' }, { fetchImpl: ghFetch(record, { govFile: ROLES_YML }), authorize: staffSuper });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: a non-numeric github_id for role assignment is 400', async () => {
+  const record = [];
+  const r = await run({ action: 'role', githubId: 'x', role: 'admin' }, { fetchImpl: ghFetch(record, { govFile: ROLES_YML }), authorize: staffSuper });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0);
 });

@@ -20,10 +20,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div data-admin-body hidden>
         <div class="sec-head">
           <h1 class="h1">Admin tools</h1>
-          <p class="lead">Moderate content and manage member status across the co-op. Role assignment runs in the browser extension for now, and will arrive here when it is enabled.</p>
+          <p class="lead">Moderate content, manage member status, and assign roles across the co-op. Every action opens a gated pull request that auto-merges; the SOW-005 gate re-checks your role.</p>
         </div>
         <div class="adm-card">
-          <gbti-admin caps="moderation,membership"></gbti-admin>
+          <gbti-admin caps="moderation,membership,roles"></gbti-admin>
         </div>
       </div>
     </div>

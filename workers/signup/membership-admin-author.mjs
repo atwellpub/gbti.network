@@ -2,6 +2,7 @@
 //   Increment 1 (moderator+): content moderation — deplatform (status -> draft), republish (-> published), remove.
 //   Increment 2 (admin+):     member status — ban / unban / grandfather / ungrandfather (house/bans.yml,
 //                             house/grandfathered.yml), via the pure superadmin-actions cores.
+//   Increment 3 (superadmin): role assignment — role (house/roles.yml, the ROOT OF TRUST, Tier S).
 //
 // The cookie session has no GitHub token, so the Worker applies the change and opens the PR with GBTI's
 // INSTALLATION token; the SOW-005 gate is the only merger. Two properties keep this safe:
@@ -20,7 +21,7 @@ import { rateLimit } from './abuse.mjs';
 import { flipContentStatus } from '../../client/src/content-ops.mjs'; // already in the Worker bundle (membership-shares)
 import { isCleanPath } from '../../membership/classify-pr.mjs';
 import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
-import { ban, unban, grandfather, revokeGrandfather } from '../../membership/superadmin-actions.mjs'; // sow-161 increment 2
+import { ban, unban, grandfather, revokeGrandfather, grantRole } from '../../membership/superadmin-actions.mjs'; // sow-161 increments 2-3
 import yaml from 'js-yaml'; // already in the Worker bundle (content-ops)
 
 const GH = 'https://api.github.com';
@@ -34,19 +35,23 @@ const STATUS_FOR = { deplatform: 'draft', republish: 'published' };
 // caller's authority over this path; this regex only bounds the shape (a clean content item, never a config file).
 const CONTENT_ITEM_RE = /^(?:members\/[a-z0-9][a-z0-9-]*|house)\/(?:posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
 
-// Increment 2: membership status (ADMIN+). Each action targets a FIXED governance file (never derived from input)
-// and applies a pure, node-free core from superadmin-actions.mjs. github_id-keyed. The gate independently re-checks
-// that the branch id is admin+ for these Tier A house files, so a moderator cannot ban even if the endpoint erred.
+// Increments 2-3: governance mutations. Each action targets a FIXED governance file (never derived from input) and
+// applies a pure, node-free core from superadmin-actions.mjs. github_id-keyed. Per-action REQUIRED rank: member
+// status is ADMIN+ (Tier A: house/bans.yml, house/grandfathered.yml); ROLE ASSIGNMENT is SUPERADMIN+ (Tier S:
+// house/roles.yml, the ROOT OF TRUST). The gate independently re-checks the branch id's role vs the touched Tier,
+// so an under-privileged caller cannot mutate even if the endpoint rank check erred (two-authority model).
 const GITHUB_ID_RE = /^\d{1,20}$/;
-const MEMBERSHIP_ACTIONS = new Set(['ban', 'unban', 'grandfather', 'ungrandfather']);
-const MEMBERSHIP_OP = {
-  ban: { path: 'house/bans.yml', fn: ban },
-  unban: { path: 'house/bans.yml', fn: unban },
-  grandfather: { path: 'house/grandfathered.yml', fn: grandfather },
-  ungrandfather: { path: 'house/grandfathered.yml', fn: revokeGrandfather },
+const VALID_ROLES = new Set(['member', 'moderator', 'admin', 'superadmin']);
+const GOV_ACTIONS = new Set(['ban', 'unban', 'grandfather', 'ungrandfather', 'role']);
+const GOV_OP = {
+  ban: { path: 'house/bans.yml', rank: ROLE_RANK.admin, fn: ban, args: (t) => ({ githubId: t.targetId, reason: t.reason }) },
+  unban: { path: 'house/bans.yml', rank: ROLE_RANK.admin, fn: unban, args: (t) => ({ githubId: t.targetId }) },
+  grandfather: { path: 'house/grandfathered.yml', rank: ROLE_RANK.admin, fn: grandfather, args: (t) => ({ githubId: t.targetId, reason: t.reason }) },
+  ungrandfather: { path: 'house/grandfathered.yml', rank: ROLE_RANK.admin, fn: revokeGrandfather, args: (t) => ({ githubId: t.targetId }) },
+  role: { path: 'house/roles.yml', rank: ROLE_RANK.superadmin, fn: grantRole, args: (t) => ({ githubId: t.targetId, role: t.role }) },
 };
 // The minimum role rank an action requires at the endpoint (the gate is the independent backstop).
-const requiredRank = (action) => (MEMBERSHIP_ACTIONS.has(action) ? ROLE_RANK.admin : ROLE_RANK.moderator);
+const requiredRank = (action) => (GOV_ACTIONS.has(action) ? GOV_OP[action].rank : ROLE_RANK.moderator);
 
 /** Standard base64 of a UTF-8 string, chunked. */
 function b64utf8(s) {
@@ -93,8 +98,8 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
   try { payload = await request.json(); } catch { return { status: 400, body: { error: 'bad_request', message: 'a JSON body is required' } }; }
   const action = String(payload?.action || '');
   const isContent = CONTENT_ACTIONS.has(action);
-  const isMembership = MEMBERSHIP_ACTIONS.has(action);
-  if (!isContent && !isMembership) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
+  const isGov = GOV_ACTIONS.has(action);
+  if (!isContent && !isGov) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
 
   // Per-action tier: content moderation is moderator+ (the endpoint floor), membership status is admin+. Reject
   // an under-privileged caller BEFORE any read/write. The SOW-005 gate re-checks the branch id's role vs the
@@ -128,29 +133,38 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
     }
     branchSlug = actionSlug(action, path);
   } else {
-    // Membership status: the target is a github_id, NEVER a path. The governance file is a FIXED constant per
-    // action (no path injection). Read it, apply the pure core, and re-serialize; an already-satisfied action is a
-    // clean no-op (no PR).
+    // Governance (member status + role assignment): the target is a github_id, NEVER a path. The governance file is
+    // a FIXED constant per action (no path injection). Read it, apply the pure core, and re-serialize; an
+    // already-satisfied action is a clean no-op (no PR).
     const targetId = String(payload?.githubId || '');
     if (!GITHUB_ID_RE.test(targetId)) return { status: 400, body: { error: 'bad_request', message: 'a numeric github_id is required' } };
     const reason = typeof payload?.reason === 'string' ? payload.reason.slice(0, 500) : undefined;
-    const op = MEMBERSHIP_OP[action];
+    // Role assignment (Tier S) carries a role value; reject anything outside the fixed set before touching roles.yml.
+    let roleVal;
+    if (action === 'role') {
+      roleVal = String(payload?.role || '');
+      if (!VALID_ROLES.has(roleVal)) return { status: 400, body: { error: 'bad_request', message: 'an invalid role was requested' } };
+    }
+    const op = GOV_OP[action];
     const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${op.path}?ref=main`, { headers: GH_HEADERS(instToken) });
     let parsed = {};
     if (cur.status === 404) parsed = {}; // the governance file may not exist yet -> start empty
     else if (!cur.ok) return { status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
     else {
       const text = decodeContent((await cur.json().catch(() => ({})))?.content);
-      let loaded = null;
-      try { loaded = text ? yaml.load(text) : {}; } catch { loaded = undefined; }
-      // Fail CLOSED on a malformed governance file rather than silently resetting it (which would drop every
-      // existing ban/grandfather). An empty file (undefined) is a legitimate fresh start.
+      // Fail CLOSED on a malformed governance file rather than silently resetting it (which would DROP every
+      // existing ban/grandfather/role on the next write). A yaml.load THROW is malformed -> 502; only a value that
+      // parses is trusted. An EMPTY file (yaml.load returns undefined/null, no throw) is a legitimate fresh start;
+      // a non-object/array parse (e.g. a bare string) is also malformed -> 502.
+      let loaded;
+      try { loaded = text ? yaml.load(text) : {}; }
+      catch { return { status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } }; }
       if (loaded === undefined || loaded === null) parsed = {};
       else if (typeof loaded !== 'object' || Array.isArray(loaded)) return { status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } };
       else parsed = loaded;
     }
     let result;
-    try { result = op.fn(parsed, { githubId: targetId, reason }, { actor: { githubId }, now: Date.now() }); }
+    try { result = op.fn(parsed, op.args({ targetId, reason, role: roleVal }), { actor: { githubId }, now: Date.now() }); }
     catch (e) { return { status: 400, body: { error: 'bad_request', message: e?.message || 'invalid action' } }; }
     if (!result.changed) return { status: 200, body: { ok: true, noop: true, message: `no change (${action})` } };
     file = { path: op.path, content: yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
