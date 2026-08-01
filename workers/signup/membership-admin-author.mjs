@@ -3,6 +3,8 @@
 //   Increment 2 (admin+):     member status — ban / unban / grandfather / ungrandfather (house/bans.yml,
 //                             house/grandfathered.yml), via the pure superadmin-actions cores.
 //   Increment 3 (superadmin): role assignment — role (house/roles.yml, the ROOT OF TRUST, Tier S).
+//   Increment 4 (admin+):     config managers — quote-add/remove/toggle (house/quotes.yml; leading comment
+//                             preserved). More managers extend the CONFIG_OP table. Read: membershipAdminQuotePool.
 //
 // The cookie session has no GitHub token, so the Worker applies the change and opens the PR with GBTI's
 // INSTALLATION token; the SOW-005 gate is the only merger. Two properties keep this safe:
@@ -15,13 +17,14 @@
 // CSRF: the cookie path enforces the double-submit token inside resolveIdentity (a POST is a non-safe method); the
 // bearer path (extension) needs none. Everything is injectable (fetchImpl, authorize, kv, limiter) for unit tests.
 
-import { authorizeStaff } from './membership-admin.mjs';
+import { authorizeStaff, authorizeAdmin } from './membership-admin.mjs';
 import { getInstallationToken } from './github-app.mjs';
 import { rateLimit } from './abuse.mjs';
 import { flipContentStatus } from '../../client/src/content-ops.mjs'; // already in the Worker bundle (membership-shares)
 import { isCleanPath } from '../../membership/classify-pr.mjs';
 import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
 import { ban, unban, grandfather, revokeGrandfather, grantRole } from '../../membership/superadmin-actions.mjs'; // sow-161 increments 2-3
+import { addQuote, removeQuote, setQuoteEnabled } from '../../membership/quote-edits.mjs'; // sow-161 increment 4
 import yaml from 'js-yaml'; // already in the Worker bundle (content-ops)
 
 const GH = 'https://api.github.com';
@@ -50,8 +53,52 @@ const GOV_OP = {
   ungrandfather: { path: 'house/grandfathered.yml', rank: ROLE_RANK.admin, fn: revokeGrandfather, args: (t) => ({ githubId: t.targetId }) },
   role: { path: 'house/roles.yml', rank: ROLE_RANK.superadmin, fn: grantRole, args: (t) => ({ githubId: t.targetId, role: t.role }) },
 };
+// Increment 4: config-manager mutations. Same fixed-path + pure-core + fail-closed-parse + hosted-admin-branch +
+// gate-recheck pattern as the governance actions, with TWO differences: the target is a text/string key (not a
+// github_id), and the config file carries a LEADING COMMENT that must be PRESERVED across the edit (governance
+// files have none). Sub-slice 1: quotes (house/quotes.yml, admin-tier). More managers extend this table.
+const CONFIG_ACTIONS = new Set(['quote-add', 'quote-remove', 'quote-toggle']);
+const CONFIG_OP = {
+  'quote-add': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: addQuote, args: (p) => ({ text: p.text, author: p.author }) },
+  'quote-remove': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: removeQuote, args: (p) => ({ text: p.text }) },
+  'quote-toggle': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: setQuoteEnabled, args: (p) => ({ text: p.text, enabled: p.enabled }) },
+};
 // The minimum role rank an action requires at the endpoint (the gate is the independent backstop).
-const requiredRank = (action) => (GOV_ACTIONS.has(action) ? GOV_OP[action].rank : ROLE_RANK.moderator);
+const requiredRank = (action) =>
+  GOV_ACTIONS.has(action) ? GOV_OP[action].rank : CONFIG_ACTIONS.has(action) ? CONFIG_OP[action].rank : ROLE_RANK.moderator;
+
+// Preserve the leading comment block (a run of `#`/blank lines at the top) of a config file across a re-serialize,
+// mirroring client/src/admin-ops.mjs leadingComment. Governance files have none, so this is config-only.
+function leadingComment(raw) {
+  const out = [];
+  for (const line of String(raw || '').split('\n')) {
+    if (/^\s*#/.test(line) || line.trim() === '') out.push(line);
+    else break;
+  }
+  const block = out.join('\n').replace(/\s+$/, '');
+  return block ? `${block}\n` : '';
+}
+// A bounded, git-safe branch slug from a free-text config key (a quote's text). Lowercase alnum + hyphen, capped.
+function textSlug(text) {
+  const s = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+  return s || 'item';
+}
+
+// Read + parse a house YAML file from canonical main, FAIL CLOSED. Shared by the governance + config branches so
+// they cannot disagree about "malformed = 502, not a silent reset". Returns { ok:true, parsed, raw } (raw kept for
+// the config leading-comment preserve), or { ok:false, status, body }. A 404 is a legitimate empty fresh start.
+async function loadHouseYaml(fetchImpl, instToken, upstream, path) {
+  const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${path}?ref=main`, { headers: GH_HEADERS(instToken) });
+  if (cur.status === 404) return { ok: true, parsed: {}, raw: '' };
+  if (!cur.ok) return { ok: false, status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
+  const raw = decodeContent((await cur.json().catch(() => ({})))?.content) ?? '';
+  let loaded;
+  try { loaded = raw ? yaml.load(raw) : {}; }
+  catch { return { ok: false, status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } }; }
+  if (loaded === undefined || loaded === null) return { ok: true, parsed: {}, raw };
+  if (typeof loaded !== 'object' || Array.isArray(loaded)) return { ok: false, status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } };
+  return { ok: true, parsed: loaded, raw };
+}
 
 /** Standard base64 of a UTF-8 string, chunked. */
 function b64utf8(s) {
@@ -99,11 +146,12 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
   const action = String(payload?.action || '');
   const isContent = CONTENT_ACTIONS.has(action);
   const isGov = GOV_ACTIONS.has(action);
-  if (!isContent && !isGov) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
+  const isConfig = CONFIG_ACTIONS.has(action);
+  if (!isContent && !isGov && !isConfig) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
 
-  // Per-action tier: content moderation is moderator+ (the endpoint floor), membership status is admin+. Reject
-  // an under-privileged caller BEFORE any read/write. The SOW-005 gate re-checks the branch id's role vs the
-  // touched Tier (A for house governance files), so this is the endpoint half of the two-authority model.
+  // Per-action tier: content moderation is moderator+ (the endpoint floor), member status + config are admin+, role
+  // assignment is superadmin+. Reject an under-privileged caller BEFORE any read/write. The SOW-005 gate re-checks
+  // the branch id's role vs the touched Tier, so this is the endpoint half of the two-authority model.
   if ((ROLE_RANK[staff.role] ?? 0) < requiredRank(action)) {
     return { status: 403, body: { error: 'forbidden', message: 'a higher role is required for this action' } };
   }
@@ -132,10 +180,10 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
       file = { path, content: flip.content };
     }
     branchSlug = actionSlug(action, path);
-  } else {
+  } else if (isGov) {
     // Governance (member status + role assignment): the target is a github_id, NEVER a path. The governance file is
-    // a FIXED constant per action (no path injection). Read it, apply the pure core, and re-serialize; an
-    // already-satisfied action is a clean no-op (no PR).
+    // a FIXED constant per action (no path injection). Read it (fail-closed), apply the pure core, re-serialize; an
+    // already-satisfied action is a clean no-op (no PR). Governance files carry no leading comment.
     const targetId = String(payload?.githubId || '');
     if (!GITHUB_ID_RE.test(targetId)) return { status: 400, body: { error: 'bad_request', message: 'a numeric github_id is required' } };
     const reason = typeof payload?.reason === 'string' ? payload.reason.slice(0, 500) : undefined;
@@ -146,29 +194,31 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
       if (!VALID_ROLES.has(roleVal)) return { status: 400, body: { error: 'bad_request', message: 'an invalid role was requested' } };
     }
     const op = GOV_OP[action];
-    const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${op.path}?ref=main`, { headers: GH_HEADERS(instToken) });
-    let parsed = {};
-    if (cur.status === 404) parsed = {}; // the governance file may not exist yet -> start empty
-    else if (!cur.ok) return { status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
-    else {
-      const text = decodeContent((await cur.json().catch(() => ({})))?.content);
-      // Fail CLOSED on a malformed governance file rather than silently resetting it (which would DROP every
-      // existing ban/grandfather/role on the next write). A yaml.load THROW is malformed -> 502; only a value that
-      // parses is trusted. An EMPTY file (yaml.load returns undefined/null, no throw) is a legitimate fresh start;
-      // a non-object/array parse (e.g. a bare string) is also malformed -> 502.
-      let loaded;
-      try { loaded = text ? yaml.load(text) : {}; }
-      catch { return { status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } }; }
-      if (loaded === undefined || loaded === null) parsed = {};
-      else if (typeof loaded !== 'object' || Array.isArray(loaded)) return { status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } };
-      else parsed = loaded;
-    }
+    const load = await loadHouseYaml(fetchImpl, instToken, upstream, op.path);
+    if (!load.ok) return { status: load.status, body: load.body };
     let result;
-    try { result = op.fn(parsed, op.args({ targetId, reason, role: roleVal }), { actor: { githubId }, now: Date.now() }); }
+    try { result = op.fn(load.parsed, op.args({ targetId, reason, role: roleVal }), { actor: { githubId }, now: Date.now() }); }
     catch (e) { return { status: 400, body: { error: 'bad_request', message: e?.message || 'invalid action' } }; }
     if (!result.changed) return { status: 200, body: { ok: true, noop: true, message: `no change (${action})` } };
     file = { path: op.path, content: yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
     branchSlug = `${action}-${targetId}`;
+  } else {
+    // Config manager (increment 4): the key is a text string, the file is a FIXED constant per action, and its
+    // LEADING COMMENT is preserved across the edit. Read fail-closed, apply the pure core, re-serialize with the
+    // comment; an already-satisfied action is a clean no-op.
+    const op = CONFIG_OP[action];
+    const text = typeof payload?.text === 'string' ? payload.text.trim() : '';
+    if (!text || text.length > 2000) return { status: 400, body: { error: 'bad_request', message: 'a quote text is required' } };
+    const author = typeof payload?.author === 'string' ? payload.author.slice(0, 200) : undefined;
+    const enabled = payload?.enabled === undefined ? undefined : Boolean(payload.enabled);
+    const load = await loadHouseYaml(fetchImpl, instToken, upstream, op.path);
+    if (!load.ok) return { status: load.status, body: load.body };
+    let result;
+    try { result = op.fn(load.parsed, op.args({ text, author, enabled }), { actor: { githubId }, now: Date.now() }); }
+    catch (e) { return { status: 400, body: { error: 'bad_request', message: e?.message || 'invalid action' } }; }
+    if (!result.changed) return { status: 200, body: { ok: true, noop: true, message: `no change (${action})` } };
+    file = { path: op.path, content: leadingComment(load.raw) + yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
+    branchSlug = `${action}-${textSlug(text)}`;
   }
 
   const branch = adminHostedBranchFor(githubId, branchSlug);
@@ -207,6 +257,24 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
   if (pr.status === 422) return { status: 200, body: { ok: true, branch, number: null, html_url: null, already: true } };
   if (!pr.ok) return { status: 502, body: { error: 'open_pr_failed', message: `GitHub returned ${pr.status}` } };
   return { status: 200, body: { ok: true, branch, number: prData.number, html_url: prData.html_url } };
+}
+
+// sow-161 increment 4: the quote-manager pool READ. Admin-gated (cookie or bearer); returns the FULL pool from
+// house/quotes.yml (incl. disabled quotes, which the public splash JSON omits) so the manager can toggle them.
+// Read-only + fail-closed; a GET carries no CSRF.
+export async function membershipAdminQuotePool(request, env, deps = {}) {
+  const {
+    fetchImpl = globalThis.fetch, authorize = authorizeAdmin, allowCookie = false,
+    upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
+  } = deps;
+  const admin = await authorize(request, env, { ...deps, allowCookie });
+  if (!admin.ok) return { status: admin.status, body: admin.body };
+  let instToken;
+  try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
+  const load = await loadHouseYaml(fetchImpl, instToken, upstream, 'house/quotes.yml');
+  if (!load.ok) return { status: load.status, body: load.body };
+  const quotes = Array.isArray(load.parsed?.quotes) ? load.parsed.quotes : [];
+  return { status: 200, body: { ok: true, quotes } };
 }
 
 /** PUT (or DELETE for content:null) one file on the branch; one retry on a 409 sha race. Mirrors membership-author. */

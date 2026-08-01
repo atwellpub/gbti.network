@@ -464,6 +464,12 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const r = await workerPost('/membership/admin/author', { action, ...args });
       return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null };
     },
+    // sow-161 increment 4: the quotes config manager. Read the full pool (admin-gated) + the three write actions,
+    // each normalized to the { noop, prNumber } shape gbti-quote-manager renders.
+    quotePool() { return workerGet('/membership/admin/quote-pool'); }, // { ok, quotes }
+    async addQuote(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-add', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+    async removeQuote(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-remove', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+    async setQuoteEnabled(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-toggle', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
 
     // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
     getNews({ category, since, limit }: any = {}) {

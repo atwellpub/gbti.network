@@ -25,6 +25,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <div class="adm-card">
           <gbti-admin caps="moderation,membership,roles"></gbti-admin>
         </div>
+
+        {/* Config managers (admin+). The element only upgrades when its module is imported, which the script does
+            for admin+ only, so a moderator sees no card. sow-161 increment 4: quotes (the first config manager). */}
+        <div class="adm-card" data-quotes-card hidden>
+          <h2 class="h2">Splash quotes</h2>
+          <gbti-quote-manager></gbti-quote-manager>
+        </div>
       </div>
     </div>
   </section>
@@ -47,7 +54,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
     function bounce() { location.replace('/account/'); }
 
-    async function mount(login: string, githubId: string | null) {
+    async function mount(login: string, githubId: string | null, rank: number) {
       if (gate) gate.hidden = true;
       if (body) body.hidden = false;
       const signupBase = document.documentElement.dataset.signupBase || '';
@@ -55,6 +62,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       const { setClient } = await import('../../client-ui/src/base.mjs');
       setClient(createWorkbenchClient({ signupBase, login, githubId }));
       await import('../../client-ui/src/elements/gbti-admin.mjs'); // defines the element; it renders on the setClient fan-out
+      // Config managers are admin+ only. Importing the module upgrades the static tag (which then renders on the
+      // setClient fan-out); a moderator never imports it, so the tag stays inert and the card stays hidden.
+      if (rank >= RANK.admin) {
+        (document.querySelector('[data-quotes-card]') as HTMLElement | null)?.removeAttribute('hidden');
+        await import('../../client-ui/src/elements/gbti-quote-manager.mjs');
+      }
     }
 
     (async () => {
@@ -68,7 +81,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       } catch { payload = null; }
       const rank = RANK[payload?.role ?? 'member'] ?? 0;
       if (payload && payload.ok === true && payload.login && rank >= RANK.moderator) {
-        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null, rank);
       } else {
         bounce(); // a signed-in non-staff member (or an invalid session) has no admin surface
       }
