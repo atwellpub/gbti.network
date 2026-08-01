@@ -50,9 +50,13 @@ import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../lib/membership';
       var btn = document.querySelector('[data-login-go]');
       window.gbtiTurnstileOk = function (token) { if (btn) { btn.disabled = false; btn.dataset.token = token; } };
       window.gbtiTurnstileReset = function () { if (btn) { btn.disabled = true; delete btn.dataset.token; } };
+      // A Turnstile token is SINGLE USE. Spend it and immediately drop it, so a second click can never replay a
+      // redeemed token into /signup/start (the Worker verifies before anything else and answers 403
+      // turnstile_failed, which reads to the visitor as a dead sign-in button with no way back).
       if (btn) btn.addEventListener('click', function () {
         var token = btn.dataset.token;
         if (!token) return;
+        window.gbtiTurnstileReset();
         var u = new URL(signupBase + '/signup/start');
         u.searchParams.set('cf-turnstile-response', token);
         var ref = cookie(refCookie); if (ref) u.searchParams.set('ref', ref);
@@ -60,6 +64,14 @@ import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../lib/membership';
         if (touchEnabled) { var sid = cookie(sidCookie); if (sid) u.searchParams.set('sid', sid); }
         u.searchParams.set('return_to', safeReturn());
         window.location.href = u.toString();
+      });
+      // Back/forward cache restores this page whole: enabled button, stale token, and NO expiry callback (the
+      // page was frozen, not running). iOS Safari does this on every Back, so without a reset the normal way
+      // back from a failed sign-in replays a spent token. Force a fresh challenge instead.
+      window.addEventListener('pageshow', function (e) {
+        if (!e.persisted) return;
+        window.gbtiTurnstileReset();
+        try { if (window.turnstile) window.turnstile.reset(); } catch (err) { /* widget not mounted yet */ }
       });
     })();
   </script>
