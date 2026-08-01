@@ -458,8 +458,12 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     adminStatuses() { return workerGet('/membership/admin/statuses'); }, // { ok, statuses: { <github_id>: '<status>' } }
     // sow-161 admin mutation dispatch (increment 1: content moderation deplatform/republish/remove with { path }).
     // The Worker computes the change server-side + gates by role; a non-staff session 403s, an unsupported action
-    // 400s (ban/role land in later increments). Cookie POST -> CSRF enforced by workerPost.
-    admin(action: string, args: any = {}) { return workerPost('/membership/admin/author', { action, ...args }); },
+    // 400s (ban/role land in later increments). Cookie POST -> CSRF enforced by workerPost. Normalize the Worker's
+    // { number, html_url } to the { prNumber, prUrl } shape <gbti-admin> renders (parity with the extension host).
+    async admin(action: string, args: any = {}) {
+      const r = await workerPost('/membership/admin/author', { action, ...args });
+      return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null };
+    },
 
     // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
     getNews({ category, since, limit }: any = {}) {

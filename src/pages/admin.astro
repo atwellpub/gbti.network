@@ -1,59 +1,84 @@
 ---
-// sow-158: a STUB for the site admin surface. Admin tools (roster, bans, roles, moderation) live in the browser
-// extension today (SOW-036/038); the native site surface is deferred to sow-161. This page is a gated placeholder
-// the header avatar menu's "Admin tools" points at, so a staff member on the cookie session lands somewhere honest
-// instead of a dead relay. noindex: not a public page.
+// sow-161: the native site admin surface (replaces the sow-158 stub). A staff member (moderator+) moderates
+// content from gbti.network over the httpOnly-cookie session, no extension: <gbti-admin> mounts with
+// caps="moderation" so only the content-moderation group (deplatform / republish / remove) renders, which is the
+// only server-side mutation cookie-enabled so far (POST /membership/admin/author). Ban / grandfather / role
+// assignment stay in the browser extension until sow-161 increments 2 and 3 cookie-enable them; widening the caps
+// attribute then surfaces them here with no component change. The Worker + the SOW-005 gate are the real boundary
+// (the role is re-checked server-side + at merge); this page is UX only. noindex: a per-staff surface.
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 <BaseLayout title="Admin tools" description="GBTI Network admin." noindex={true}>
   <section class="band">
     <div class="wrap adm-wrap">
-      {/* pre-hydration / non-staff fallback (static SSG has no request-time role). Hidden for staff by the script. */}
+      {/* pre-hydration / non-staff fallback (static SSG has no request-time role). */}
       <div class="sec-head center" data-admin-gate>
         <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-id"/></svg></span>
         <h1 class="h1 mt24">Checking access&hellip;</h1>
       </div>
 
-      <div class="sec-head center" data-admin-body hidden>
-        <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-id"/></svg></span>
-        <h1 class="h1 mt24">Admin tools</h1>
-        <p class="lead">
-          Moderation and governance (member roster, bans, roles, and content remediation) run in the GBTI browser
-          extension for now. A native admin surface on gbti.network is planned. Use the extension to manage the
-          co-op today; this page will grow into the full toolset.
-        </p>
-        <div class="adm-actions mt24">
-          <a href="/extension/" class="btn btn-primary">Get the extension <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
-          <a href="/workbench/" class="btn btn-ghost">Back to your WorkBench</a>
+      <div data-admin-body hidden>
+        <div class="sec-head">
+          <h1 class="h1">Admin tools</h1>
+          <p class="lead">Moderate content across the co-op. Member status, grandfather, and role assignment run in the browser extension for now, and will arrive here as they are enabled.</p>
+        </div>
+        <div class="adm-card">
+          <gbti-admin caps="moderation"></gbti-admin>
         </div>
       </div>
     </div>
   </section>
 
   <script>
-    import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
+    // Resolve the signed-in member from the httpOnly-cookie session, gate to moderator+ by the role the
+    // /membership/status oracle now returns (sow-158 follow-up), then mount the shared <gbti-admin> over the cookie
+    // adapter. Fail closed: a signed-out or non-staff visitor is sent to their account (the server + the SOW-005
+    // gate re-check the role, so this gate is UX, not the boundary).
     const RANK: Record<string, number> = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
-    const gate = document.querySelector('[data-admin-gate]');
-    const body = document.querySelector('[data-admin-body]');
-    let settled = false;
-    function render(s) {
-      const rank = RANK[s?.role ?? 'member'] ?? 0;
-      // Staff (moderator+) see the stub; a signed-out or non-staff member is redirected to their account. Wait for
-      // the cookie hydration (which now carries the role) before redirecting, so a staff member is not bounced.
-      if (s && s.login && rank >= RANK.moderator) {
-        settled = true;
-        if (gate) gate.hidden = true;
-        if (body) body.hidden = false;
+    const gate = document.querySelector('[data-admin-gate]') as HTMLElement | null;
+    const body = document.querySelector('[data-admin-body]') as HTMLElement | null;
+
+    function readCookie(name: string): string | null {
+      for (const part of document.cookie.split(';')) {
+        const eq = part.indexOf('=');
+        if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
       }
+      return null;
     }
-    render(currentIdentity(readMemberSignal()));
-    onMemberSignal(render); // BaseLayout hydrates the cookie session; the role arrives here
-    // If, after hydration, no staff identity resolved, send the visitor to their account (fail closed).
-    setTimeout(() => { if (!settled) location.replace('/account/'); }, 4000);
+    function bounce() { location.replace('/account/'); }
+
+    async function mount(login: string, githubId: string | null) {
+      if (gate) gate.hidden = true;
+      if (body) body.hidden = false;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const { createWorkbenchClient } = await import('../lib/workbench-client');
+      const { setClient } = await import('../../client-ui/src/base.mjs');
+      setClient(createWorkbenchClient({ signupBase, login, githubId }));
+      await import('../../client-ui/src/elements/gbti-admin.mjs'); // defines the element; it renders on the setClient fan-out
+    }
+
+    (async () => {
+      // Cheap gate: no readable gbti_csrf means no web session -> not staff -> bounce (no network).
+      if (!readCookie('gbti_csrf')) { bounce(); return; }
+      const base = document.documentElement.dataset.signupBase || '';
+      let payload: any = null;
+      try {
+        const res = await fetch(base + '/membership/status', { credentials: 'include' });
+        payload = res.ok ? await res.json() : null;
+      } catch { payload = null; }
+      const rank = RANK[payload?.role ?? 'member'] ?? 0;
+      if (payload && payload.ok === true && payload.login && rank >= RANK.moderator) {
+        mount(String(payload.login), payload.github_id != null ? String(payload.github_id) : null);
+      } else {
+        bounce(); // a signed-in non-staff member (or an invalid session) has no admin surface
+      }
+    })();
   </script>
 
   <style>
-    .adm-wrap { max-width: 560px; }
-    .adm-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .adm-wrap { max-width: 760px; }
+    .sec-head { margin-bottom: 18px; }
+    .sec-head .lead { max-width: 640px; }
+    .adm-card { border: 1.5px solid var(--line); border-radius: 16px; background: var(--panel); padding: 20px 24px; }
   </style>
 </BaseLayout>

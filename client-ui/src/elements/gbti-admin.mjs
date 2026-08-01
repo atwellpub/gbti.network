@@ -58,6 +58,12 @@ class GbtiAdmin extends GbtiElement {
       this.set(this.css(CSS) + `<p class="nudge">Admin actions are available to moderators and above.</p>`);
       return;
     }
+    // sow-161: an optional `caps` attribute limits which mutation GROUPS render, so a host that has only
+    // cookie-enabled SOME of the server-side admin mutations (the website, increment by increment) shows only
+    // those. Absent attribute -> all groups (the extension/npm host, unchanged). Read from the attribute (not a
+    // property) so it survives custom-element upgrade with no race. Groups: 'moderation', 'membership', 'roles'.
+    const caps = this.hasAttribute('caps') ? this.getAttribute('caps').split(',').map((s) => s.trim()).filter(Boolean) : null;
+    const capOn = (g) => !caps || caps.includes(g);
     this.set(
       this.css(CSS) +
         `<div class="rolebar"><span class="lbl">Acting as</span><span class="badge">${esc(role)}</span></div>
@@ -73,7 +79,7 @@ class GbtiAdmin extends GbtiElement {
            </div>
          </div>
 
-         ${rank >= RANK.admin ? `<div class="grp">
+         ${rank >= RANK.admin && capOn('membership') ? `<div class="grp">
            <h4>Member status</h4>
            <p class="desc">Ban deplatforms a member regardless of payment; grandfather grants permanent paid access with no Stripe subscription. Keyed by the immutable github_id.</p>
            <input class="fld" id="gid" placeholder="github_id" />
@@ -86,7 +92,7 @@ class GbtiAdmin extends GbtiElement {
            </div>
          </div>` : ''}
 
-         ${rank >= RANK.superadmin ? `<div class="grp">
+         ${rank >= RANK.superadmin && capOn('roles') ? `<div class="grp">
            <h4>Role assignment</h4>
            <p class="desc">Set a member's role. Superadmin owns roles.yml and the root of trust, so assign it carefully.</p>
            <div class="role-row">
@@ -116,13 +122,13 @@ class GbtiAdmin extends GbtiElement {
     this.on('#deplatform', 'click', run('deplatform', cpath));
     this.on('#republish', 'click', run('republish', cpath)); // SOW-071: the inverse of deplatform (un-hide)
     this.on('#remove', 'click', run('remove', cpath));
-    if (rank >= RANK.admin) {
+    if (rank >= RANK.admin && capOn('membership')) {
       this.on('#ban', 'click', run('ban', gid));
       this.on('#unban', 'click', run('unban', () => ({ githubId: this.$('#gid').value.trim() })));
       this.on('#grandfather', 'click', run('grandfather', gid));
       this.on('#ungrandfather', 'click', run('ungrandfather', () => ({ githubId: this.$('#gid').value.trim() })));
     }
-    if (rank >= RANK.superadmin) {
+    if (rank >= RANK.superadmin && capOn('roles')) {
       this.on('#setrole', 'click', run('role', () => ({ githubId: this.$('#rid').value.trim(), role: this.$('#role').value })));
     }
   }
