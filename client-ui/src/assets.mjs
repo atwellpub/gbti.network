@@ -24,6 +24,30 @@ export function resolveMarkdownAssets(markdown, itemPath, repo = CONTENT_REPO) {
     (_m, pre, _dot, rest) => `${pre}https://cdn.jsdelivr.net/gh/${repo}@main/${folder}/${rest}`);
 }
 
+/**
+ * Resolve ONE image value (a frontmatter cover, or a body image block's url) to something an <img src>
+ * can actually load. Absolute, protocol-relative and build-optimized `/_astro/` values pass through;
+ * anything else is treated as a REPO-relative path and resolved against the item's folder via jsDelivr,
+ * exactly as resolveMarkdownAssets does for raw markdown. Without the item path there is no folder to
+ * resolve against, so it falls back to the site origin.
+ *
+ * Shared deliberately: the editor renders `./images/x.webp` live in the page, where the browser resolves
+ * it against the PAGE url (`/workbench/` -> a guaranteed 404). Only a repo-aware resolver can turn a
+ * content-relative path into a loadable URL outside the site build.
+ */
+export function resolveContentAsset(value, itemPath, repo = CONTENT_REPO, site = SITE) {
+  if (!value) return '';
+  const s = String(value);
+  if (/^https?:\/\//.test(s) || /^\/\//.test(s) || /^\/_astro\//.test(s)) return resolveAsset(s, site) || s;
+  const folder = String(itemPath || '').replace(/\/[^/]*$/, '').replace(/^\/+/, '');
+  if (folder) return `https://cdn.jsdelivr.net/gh/${repo}@main/${folder}/${s.replace(/^\.?\/+/, '')}`;
+  // No item folder means an explicitly RELATIVE path cannot be resolved. Return nothing rather than a
+  // site-origin guess: `https://gbti.network/./images/x.webp` is the exact 404 this function exists to
+  // stop, and an empty src renders the placeholder instead of a broken image.
+  if (/^\.{1,2}\//.test(s)) return '';
+  return resolveAsset(s, site) || '';
+}
+
 export function resolveAsset(thumb, site = SITE) {
   if (!thumb || typeof thumb !== 'string') return null;
   if (/^https?:\/\//.test(thumb)) return thumb; // already absolute (a raw/jsDelivr/CDN URL)

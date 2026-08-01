@@ -8,6 +8,7 @@
 // menu + selection toolbar + drag reorder on top of this engine.
 import { GbtiElement, define, esc } from '../base.mjs';
 import { parseBlocks, serializeBlocks, emptyBlock, CALLOUT_VARIANTS, inlineMdToHtml, inlineHtmlToMd } from '../markdown-blocks.mjs';
+import { resolveContentAsset } from '../assets.mjs'; // sow-165: repo-relative body images need the item folder to resolve
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
 
 let UID = 0;
@@ -167,6 +168,9 @@ const CSS = `
 `;
 
 class GbtiDocEditor extends GbtiElement {
+  // sow-165: the owning editor sets this so a repo-relative body image resolves against the item's folder.
+  set itemPath(v) { this._itemPath = v || null; if (this.isConnected) this._render(); }
+  get itemPath() { return this._itemPath || null; }
   set value(md) { this._blocks = parseBlocks(md).map(withId); if (this.isConnected) this._render(); }
   get value() { return serializeBlocks(this._blocks || []); } // serializeBlock ignores the non-serialized _id
 
@@ -244,7 +248,10 @@ class GbtiDocEditor extends GbtiElement {
       case 'image': {
         // SOW-062 P6: a striped drop-zone placeholder when empty (click OR drag-drop an image), the preview when set.
         const hasUrl = !!b.url;
-        const src = hasUrl ? esc(b.url.startsWith('http') ? b.url : `https://gbti.network/${b.url}`) : '';
+        // sow-165: a body image is usually a REPO-relative path (`./images/x.webp`). Prefixing the site
+        // origin produced `https://gbti.network/./images/x.webp`, a guaranteed 404, which is why every body
+        // image rendered broken in the editor. Resolve against the item's folder like the reader does.
+        const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : '';
         return `<div class="card"><div class="card-h">${svg('img')} Image</div>`
           + `<div class="imgframe">`
           +   (hasUrl ? `<img src="${src}" alt="" />` : `<div class="imgph" data-imgdrop="${b._id}" title="Drop an image here, or click to upload">${svg('img')}<span class="imgph-t">Drop an image here, or click to upload</span></div>`)

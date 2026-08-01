@@ -381,6 +381,34 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   }
 
+  // client-ui/src/assets.mjs
+  var SITE = "https://gbti.network";
+  var CONTENT_REPO = "gbti-network/gbti.network";
+  function resolveMarkdownAssets(markdown, itemPath, repo = CONTENT_REPO) {
+    const md = String(markdown ?? "");
+    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
+    if (!folder2) return md;
+    return md.replace(
+      /(!\[[^\]]*\]\()(\.\/)([^\s)]+\))/g,
+      (_m, pre, _dot, rest) => `${pre}https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${rest}`
+    );
+  }
+  function resolveContentAsset(value, itemPath, repo = CONTENT_REPO, site = SITE) {
+    if (!value) return "";
+    const s = String(value);
+    if (/^https?:\/\//.test(s) || /^\/\//.test(s) || /^\/_astro\//.test(s)) return resolveAsset(s, site) || s;
+    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
+    if (folder2) return `https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${s.replace(/^\.?\/+/, "")}`;
+    if (/^\.{1,2}\//.test(s)) return "";
+    return resolveAsset(s, site) || "";
+  }
+  function resolveAsset(thumb, site = SITE) {
+    if (!thumb || typeof thumb !== "string") return null;
+    if (/^https?:\/\//.test(thumb)) return thumb;
+    if (/^\/\//.test(thumb)) return `https:${thumb}`;
+    return `${site}${thumb.startsWith("/") ? "" : "/"}${thumb}`;
+  }
+
   // client-ui/src/elements/gbti-doc-editor.mjs
   var UID = 0;
   var withId = (b) => {
@@ -533,6 +561,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .sel-tb button:hover { background:rgba(255,255,255,.12); color:#fff; }
 `;
   var GbtiDocEditor = class extends GbtiElement {
+    // sow-165: the owning editor sets this so a repo-relative body image resolves against the item's folder.
+    set itemPath(v) {
+      this._itemPath = v || null;
+      if (this.isConnected) this._render();
+    }
+    get itemPath() {
+      return this._itemPath || null;
+    }
     set value(md) {
       this._blocks = parseBlocks(md).map(withId);
       if (this.isConnected) this._render();
@@ -618,7 +654,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         }
         case "image": {
           const hasUrl = !!b.url;
-          const src = hasUrl ? esc(b.url.startsWith("http") ? b.url : `https://gbti.network/${b.url}`) : "";
+          const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : "";
           return `<div class="card"><div class="card-h">${svg("img")} Image</div><div class="imgframe">` + (hasUrl ? `<img src="${src}" alt="" />` : `<div class="imgph" data-imgdrop="${b._id}" title="Drop an image here, or click to upload">${svg("img")}<span class="imgph-t">Drop an image here, or click to upload</span></div>`) + `<input type="file" accept="image/*" hidden data-imgfile="${b._id}" /></div><input data-edit="url" data-id="${b._id}" value="${esc(b.url || "")}" placeholder="Image URL or repo path" /><input data-edit="alt" data-id="${b._id}" value="${esc(b.alt || "")}" placeholder="Alt text" /><div class="up"><button type="button" class="up-btn" data-imgpick="${b._id}">${svg("img")} ${hasUrl ? "Replace image" : "Choose image"}</button><span class="up-st" data-imgst="${b._id}"></span></div></div>`;
         }
         case "embed":
@@ -1240,25 +1276,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return input;
   }
 
-  // client-ui/src/assets.mjs
-  var SITE = "https://gbti.network";
-  var CONTENT_REPO = "gbti-network/gbti.network";
-  function resolveMarkdownAssets(markdown, itemPath, repo = CONTENT_REPO) {
-    const md = String(markdown ?? "");
-    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
-    if (!folder2) return md;
-    return md.replace(
-      /(!\[[^\]]*\]\()(\.\/)([^\s)]+\))/g,
-      (_m, pre, _dot, rest) => `${pre}https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${rest}`
-    );
-  }
-  function resolveAsset(thumb, site = SITE) {
-    if (!thumb || typeof thumb !== "string") return null;
-    if (/^https?:\/\//.test(thumb)) return thumb;
-    if (/^\/\//.test(thumb)) return `https:${thumb}`;
-    return `${site}${thumb.startsWith("/") ? "" : "/"}${thumb}`;
-  }
-
   // client-ui/src/workbench-cache.mjs
   var WB_CACHE_PREFIX = "gbti:wb";
   var WB_DEFAULT_TTL_MS = 10 * 60 * 1e3;
@@ -1806,7 +1823,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { key: "discussions", label: "Discussions" }
   ];
   var TYPE_LABEL = { post: "Article", product: "Product", prompt: "Prompt", profile: "Profile" };
-  var CONTENT_REPO2 = "gbti-network/gbti.network";
   var RAIL_SCHEMA = {
     post: [
       { title: "Details", open: true, keys: ["visibility", "excerpt", "categories", "tags"] },
@@ -1959,14 +1975,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // via jsDelivr over GitHub (the built site only serves the /_astro/-optimized variant, whose path the editor does
     // not have). This is why resolveAsset alone produced a broken `gbti.network/./images/...` url. Falls back safely.
     resolveCover(value) {
-      if (!value) return "";
-      const s = String(value);
-      if (/^https?:\/\//.test(s) || /^\/_astro\//.test(s) || s.startsWith("//")) return resolveAsset(s) || s;
-      if (this.itemPath) {
-        const folder2 = String(this.itemPath).replace(/\/index\.md$/, "").replace(/^\/+/, "");
-        return `https://cdn.jsdelivr.net/gh/${CONTENT_REPO2}@main/${folder2}/${s.replace(/^\.?\/+/, "")}`;
-      }
-      return resolveAsset(s) || "";
+      return resolveContentAsset(value, this.itemPath);
     }
     async render() {
       if (!this.client) return;
@@ -2358,7 +2367,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         }));
       });
       const be = this.$("#body");
-      if (be) be.value = this.preset?.body ?? "";
+      if (be) {
+        be.itemPath = this.itemPath;
+        be.value = this.preset?.body ?? "";
+      }
       const deps = new Set(this.fields.filter((f) => f.showIf?.field).map((f) => f.showIf.field));
       for (const dep of deps) {
         const el = this.$(`[data-key="${dep}"]`);

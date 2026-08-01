@@ -7,7 +7,7 @@
 import { GbtiElement, define, esc } from '../base.mjs';
 import { submitAck, failHint } from '../workspace-core.mjs'; // SOW-072 P2: the one consistent submit acknowledgement
 import { gatherInput } from '../form.mjs';
-import { resolveAsset } from '../assets.mjs'; // SOW-062 P3: resolve an existing coverImage path to a preview URL
+import { resolveContentAsset } from '../assets.mjs'; // SOW-062 P3 + sow-165: resolve a cover/body image path to a loadable preview URL
 import './gbti-doc-editor.mjs'; // SOW-062 P5: the cohesive WYSIWYG body editor (same #body.value Markdown contract)
 import './gbti-discussion.mjs'; // SOW-062 P6: the shared discussion thread, embedded in the editor for published items
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
@@ -53,7 +53,6 @@ const STAT_DEFS = [
   { key: 'discussions', label: 'Discussions' },
 ];
 const TYPE_LABEL = { post: 'Article', product: 'Product', prompt: 'Prompt', profile: 'Profile' };
-const CONTENT_REPO = 'gbti-network/gbti.network'; // SOW-062 P6: resolve a repo-relative cover to a jsDelivr preview URL
 
 const TYPES = ['post', 'product', 'prompt', 'profile'];
 
@@ -181,14 +180,7 @@ class GbtiContentEditor extends GbtiElement {
   // via jsDelivr over GitHub (the built site only serves the /_astro/-optimized variant, whose path the editor does
   // not have). This is why resolveAsset alone produced a broken `gbti.network/./images/...` url. Falls back safely.
   resolveCover(value) {
-    if (!value) return '';
-    const s = String(value);
-    if (/^https?:\/\//.test(s) || /^\/_astro\//.test(s) || s.startsWith('//')) return resolveAsset(s) || s;
-    if (this.itemPath) {
-      const folder = String(this.itemPath).replace(/\/index\.md$/, '').replace(/^\/+/, '');
-      return `https://cdn.jsdelivr.net/gh/${CONTENT_REPO}@main/${folder}/${s.replace(/^\.?\/+/, '')}`;
-    }
-    return resolveAsset(s) || '';
+    return resolveContentAsset(value, this.itemPath);
   }
 
   async render() {
@@ -610,7 +602,10 @@ class GbtiContentEditor extends GbtiElement {
 
     // SOW-062 P4: seed the block body editor from the preset body (its value setter parses Markdown -> blocks).
     const be = this.$('#body');
-    if (be) be.value = this.preset?.body ?? '';
+    // sow-165: hand the body editor the item's path BEFORE its value, so a repo-relative image block
+    // (`./images/x.webp`) resolves against the item folder on its first render instead of 404-ing against
+    // the page url.
+    if (be) { be.itemPath = this.itemPath; be.value = this.preset?.body ?? ''; }
 
     // Live-toggle conditional fields (e.g. the image-gen-only result image) as their dependency changes.
     const deps = new Set(this.fields.filter((f) => f.showIf?.field).map((f) => f.showIf.field));
