@@ -15450,13 +15450,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const mLabel = MEMBERSHIP_LABEL[ov.membership] || "Member";
       const isStaff = ["moderator", "admin", "superadmin"].includes(ov.role);
       const tiles = [
-        { nm: "Articles", href: "workspace.html#tab=post", n: c.post },
-        { nm: "Prompts", href: "workspace.html#tab=prompt", n: c.prompt },
-        { nm: "Products", href: "workspace.html#tab=product", n: c.product },
-        { nm: "Pull requests", href: "workspace.html#tab=prs", n: c.prs },
-        { nm: "Saved", href: "workspace.html#tab=saved", n: c.saved },
-        { nm: "Following", href: "workspace.html#tab=subs", n: c.subs },
-        { nm: "Earnings", href: "workspace.html#tab=earnings", n: null },
+        // sow-158 host-awareness fix: the workspace's OWN tab nav uses a BARE `#tab=` hash, not the extension page
+        // `workspace.html#tab=`. On the website the workspace lives at /workbench/, so `workspace.html#...` resolved
+        // to /workbench/workspace.html -> 404. A bare hash stays on the current page (extension workspace.html OR
+        // website /workbench/) and the _onHash listener switches the tab in place, no reload, on BOTH hosts.
+        { nm: "Articles", href: "#tab=post", n: c.post },
+        { nm: "Prompts", href: "#tab=prompt", n: c.prompt },
+        { nm: "Products", href: "#tab=product", n: c.product },
+        { nm: "Pull requests", href: "#tab=prs", n: c.prs },
+        { nm: "Saved", href: "#tab=saved", n: c.saved },
+        { nm: "Following", href: "#tab=subs", n: c.subs },
+        { nm: "Earnings", href: "#tab=earnings", n: null },
         { nm: "Settings", href: "account.html", n: null },
         ...isStaff ? [{ nm: "Admin tools", href: "admin.html", n: null }] : []
       ];
@@ -17265,7 +17269,8 @@ From the author:
       const ini = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
       const note = e.headline ? `<p class="a-note">${esc(e.headline)}</p>` : "";
       let follow = "";
-      if (a.isSelf) follow = ["post", "product", "prompt"].includes(it.type) ? `<a class="follow edit" href="workspace.html#tab=${esc(it.type)}">Edit in workspace</a>` : "";
+      const wsBase = typeof location !== "undefined" && location.protocol === "chrome-extension:" ? "workspace.html" : "/workbench/";
+      if (a.isSelf) follow = ["post", "product", "prompt"].includes(it.type) ? `<a class="follow edit" href="${wsBase}#tab=${esc(it.type)}">Edit in workspace</a>` : "";
       else if (a.canFollow) follow = `<button class="follow${a.following ? " on" : ""}" data-follow type="button">${a.following ? "Following" : "Follow"}</button>`;
       else follow = `<a class="follow muted" href="${SITE15}/membership/" target="_blank" rel="noopener" title="Members can follow other members">Follow</a>`;
       const links = e.links || {};

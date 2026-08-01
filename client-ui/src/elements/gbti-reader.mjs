@@ -439,9 +439,12 @@ class GbtiReader extends GbtiElement {
     // Follow control: paid viewer -> toggle; self -> an Edit deep-link into the WorkBench; otherwise a prompt.
     let follow = '';
     // SOW-067 (decision 11): the author viewing their OWN post/product/prompt gets an Edit control that opens the
-    // WorkBench on that type tab (workspace.html is a sibling extension page; npm-CMS hosts ignore the dead link).
+    // WorkBench on that type tab. sow-158 host-awareness: the WorkBench is `workspace.html` in the extension but
+    // `/workbench/` on the website (gbti.network), so pick the base by host or a website /browse reader links to
+    // /browse/workspace.html -> 404. npm-CMS hosts have no WorkBench page; the link is inert there as before.
+    const wsBase = (typeof location !== 'undefined' && location.protocol === 'chrome-extension:') ? 'workspace.html' : '/workbench/';
     if (a.isSelf) follow = ['post', 'product', 'prompt'].includes(it.type)
-      ? `<a class="follow edit" href="workspace.html#tab=${esc(it.type)}">Edit in workspace</a>` : '';
+      ? `<a class="follow edit" href="${wsBase}#tab=${esc(it.type)}">Edit in workspace</a>` : '';
     else if (a.canFollow) follow = `<button class="follow${a.following ? ' on' : ''}" data-follow type="button">${a.following ? 'Following' : 'Follow'}</button>`;
     else follow = `<a class="follow muted" href="${SITE}/membership/" target="_blank" rel="noopener" title="Members can follow other members">Follow</a>`;
     // Social links (Discord shown as an inspectable handle chip).
