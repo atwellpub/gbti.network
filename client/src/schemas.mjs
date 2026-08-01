@@ -143,7 +143,11 @@ export const productSchema = z.object({
   pricing: z.enum(['free', 'freemium', 'paid']).optional(),
   version: z.string().optional(),
   pricingUrl: z.string().url().optional(),
-  icon: z.string(),
+  icon: z.string(), // REQUIRED, 1:1. The SMALL icon: the directory card renders it at 64 (shown 56).
+  // Optional 1:1 LARGE icon for the detail page's 96px slot, which a 128px source cannot serve crisply at
+  // 2x. Optional on purpose: every existing product predates it, and their 128x128 sources cannot be
+  // upscaled into a genuine large asset. The render falls back to `icon`.
+  iconLarge: z.string().optional(),
   banner: z.string().optional(),
   featuredImage: z.string(), // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional
   // here: a product published without it passed the client but broke the Astro build (SOW-025, same drift class).

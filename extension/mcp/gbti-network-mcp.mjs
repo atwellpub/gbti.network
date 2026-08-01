@@ -17120,6 +17120,11 @@ var productSchema = external_exports.object({
   version: external_exports.string().optional(),
   pricingUrl: external_exports.string().url().optional(),
   icon: external_exports.string(),
+  // REQUIRED, 1:1. The SMALL icon: the directory card renders it at 64 (shown 56).
+  // Optional 1:1 LARGE icon for the detail page's 96px slot, which a 128px source cannot serve crisply at
+  // 2x. Optional on purpose: every existing product predates it, and their 128x128 sources cannot be
+  // upscaled into a genuine large asset. The render falls back to `icon`.
+  iconLarge: external_exports.string().optional(),
   banner: external_exports.string().optional(),
   featuredImage: external_exports.string(),
   // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional

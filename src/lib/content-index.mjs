@@ -19,7 +19,7 @@ export function contentItemPath(type, owner, slug) {
 
 // The image field(s) that supply a card thumbnail per type, in preference order. A product prefers its square
 // `icon` for a list-row thumb (then the 16:10 featuredImage, then banner); posts use coverImage; prompts use image.
-const THUMB_FIELDS = { post: ['coverImage'], product: ['icon', 'featuredImage', 'banner'], prompt: ['image'] };
+const THUMB_FIELDS = { post: ['coverImage'], product: ['iconLarge', 'icon', 'featuredImage', 'banner'], prompt: ['image'] };
 
 /** Resolve one image field value to a URL string the in-extension UI can render. An Astro `image()` field is an
  *  ImageMetadata object ({ src, width, height }), so we emit its build-optimized `.src` (a SITE-relative

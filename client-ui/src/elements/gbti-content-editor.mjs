@@ -667,10 +667,19 @@ class GbtiContentEditor extends GbtiElement {
     if (f.kind === 'image') {
       const url = v ? this.resolveCover(v) : '';
       const has = !!url;
-      return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? '' : ' hidden'}>${label}
+      // A field that declares its own aspect (product icon 1:1, featured 16:10, banner 3:1) locks the preview
+      // to it: the old shared 4:3/Hero toggle matched none of them, so an icon stretched into a 4:3 box and a
+      // 16:10 cover showed letterbox bars. Fields with no declared frame keep the toggle.
+      const framed = typeof f.frame === 'string' && f.frame.includes('/');
+      const frameStyle = framed ? ` style="aspect-ratio:${esc(f.frame)}${f.previewPx ? `;max-width:${Number(f.previewPx)}px` : ''}"` : '';
+      const picker = framed
+        ? ''
+        : '<div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>';
+      const hint = f.hint ? `<div class="urlprev" style="color:var(--s-fg-soft)">${esc(f.hint)}</div>` : '';
+      return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? '' : ' hidden'}>${label}${hint}
         <div class="cover" data-cover>
-          <div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>
-          <div class="coverframe card4" data-coverframe>${this._coverFrameInner(url)}</div>
+          ${picker}
+          <div class="coverframe${framed ? '' : ' card4'}" data-coverframe${frameStyle}>${this._coverFrameInner(url)}</div>
           <input type="file" accept="image/*" hidden data-cover-file />
           <div class="coverbtns"><button type="button" class="ebtn" data-cover-pick>${has ? 'Replace image' : 'Choose image'}</button><button type="button" class="ebtn" data-cover-clear${has ? '' : ' hidden'}>Remove</button></div>
           <input data-key="${f.key}" data-kind="image" type="hidden" value="${esc(v)}" />

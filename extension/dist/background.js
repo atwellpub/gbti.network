@@ -17063,6 +17063,11 @@ var productSchema = external_exports.object({
   version: external_exports.string().optional(),
   pricingUrl: external_exports.string().url().optional(),
   icon: external_exports.string(),
+  // REQUIRED, 1:1. The SMALL icon: the directory card renders it at 64 (shown 56).
+  // Optional 1:1 LARGE icon for the detail page's 96px slot, which a 128px source cannot serve crisply at
+  // 2x. Optional on purpose: every existing product predates it, and their 128x128 sources cannot be
+  // upscaled into a genuine large asset. The render falls back to `icon`.
+  iconLarge: external_exports.string().optional(),
   banner: external_exports.string().optional(),
   featuredImage: external_exports.string(),
   // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional
@@ -20578,10 +20583,13 @@ var FIELDS = Object.freeze({
     f("version", "Version", "text"),
     TAGS,
     f("platforms", "Platforms", "array"),
-    f("icon", "Icon", "image", { required: true }),
-    f("banner", "Banner", "image"),
-    f("featuredImage", "Featured cover (spotlight)", "image", { required: true }),
-    // SOW-025: required by the schema (16:10 spotlight cover)
+    // Per-field aspect ratios, taken from what each render surface actually asks for rather than one shared
+    // 4:3/Hero toggle. `frame` locks the editor preview so it cannot misrepresent the crop. Icon is square and
+    // small, so it also carries the two real display sizes.
+    f("icon", "Icon (small, 1:1)", "image", { required: true, frame: "1/1", previewPx: 96, hint: "Square. Rendered at 56 on cards and 96 on the product page. 128x128 or larger." }),
+    f("iconLarge", "Icon (large, 1:1)", "image", { frame: "1/1", previewPx: 96, hint: "Optional crisper square for the 96px product-page slot on high-density screens. 192x192 or 256x256." }),
+    f("featuredImage", "Featured cover (spotlight)", "image", { required: true, frame: "16/10", hint: "Must be 16:10 (1280x800). The spotlight box is locked to 16:10, so it fills without cropping." }),
+    f("banner", "Banner", "image", { frame: "3/1", hint: "Wide 3:1 strip across the top of the product page (rendered 1200x400, cropped to fill)." }),
     f("gallery", "Gallery (screenshots)", "array", { placeholder: "image1.png, image2.png" }),
     f("video", "Video (YouTube/Vimeo URL)", "text"),
     f("links", "Links (JSON array: {type,url,visibility:public|members,primary,label})", "json"),

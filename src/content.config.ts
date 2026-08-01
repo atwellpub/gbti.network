@@ -160,7 +160,8 @@ const productShape = ({ image }: { image: any }) => ({
   // only reaches the network's news pool once an admin approves the product slug in the admin-owned
   // house/member-news-sources.yml registry (moderation boundary; see the ops SOP).
   newsFeed: z.string().url().optional(),
-  icon: image(),
+  icon: image(), // REQUIRED, 1:1. The SMALL icon (directory card renders it at 64, shown 56).
+  iconLarge: image().optional(), // Optional 1:1 LARGE icon for the 96px detail slot; falls back to `icon`.
   banner: image().optional(),
   featuredImage: image(), // REQUIRED marquee cover for the Featured-product spotlight. Must be 16:10 (1280x800); the spotlight media box is locked to 16:10 so the image fills it without cropping.
   gallery: z.array(image()).default([]),

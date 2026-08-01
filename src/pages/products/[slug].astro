@@ -56,7 +56,10 @@ const meta = [
         <Image src={d.banner} alt={`${d.title} banner`} width={1200} height={400} class="card" style="width:100%;object-fit:cover;margin-bottom:32px" />
       )}
       <div class="flex items-center g24 wrap-w" style="text-align:center;justify-content:center;flex-direction:column">
-        <Image src={d.icon} alt={`${d.title} icon`} width={96} height={96} class="card" style="width:96px;height:96px;flex:none;object-fit:contain;padding:8px;background:rgba(255,255,255,.08);border-radius:var(--r-lg)" />
+        {/* The 96px slot wants a 192px source at 2x, which a 128x128 icon cannot supply, so prefer the
+            optional larger square when the author provided one. Falls back to `icon` for every product
+            published before the field existed. */}
+        <Image src={d.iconLarge ?? d.icon} alt={`${d.title} icon`} width={96} height={96} class="card" style="width:96px;height:96px;flex:none;object-fit:contain;padding:8px;background:rgba(255,255,255,.08);border-radius:var(--r-lg)" />
         <div style="max-width:680px">
           <p class="eyebrow">{leafLabel(d.categories)}</p>
           <h1 data-gbti-region="title" class="h1 mt12" style="color:#fff">{d.title}</h1>
