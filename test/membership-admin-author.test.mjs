@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { membershipAdminAuthor, membershipAdminQuotePool } from '../workers/signup/membership-admin-author.mjs';
+import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool } from '../workers/signup/membership-admin-author.mjs';
 
 const env = {
   GITHUB_APP_ID: '123', GITHUB_APP_INSTALLATION_ID: '999', GITHUB_APP_PRIVATE_KEY: 'PEM',
@@ -32,7 +32,7 @@ function ghFetch(record, { mainFile = fileWithStatus('published'), govFile = 'ba
   return async (url, init = {}) => {
     const method = init.method || 'GET';
     if (/\/access_tokens$/.test(url)) return { ok: true, status: 201, async json() { return { token: 'ghs_inst', expires_at: new Date(Date.now() + 3600e3).toISOString() }; } };
-    if (/\/contents\/house\/(?:bans|grandfathered|roles|quotes)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance/config file (increments 2-4)
+    if (/\/contents\/house\/(?:bans|grandfathered|roles|quotes|news-sources)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance/config file (increments 2-4)
       return govFile == null ? { ok: false, status: 404, async json() { return {}; } } : { ok: true, status: 200, async json() { return { content: b64(govFile) }; } };
     }
     if (/\/contents\/.+\?ref=main$/.test(url) && method === 'GET') {
@@ -291,4 +291,79 @@ test('sow-161: the quote-pool read is admin-gated and returns the FULL pool (inc
   assert.equal(okr.body.quotes.length, 2, 'the disabled quote is included (the splash JSON omits it)');
   const denied = await membershipAdminQuotePool(req({}), env, { fetchImpl: ghFetch([], { govFile: seed }), authorize: staffMod ? (async () => ({ ok: false, status: 403, body: { error: 'forbidden' } })) : undefined, signJwt });
   assert.equal(denied.status, 403);
+});
+
+// ---- sow-161 increment 4 (sub-slice 2): the NEWS-SOURCE config manager (admin-tier; id/url keyed) ----
+
+const NEWS_YML = '# News sources (curated)\nsources: []\n';
+
+test('sow-161: a MODERATOR cannot add a news source (403)', async () => {
+  const record = [];
+  const r = await run({ action: 'news-source-add', name: 'Hacker News', url: 'https://hnrss.org/frontpage' }, { fetchImpl: ghFetch(record, { govFile: NEWS_YML }), authorize: staffMod });
+  assert.equal(r.status, 403);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: an admin news-source-add writes house/news-sources.yml preserving the leading comment', async () => {
+  const record = [];
+  const r = await run({ action: 'news-source-add', name: 'Hacker News', url: 'https://hnrss.org/frontpage' }, { fetchImpl: ghFetch(record, { govFile: NEWS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.number, 42);
+  const put = record.find((c) => c.method === 'PUT');
+  assert.match(put.url, /house\/news-sources\.yml$/);
+  const content = deB64(put.body.content);
+  assert.ok(content.startsWith('# News sources (curated)'), 'leading comment preserved');
+  assert.match(content, /hnrss\.org/);
+});
+
+test('sow-161: a non-http(s) feed URL is rejected (400), and a missing name+id too', async () => {
+  const rec1 = [];
+  const r1 = await run({ action: 'news-source-add', name: 'Bad', url: 'javascript:alert(1)' }, { fetchImpl: ghFetch(rec1, { govFile: NEWS_YML }), authorize: staffAdmin });
+  assert.equal(r1.status, 400);
+  assert.equal(rec1.length, 0, 'a non-http url writes nothing');
+  const rec2 = [];
+  const r2 = await run({ action: 'news-source-add', url: 'https://ok.example/feed' }, { fetchImpl: ghFetch(rec2, { govFile: NEWS_YML }), authorize: staffAdmin });
+  assert.equal(r2.status, 400, 'a source with neither name nor id is rejected');
+});
+
+test('sow-161: news-source-toggle / remove act by id on the sources file', async () => {
+  const seed = '# c\nsources:\n  - id: hn\n    name: Hacker News\n    url: https://hnrss.org/frontpage\n    enabled: true\n';
+  const t = [];
+  const rt = await run({ action: 'news-source-toggle', id: 'hn', enabled: false }, { fetchImpl: ghFetch(t, { govFile: seed }), authorize: staffAdmin });
+  assert.equal(rt.status, 200);
+  assert.match(deB64(t.find((c) => c.method === 'PUT').body.content), /enabled: false/);
+  const rm = [];
+  const rr = await run({ action: 'news-source-remove', id: 'hn' }, { fetchImpl: ghFetch(rm, { govFile: seed }), authorize: staffAdmin });
+  assert.equal(rr.status, 200);
+  assert.match(rm.find((c) => c.method === 'PUT').url, /house\/news-sources\.yml$/);
+});
+
+test('sow-161: the news-source pool read is admin-gated and returns the FULL pool (incl disabled)', async () => {
+  const seed = '# c\nsources:\n  - id: a\n    enabled: true\n  - id: b\n    enabled: false\n';
+  const okr = await membershipAdminNewsSourcePool(req({}), env, { fetchImpl: ghFetch([], { govFile: seed }), authorize: staffAdmin, signJwt });
+  assert.equal(okr.status, 200);
+  assert.equal(okr.body.sources.length, 2);
+  const denied = await membershipAdminNewsSourcePool(req({}), env, { fetchImpl: ghFetch([], { govFile: seed }), authorize: async () => ({ ok: false, status: 403, body: {} }), signJwt });
+  assert.equal(denied.status, 403);
+});
+
+// ---- sow-161 increment 4 review fixes: endpoint validation matches the pure-core limits ----
+
+test('sow-161: a quote over the core cap (280 text / 80 author) is REJECTED, not silently truncated', async () => {
+  const rec1 = [];
+  const r1 = await run({ action: 'quote-add', text: 'x'.repeat(281) }, { fetchImpl: ghFetch(rec1, { govFile: '# c\nquotes: []\n' }), authorize: staffAdmin });
+  assert.equal(r1.status, 400);
+  assert.equal(rec1.length, 0);
+  const rec2 = [];
+  const r2 = await run({ action: 'quote-add', text: 'ok', author: 'a'.repeat(81) }, { fetchImpl: ghFetch(rec2, { govFile: '# c\nquotes: []\n' }), authorize: staffAdmin });
+  assert.equal(r2.status, 400);
+});
+
+test('sow-161: a non-kebab source id (trailing/consecutive hyphen) is REJECTED at the endpoint', async () => {
+  for (const id of ['a-', 'a--b', '-a', 'A_B', 'a'.repeat(65)]) {
+    const rec = [];
+    const r = await run({ action: 'news-source-remove', id }, { fetchImpl: ghFetch(rec, { govFile: '# c\nsources: []\n' }), authorize: staffAdmin });
+    assert.equal(r.status, 400, `id ${id} must be rejected`);
+    assert.equal(rec.length, 0);
+  }
 });

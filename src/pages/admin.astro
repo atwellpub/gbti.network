@@ -32,6 +32,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <h2 class="h2">Splash quotes</h2>
           <gbti-quote-manager></gbti-quote-manager>
         </div>
+        <div class="adm-card" data-newssrc-card hidden>
+          <h2 class="h2">News sources</h2>
+          <gbti-news-source-manager></gbti-news-source-manager>
+        </div>
       </div>
     </div>
   </section>
@@ -66,7 +70,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       // setClient fan-out); a moderator never imports it, so the tag stays inert and the card stays hidden.
       if (rank >= RANK.admin) {
         (document.querySelector('[data-quotes-card]') as HTMLElement | null)?.removeAttribute('hidden');
-        await import('../../client-ui/src/elements/gbti-quote-manager.mjs');
+        (document.querySelector('[data-newssrc-card]') as HTMLElement | null)?.removeAttribute('hidden');
+        await Promise.all([
+          import('../../client-ui/src/elements/gbti-quote-manager.mjs'),
+          import('../../client-ui/src/elements/gbti-news-source-manager.mjs'),
+        ]);
       }
     }
 

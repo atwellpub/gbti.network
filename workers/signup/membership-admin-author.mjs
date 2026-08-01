@@ -3,8 +3,9 @@
 //   Increment 2 (admin+):     member status — ban / unban / grandfather / ungrandfather (house/bans.yml,
 //                             house/grandfathered.yml), via the pure superadmin-actions cores.
 //   Increment 3 (superadmin): role assignment — role (house/roles.yml, the ROOT OF TRUST, Tier S).
-//   Increment 4 (admin+):     config managers — quote-add/remove/toggle (house/quotes.yml; leading comment
-//                             preserved). More managers extend the CONFIG_OP table. Read: membershipAdminQuotePool.
+//   Increment 4 (admin+):     config managers — quotes (house/quotes.yml) + news sources (house/news-sources.yml);
+//                             leading comment preserved, table-driven per-action input/slug. More managers extend
+//                             the CONFIG_OP table. Reads: membershipAdminQuotePool / membershipAdminNewsSourcePool.
 //
 // The cookie session has no GitHub token, so the Worker applies the change and opens the PR with GBTI's
 // INSTALLATION token; the SOW-005 gate is the only merger. Two properties keep this safe:
@@ -25,6 +26,7 @@ import { isCleanPath } from '../../membership/classify-pr.mjs';
 import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
 import { ban, unban, grandfather, revokeGrandfather, grantRole } from '../../membership/superadmin-actions.mjs'; // sow-161 increments 2-3
 import { addQuote, removeQuote, setQuoteEnabled } from '../../membership/quote-edits.mjs'; // sow-161 increment 4
+import { addSource, removeSource, setSourceEnabled } from '../../membership/news-source-edits.mjs'; // sow-161 increment 4
 import yaml from 'js-yaml'; // already in the Worker bundle (content-ops)
 
 const GH = 'https://api.github.com';
@@ -57,11 +59,53 @@ const GOV_OP = {
 // gate-recheck pattern as the governance actions, with TWO differences: the target is a text/string key (not a
 // github_id), and the config file carries a LEADING COMMENT that must be PRESERVED across the edit (governance
 // files have none). Sub-slice 1: quotes (house/quotes.yml, admin-tier). More managers extend this table.
-const CONFIG_ACTIONS = new Set(['quote-add', 'quote-remove', 'quote-toggle']);
+// Each config action is table-driven: `input(payload)` validates + extracts the action's fields (returning
+// { ok, args } or a { ok:false, status, body } rejection), `fn` is the pure edit core, `slug(args)` names the
+// branch. The key differs by manager (a quote's text vs a source's id), so validation is per-action, never a
+// path from the body. `SOURCE_ID_RE` bounds a source id; `idSlug` bounds the branch segment.
+// Kebab-case, matching membership/news-source-edits.mjs ID_RE (no trailing/consecutive hyphens); length-capped so
+// the endpoint rejects an invalid id with a clear message rather than letting the pure core throw.
+const SOURCE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const idSlug = (s) => (String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'item');
+// Match the pure quote-edits caps (MAX_TEXT=280, MAX_AUTHOR=80) EXACTLY, so the endpoint rejects an over-long
+// value instead of the core SILENTLY truncating it (a real UX bug the review caught).
+const QUOTE_MAX_TEXT = 280;
+const QUOTE_MAX_AUTHOR = 80;
+// quotes: a required text key (+ optional author / enabled).
+function quoteInput(p) {
+  const text = typeof p?.text === 'string' ? p.text.trim() : '';
+  if (!text || text.length > QUOTE_MAX_TEXT) return { ok: false, status: 400, body: { error: 'bad_request', message: `a quote text is required (max ${QUOTE_MAX_TEXT} chars)` } };
+  const author = typeof p?.author === 'string' ? p.author.trim() : undefined;
+  if (author && author.length > QUOTE_MAX_AUTHOR) return { ok: false, status: 400, body: { error: 'bad_request', message: `the author is too long (max ${QUOTE_MAX_AUTHOR} chars)` } };
+  const enabled = p?.enabled === undefined ? undefined : Boolean(p.enabled);
+  return { ok: true, args: { text, author, enabled } };
+}
+// news sources: an add with { name, url(http/s), optional id/description }, or a remove/toggle by id.
+function sourceAddInput(p) {
+  const name = typeof p?.name === 'string' ? p.name.trim().slice(0, 120) : '';
+  const id = typeof p?.id === 'string' ? p.id.trim().toLowerCase() : '';
+  const url = typeof p?.url === 'string' ? p.url.trim() : '';
+  const description = typeof p?.description === 'string' ? p.description.slice(0, 500) : undefined;
+  let u; try { u = new URL(url); } catch { u = null; }
+  if (!u || !/^https?:$/.test(u.protocol)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a valid http(s) feed URL is required' } };
+  if (id && (id.length > 64 || !SOURCE_ID_RE.test(id))) return { ok: false, status: 400, body: { error: 'bad_request', message: 'an invalid source id was given' } };
+  if (!name && !id) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a source name or id is required' } };
+  return { ok: true, args: { ...(id ? { id } : {}), name, url, description } };
+}
+function sourceIdInput(p, { enabled = false } = {}) {
+  const id = typeof p?.id === 'string' ? p.id.trim().toLowerCase() : '';
+  if (!id || id.length > 64 || !SOURCE_ID_RE.test(id)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a valid source id is required' } };
+  return { ok: true, args: enabled ? { id, enabled: Boolean(p?.enabled) } : { id } };
+}
+
+const CONFIG_ACTIONS = new Set(['quote-add', 'quote-remove', 'quote-toggle', 'news-source-add', 'news-source-remove', 'news-source-toggle']);
 const CONFIG_OP = {
-  'quote-add': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: addQuote, args: (p) => ({ text: p.text, author: p.author }) },
-  'quote-remove': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: removeQuote, args: (p) => ({ text: p.text }) },
-  'quote-toggle': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: setQuoteEnabled, args: (p) => ({ text: p.text, enabled: p.enabled }) },
+  'quote-add': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: addQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
+  'quote-remove': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: removeQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
+  'quote-toggle': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: setQuoteEnabled, input: quoteInput, slug: (a) => idSlug(a.text) },
+  'news-source-add': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: addSource, input: sourceAddInput, slug: (a) => idSlug(a.id || a.name) },
+  'news-source-remove': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: removeSource, input: (p) => sourceIdInput(p), slug: (a) => idSlug(a.id) },
+  'news-source-toggle': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: setSourceEnabled, input: (p) => sourceIdInput(p, { enabled: true }), slug: (a) => idSlug(a.id) },
 };
 // The minimum role rank an action requires at the endpoint (the gate is the independent backstop).
 const requiredRank = (action) =>
@@ -77,11 +121,6 @@ function leadingComment(raw) {
   }
   const block = out.join('\n').replace(/\s+$/, '');
   return block ? `${block}\n` : '';
-}
-// A bounded, git-safe branch slug from a free-text config key (a quote's text). Lowercase alnum + hyphen, capped.
-function textSlug(text) {
-  const s = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
-  return s || 'item';
 }
 
 // Read + parse a house YAML file from canonical main, FAIL CLOSED. Shared by the governance + config branches so
@@ -203,22 +242,20 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
     file = { path: op.path, content: yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
     branchSlug = `${action}-${targetId}`;
   } else {
-    // Config manager (increment 4): the key is a text string, the file is a FIXED constant per action, and its
-    // LEADING COMMENT is preserved across the edit. Read fail-closed, apply the pure core, re-serialize with the
-    // comment; an already-satisfied action is a clean no-op.
+    // Config manager (increment 4): the key is a text/id string (validated per action by op.input, NEVER a path),
+    // the file is a FIXED constant per action, and its LEADING COMMENT is preserved across the edit. Read
+    // fail-closed, apply the pure core, re-serialize with the comment; an already-satisfied action is a clean no-op.
     const op = CONFIG_OP[action];
-    const text = typeof payload?.text === 'string' ? payload.text.trim() : '';
-    if (!text || text.length > 2000) return { status: 400, body: { error: 'bad_request', message: 'a quote text is required' } };
-    const author = typeof payload?.author === 'string' ? payload.author.slice(0, 200) : undefined;
-    const enabled = payload?.enabled === undefined ? undefined : Boolean(payload.enabled);
+    const built = op.input(payload);
+    if (!built.ok) return { status: built.status, body: built.body };
     const load = await loadHouseYaml(fetchImpl, instToken, upstream, op.path);
     if (!load.ok) return { status: load.status, body: load.body };
     let result;
-    try { result = op.fn(load.parsed, op.args({ text, author, enabled }), { actor: { githubId }, now: Date.now() }); }
+    try { result = op.fn(load.parsed, built.args, { actor: { githubId }, now: Date.now() }); }
     catch (e) { return { status: 400, body: { error: 'bad_request', message: e?.message || 'invalid action' } }; }
     if (!result.changed) return { status: 200, body: { ok: true, noop: true, message: `no change (${action})` } };
     file = { path: op.path, content: leadingComment(load.raw) + yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
-    branchSlug = `${action}-${textSlug(text)}`;
+    branchSlug = `${action}-${op.slug(built.args)}`;
   }
 
   const branch = adminHostedBranchFor(githubId, branchSlug);
@@ -275,6 +312,23 @@ export async function membershipAdminQuotePool(request, env, deps = {}) {
   if (!load.ok) return { status: load.status, body: load.body };
   const quotes = Array.isArray(load.parsed?.quotes) ? load.parsed.quotes : [];
   return { status: 200, body: { ok: true, quotes } };
+}
+
+// sow-161 increment 4: the news-source-manager pool READ (admin-gated). The FULL pool from house/news-sources.yml
+// (incl. disabled sources, so the manager can toggle them). Read-only + fail-closed; a GET carries no CSRF.
+export async function membershipAdminNewsSourcePool(request, env, deps = {}) {
+  const {
+    fetchImpl = globalThis.fetch, authorize = authorizeAdmin, allowCookie = false,
+    upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
+  } = deps;
+  const admin = await authorize(request, env, { ...deps, allowCookie });
+  if (!admin.ok) return { status: admin.status, body: admin.body };
+  let instToken;
+  try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
+  const load = await loadHouseYaml(fetchImpl, instToken, upstream, 'house/news-sources.yml');
+  if (!load.ok) return { status: load.status, body: load.body };
+  const sources = Array.isArray(load.parsed?.sources) ? load.parsed.sources : [];
+  return { status: 200, body: { ok: true, sources } };
 }
 
 /** PUT (or DELETE for content:null) one file on the branch; one retry on a 409 sha race. Mirrors membership-author. */
