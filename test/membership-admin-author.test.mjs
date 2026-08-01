@@ -16,6 +16,7 @@ const fakeKv = () => { const m = new Map(); return { store: m, async get() { ret
 const signJwt = async () => 'fake.jwt.sig';
 const allow = async () => ({ allowed: true });
 const staffMod = async () => ({ ok: true, githubId: '3', role: 'moderator' }); // a moderator
+const staffAdmin = async () => ({ ok: true, githubId: '2', role: 'admin' }); // an admin
 const denied = async () => ({ ok: false, status: 403, body: { error: 'forbidden', message: 'moderator access is required' } });
 const req = (body) => ({ headers: { get: () => 'Bearer tok' }, json: async () => body });
 const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
@@ -26,10 +27,13 @@ const fileWithStatus = (status) => `---\ntitle: My Post\nauthor: alice\nstatus: 
 
 /** URL-matching GitHub fake for the admin-author flow; records writes. `mainFile` is the current file text on main
  *  (or null -> 404). `onBranchSha` is the existing target sha on the work branch (undefined -> 404 there). */
-function ghFetch(record, { mainFile = fileWithStatus('published'), onBranchSha = 'oldsha', branchExists = false } = {}) {
+function ghFetch(record, { mainFile = fileWithStatus('published'), govFile = 'bans: []\n', onBranchSha = 'oldsha', branchExists = false } = {}) {
   return async (url, init = {}) => {
     const method = init.method || 'GET';
     if (/\/access_tokens$/.test(url)) return { ok: true, status: 201, async json() { return { token: 'ghs_inst', expires_at: new Date(Date.now() + 3600e3).toISOString() }; } };
+    if (/\/contents\/house\/(?:bans|grandfathered)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance file (increment 2)
+      return govFile == null ? { ok: false, status: 404, async json() { return {}; } } : { ok: true, status: 200, async json() { return { content: b64(govFile) }; } };
+    }
     if (/\/contents\/.+\?ref=main$/.test(url) && method === 'GET') {
       return mainFile == null ? { ok: false, status: 404, async json() { return {}; } } : { ok: true, status: 200, async json() { return { content: b64(mainFile) }; } };
     }
@@ -57,9 +61,9 @@ test('sow-161: a non-staff caller is denied (403) and writes NOTHING', async () 
   assert.equal(record.length, 0, 'no branch, no PR, no write for a denied caller');
 });
 
-test('sow-161: an unsupported action is 400', async () => {
+test('sow-161: an unknown action is 400', async () => {
   const record = [];
-  const r = await run({ action: 'ban', path: ITEM }, { fetchImpl: ghFetch(record) });
+  const r = await run({ action: 'frobnicate', path: ITEM }, { fetchImpl: ghFetch(record) });
   assert.equal(r.status, 400);
   assert.equal(record.length, 0);
 });
@@ -117,4 +121,66 @@ test('sow-161: the endpoint is inert unless MEMBERSHIP_AUTHOR_ENABLED is true', 
   const r = await membershipAdminAuthor(req({ action: 'deplatform', path: ITEM }), { ...env, MEMBERSHIP_AUTHOR_ENABLED: 'false' }, { fetchImpl: ghFetch([]), authorize: staffMod, kv: fakeKv(), limiter: allow, signJwt });
   assert.equal(r.status, 403);
   assert.equal(r.body.error, 'author_disabled');
+});
+
+// ---- sow-161 increment 2: member status (ban / unban / grandfather / ungrandfather), ADMIN-tier ----
+
+test('sow-161: a MODERATOR cannot ban (403 insufficient role) and writes nothing', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record), authorize: staffMod });
+  assert.equal(r.status, 403);
+  assert.equal(record.length, 0, 'a moderator is rejected at the endpoint before any read/write');
+});
+
+test('sow-161: an admin ban writes house/bans.yml with the target id, on a caller-keyed hosted-admin branch', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999', reason: 'spam' }, { fetchImpl: ghFetch(record, { govFile: 'bans: []\n' }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.number, 42);
+  const createRef = record.find((c) => /\/git\/refs$/.test(c.url));
+  assert.equal(createRef.body.ref, 'refs/heads/hosted-admin/2/ban-999', 'branch = the admin id (2) + ban-<targetId>');
+  const put = record.find((c) => c.method === 'PUT');
+  assert.match(deB64(put.body.content), /github_id: '?999'?/, 'the target id is written into bans.yml');
+  assert.match(put.url, /house\/bans\.yml$/);
+});
+
+test('sow-161: a non-numeric github_id for a membership action is 400', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: 'not-a-number' }, { fetchImpl: ghFetch(record), authorize: staffAdmin });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: grandfather targets house/grandfathered.yml; ungrandfather removes; unban removes', async () => {
+  const g = [];
+  const rg = await run({ action: 'grandfather', githubId: '77' }, { fetchImpl: ghFetch(g, { govFile: 'grandfathered: []\n' }), authorize: staffAdmin });
+  assert.equal(rg.status, 200);
+  assert.match(g.find((c) => c.method === 'PUT').url, /house\/grandfathered\.yml$/);
+
+  const u = [];
+  const ru = await run({ action: 'unban', githubId: '999' }, { fetchImpl: ghFetch(u, { govFile: "bans:\n  - github_id: '999'\n    reason: spam\n    at: '2026-01-01T00:00:00.000Z'\n" }), authorize: staffAdmin });
+  assert.equal(ru.status, 200);
+  assert.match(u.find((c) => c.method === 'PUT').url, /house\/bans\.yml$/);
+});
+
+test('sow-161: banning an already-banned member is a clean no-op (200, no PR)', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record, { govFile: "bans:\n  - github_id: '999'\n    reason: spam\n    at: '2026-01-01T00:00:00.000Z'\n" }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.noop, true);
+  assert.ok(!record.some((c) => /\/pulls$/.test(c.url)), 'a no-op opens no PR');
+});
+
+test('sow-161: a malformed governance file fails CLOSED (502), never silently resetting the bans', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record, { govFile: 'just a string, not a map' }), authorize: staffAdmin });
+  assert.equal(r.status, 502);
+  assert.equal(record.length, 0, 'no write when the file cannot be parsed as a map');
+});
+
+test('sow-161: a missing governance file (404) is a legitimate fresh start (the ban still lands)', async () => {
+  const record = [];
+  const r = await run({ action: 'ban', githubId: '999' }, { fetchImpl: ghFetch(record, { govFile: null }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  assert.match(deB64(record.find((c) => c.method === 'PUT').body.content), /github_id: '?999'?/);
 });

@@ -1,8 +1,10 @@
-// sow-161: POST /membership/admin/author — server-side admin mutations (increment 1: content moderation).
+// sow-161: POST /membership/admin/author — server-side admin mutations.
+//   Increment 1 (moderator+): content moderation — deplatform (status -> draft), republish (-> published), remove.
+//   Increment 2 (admin+):     member status — ban / unban / grandfather / ungrandfather (house/bans.yml,
+//                             house/grandfathered.yml), via the pure superadmin-actions cores.
 //
-// A STAFF member (moderator+) moderates any content item: deplatform (status -> draft), republish (-> published),
-// or remove (delete). The cookie session has no GitHub token, so the Worker applies the change and opens the PR
-// with GBTI's INSTALLATION token; the SOW-005 gate is the only merger. Two properties keep this safe:
+// The cookie session has no GitHub token, so the Worker applies the change and opens the PR with GBTI's
+// INSTALLATION token; the SOW-005 gate is the only merger. Two properties keep this safe:
 //   1. The mutation is computed SERVER-SIDE. The caller names an ACTION + a target PATH, never file content, so a
 //      moderator can only flip status or remove, never rewrite another member's words.
 //   2. The PR is committed to `hosted-admin/<callerGithubId>/<action-slug>` with the github_id ALWAYS taken from
@@ -18,16 +20,33 @@ import { rateLimit } from './abuse.mjs';
 import { flipContentStatus } from '../../client/src/content-ops.mjs'; // already in the Worker bundle (membership-shares)
 import { isCleanPath } from '../../membership/classify-pr.mjs';
 import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
+import { ban, unban, grandfather, revokeGrandfather } from '../../membership/superadmin-actions.mjs'; // sow-161 increment 2
+import yaml from 'js-yaml'; // already in the Worker bundle (content-ops)
 
 const GH = 'https://api.github.com';
 const GH_HEADERS = (token) => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'gbti-network' });
+const ROLE_RANK = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
 
-// The moderation actions and the status each sets (remove is a delete, handled separately).
+// Increment 1: content moderation (moderator+). remove is a delete; the others flip status.
 const CONTENT_ACTIONS = new Set(['deplatform', 'republish', 'remove']);
 const STATUS_FOR = { deplatform: 'draft', republish: 'published' };
 // A content item index.md under a member OR house content folder (posts/products/prompts). The gate re-checks the
 // caller's authority over this path; this regex only bounds the shape (a clean content item, never a config file).
 const CONTENT_ITEM_RE = /^(?:members\/[a-z0-9][a-z0-9-]*|house)\/(?:posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+
+// Increment 2: membership status (ADMIN+). Each action targets a FIXED governance file (never derived from input)
+// and applies a pure, node-free core from superadmin-actions.mjs. github_id-keyed. The gate independently re-checks
+// that the branch id is admin+ for these Tier A house files, so a moderator cannot ban even if the endpoint erred.
+const GITHUB_ID_RE = /^\d{1,20}$/;
+const MEMBERSHIP_ACTIONS = new Set(['ban', 'unban', 'grandfather', 'ungrandfather']);
+const MEMBERSHIP_OP = {
+  ban: { path: 'house/bans.yml', fn: ban },
+  unban: { path: 'house/bans.yml', fn: unban },
+  grandfather: { path: 'house/grandfathered.yml', fn: grandfather },
+  ungrandfather: { path: 'house/grandfathered.yml', fn: revokeGrandfather },
+};
+// The minimum role rank an action requires at the endpoint (the gate is the independent backstop).
+const requiredRank = (action) => (MEMBERSHIP_ACTIONS.has(action) ? ROLE_RANK.admin : ROLE_RANK.moderator);
 
 /** Standard base64 of a UTF-8 string, chunked. */
 function b64utf8(s) {
@@ -73,34 +92,72 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
   let payload;
   try { payload = await request.json(); } catch { return { status: 400, body: { error: 'bad_request', message: 'a JSON body is required' } }; }
   const action = String(payload?.action || '');
-  const path = String(payload?.path || '');
-  if (!CONTENT_ACTIONS.has(action)) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
-  if (!isCleanPath(path) || !CONTENT_ITEM_RE.test(path)) {
-    return { status: 400, body: { error: 'bad_request', message: 'a clean content item path is required' } };
+  const isContent = CONTENT_ACTIONS.has(action);
+  const isMembership = MEMBERSHIP_ACTIONS.has(action);
+  if (!isContent && !isMembership) return { status: 400, body: { error: 'bad_request', message: 'unsupported admin action' } };
+
+  // Per-action tier: content moderation is moderator+ (the endpoint floor), membership status is admin+. Reject
+  // an under-privileged caller BEFORE any read/write. The SOW-005 gate re-checks the branch id's role vs the
+  // touched Tier (A for house governance files), so this is the endpoint half of the two-authority model.
+  if ((ROLE_RANK[staff.role] ?? 0) < requiredRank(action)) {
+    return { status: 403, body: { error: 'forbidden', message: 'a higher role is required for this action' } };
   }
 
   let instToken;
   try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
 
-  // Read the current file from canonical main. A 404 means nothing to moderate.
-  const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${path}?ref=main`, { headers: GH_HEADERS(instToken) });
-  if (cur.status === 404) return { status: 404, body: { error: 'not_found', message: 'no such content item on the network' } };
-  if (!cur.ok) return { status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
-  const curData = await cur.json().catch(() => ({}));
-
-  // Compute the file change SERVER-SIDE.
-  let file;
-  if (action === 'remove') {
-    file = { path, content: null };
+  // Compute the file change + the branch slug SERVER-SIDE, per action category.
+  let file, branchSlug;
+  if (isContent) {
+    const path = String(payload?.path || '');
+    if (!isCleanPath(path) || !CONTENT_ITEM_RE.test(path)) {
+      return { status: 400, body: { error: 'bad_request', message: 'a clean content item path is required' } };
+    }
+    const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${path}?ref=main`, { headers: GH_HEADERS(instToken) });
+    if (cur.status === 404) return { status: 404, body: { error: 'not_found', message: 'no such content item on the network' } };
+    if (!cur.ok) return { status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
+    const curData = await cur.json().catch(() => ({}));
+    if (action === 'remove') {
+      file = { path, content: null };
+    } else {
+      const text = decodeContent(curData?.content);
+      if (text == null) return { status: 502, body: { error: 'read_failed', message: 'could not read the content item' } };
+      const flip = flipContentStatus(text, STATUS_FOR[action]);
+      if (!flip.changed) return { status: 200, body: { ok: true, noop: true, message: `already ${STATUS_FOR[action]}` } };
+      file = { path, content: flip.content };
+    }
+    branchSlug = actionSlug(action, path);
   } else {
-    const text = decodeContent(curData?.content);
-    if (text == null) return { status: 502, body: { error: 'read_failed', message: 'could not read the content item' } };
-    const flip = flipContentStatus(text, STATUS_FOR[action]);
-    if (!flip.changed) return { status: 200, body: { ok: true, noop: true, message: `already ${STATUS_FOR[action]}` } };
-    file = { path, content: flip.content };
+    // Membership status: the target is a github_id, NEVER a path. The governance file is a FIXED constant per
+    // action (no path injection). Read it, apply the pure core, and re-serialize; an already-satisfied action is a
+    // clean no-op (no PR).
+    const targetId = String(payload?.githubId || '');
+    if (!GITHUB_ID_RE.test(targetId)) return { status: 400, body: { error: 'bad_request', message: 'a numeric github_id is required' } };
+    const reason = typeof payload?.reason === 'string' ? payload.reason.slice(0, 500) : undefined;
+    const op = MEMBERSHIP_OP[action];
+    const cur = await fetchImpl(`${GH}/repos/${upstream}/contents/${op.path}?ref=main`, { headers: GH_HEADERS(instToken) });
+    let parsed = {};
+    if (cur.status === 404) parsed = {}; // the governance file may not exist yet -> start empty
+    else if (!cur.ok) return { status: 502, body: { error: 'read_failed', message: `GitHub returned ${cur.status}` } };
+    else {
+      const text = decodeContent((await cur.json().catch(() => ({})))?.content);
+      let loaded = null;
+      try { loaded = text ? yaml.load(text) : {}; } catch { loaded = undefined; }
+      // Fail CLOSED on a malformed governance file rather than silently resetting it (which would drop every
+      // existing ban/grandfather). An empty file (undefined) is a legitimate fresh start.
+      if (loaded === undefined || loaded === null) parsed = {};
+      else if (typeof loaded !== 'object' || Array.isArray(loaded)) return { status: 502, body: { error: 'parse_failed', message: 'the governance file is malformed' } };
+      else parsed = loaded;
+    }
+    let result;
+    try { result = op.fn(parsed, { githubId: targetId, reason }, { actor: { githubId }, now: Date.now() }); }
+    catch (e) { return { status: 400, body: { error: 'bad_request', message: e?.message || 'invalid action' } }; }
+    if (!result.changed) return { status: 200, body: { ok: true, noop: true, message: `no change (${action})` } };
+    file = { path: op.path, content: yaml.dump(result.next, { lineWidth: 100, noRefs: true }) };
+    branchSlug = `${action}-${targetId}`;
   }
 
-  const branch = adminHostedBranchFor(githubId, actionSlug(action, path));
+  const branch = adminHostedBranchFor(githubId, branchSlug);
   if (!branch) return { status: 500, body: { error: 'internal', message: 'could not build the admin branch' } };
 
   // Fresh-base the branch on live main (create, or force-reset if it exists), then apply the single file, then open
@@ -126,8 +183,8 @@ export async function membershipAdminAuthor(request, env, deps = {}) {
   const applied = await applyFile(fetchImpl, instToken, upstream, branch, file);
   if (!applied.ok) return { status: 502, body: { error: 'git_failed', message: `could not write ${file.path}` } };
 
-  const title = `Moderation: ${action} ${path}`.slice(0, 256);
-  const body = `Content moderation (${action}) by github_id ${githubId} via the GBTI admin surface (sow-161).`;
+  const title = `Admin: ${action} ${branchSlug.slice(action.length + 1)}`.slice(0, 256);
+  const body = `Admin action (${action}) by github_id ${githubId} via the GBTI admin surface (sow-161).`;
   const pr = await fetchImpl(`${GH}/repos/${upstream}/pulls`, {
     method: 'POST', headers: { ...GH_HEADERS(instToken), 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, head: branch, base: 'main', body, maintainer_can_modify: false }),
