@@ -326,6 +326,19 @@ test('sow-161: a non-http(s) feed URL is rejected (400), and a missing name+id t
   assert.equal(r2.status, 400, 'a source with neither name nor id is rejected');
 });
 
+test('sow-161: an over-long news-source name / description is REJECTED at the endpoint (no silent truncation)', async () => {
+  // The pure core caps name at 80 and description at 120; the endpoint must reject over-long input rather than let
+  // the core silently truncate it (the same UX bug the quotes review caught).
+  const recN = [];
+  const rN = await run({ action: 'news-source-add', name: 'x'.repeat(81), url: 'https://ok.example/feed' }, { fetchImpl: ghFetch(recN, { govFile: NEWS_YML }), authorize: staffAdmin });
+  assert.equal(rN.status, 400, 'a name over 80 chars is rejected');
+  assert.equal(recN.length, 0, 'an over-long name writes nothing');
+  const recD = [];
+  const rD = await run({ action: 'news-source-add', name: 'OK', url: 'https://ok.example/feed', description: 'y'.repeat(121) }, { fetchImpl: ghFetch(recD, { govFile: NEWS_YML }), authorize: staffAdmin });
+  assert.equal(rD.status, 400, 'a description over 120 chars is rejected');
+  assert.equal(recD.length, 0, 'an over-long description writes nothing');
+});
+
 test('sow-161: news-source-toggle / remove act by id on the sources file', async () => {
   const seed = '# c\nsources:\n  - id: hn\n    name: Hacker News\n    url: https://hnrss.org/frontpage\n    enabled: true\n';
   const t = [];

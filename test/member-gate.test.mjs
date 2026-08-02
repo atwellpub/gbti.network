@@ -63,3 +63,23 @@ test('a persistent network throw -> error (never a forced logout)', async () => 
   const { p } = run([{ throw: true }], { retries: 1 });
   assert.deepEqual(await p, { state: 'error' });
 });
+
+// A 429 (rate limit) / 408 (request timeout) is the server saying "try again", NOT "signed out". It must be
+// treated as transient (retried), never fall through to 'out' (which on workbench/admin bounces to /login).
+test('a single 429 then a 200 -> in (rate-limit is transient, retried)', async () => {
+  const { p, calls } = run([{ status: 429 }, { status: 200, body: { ok: true, login: 'ada' } }], { retries: 2 });
+  assert.equal((await p).state, 'in');
+  assert.equal(calls.n, 2, 'retried once after the 429');
+});
+
+test('a persistent 429 -> error after the retries (NOT out, so no forced logout)', async () => {
+  const { p, calls } = run([{ status: 429 }], { retries: 2 });
+  assert.deepEqual(await p, { state: 'error' });
+  assert.equal(calls.n, 3, '1 initial + 2 retries');
+});
+
+test('a single 408 then a 200 -> in (request-timeout is transient, retried)', async () => {
+  const { p, calls } = run([{ status: 408 }, { status: 200, body: { ok: true, login: 'ada' } }], { retries: 2 });
+  assert.equal((await p).state, 'in');
+  assert.equal(calls.n, 2, 'retried once after the 408');
+});

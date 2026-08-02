@@ -742,11 +742,17 @@ class GbtiWorkspace extends GbtiElement {
     const c = ov.counts;
     const mLabel = MEMBERSHIP_LABEL[ov.membership] || 'Member';
     const isStaff = ['moderator', 'admin', 'superadmin'].includes(ov.role);
+    // sow-158 host-awareness fix: Settings + Admin are SEPARATE pages, not tabs, so they need a host-aware base.
+    // In the extension they are `account.html` / `admin.html`; on the website they are `/account/` / `/admin/`. A
+    // bare `account.html` resolved to /workbench/account.html -> 404 on the site (the same 404 class as the tabs).
+    const isExt = (typeof location !== 'undefined' && location.protocol === 'chrome-extension:');
+    const settingsHref = isExt ? 'account.html' : '/account/';
+    const adminHref = isExt ? 'admin.html' : '/admin/';
     const tiles = [
-      // sow-158 host-awareness fix: the workspace's OWN tab nav uses a BARE `#tab=` hash, not the extension page
-      // `workspace.html#tab=`. On the website the workspace lives at /workbench/, so `workspace.html#...` resolved
-      // to /workbench/workspace.html -> 404. A bare hash stays on the current page (extension workspace.html OR
-      // website /workbench/) and the _onHash listener switches the tab in place, no reload, on BOTH hosts.
+      // The workspace's OWN tab nav uses a BARE `#tab=` hash, not the extension page `workspace.html#tab=`. On the
+      // website the workspace lives at /workbench/, so `workspace.html#...` resolved to /workbench/workspace.html
+      // -> 404. A bare hash stays on the current page (extension workspace.html OR website /workbench/) and the
+      // _onHash listener switches the tab in place, no reload, on BOTH hosts.
       { nm: 'Articles', href: '#tab=post', n: c.post },
       { nm: 'Prompts', href: '#tab=prompt', n: c.prompt },
       { nm: 'Products', href: '#tab=product', n: c.product },
@@ -754,8 +760,8 @@ class GbtiWorkspace extends GbtiElement {
       { nm: 'Saved', href: '#tab=saved', n: c.saved },
       { nm: 'Following', href: '#tab=subs', n: c.subs },
       { nm: 'Earnings', href: '#tab=earnings', n: null },
-      { nm: 'Settings', href: 'account.html', n: null },
-      ...(isStaff ? [{ nm: 'Admin tools', href: 'admin.html', n: null }] : []),
+      { nm: 'Settings', href: settingsHref, n: null },
+      ...(isStaff ? [{ nm: 'Admin tools', href: adminHref, n: null }] : []),
     ];
     const tileHtml = tiles.map((t) => `<a class="ov-tile" href="${esc(t.href)}"><span class="ov-n">${t.n == null ? '' : esc(t.n)}</span><span class="ov-nm">${esc(t.nm)}</span></a>`).join('');
     const draft = c.drafts ? `<span class="ov-draft">${esc(c.drafts)} draft${c.drafts === 1 ? '' : 's'} in progress</span>` : '';

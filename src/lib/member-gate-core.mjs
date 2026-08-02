@@ -33,7 +33,10 @@ export async function resolveMemberSession({ base, fetchImpl, retries = 2, sleep
     }
     const status = res?.status ?? 0;
     if (status === 401) return { state: 'out' }; // definitive: no/invalid session — never retried
-    if (status >= 500 || status === 0) {
+    // Transient: a network throw (handled above), a 5xx / status 0, or a rate-limit / request-timeout (429 / 408).
+    // A 429 or 408 is the server saying "try again", NOT "signed out", so it must retry rather than fall through to
+    // 'out' (which on workbench/admin would bounce a valid session to /login = the re-login bug we are fixing).
+    if (status >= 500 || status === 0 || status === 429 || status === 408) {
       if (attempt < retries) { await sleep(backoffMs * (attempt + 1)); continue; } // transient: retry
       return { state: 'error' };
     }

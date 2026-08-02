@@ -68,8 +68,17 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
       const s = await resolveMemberSession({ base });
       if (s.state === 'in') {
         mount(String(s.payload.login), s.payload.github_id != null ? String(s.payload.github_id) : null);
+      } else if (s.state === 'error') {
+        // Transient (a deploy window / network blip) that survived the retries: the session is still valid, so do
+        // NOT show the sign-in prompt (it reads as a false logout). Show a soft retry that keeps the session.
+        if (signedOut) {
+          signedOut.hidden = false;
+          signedOut.innerHTML = '<p class="lead">Cannot reach the server right now. Your session is still active. <button type="button" data-browse-retry>Retry</button></p>';
+          signedOut.querySelector('[data-browse-retry]')?.addEventListener('click', () => location.reload());
+        }
+        if (mountEl) mountEl.hidden = true;
       } else {
-        showSignedOut(); // definitive signed-out, or a persistent transient error (reload retries)
+        showSignedOut(); // definitive signed-out
       }
     })();
   </script>

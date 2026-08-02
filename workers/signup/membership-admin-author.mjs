@@ -71,6 +71,10 @@ const idSlug = (s) => (String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')
 // value instead of the core SILENTLY truncating it (a real UX bug the review caught).
 const QUOTE_MAX_TEXT = 280;
 const QUOTE_MAX_AUTHOR = 80;
+// Match the pure news-source-edits caps (MAX_NAME=80, MAX_DESC=120) EXACTLY, same reason: reject an over-long
+// value at the endpoint instead of the core SILENTLY truncating it (the endpoint used to slice at 120 / 500).
+const SOURCE_MAX_NAME = 80;
+const SOURCE_MAX_DESC = 120;
 // quotes: a required text key (+ optional author / enabled).
 function quoteInput(p) {
   const text = typeof p?.text === 'string' ? p.text.trim() : '';
@@ -82,14 +86,16 @@ function quoteInput(p) {
 }
 // news sources: an add with { name, url(http/s), optional id/description }, or a remove/toggle by id.
 function sourceAddInput(p) {
-  const name = typeof p?.name === 'string' ? p.name.trim().slice(0, 120) : '';
+  const name = typeof p?.name === 'string' ? p.name.trim() : '';
   const id = typeof p?.id === 'string' ? p.id.trim().toLowerCase() : '';
   const url = typeof p?.url === 'string' ? p.url.trim() : '';
-  const description = typeof p?.description === 'string' ? p.description.slice(0, 500) : undefined;
+  const description = typeof p?.description === 'string' ? p.description.trim() : undefined;
   let u; try { u = new URL(url); } catch { u = null; }
   if (!u || !/^https?:$/.test(u.protocol)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a valid http(s) feed URL is required' } };
   if (id && (id.length > 64 || !SOURCE_ID_RE.test(id))) return { ok: false, status: 400, body: { error: 'bad_request', message: 'an invalid source id was given' } };
   if (!name && !id) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a source name or id is required' } };
+  if (name.length > SOURCE_MAX_NAME) return { ok: false, status: 400, body: { error: 'bad_request', message: `the source name is too long (max ${SOURCE_MAX_NAME} chars)` } };
+  if (description && description.length > SOURCE_MAX_DESC) return { ok: false, status: 400, body: { error: 'bad_request', message: `the description is too long (max ${SOURCE_MAX_DESC} chars)` } };
   return { ok: true, args: { ...(id ? { id } : {}), name, url, description } };
 }
 function sourceIdInput(p, { enabled = false } = {}) {
