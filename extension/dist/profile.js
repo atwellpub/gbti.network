@@ -2263,6 +2263,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            ${this.itemPath ? `<button class="ebtn" id="copyid" type="button" title="Copy this content's ID (its repo path) for the MCP server">${COPY} <span class="lbl">Copy ID</span></button>` : ""}
            ${isPub ? `<button class="ebtn" id="viewpub" type="button" title="Open the live public page in a new tab">${GLOBE} <span class="lbl">View Public Entry</span></button>` : ""}
            ${canStage ? `<button class="ebtn" id="draft" type="button">${SAVE} Save draft</button>` : ""}
+           ${canStage ? `<button class="ebtn" id="preview" type="button" title="Save the draft, then open it in a new tab as the page it will become">${GLOBE} <span class="lbl">Preview</span></button>` : ""}
            <button class="ebtn${blocked ? "" : " ebtn-primary"}" id="publish" type="button"${isPub && !this.staged ? " hidden" : ""}${blocked ? ' title="Publishing requires a paid membership"' : ""}>${blocked ? "Membership required" : `${MERGE} Publish`}</button>
          </div>
          <div class="edgrid">
@@ -2327,6 +2328,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       });
       this.$$("#docview [data-view]").forEach((b) => b.addEventListener("click", () => this.setDocView(b.dataset.view)));
       this.on("#draft", "click", () => this.doDraft());
+      this.on("#preview", "click", () => this.doPreview());
       this.on("#publish", "click", () => this.doPublish());
       this._dirty = false;
       if (!this._dirtyRootWired) {
@@ -2833,6 +2835,38 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     // SOW-082: Save the current content as a draft on the member's own fork (no PR). Allowed for trial + paid; a
     // trial member's members-only content is refused server-side with a clean upgrade nudge (membership-required).
+    // sow-169 phase 4: preview the item as the page it will become, in a new tab.
+    //
+    // It SAVES first, and that is forced rather than chosen: a new tab cannot read this editor's unsaved
+    // in-memory state, and in the extension the editor runs on chrome-extension:// while the preview is
+    // gbti.network, so no storage is shared at all. Saving to the draft store is the only mechanism that
+    // works identically on both hosts, so the button title says so and the status line repeats it.
+    //
+    // The tab is opened SYNCHRONOUSLY on the click and its location set after the save resolves, because a
+    // window.open() issued after an await is a popup the browser blocks.
+    async doPreview() {
+      const slug = String(this.gather()?.input?.slug || "").trim();
+      if (!slug) {
+        this.out("Give the item a permalink before previewing it.", "danger");
+        return;
+      }
+      const tab = typeof window !== "undefined" ? window.open("", "_blank", "noopener") : null;
+      const restore = this._btnBusy("#preview", "Saving…");
+      this._setChip("Saving…", "busy");
+      try {
+        await this.doDraft();
+        const url = `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}`;
+        if (tab) tab.location = url;
+        else window.open(url, "_blank", "noopener");
+        this.out('<span class="tag ok">saved</span> Draft saved and opened in a new tab as a preview.');
+      } catch (err) {
+        if (tab) tab.close();
+        const h = failHint(err);
+        this.out(esc(h.text), "danger");
+      } finally {
+        restore();
+      }
+    }
     async doDraft() {
       const restore = this._btnBusy("#draft", "Saving…");
       this._setChip("Saving…", "busy");

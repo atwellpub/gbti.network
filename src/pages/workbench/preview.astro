@@ -1,0 +1,201 @@
+---
+// sow-169 phase 4 (owner-directed, 2026-08-01): preview a staged draft as the page it will become.
+//
+// The site is `output: static` with no adapter, so nothing can server-render a product page on demand; a
+// build-identical preview would mean publishing and waiting out the deploy, which is exactly what Preview
+// exists to avoid. So this follows the news/item.astro pattern: a REAL Astro page carrying the real
+// BaseLayout, header, footer, V3 tokens, fonts and Prose CSS, which fetches the draft at runtime and injects
+// it into the same structure src/pages/products/[slug].astro builds. Everything a viewer can see is the real
+// page; only the content arrives at runtime.
+//
+// noindex + member-only: the draft is read with the member's own credentialed session from
+// GET /membership/drafts, so a signed-out visitor gets nothing. Live-data regions (favourite counts,
+// comments, contribution credits) render as inert placeholders rather than invented numbers.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Prose from '../../components/blog/Prose.astro';
+import { SIGNUP_BASE } from '../../lib/membership';
+---
+<BaseLayout title="Preview" description="Preview a staged draft as the page it will become." noindex={true}>
+  <div data-preview-root data-signup-base={SIGNUP_BASE}>
+    <!-- The preview bar: says plainly what this is, and carries the viewer toggle. -->
+    <div class="pv-bar">
+      <div class="wrap pv-bar-in">
+        <span class="pv-tag">PREVIEW</span>
+        <span class="pv-note" data-pv-note>Loading the staged draft…</span>
+        <div class="pv-view" role="group" aria-label="Preview as">
+          <button type="button" class="on" data-pv-as="visitor">As a visitor</button>
+          <button type="button" data-pv-as="member">As a member</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="band-sm dark">
+      <div class="wrap">
+        <img data-pv-banner hidden alt="" class="card" style="width:100%;object-fit:cover;margin-bottom:32px;aspect-ratio:3/1" />
+        <div class="flex items-center g24 wrap-w" style="text-align:center;justify-content:center;flex-direction:column">
+          <img data-pv-icon hidden alt="" class="card" style="width:96px;height:96px;flex:none;object-fit:contain;padding:8px;background:rgba(255,255,255,.08);border-radius:var(--r-lg)" />
+          <div style="max-width:680px">
+            <p class="eyebrow" data-pv-eyebrow></p>
+            <h1 class="h1 mt12" style="color:#fff" data-pv-title>&nbsp;</h1>
+            <p class="lead mt16" data-pv-desc></p>
+            <p class="pv-inert mt16" data-pv-inert-actions>Save, share and favourite controls appear here on the published page.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band tint">
+      <div class="wrap">
+        <div class="pd-grid">
+          <article class="card" style="padding:36px 40px">
+            <Prose><div data-pv-body></div></Prose>
+          </article>
+          <aside class="flex col g24">
+            <div class="card" style="padding:26px" data-pv-getcard hidden>
+              <h2 class="h3" data-pv-gettitle>Get it</h2>
+              <div class="flex col g12 mt16" data-pv-links></div>
+            </div>
+            <div class="card" style="padding:26px">
+              <p class="eyebrow">Details</p>
+              <dl class="flex col g12 mt16" data-pv-meta></dl>
+            </div>
+            <p class="pv-inert">The author box, discussion and favourited-by list render here on the published page.</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    .pv-bar { position: sticky; top: 0; z-index: 40; background: var(--ink); border-bottom: 1.5px solid var(--ink-3); }
+    .pv-bar-in { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 0; }
+    .pv-tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; font-weight: 700;
+      color: var(--ink); background: var(--green-mint); padding: 3px 9px; border-radius: 999px; }
+    .pv-note { color: #b8b4c2; font-size: 13.5px; flex: 1; min-width: 200px; }
+    .pv-view { display: inline-flex; gap: 2px; padding: 2px; background: var(--ink-2); border: 1.5px solid var(--ink-3); border-radius: 8px; }
+    .pv-view button { font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 11px; border: 0;
+      background: transparent; color: #8b8695; border-radius: 6px; cursor: pointer; }
+    .pv-view button.on { background: var(--ink-3); color: #fff; }
+    .pv-inert { color: var(--fg-mute); font-size: 13px; font-style: italic; }
+    @media (max-width: 640px) { .pv-note { order: 3; flex-basis: 100%; } }
+  </style>
+
+  <script>
+    // Read the staged draft with the member's own session and inject it into the structure above. Nothing is
+    // written here: Preview is read-only, and the SAVE happens in the editor before this tab opens.
+    (async () => {
+      const root = document.querySelector('[data-preview-root]');
+      if (!root) return;
+      const base = (root as HTMLElement).dataset.signupBase || '';
+      const q = new URLSearchParams(location.search);
+      const slug = q.get('slug') || '';
+      const type = q.get('type') || 'product';
+      const $ = (s: string) => root.querySelector(s) as HTMLElement | null;
+      const note = $('[data-pv-note]');
+      const say = (m: string) => { if (note) note.textContent = m; };
+
+      const CDN = 'https://cdn.jsdelivr.net/gh/gbti-network/gbti.network@main';
+      // Mirrors resolveContentAsset (client-ui/src/assets.mjs): a repo-relative path resolves against the
+      // item's folder over jsDelivr, because a draft's images may not be on the site yet.
+      const asset = (v: string, itemPath: string) => {
+        if (!v) return '';
+        if (/^https?:\/\//.test(v) || /^\/\//.test(v)) return v.replace(/^\/\//, 'https://');
+        const folder = String(itemPath || '').replace(/\/[^/]*$/, '').replace(/^\/+/, '');
+        if (folder) return `${CDN}/${folder}/${v.replace(/^\.?\/+/, '')}`;
+        return '';
+      };
+
+      if (!slug) { say('No draft named. Open Preview from the editor.'); return; }
+      let draft: any = null;
+      try {
+        const res = await fetch(`${base}/membership/drafts`, { credentials: 'include' });
+        if (res.status === 401 || res.status === 403) { say('Sign in to preview your staged drafts.'); return; }
+        const data = await res.json();
+        draft = (Array.isArray(data?.drafts) ? data.drafts : []).find((d: any) => d?.slug === slug && (!type || d?.type === type));
+      } catch { /* fall through */ }
+      if (!draft) { say('That draft was not found. Save it in the editor, then preview.'); return; }
+
+      const fm = draft.frontmatter || {};
+      const itemPath = draft.path || '';
+      say('This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.');
+      document.title = `Preview: ${fm.title || slug}`;
+
+      const setImg = (sel: string, val: string) => {
+        const el = $(sel) as HTMLImageElement | null; if (!el) return;
+        const url = asset(val, itemPath);
+        if (url) { el.src = url; el.hidden = false; } else { el.hidden = true; }
+      };
+      setImg('[data-pv-banner]', fm.banner);
+      setImg('[data-pv-icon]', fm.iconLarge || fm.icon);
+      const t = $('[data-pv-title]'); if (t) t.textContent = fm.title || slug;
+      const dsc = $('[data-pv-desc]'); if (dsc) dsc.textContent = fm.shortDescription || fm.excerpt || '';
+      const eb = $('[data-pv-eyebrow]'); if (eb) eb.textContent = (Array.isArray(fm.categories) ? fm.categories[fm.categories.length - 1] : '') || type;
+
+      // Links: mirror the published sidebar, including the members-locked treatment.
+      const links = Array.isArray(fm.links) ? fm.links : [];
+      const getCard = $('[data-pv-getcard]'); const linkBox = $('[data-pv-links]');
+      const gt = $('[data-pv-gettitle]'); if (gt) gt.textContent = `Get ${fm.title || 'it'}`;
+      const renderLinks = (asMember: boolean) => {
+        if (!linkBox) return;
+        linkBox.innerHTML = '';
+        for (const l of links) {
+          const locked = l?.visibility === 'members' && !asMember;
+          const el = document.createElement(locked ? 'span' : 'a');
+          el.className = 'btn ' + (l?.primary ? 'btn-primary' : 'btn-ghost');
+          (el as HTMLElement).style.width = '100%';
+          if (locked) { (el as HTMLElement).style.opacity = '.75'; (el as HTMLElement).style.cursor = 'not-allowed'; }
+          else { (el as HTMLAnchorElement).href = String(l?.url || '#'); (el as HTMLAnchorElement).rel = 'noopener'; }
+          el.textContent = (l?.label || l?.type || 'Open') + (locked ? '  (members)' : '');
+          linkBox.append(el);
+        }
+        if (getCard) getCard.hidden = links.length === 0;
+      };
+
+      // Details card: the same shape of metadata the published page lists.
+      const meta = $('[data-pv-meta]');
+      if (meta) {
+        const rows: [string, string][] = [];
+        if (fm.pricing) rows.push(['Pricing', String(fm.pricing)]);
+        if (fm.version) rows.push(['Version', String(fm.version)]);
+        if (Array.isArray(fm.platforms) && fm.platforms.length) rows.push(['Works with', fm.platforms.join(', ')]);
+        if (Array.isArray(fm.tags) && fm.tags.length) rows.push(['Tags', fm.tags.join(', ')]);
+        rows.push(['Status', 'staged draft (not published)']);
+        meta.innerHTML = rows.map(([k, v]) =>
+          `<div class="flex justify-between g16" style="border-top:1.5px solid var(--line);padding-top:12px">`
+          + `<dt class="body-sm muted">${k}</dt><dd class="body-sm" style="text-align:right;font-weight:600;color:var(--fg)">${v}</dd></div>`).join('');
+      }
+
+      // The body. A members-only draft keeps its plain body in the private draft store, so the MEMBER view
+      // shows it and the VISITOR view shows the stub the published page would serve.
+      const bodyEl = $('[data-pv-body]');
+      const membersOnly = fm.visibility === 'members';
+      const renderBody = async (asMember: boolean) => {
+        if (!bodyEl) return;
+        if (membersOnly && !asMember) {
+          bodyEl.innerHTML = '<p class="lead">This content is for members.</p>'
+            + '<p><a class="btn btn-primary" href="/membership/">Become a member</a></p>';
+          return;
+        }
+        bodyEl.innerHTML = draft.__html || '';
+      };
+
+      // Render the body markdown with the same renderer the editor uses, via a dynamic import so the page
+      // ships nothing extra until a preview actually runs.
+      try {
+        const { renderMarkdown } = await import('../../../client/src/markdown.mjs');
+        draft.__html = renderMarkdown(String(draft.body || ''));
+        // Repo-relative body images need the item folder, exactly as the editor's blocks do.
+        draft.__html = String(draft.__html).replace(/src="(\.\/[^"]+)"/g, (_m: string, p: string) => `src="${asset(p, itemPath)}"`);
+      } catch { draft.__html = '<p class="muted">The body could not be rendered.</p>'; }
+
+      let asMember = false;
+      const apply = () => { renderLinks(asMember); void renderBody(asMember); };
+      root.querySelectorAll('[data-pv-as]').forEach((b) => b.addEventListener('click', () => {
+        asMember = (b as HTMLElement).dataset.pvAs === 'member';
+        root.querySelectorAll('[data-pv-as]').forEach((x) => x.classList.toggle('on', x === b));
+        apply();
+      }));
+      apply();
+    })();
+  </script>
+</BaseLayout>
