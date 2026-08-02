@@ -2,9 +2,9 @@
 title: 'Resolve Open Questions: a /qa Skill for Claude Code'
 slug: qa-skill-for-claude-code-and-codex
 shortDescription: >-
-  A drop-in /qa skill for Claude Code that turns the questions your agent just raised into one
-  batch, asked in plan mode before any code is written. The default reads only the last reply, so it
-  stays cheap; /qa deep runs the full six-category sweep when you want it.
+  A drop-in `/qa` skill for Claude Code that collects the questions your agent just raised and asks
+  them in a single batch, in plan mode, before any code is written. By default, it reviews only the
+  last reply to keep usage low; `/qa deep` runs the full six-category review when needed.
 targets:
   - Claude Code
 categories:
