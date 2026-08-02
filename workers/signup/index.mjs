@@ -83,7 +83,7 @@ import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForRev
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
-import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
+import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF
 
@@ -767,13 +767,16 @@ export default {
         }
       }
 
-      // SOW-119: admin-gated coupon usage + invite-link rotate (the git file holds the config; KV holds the
-      // runtime usage + the link tokens). Never cached; varied on the bearer.
+      // SOW-119: admin-gated coupon usage (the git file holds the config; KV holds the runtime redemption counts).
+      // sow-161: credentialed CORS + allowCookie so the WEBSITE coupon manager reads counts over the cookie session
+      // (same treatment as /membership/admin/statuses; the extension's bearer call is unaffected). Never cached.
       if (pathname === '/membership/admin/coupon-usage') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
-          const r = await membershipCouponUsage(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await membershipCouponUsage(request, env, { allowCookie: true });
+          // corsHeaders(credentials) already sets Vary: 'Origin, Authorization'; don't override it to drop Origin.
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
       // SOW-023: the member follow graph (subscriptions) in the deletable edge store. Signed-in, non-banned
@@ -958,6 +961,15 @@ export default {
         if (method === 'GET') {
           const r = await membershipAdminNewsSourcePool(request, env, { allowCookie: true });
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+        }
+      }
+      if (pathname === '/membership/admin/coupon-pool') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await membershipAdminCouponPool(request, env, { allowCookie: true });
+          // corsHeaders(credentials) already sets Vary: 'Origin, Authorization'; don't override it to drop Origin.
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 

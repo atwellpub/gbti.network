@@ -27,6 +27,8 @@ import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
 import { ban, unban, grandfather, revokeGrandfather, grantRole } from '../../membership/superadmin-actions.mjs'; // sow-161 increments 2-3
 import { addQuote, removeQuote, setQuoteEnabled } from '../../membership/quote-edits.mjs'; // sow-161 increment 4
 import { addSource, removeSource, setSourceEnabled } from '../../membership/news-source-edits.mjs'; // sow-161 increment 4
+import { addCouponEdit, updateCouponEdit } from '../../membership/coupon-edits.mjs'; // sow-161 increment 4 (coupons)
+import { normalizeCouponCode, COUPON_CODE_RE } from '../../membership/coupons.mjs'; // sow-161 increment 4 (coupons)
 import yaml from 'js-yaml'; // already in the Worker bundle (content-ops)
 
 const GH = 'https://api.github.com';
@@ -103,8 +105,35 @@ function sourceIdInput(p, { enabled = false } = {}) {
   if (!id || id.length > 64 || !SOURCE_ID_RE.test(id)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a valid source id is required' } };
   return { ok: true, args: enabled ? { id, enabled: Boolean(p?.enabled) } : { id } };
 }
+// coupons (SOW-119 registry): the coupon-edits core validates freeDays / maxRedemptions / expiresAt and THROWS a
+// clean CouponEditError on a bad value (surfaced as a 400 by the config branch), so the endpoint only pre-checks
+// the code shape (a valid branch slug depends on it) and the ONE field the core would SILENTLY truncate: the note
+// (MAX_NOTE=160). Match that cap here so an over-long note is rejected, not quietly cut.
+const COUPON_MAX_NOTE = 160;
+function couponAddInput(p) {
+  const code = normalizeCouponCode(p?.code);
+  if (!COUPON_CODE_RE.test(code)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a coupon code is 3-32 chars A-Z 0-9' } };
+  if (p?.freeDays === undefined || p?.freeDays === null || p?.freeDays === '') return { ok: false, status: 400, body: { error: 'bad_request', message: 'freeDays is required' } };
+  const note = typeof p?.note === 'string' ? p.note : undefined;
+  if (note && note.length > COUPON_MAX_NOTE) return { ok: false, status: 400, body: { error: 'bad_request', message: `the note is too long (max ${COUPON_MAX_NOTE} chars)` } };
+  // freeDays / maxRedemptions / expiresAt are validated (and thrown on) by addCouponEdit; pass them through.
+  return { ok: true, args: { code, freeDays: p.freeDays, note, maxRedemptions: p?.maxRedemptions ?? null, expiresAt: p?.expiresAt ?? null } };
+}
+function couponUpdateInput(p) {
+  const code = normalizeCouponCode(p?.code);
+  if (!COUPON_CODE_RE.test(code)) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a coupon code is 3-32 chars A-Z 0-9' } };
+  const patch = (p?.patch && typeof p.patch === 'object' && !Array.isArray(p.patch)) ? p.patch : null;
+  if (!patch) return { ok: false, status: 400, body: { error: 'bad_request', message: 'a patch object is required' } };
+  if (typeof patch.note === 'string' && patch.note.length > COUPON_MAX_NOTE) return { ok: false, status: 400, body: { error: 'bad_request', message: `the note is too long (max ${COUPON_MAX_NOTE} chars)` } };
+  // The core (updateCouponEdit) validates each patched field and throws on an empty/invalid patch -> a clean 400.
+  return { ok: true, args: { code, patch } };
+}
 
-const CONFIG_ACTIONS = new Set(['quote-add', 'quote-remove', 'quote-toggle', 'news-source-add', 'news-source-remove', 'news-source-toggle']);
+const CONFIG_ACTIONS = new Set([
+  'quote-add', 'quote-remove', 'quote-toggle',
+  'news-source-add', 'news-source-remove', 'news-source-toggle',
+  'coupon-add', 'coupon-update',
+]);
 const CONFIG_OP = {
   'quote-add': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: addQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
   'quote-remove': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: removeQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
@@ -112,6 +141,10 @@ const CONFIG_OP = {
   'news-source-add': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: addSource, input: sourceAddInput, slug: (a) => idSlug(a.id || a.name) },
   'news-source-remove': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: removeSource, input: (p) => sourceIdInput(p), slug: (a) => idSlug(a.id) },
   'news-source-toggle': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: setSourceEnabled, input: (p) => sourceIdInput(p, { enabled: true }), slug: (a) => idSlug(a.id) },
+  // Coupons (house/coupons.yml, admin-owned). Add creates a code; update patches freeDays/active/note/etc. A coupon
+  // is deactivated (active:false), never deleted, so redemption history + the git audit stay intact (no -remove).
+  'coupon-add': { path: 'house/coupons.yml', rank: ROLE_RANK.admin, fn: addCouponEdit, input: couponAddInput, slug: (a) => idSlug(a.code) },
+  'coupon-update': { path: 'house/coupons.yml', rank: ROLE_RANK.admin, fn: updateCouponEdit, input: couponUpdateInput, slug: (a) => idSlug(a.code) },
 };
 // The minimum role rank an action requires at the endpoint (the gate is the independent backstop).
 const requiredRank = (action) =>
@@ -335,6 +368,24 @@ export async function membershipAdminNewsSourcePool(request, env, deps = {}) {
   if (!load.ok) return { status: load.status, body: load.body };
   const sources = Array.isArray(load.parsed?.sources) ? load.parsed.sources : [];
   return { status: 200, body: { ok: true, sources } };
+}
+
+// sow-161 increment 4: the coupon-manager CONFIG pool READ (admin-gated). The FULL registry from house/coupons.yml
+// (incl. inactive coupons, so the manager can re-activate them). Read-only + fail-closed; a GET carries no CSRF.
+// The runtime redemption COUNTS come from the separate /membership/admin/coupon-usage endpoint (KV, not git).
+export async function membershipAdminCouponPool(request, env, deps = {}) {
+  const {
+    fetchImpl = globalThis.fetch, authorize = authorizeAdmin, allowCookie = false,
+    upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
+  } = deps;
+  const admin = await authorize(request, env, { ...deps, allowCookie });
+  if (!admin.ok) return { status: admin.status, body: admin.body };
+  let instToken;
+  try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
+  const load = await loadHouseYaml(fetchImpl, instToken, upstream, 'house/coupons.yml');
+  if (!load.ok) return { status: load.status, body: load.body };
+  const coupons = Array.isArray(load.parsed?.coupons) ? load.parsed.coupons : [];
+  return { status: 200, body: { ok: true, coupons } };
 }
 
 /** PUT (or DELETE for content:null) one file on the branch; one retry on a 409 sha race. Mirrors membership-author. */

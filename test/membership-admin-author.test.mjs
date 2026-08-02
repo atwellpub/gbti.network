@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool } from '../workers/signup/membership-admin-author.mjs';
+import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from '../workers/signup/membership-admin-author.mjs';
 
 const env = {
   GITHUB_APP_ID: '123', GITHUB_APP_INSTALLATION_ID: '999', GITHUB_APP_PRIVATE_KEY: 'PEM',
@@ -32,7 +32,7 @@ function ghFetch(record, { mainFile = fileWithStatus('published'), govFile = 'ba
   return async (url, init = {}) => {
     const method = init.method || 'GET';
     if (/\/access_tokens$/.test(url)) return { ok: true, status: 201, async json() { return { token: 'ghs_inst', expires_at: new Date(Date.now() + 3600e3).toISOString() }; } };
-    if (/\/contents\/house\/(?:bans|grandfathered|roles|quotes|news-sources)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance/config file (increments 2-4)
+    if (/\/contents\/house\/(?:bans|grandfathered|roles|quotes|news-sources|coupons)\.yml\?ref=main$/.test(url) && method === 'GET') { // the governance/config file (increments 2-4)
       return govFile == null ? { ok: false, status: 404, async json() { return {}; } } : { ok: true, status: 200, async json() { return { content: b64(govFile) }; } };
     }
     if (/\/contents\/.+\?ref=main$/.test(url) && method === 'GET') {
@@ -379,4 +379,83 @@ test('sow-161: a non-kebab source id (trailing/consecutive hyphen) is REJECTED a
     assert.equal(r.status, 400, `id ${id} must be rejected`);
     assert.equal(rec.length, 0);
   }
+});
+
+// ---- sow-161 increment 4: coupons config manager (house/coupons.yml, admin-tier) ----
+
+const COUPONS_YML = '# SOW-119: the coupon registry (ADMIN-owned).\ncoupons:\n  - code: EXISTING\n    freeDays: 365\n    active: true\n    note: seed\n    maxRedemptions: null\n    expiresAt: null\n';
+
+test('sow-161: a MODERATOR cannot add a coupon (403, admin-tier), and writes NOTHING', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-add', code: 'NEWCODE', freeDays: 90 }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffMod });
+  assert.equal(r.status, 403);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: an admin coupon-add writes house/coupons.yml preserving the leading comment', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-add', code: 'newcode', freeDays: 90, note: 'launch promo' }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.number, 42);
+  const put = record.find((c) => c.method === 'PUT');
+  assert.match(put.url, /house\/coupons\.yml$/);
+  const content = deB64(put.body.content);
+  assert.ok(content.startsWith('# SOW-119: the coupon registry'), 'leading comment preserved');
+  assert.match(content, /NEWCODE/, 'the code is normalized to upper-case by the core');
+  assert.match(record.find((c) => c.method === 'POST' && /git\/refs$/.test(c.url)).body.ref, /^refs\/heads\/hosted-admin\/2\/coupon-add-newcode$/);
+});
+
+test('sow-161: coupon-add of a DUPLICATE code is a 400 from the core (writes nothing)', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-add', code: 'EXISTING', freeDays: 30 }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0, 'a duplicate writes nothing');
+});
+
+test('sow-161: an over-long coupon note (>160) is REJECTED at the endpoint (no silent truncation)', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-add', code: 'NOTELONG', freeDays: 30, note: 'x'.repeat(161) }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: a bad coupon code shape is rejected (400) at the endpoint', async () => {
+  for (const code of ['ab', 'has space', 'lower-hyphen', 'x'.repeat(33)]) {
+    const record = [];
+    const r = await run({ action: 'coupon-add', code, freeDays: 30 }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+    assert.equal(r.status, 400, `code "${code}" must be rejected`);
+    assert.equal(record.length, 0);
+  }
+});
+
+test('sow-161: coupon-update deactivates an existing code (writes, comment preserved)', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-update', code: 'EXISTING', patch: { active: false } }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 200);
+  const content = deB64(record.find((c) => c.method === 'PUT').body.content);
+  assert.ok(content.startsWith('# SOW-119: the coupon registry'), 'leading comment preserved');
+  assert.match(content, /active: false/);
+});
+
+test('sow-161: coupon-update of an UNKNOWN code is a 400 (writes nothing)', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-update', code: 'MISSINGCODE', patch: { active: false } }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 400);
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: coupon-update with an empty/absent patch is a 400 (writes nothing)', async () => {
+  const record = [];
+  const r = await run({ action: 'coupon-update', code: 'EXISTING' }, { fetchImpl: ghFetch(record, { govFile: COUPONS_YML }), authorize: staffAdmin });
+  assert.equal(r.status, 400, 'no patch object -> rejected');
+  assert.equal(record.length, 0);
+});
+
+test('sow-161: the coupon pool read is admin-gated and returns the FULL registry (incl inactive)', async () => {
+  const seed = '# c\ncoupons:\n  - code: A\n    active: true\n  - code: B\n    active: false\n';
+  const okr = await membershipAdminCouponPool(req({}), env, { fetchImpl: ghFetch([], { govFile: seed }), authorize: staffAdmin, signJwt });
+  assert.equal(okr.status, 200);
+  assert.equal(okr.body.coupons.length, 2);
+  const denied = await membershipAdminCouponPool(req({}), env, { fetchImpl: ghFetch([], { govFile: seed }), authorize: async () => ({ ok: false, status: 403, body: {} }), signJwt });
+  assert.equal(denied.status, 403);
 });

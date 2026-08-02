@@ -36,6 +36,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <h2 class="h2">News sources</h2>
           <gbti-news-source-manager></gbti-news-source-manager>
         </div>
+        <div class="adm-card" data-coupons-card hidden>
+          <h2 class="h2">Coupons</h2>
+          <gbti-coupon-manager></gbti-coupon-manager>
+        </div>
       </div>
     </div>
   </section>
@@ -71,9 +75,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       if (rank >= RANK.admin) {
         (document.querySelector('[data-quotes-card]') as HTMLElement | null)?.removeAttribute('hidden');
         (document.querySelector('[data-newssrc-card]') as HTMLElement | null)?.removeAttribute('hidden');
+        (document.querySelector('[data-coupons-card]') as HTMLElement | null)?.removeAttribute('hidden');
         await Promise.all([
           import('../../client-ui/src/elements/gbti-quote-manager.mjs'),
           import('../../client-ui/src/elements/gbti-news-source-manager.mjs'),
+          import('../../client-ui/src/elements/gbti-coupon-manager.mjs'),
         ]);
       }
     }
