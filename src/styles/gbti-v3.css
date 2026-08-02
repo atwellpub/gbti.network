@@ -96,6 +96,13 @@ img { max-width: 100%; display: block; }
 section { position: relative; }
 .band { padding: 104px 0; }
 .band-sm { padding: 72px 0; }
+
+/* sow-169: the product detail layout. These lived in a page-scoped <style> on products/[slug].astro, so any
+   other page rendering the same structure (the WorkBench preview) got no grid and collapsed to one column.
+   Site-wide here, so the product page and its preview share ONE definition and cannot drift. */
+.pd-grid { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+@media (max-width: 900px) { .pd-grid { grid-template-columns: 1fr; } }
+.pvideo { margin-bottom: 28px; }
 .band-lg { padding: 128px 0; }
 .dark { background: var(--ink); color: var(--on-dark); }
 .tint { background: var(--tint-warm); }

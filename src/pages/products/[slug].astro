@@ -160,11 +160,7 @@ const meta = [
 </BaseLayout>
 
 <style>
-  .pvideo { margin-bottom: 28px; }
-  /* Body + meta-sidebar. minmax(0,1fr) so the body never floors the track; stacks to one column on mobile
-     (without this the 320px sidebar starved the body to ~100px, one word per line). */
-  .pd-grid { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
-  @media (max-width: 900px) { .pd-grid { grid-template-columns: 1fr; } }
+  /* sow-169: .pd-grid and .pvideo moved to src/styles/gbti-v3.css so the preview route shares them. */
   .pgallery-wrap { margin-top: 44px; }
   .pgallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
   .pgallery-item { display: block; padding: 0; overflow: hidden; line-height: 0; background: var(--ink-2, #1c1a22); transition: transform .15s ease, box-shadow .15s ease; }

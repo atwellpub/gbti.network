@@ -26,6 +26,10 @@ const LABELS: Record<string, string> = {};
   }
 })(TREE);
 
+/** sow-169: the flat key -> label map, exported so a client-rendered surface (the WorkBench preview) can
+ *  serialize it and show the SAME words the built page does, instead of a raw slug. */
+export const CATEGORY_LABELS: Readonly<Record<string, string>> = LABELS;
+
 /** Display label for a single category key (falls back to the key). */
 export function categoryLabel(key: string): string {
   return LABELS[key] ?? key;

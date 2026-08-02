@@ -14,9 +14,14 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Prose from '../../components/blog/Prose.astro';
 import { SIGNUP_BASE } from '../../lib/membership';
+import { CATEGORY_LABELS } from '../../lib/taxonomy';
+
+// The published page renders leafLabel(categories) from the canonical taxonomy, not the raw slug. Serialize
+// the same map at build time so the client-rendered preview shows identical words.
+const labelOf = CATEGORY_LABELS;
 ---
 <BaseLayout title="Preview" description="Preview a staged draft as the page it will become." noindex={true}>
-  <div data-preview-root data-signup-base={SIGNUP_BASE}>
+  <div data-preview-root data-signup-base={SIGNUP_BASE} data-labels={JSON.stringify(labelOf)}>
     <!-- The preview bar: says plainly what this is, and carries the viewer toggle. -->
     <div class="pv-bar">
       <div class="wrap pv-bar-in">
@@ -129,7 +134,10 @@ import { SIGNUP_BASE } from '../../lib/membership';
       setImg('[data-pv-icon]', fm.iconLarge || fm.icon);
       const t = $('[data-pv-title]'); if (t) t.textContent = fm.title || slug;
       const dsc = $('[data-pv-desc]'); if (dsc) dsc.textContent = fm.shortDescription || fm.excerpt || '';
-      const eb = $('[data-pv-eyebrow]'); if (eb) eb.textContent = (Array.isArray(fm.categories) ? fm.categories[fm.categories.length - 1] : '') || type;
+      let labels: Record<string, string> = {};
+      try { labels = JSON.parse((root as HTMLElement).dataset.labels || '{}'); } catch { labels = {}; }
+      const leaf = Array.isArray(fm.categories) && fm.categories.length ? String(fm.categories[fm.categories.length - 1]) : '';
+      const eb = $('[data-pv-eyebrow]'); if (eb) eb.textContent = (leaf && (labels[leaf] || leaf)) || type;
 
       // Links: mirror the published sidebar, including the members-locked treatment.
       const links = Array.isArray(fm.links) ? fm.links : [];
