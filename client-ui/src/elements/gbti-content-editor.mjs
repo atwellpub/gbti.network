@@ -1124,17 +1124,27 @@ class GbtiContentEditor extends GbtiElement {
   //
   // The tab is opened SYNCHRONOUSLY on the click and its location set after the save resolves, because a
   // window.open() issued after an await is a popup the browser blocks.
+  //
+  // sow-170 fix: the open must NOT pass 'noopener' -- `window.open('', ..., 'noopener')` returns null (that is
+  // what noopener does), so the code could never navigate the tab it opened and fell to a second window.open()
+  // after the await, leaving a blank orphan tab beside the preview. We open with a real handle, sever the opener
+  // ourselves (the security intent of noopener) and paint a same-origin interstitial so the tab is not a stark
+  // blank while the draft saves.
   async doPreview() {
     const slug = String(this.gather()?.input?.slug || '').trim();
     if (!slug) { this.out('Give the item a permalink before previewing it.', 'danger'); return; }
-    const tab = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener') : null;
+    const tab = typeof window !== 'undefined' ? window.open('', '_blank') : null;
+    if (tab) {
+      try { tab.opener = null; } catch { /* cross-origin, already severed */ }
+      try { tab.document.write('<!doctype html><title>Preparing preview</title><body style="margin:0;font:15px/1.5 system-ui,sans-serif;color:#6c6976;background:#faf9fb;display:flex;align-items:center;justify-content:center;height:100vh">Preparing your preview&hellip;</body>'); } catch { /* about:blank not writable */ }
+    }
     const restore = this._btnBusy('#preview', 'Saving…');
     this._setChip('Saving…', 'busy');
     try {
       await this.doDraft();
       const url = `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}`;
       if (tab) tab.location = url;
-      else window.open(url, '_blank', 'noopener'); // popup blocked: try again directly
+      else window.open(url, '_blank', 'noopener'); // the synchronous open was popup-blocked: try once directly
       this.out('<span class="tag ok">saved</span> Draft saved and opened in a new tab as a preview.');
     } catch (err) {
       if (tab) tab.close();
