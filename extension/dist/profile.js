@@ -359,18 +359,87 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return { type: "paragraph", text: "" };
     }
   }
+  var REL_ALLOWED = /* @__PURE__ */ new Set(["nofollow", "noopener", "noreferrer"]);
+  var DANGEROUS_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+  function isDangerousUrl(url) {
+    const decoded = decodeEnt(String(url ?? "")).replace(/[\x00-\x20]+/g, "");
+    return DANGEROUS_SCHEME.test(decoded) || DANGEROUS_SCHEME.test(String(url ?? ""));
+  }
+  function sanitizeRel(rel) {
+    const kept = [];
+    for (const tok of String(rel || "").trim().split(/\s+/)) {
+      const t = tok.toLowerCase();
+      if (REL_ALLOWED.has(t) && !kept.includes(t)) kept.push(t);
+    }
+    return kept;
+  }
+  var attrOf = (attrs, name) => {
+    const m = new RegExp(`\\b${name}="([^"]*)"`, "i").exec(String(attrs || ""));
+    return m ? m[1] : "";
+  };
+  var decodeEntOnce = (s) => String(s ?? "").replace(/&#x([0-9a-f]+);?/gi, (_m, h) => {
+    try {
+      return String.fromCodePoint(parseInt(h, 16));
+    } catch {
+      return "";
+    }
+  }).replace(/&#(\d+);?/g, (_m, d) => {
+    try {
+      return String.fromCodePoint(parseInt(d, 10));
+    } catch {
+      return "";
+    }
+  }).replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+  var decodeEnt = (s) => {
+    let p = String(s ?? "");
+    for (let i = 0; i < 4; i += 1) {
+      const n = decodeEntOnce(p);
+      if (n === p) break;
+      p = n;
+    }
+    return p;
+  };
+  var escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function parseLinkAttrs(attrs) {
+    const rawHref = decodeEnt(attrOf(attrs, "href"));
+    const href = isDangerousUrl(rawHref) ? "" : rawHref;
+    const rel = sanitizeRel(attrOf(attrs, "rel"));
+    const blank = attrOf(attrs, "target").toLowerCase() === "_blank";
+    if (blank && !rel.includes("noopener")) rel.push("noopener");
+    return { href, rel, blank, attributed: rel.length > 0 || blank };
+  }
+  function rawAnchor(href, rel, blank, inner) {
+    const relAttr = rel.length ? ` rel="${rel.join(" ")}"` : "";
+    const tgtAttr = blank ? ' target="_blank"' : "";
+    return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${inner}</a>`;
+  }
   function inlineMdToHtml(md) {
-    let h = String(md ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => /^\s*(?:javascript|data|vbscript):/i.test(url) ? text : `<a href="${String(url).replace(/"/g, "&quot;").replace(/'/g, "&#39;")}">${text}</a>`);
+    let src = String(md ?? "");
+    const keep = [];
+    src = src.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+      const a = parseLinkAttrs(attrs);
+      keep.push(a.href ? rawAnchor(a.href, a.rel, a.blank, inner) : inner);
+      return `\0A${keep.length - 1}\0`;
+    });
+    let h = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => isDangerousUrl(url) ? text : `<a href="${String(url).replace(/"/g, "&quot;").replace(/'/g, "&#39;")}">${text}</a>`);
     h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     h = h.replace(/~~([^~]+)~~/g, "<s>$1</s>");
     h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
-    return h.replace(/\n/g, "<br>");
+    h = h.replace(/\n/g, "<br>");
+    return h.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
   }
   function inlineHtmlToMd(html) {
     let s = String(html ?? "");
-    s = s.replace(/<a [^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)");
+    const keep = [];
+    s = s.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+      const a = parseLinkAttrs(attrs);
+      if (!a.href) return inner;
+      if (!a.attributed) return `[${inner}](${a.href})`;
+      keep.push(rawAnchor(a.href, a.rel, a.blank, inner));
+      return `\0A${keep.length - 1}\0`;
+    });
     s = s.replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, "**$2**");
     s = s.replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, "*$2*");
     s = s.replace(/<(s|strike|del)>([\s\S]*?)<\/\1>/gi, "~~$2~~");
@@ -378,7 +447,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     s = s.replace(/<br\s*\/?>/gi, "\n");
     s = s.replace(/<div>/gi, "\n").replace(/<\/div>/gi, "");
     s = s.replace(/<[^>]+>/g, "");
-    return s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    s = s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    return s.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
   }
 
   // client-ui/src/assets.mjs
@@ -559,6 +629,13 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .sel-tb { display:none; gap:1px; padding:4px; background:var(--ink); border:0; box-shadow:0 12px 30px rgba(0,0,0,.4); }
   .sel-tb button { min-width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:7px; background:transparent; color:#e6e4ee; cursor:pointer; font-weight:700; font-size:13px; padding:0 6px; }
   .sel-tb button:hover { background:rgba(255,255,255,.12); color:#fff; }
+  /* SOW-170: the inline link editor (URL + nofollow + open-in-new-tab) */
+  .link-panel { position:absolute; z-index:21; display:none; flex-direction:column; gap:8px; padding:10px; min-width:260px; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.28); }
+  .link-panel input[type="url"] { font:inherit; color:var(--s-fg); background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:7px; padding:7px 9px; }
+  .link-panel label { display:flex; align-items:center; gap:7px; font-size:13px; color:var(--s-fg-soft); cursor:pointer; }
+  .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
+  .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
+  .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
 `;
   var GbtiDocEditor = class extends GbtiElement {
     // sow-165: the owning editor sets this so a repo-relative body image resolves against the item's folder.
@@ -1004,7 +1081,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!this.isConnected) return;
       let sel;
       try {
-        sel = document.getSelection();
+        sel = this.root?.getSelection?.() ?? document.getSelection();
       } catch {
         return;
       }
@@ -1049,7 +1126,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     _wrap(w) {
       let sel;
       try {
-        sel = document.getSelection();
+        sel = this.root?.getSelection?.() ?? document.getSelection();
       } catch {
         return;
       }
@@ -1058,9 +1135,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!ce) return;
       if (ce.dataset.edit === "code") return;
       if (w === "link") {
-        const url = (typeof prompt === "function" ? prompt("Link URL", "https://") : "") || "";
-        if (url && typeof document !== "undefined") document.execCommand("createLink", false, url);
-      } else if (w === "code") this._toggleInline(sel, "code");
+        this._openLinkPanel(sel, ce);
+        return;
+      }
+      if (w === "code") this._toggleInline(sel, "code");
       else if (typeof document !== "undefined") document.execCommand(w);
       const b = this._byId(ce.dataset.id);
       if (b) {
@@ -1068,6 +1146,112 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this._change();
       }
       this._hideTb();
+    }
+    // SOW-170: the inline LINK editor. Standard Markdown links carry no rel/target, so an attributed link is stored
+    // as sanitized raw <a> HTML (see markdown-blocks.mjs); this panel is where the author sets the URL + nofollow +
+    // open-in-new-tab, on a new selection or an existing link. Fail-safe: a dangerous URL scheme is rejected.
+    _linkAnchorIn(range) {
+      let n = range.commonAncestorContainer;
+      n = n && n.nodeType === 1 ? n : n && n.parentNode;
+      while (n && n !== this.root && !(n.classList && n.classList.contains("ce"))) {
+        if (n.tagName === "A") return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+    _openLinkPanel(sel, ce) {
+      const range = sel.getRangeAt(0).cloneRange();
+      const existing = this._linkAnchorIn(range);
+      this._lk = { range, ce, existing };
+      const host = this.$(".doc-blocks");
+      if (!host) return;
+      if (!this._lp) {
+        const lp = document.createElement("div");
+        lp.className = "link-panel";
+        lp.innerHTML = `<input type="url" data-lk-url placeholder="https://..." /><label><input type="checkbox" data-lk-nofollow /> nofollow</label><label><input type="checkbox" data-lk-blank /> New tab</label><div class="lp-btns"><button type="button" data-lk-apply>Apply</button><button type="button" data-lk-remove title="Remove link">Remove</button></div>`;
+        lp.addEventListener("mousedown", (e) => {
+          if (e.target.tagName !== "INPUT") e.preventDefault();
+        });
+        lp.querySelector("[data-lk-apply]").addEventListener("click", () => this._applyLink());
+        lp.querySelector("[data-lk-remove]").addEventListener("click", () => this._applyLink(true));
+        lp.querySelector("[data-lk-url]").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            this._applyLink();
+          }
+        });
+        host.appendChild(lp);
+        this._lp = lp;
+      }
+      const rel = existing ? existing.getAttribute("rel") || "" : "";
+      this._lp.querySelector("[data-lk-url]").value = existing ? existing.getAttribute("href") || "" : "";
+      this._lp.querySelector("[data-lk-nofollow]").checked = /\bnofollow\b/i.test(rel);
+      this._lp.querySelector("[data-lk-blank]").checked = (existing && existing.getAttribute("target")) === "_blank";
+      this._lp.querySelector("[data-lk-remove]").style.display = existing ? "" : "none";
+      const hr = host.getBoundingClientRect();
+      const r = range.getBoundingClientRect();
+      this._lp.style.top = `${r.bottom - hr.top + 6}px`;
+      this._lp.style.left = `${Math.max(0, r.left - hr.left)}px`;
+      this._lp.style.display = "flex";
+      this._hideTb();
+      setTimeout(() => this._lp.querySelector("[data-lk-url]").focus(), 0);
+    }
+    _hideLinkPanel() {
+      if (this._lp) this._lp.style.display = "none";
+      this._lk = null;
+    }
+    _applyLink(remove = false) {
+      const lk = this._lk;
+      if (!lk) return;
+      const ce = lk.ce;
+      const url = String(this._lp.querySelector("[data-lk-url]").value || "").trim();
+      const nofollow = this._lp.querySelector("[data-lk-nofollow]").checked;
+      const blank = this._lp.querySelector("[data-lk-blank]").checked;
+      if (url && isDangerousUrl(url)) {
+        this._hideLinkPanel();
+        return;
+      }
+      try {
+        ce.focus();
+        const s = this.root?.getSelection?.() ?? document.getSelection();
+        s.removeAllRanges();
+        s.addRange(lk.range);
+      } catch {
+      }
+      if (remove || !url) {
+        if (lk.existing && lk.existing.parentNode) {
+          const a = lk.existing;
+          while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+          a.remove();
+        }
+      } else {
+        const rel = [nofollow ? "nofollow" : null, blank ? "noopener" : null].filter(Boolean).join(" ");
+        if (lk.existing) {
+          lk.existing.setAttribute("href", url);
+          if (rel) lk.existing.setAttribute("rel", rel);
+          else lk.existing.removeAttribute("rel");
+          if (blank) lk.existing.setAttribute("target", "_blank");
+          else lk.existing.removeAttribute("target");
+        } else {
+          const a = document.createElement("a");
+          a.setAttribute("href", url);
+          if (rel) a.setAttribute("rel", rel);
+          if (blank) a.setAttribute("target", "_blank");
+          try {
+            a.appendChild(lk.range.extractContents());
+            lk.range.insertNode(a);
+          } catch {
+          }
+        }
+      }
+      const b = this._byId(ce.dataset.id);
+      if (b) {
+        b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, "");
+        this._render();
+        this._focusBlock(b._id);
+        this._change();
+      }
+      this._hideLinkPanel();
     }
     // SOW-062 P6: toggle an inline tag around the selection (execCommand has no 'code'); ported from the design.
     _toggleInline(sel, tag) {

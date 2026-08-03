@@ -139,21 +139,86 @@ export function emptyBlock(type) {
 // b.text; the WYSIWYG renders it as inline HTML (bold/italic/code/link/strike) in a contenteditable, then reads it
 // back to Markdown on edit. Block STRUCTURE (headings/lists/fences/the members marker) is NOT their concern -- these
 // only handle the inline layer. Pure + node-safe, exported so the editor and its round-trip test share one copy.
+// SOW-170: an attributed link (nofollow / open-in-new-tab) cannot be expressed as `[text](url)` Markdown, so it is
+// carried as sanitized raw <a> HTML in the body. The sow-158 SITE sanitizer already permits `target` + `rel`
+// (nofollow/noopener/noreferrer) on <a>, so a stored raw anchor renders correctly on the published page. A PLAIN
+// link (no rel/target) stays `[text](url)`. These helpers keep both forms round-tripping idempotently.
+const REL_ALLOWED = new Set(['nofollow', 'noopener', 'noreferrer']);
+const DANGEROUS_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+// A URL is dangerous if it names a script/data scheme, even when obfuscated with entities (numeric or named) or
+// with embedded control/whitespace characters ("java\tscript:"). The published site's sow-158 sanitizer is the
+// real boundary, but the editor must never mint such a link into the live DOM or the stored body either.
+export function isDangerousUrl(url) {
+  const decoded = decodeEnt(String(url ?? '')).replace(/[\x00-\x20]+/g, '');
+  return DANGEROUS_SCHEME.test(decoded) || DANGEROUS_SCHEME.test(String(url ?? ''));
+}
+/** Keep only allow-listed, de-duplicated rel tokens (mirrors the sow-158 sanitizer allow-list). */
+function sanitizeRel(rel) {
+  const kept = [];
+  for (const tok of String(rel || '').trim().split(/\s+/)) {
+    const t = tok.toLowerCase();
+    if (REL_ALLOWED.has(t) && !kept.includes(t)) kept.push(t);
+  }
+  return kept;
+}
+const attrOf = (attrs, name) => { const m = new RegExp(`\\b${name}="([^"]*)"`, 'i').exec(String(attrs || '')); return m ? m[1] : ''; };
+const decodeEntOnce = (s) => String(s ?? '')
+  .replace(/&#x([0-9a-f]+);?/gi, (_m, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+  .replace(/&#(\d+);?/g, (_m, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return ''; } })
+  .replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&amp;/gi, '&');
+// Decode to a fixed point (capped) so a double-encoded scheme like `&amp;#106;avascript:` cannot slip past the
+// dangerous-URL check by needing two passes. The cap bounds the work; real hrefs settle in one pass.
+const decodeEnt = (s) => { let p = String(s ?? ''); for (let i = 0; i < 4; i += 1) { const n = decodeEntOnce(p); if (n === p) break; p = n; } return p; };
+const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Parse an <a>'s attribute string into a safe, DECODED link shape. `attributed` is true when it needs raw-HTML form. */
+function parseLinkAttrs(attrs) {
+  const rawHref = decodeEnt(attrOf(attrs, 'href'));
+  const href = isDangerousUrl(rawHref) ? '' : rawHref;
+  const rel = sanitizeRel(attrOf(attrs, 'rel'));
+  const blank = attrOf(attrs, 'target').toLowerCase() === '_blank';
+  if (blank && !rel.includes('noopener')) rel.push('noopener'); // target=_blank must carry noopener (tab-nabbing)
+  return { href, rel, blank, attributed: rel.length > 0 || blank };
+}
+/** The ONE canonical sanitized raw-<a> HTML for an attributed link (href already decoded), used on BOTH sides. */
+function rawAnchor(href, rel, blank, inner) {
+  const relAttr = rel.length ? ` rel="${rel.join(' ')}"` : '';
+  const tgtAttr = blank ? ' target="_blank"' : '';
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${inner}</a>`;
+}
+
 export function inlineMdToHtml(md) {
-  let h = String(md ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let src = String(md ?? '');
+  const keep = [];
+  // Preserve author-written attributed links (raw <a rel/target>) across the escape pass, re-sanitized to canonical.
+  src = src.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+    const a = parseLinkAttrs(attrs);
+    keep.push(a.href ? rawAnchor(a.href, a.rel, a.blank, inner) : inner);
+    return `\u0000A${keep.length - 1}\u0000`;
+  });
   // Escape the URL before it goes into the href attribute (& < > are already escaped above; the double-quote is
   // not, so an unescaped " would break out of href=""), and neutralize dangerous URL schemes.
+  let h = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) =>
-    /^\s*(?:javascript|data|vbscript):/i.test(url) ? text : `<a href="${String(url).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}">${text}</a>`);
+    isDangerousUrl(url) ? text : `<a href="${String(url).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}">${text}</a>`);
   h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
   h = h.replace(/~~([^~]+)~~/g, '<s>$1</s>');
   h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-  return h.replace(/\n/g, '<br>');
+  h = h.replace(/\n/g, '<br>');
+  return h.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? ''); // restore the protected anchors
 }
 export function inlineHtmlToMd(html) {
   let s = String(html ?? '');
-  s = s.replace(/<a [^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)');
+  const keep = [];
+  // Links: a plain link -> `[text](url)`; an attributed link (rel/target) -> the canonical sanitized raw <a> HTML,
+  // protected from the tag-strip + entity-decode below by a placeholder so it survives verbatim.
+  s = s.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+    const a = parseLinkAttrs(attrs);
+    if (!a.href) return inner;                       // dangerous/empty href -> drop the link, keep the text
+    if (!a.attributed) return `[${inner}](${a.href})`;
+    keep.push(rawAnchor(a.href, a.rel, a.blank, inner));
+    return `\u0000A${keep.length - 1}\u0000`;
+  });
   s = s.replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, '**$2**');
   s = s.replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, '*$2*');
   s = s.replace(/<(s|strike|del)>([\s\S]*?)<\/\1>/gi, '~~$2~~');
@@ -161,5 +226,6 @@ export function inlineHtmlToMd(html) {
   s = s.replace(/<br\s*\/?>/gi, '\n');
   s = s.replace(/<div>/gi, '\n').replace(/<\/div>/gi, ''); // contenteditable wraps soft lines in <div>
   s = s.replace(/<[^>]+>/g, ''); // drop any stray markup (paste is hardened; nothing else should appear)
-  return s.replace(/&nbsp;/gi, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  s = s.replace(/&nbsp;/gi, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); // decode NON-anchor text
+  return s.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? ''); // restore anchors AFTER the decode
 }
