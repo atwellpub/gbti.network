@@ -22,7 +22,7 @@ gallery:
   - "./images/radle-shot-7.webp"
 video: "MhHHV-ZHNes"
 links:
-  - { type: download, url: "https://wordpress.org/plugins/radle-lite/", label: "Download free on WordPress.org", primary: true }
+  - { type: download, url: "https://wordpress.org/plugins/radle-lite/", primary: true }
   - { type: repository, url: "https://github.com/gbti-network/radle-lite" }
 ---
 
@@ -30,7 +30,7 @@ Radle is a WordPress plugin that replaces (or compliments) the native WordPress 
 
 Radle is now a single free plugin on the [WordPress plugin directory](https://wordpress.org/plugins/radle-lite/). The former Radle Pro has been sunset, and every feature it carried is now built into the free release: comment display controls, searching, user badges, deeper comment nesting, improved caching, and integration with Yoast SEO and Rank Math. There is no license, sponsor check, or upsell.
 
-## We built Radle to:
+## About
 
 -   Extend WordPress content reach to Reddit audience
 -   Help readers engage with content using the Reddit application
