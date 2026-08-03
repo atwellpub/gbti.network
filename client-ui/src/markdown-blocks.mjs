@@ -5,7 +5,27 @@
 // (we model block STRUCTURE, not inline), so it round-trips verbatim.
 
 export const MEMBERS_MARKER = '<!-- members-only -->';
-export const BLOCK_TYPES = ['paragraph', 'heading', 'code', 'quote', 'list', 'image', 'embed', 'callout', 'members'];
+export const BLOCK_TYPES = ['paragraph', 'heading', 'code', 'quote', 'list', 'table', 'image', 'embed', 'callout', 'members'];
+
+// SOW-169/SOW-170: GFM table helpers. A table is a header row of `| ... |` cells immediately followed by a
+// delimiter row (`| --- | :--: |`), then zero or more body rows. Before this, a table fell into the paragraph
+// branch and showed as literal pipes; now it is a first-class `table` block the editor renders as a real table.
+const isTableDelimLine = (l) => /^\s*\|?(\s*:?-{1,}:?\s*\|)+\s*:?-{1,}:?\s*\|?\s*$/.test(l) || /^\s*\|(\s*:?-{1,}:?\s*\|)+\s*$/.test(l);
+/** Split a `| a | b |` row into trimmed cells, honoring a `\|` escaped pipe. */
+function splitTableRow(line) {
+  let s = String(line).trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'));
+}
+/** The column alignment from a delimiter spec (`:--`, `--:`, `:-:`, `--`). */
+function tableAlign(spec) {
+  const s = String(spec).trim();
+  const l = s.startsWith(':'); const r = s.endsWith(':');
+  return l && r ? 'center' : r ? 'right' : l ? 'left' : '';
+}
+/** A table begins where a pipe-bearing line is immediately followed by a delimiter row. */
+const isTableStart = (lines, i) => i + 1 < lines.length && lines[i].includes('|') && isTableDelimLine(lines[i + 1]);
 
 // SOW-062 Phase 5: callout + body embed are stored as FENCED blocks (```callout <variant> / ```embed) so they
 // reuse the same fence machinery, round-trip idempotently, and survive the reader's escape-first renderer. Members
@@ -49,6 +69,20 @@ function serializeBlock(b) {
     case 'list': {
       const items = Array.isArray(b.items) ? b.items : String(b.text ?? '').split('\n').filter((x) => x !== '');
       return items.map((it, i) => (b.ordered ? `${i + 1}. ` : '- ') + it).join('\n');
+    }
+    case 'table': {
+      const head = Array.isArray(b.head) ? b.head : [];
+      const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      const cols = Math.max(1, head.length);
+      const cell = (c) => String(c ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+      const pad = (arr) => { const a = arr.slice(0, cols); while (a.length < cols) a.push(''); return a; };
+      const line = (cells) => '| ' + pad(cells).map(cell).join(' | ') + ' |';
+      const delim = '| ' + pad(head).map((_, i) => {
+        const a = aligns[i] || '';
+        return a === 'center' ? ':---:' : a === 'right' ? '---:' : a === 'left' ? ':---' : '---';
+      }).join(' | ') + ' |';
+      return [line(head), delim, ...rows.map(line)].join('\n');
     }
     case 'image': return `![${b.alt ?? ''}](${b.url ?? ''})`;
     case 'embed': return '```embed\n' + (b.url ?? '') + '\n```';
@@ -104,6 +138,26 @@ export function parseBlocks(md) {
       blocks.push({ type: 'list', ordered, items });
       continue;
     }
+    // SOW-169: a GFM table = a header row with pipes immediately followed by a delimiter row. Body rows continue
+    // while they carry pipes and start no other block. This is what stops a table rendering as literal pipe text.
+    if (isTableStart(lines, i)) {
+      const head = splitTableRow(lines[i]);
+      const cols = Math.max(1, head.length);
+      // Normalize aligns + every row to the header column count so parse(serialize(x)) === x (idempotent). GFM
+      // uses the header to fix the column count: a short row pads, an over-long row truncates.
+      const aligns = splitTableRow(lines[i + 1]).map(tableAlign).slice(0, cols);
+      while (aligns.length < cols) aligns.push('');
+      i += 2;
+      const rows = [];
+      while (i < n && lines[i].trim() !== '' && lines[i].includes('|')
+        && !isMarker(lines[i]) && !isFence(lines[i]) && !isHeading(lines[i]) && !isQuote(lines[i])) {
+        const row = splitTableRow(lines[i]).slice(0, cols);
+        while (row.length < cols) row.push('');
+        rows.push(row); i++;
+      }
+      blocks.push({ type: 'table', head, aligns, rows });
+      continue;
+    }
     m = line.match(/^!\[([^\]]*)\]\(([^)]*)\)\s*$/);
     if (m) { blocks.push({ type: 'image', alt: m[1], url: m[2] }); i++; continue; }
     if (isBareUrl(line) && isVideoUrl(line)) { blocks.push({ type: 'embed', url: line.trim() }); i++; continue; }
@@ -111,7 +165,7 @@ export function parseBlocks(md) {
     const para = [];
     while (i < n) {
       const l = lines[i];
-      if (l.trim() === '' || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || (isBareUrl(l) && isVideoUrl(l))) break;
+      if (l.trim() === '' || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || (isBareUrl(l) && isVideoUrl(l)) || isTableStart(lines, i)) break;
       para.push(l); i++;
     }
     if (para.length) blocks.push({ type: 'paragraph', text: para.join('\n') });
@@ -127,6 +181,7 @@ export function emptyBlock(type) {
     case 'code': return { type: 'code', lang: '', code: '' };
     case 'quote': return { type: 'quote', text: '' };
     case 'list': return { type: 'list', ordered: false, items: [''] };
+    case 'table': return { type: 'table', head: ['Column 1', 'Column 2'], aligns: ['', ''], rows: [['', ''], ['', '']] };
     case 'image': return { type: 'image', alt: '', url: '' };
     case 'embed': return { type: 'embed', url: '' };
     case 'callout': return { type: 'callout', variant: 'note', text: '' };
@@ -179,11 +234,20 @@ function parseLinkAttrs(attrs) {
   if (blank && !rel.includes('noopener')) rel.push('noopener'); // target=_blank must carry noopener (tab-nabbing)
   return { href, rel, blank, attributed: rel.length > 0 || blank };
 }
+// An attributed link's inner content is preserved verbatim so nested marks (<strong>/<em>/<code>) survive, but a
+// crafted inner must never smuggle a script/style/iframe/handler into the stored body or the editor DOM. Keep ONLY
+// safe inline tags (stripping their attributes too) and drop every other tag, leaving its text. The published-site
+// sanitizer is still the real boundary; this is defense-in-depth so the stored .md never carries an active tag.
+const SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
+function sanitizeInner(html) {
+  return String(html ?? '').replace(/<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
+    (_m, slash, tag) => (SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ''));
+}
 /** The ONE canonical sanitized raw-<a> HTML for an attributed link (href already decoded), used on BOTH sides. */
 function rawAnchor(href, rel, blank, inner) {
   const relAttr = rel.length ? ` rel="${rel.join(' ')}"` : '';
   const tgtAttr = blank ? ' target="_blank"' : '';
-  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${inner}</a>`;
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeInner(inner)}</a>`;
 }
 
 export function inlineMdToHtml(md) {

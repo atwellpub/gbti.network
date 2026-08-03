@@ -211,6 +211,20 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
   // client-ui/src/markdown-blocks.mjs
   var MEMBERS_MARKER = "<!-- members-only -->";
+  var isTableDelimLine = (l) => /^\s*\|?(\s*:?-{1,}:?\s*\|)+\s*:?-{1,}:?\s*\|?\s*$/.test(l) || /^\s*\|(\s*:?-{1,}:?\s*\|)+\s*$/.test(l);
+  function splitTableRow(line) {
+    let s = String(line).trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+  }
+  function tableAlign(spec) {
+    const s = String(spec).trim();
+    const l = s.startsWith(":");
+    const r = s.endsWith(":");
+    return l && r ? "center" : r ? "right" : l ? "left" : "";
+  }
+  var isTableStart = (lines, i) => i + 1 < lines.length && lines[i].includes("|") && isTableDelimLine(lines[i + 1]);
   var CALLOUT_VARIANTS = ["info", "note", "warning", "tip"];
   var normalizeVariant = (v) => CALLOUT_VARIANTS.includes(v) ? v : "note";
   var isMarker = (l) => l.trim() === MEMBERS_MARKER;
@@ -244,6 +258,24 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       case "list": {
         const items = Array.isArray(b.items) ? b.items : String(b.text ?? "").split("\n").filter((x) => x !== "");
         return items.map((it, i) => (b.ordered ? `${i + 1}. ` : "- ") + it).join("\n");
+      }
+      case "table": {
+        const head = Array.isArray(b.head) ? b.head : [];
+        const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+        const rows = Array.isArray(b.rows) ? b.rows : [];
+        const cols = Math.max(1, head.length);
+        const cell = (c) => String(c ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+        const pad = (arr) => {
+          const a = arr.slice(0, cols);
+          while (a.length < cols) a.push("");
+          return a;
+        };
+        const line = (cells) => "| " + pad(cells).map(cell).join(" | ") + " |";
+        const delim = "| " + pad(head).map((_, i) => {
+          const a = aligns[i] || "";
+          return a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---";
+        }).join(" | ") + " |";
+        return [line(head), delim, ...rows.map(line)].join("\n");
       }
       case "image":
         return `![${b.alt ?? ""}](${b.url ?? ""})`;
@@ -314,6 +346,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         blocks.push({ type: "list", ordered, items });
         continue;
       }
+      if (isTableStart(lines, i)) {
+        const head = splitTableRow(lines[i]);
+        const cols = Math.max(1, head.length);
+        const aligns = splitTableRow(lines[i + 1]).map(tableAlign).slice(0, cols);
+        while (aligns.length < cols) aligns.push("");
+        i += 2;
+        const rows = [];
+        while (i < n && lines[i].trim() !== "" && lines[i].includes("|") && !isMarker(lines[i]) && !isFence(lines[i]) && !isHeading(lines[i]) && !isQuote(lines[i])) {
+          const row = splitTableRow(lines[i]).slice(0, cols);
+          while (row.length < cols) row.push("");
+          rows.push(row);
+          i++;
+        }
+        blocks.push({ type: "table", head, aligns, rows });
+        continue;
+      }
       m = line.match(/^!\[([^\]]*)\]\(([^)]*)\)\s*$/);
       if (m) {
         blocks.push({ type: "image", alt: m[1], url: m[2] });
@@ -328,7 +376,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const para = [];
       while (i < n) {
         const l = lines[i];
-        if (l.trim() === "" || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || isBareUrl(l) && isVideoUrl(l)) break;
+        if (l.trim() === "" || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || isBareUrl(l) && isVideoUrl(l) || isTableStart(lines, i)) break;
         para.push(l);
         i++;
       }
@@ -347,6 +395,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return { type: "quote", text: "" };
       case "list":
         return { type: "list", ordered: false, items: [""] };
+      case "table":
+        return { type: "table", head: ["Column 1", "Column 2"], aligns: ["", ""], rows: [["", ""], ["", ""]] };
       case "image":
         return { type: "image", alt: "", url: "" };
       case "embed":
@@ -408,10 +458,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     if (blank && !rel.includes("noopener")) rel.push("noopener");
     return { href, rel, blank, attributed: rel.length > 0 || blank };
   }
+  var SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
+  function sanitizeInner(html) {
+    return String(html ?? "").replace(
+      /<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
+      (_m, slash, tag) => SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ""
+    );
+  }
   function rawAnchor(href, rel, blank, inner) {
     const relAttr = rel.length ? ` rel="${rel.join(" ")}"` : "";
     const tgtAttr = blank ? ' target="_blank"' : "";
-    return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${inner}</a>`;
+    return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeInner(inner)}</a>`;
   }
   function inlineMdToHtml(md) {
     let src = String(md ?? "");
@@ -495,6 +552,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { key: "code", label: "Code", icon: "code", desc: "A code block" },
     { key: "ul", label: "Bulleted list", type: "list", ordered: false, icon: "listul", desc: "A simple list" },
     { key: "ol", label: "Numbered list", type: "list", ordered: true, icon: "listol", desc: "An ordered list" },
+    { key: "table", label: "Table", icon: "table", desc: "Rows and columns" },
     { key: "image", label: "Image", icon: "img", desc: "Upload or embed a picture" },
     { key: "embed", label: "Video / embed", icon: "video", desc: "YouTube or Vimeo" }
   ];
@@ -508,6 +566,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return nb;
   };
   var ic = {
+    table: '<path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
     up: '<path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
     down: '<path d="M12 5v13M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
     x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
@@ -636,6 +695,25 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
   .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
   .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
+  /* SOW-169: the editable table block */
+  .tbl-card { padding:12px; }
+  .tbl-scroll { overflow-x:auto; }
+  .tbl { border-collapse:collapse; width:100%; font-size:14px; }
+  .tbl th, .tbl td { border:1px solid var(--s-line); padding:0; vertical-align:top; }
+  .tbl th { background:var(--s-surface-2); }
+  .tbl .corner { border:0; background:transparent; width:0; }
+  .tbl td.row-ctl { border:0; background:transparent; width:28px; text-align:center; }
+  .tbl .tc { min-width:80px; padding:7px 9px; outline:none; color:var(--s-fg); }
+  .tbl .tc:empty::before { content:attr(data-ph); color:var(--s-fg-mute,#8a8792); }
+  .tbl th .th-ctl { display:flex; gap:2px; justify-content:flex-end; padding:2px 4px; border-top:1px dashed var(--s-line); }
+  .tbtn { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:20px; padding:0 4px; border:1px solid var(--s-line); border-radius:5px; background:var(--s-surface); color:var(--s-fg-soft); font-size:11px; font-weight:700; cursor:pointer; }
+  .tbtn svg { width:12px; height:12px; }
+  .tbtn:hover { border-color:var(--s-green); color:var(--s-green); }
+  .tbtn.del:hover { border-color:#d9534f; color:#d9534f; }
+  .tbl-ctl { display:flex; gap:8px; margin-top:10px; }
+  .tbl-ctl .tadd { display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:12.5px; font-weight:600; border:1px solid var(--s-line); border-radius:7px; background:var(--s-surface); color:var(--s-fg); padding:5px 11px; cursor:pointer; }
+  .tbl-ctl .tadd svg { width:13px; height:13px; }
+  .tbl-ctl .tadd:hover { border-color:var(--s-green); color:var(--s-green); }
 `;
   var GbtiDocEditor = class extends GbtiElement {
     // sow-165: the owning editor sets this so a repo-relative body image resolves against the item's folder.
@@ -729,6 +807,18 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           const items = (Array.isArray(b.items) ? b.items : [""]).map((it) => `<li>${inlineMdToHtml(it)}</li>`).join("") || "<li></li>";
           return `<${tag} class="ce ce-list" contenteditable="true" data-edit="list" data-id="${b._id}">${items}</${tag}>`;
         }
+        case "table": {
+          const head = Array.isArray(b.head) ? b.head : [];
+          const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+          const rows = Array.isArray(b.rows) ? b.rows : [];
+          const cols = Math.max(1, head.length);
+          const alignStyle = (c) => aligns[c] ? ` style="text-align:${aligns[c]}"` : "";
+          const alignLabel = (c) => ({ "": "–", left: "L", center: "C", right: "R" })[aligns[c] || ""];
+          const cell = (r, c, v) => `<div class="tc" contenteditable="true" data-edit="cell" data-id="${b._id}" data-r="${r}" data-c="${c}" data-ph="">${inlineMdToHtml(v || "")}</div>`;
+          const headCells = Array.from({ length: cols }, (_, c) => `<th${alignStyle(c)}>${cell(-1, c, head[c])}<div class="th-ctl"><button type="button" class="tbtn" data-talign="${b._id}" data-c="${c}" title="Cycle column alignment">${alignLabel(c)}</button><button type="button" class="tbtn del" data-tcolrm="${b._id}" data-c="${c}" title="Delete this column">${svg("x")}</button></div></th>`).join("");
+          const bodyRows = rows.map((row, r) => `<tr>` + Array.from({ length: cols }, (_, c) => `<td${alignStyle(c)}>${cell(r, c, row[c])}</td>`).join("") + `<td class="row-ctl"><button type="button" class="tbtn del" data-trowrm="${b._id}" data-r="${r}" title="Delete this row">${svg("x")}</button></td></tr>`).join("");
+          return `<div class="card tbl-card"><div class="card-h">${svg("table")} Table</div><div class="tbl-scroll"><table class="tbl"><thead><tr>${headCells}<th class="corner"></th></tr></thead><tbody>${bodyRows || ""}</tbody></table></div><div class="tbl-ctl"><button type="button" class="tadd" data-taddrow="${b._id}">${svg("plus")} Row</button><button type="button" class="tadd" data-taddcol="${b._id}">${svg("plus")} Column</button></div></div>`;
+        }
         case "image": {
           const hasUrl = !!b.url;
           const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : "";
@@ -798,7 +888,18 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
             b.text = inlineHtmlToMd(el.innerHTML).replace(/\n$/, "");
           } else if (f === "code") b.code = el.innerText.replace(/\n$/, "");
           else if (f === "list") b.items = Array.from(el.querySelectorAll("li")).map((li) => inlineHtmlToMd(li.innerHTML));
-          else b[f] = el.value;
+          else if (f === "cell") {
+            const r = Number(el.dataset.r);
+            const c = Number(el.dataset.c);
+            if (Number.isNaN(r) || Number.isNaN(c) || c < 0) return;
+            const md = inlineHtmlToMd(el.innerHTML).replace(/\n$/, "");
+            if (r < 0) {
+              if (!Array.isArray(b.head)) b.head = [];
+              if (c < b.head.length) b.head[c] = md;
+            } else if (Array.isArray(b.rows) && r < b.rows.length && Array.isArray(b.rows[r]) && c < b.rows[r].length) {
+              b.rows[r][c] = md;
+            }
+          } else b[f] = el.value;
           this._change();
         };
         el.addEventListener("input", on);
@@ -809,7 +910,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           el._composing = false;
           on();
         });
-        if (el.classList.contains("ce")) {
+        if (el.classList.contains("ce") || el.classList.contains("tc")) {
           el.addEventListener("paste", (e) => {
             e.preventDefault();
             const t = (e.clipboardData || window.clipboardData)?.getData("text/plain") || "";
@@ -838,6 +939,75 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           this._focusBlock(b._id);
           this._change();
         }
+      }));
+      const tblCols = (b) => Math.max(1, Array.isArray(b.head) ? b.head.length : 1);
+      const tblNorm = (b) => {
+        const c = tblCols(b);
+        if (!Array.isArray(b.head)) b.head = [];
+        while (b.head.length < c) b.head.push("");
+        if (!Array.isArray(b.aligns)) b.aligns = [];
+        while (b.aligns.length < c) b.aligns.push("");
+        b.aligns.length = c;
+        b.rows = (Array.isArray(b.rows) ? b.rows : []).map((r) => {
+          const row = Array.isArray(r) ? r.slice(0, c) : [];
+          while (row.length < c) row.push("");
+          return row;
+        });
+      };
+      this.$$("[data-taddrow]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.taddrow);
+        if (!b) return;
+        tblNorm(b);
+        b.rows.push(new Array(tblCols(b)).fill(""));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-taddcol]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.taddcol);
+        if (!b) return;
+        tblNorm(b);
+        b.head.push("");
+        b.aligns.push("");
+        b.rows.forEach((r) => r.push(""));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-trowrm]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.trowrm);
+        if (!b) return;
+        const r = Number(el.dataset.r);
+        if (Array.isArray(b.rows)) b.rows.splice(r, 1);
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-tcolrm]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.tcolrm);
+        if (!b) return;
+        const c = Number(el.dataset.c);
+        if (tblCols(b) <= 1) {
+          const i = this._indexOf(b._id);
+          if (i >= 0) {
+            this._blocks.splice(i, 1);
+            this._render();
+            this._change();
+          }
+          return;
+        }
+        b.head.splice(c, 1);
+        if (Array.isArray(b.aligns)) b.aligns.splice(c, 1);
+        (b.rows || []).forEach((r) => r.splice(c, 1));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-talign]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.talign);
+        if (!b) return;
+        const c = Number(el.dataset.c);
+        const order = ["", "left", "center", "right"];
+        if (!Array.isArray(b.aligns)) b.aligns = [];
+        b.aligns[c] = order[(order.indexOf(b.aligns[c] || "") + 1) % order.length];
+        this._render();
+        this._change();
       }));
       this.$$("[data-up]").forEach((el) => el.addEventListener("click", () => this._move(el.dataset.up, -1)));
       this.$$("[data-down]").forEach((el) => el.addEventListener("click", () => this._move(el.dataset.down, 1)));

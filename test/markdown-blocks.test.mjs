@@ -135,3 +135,66 @@ test('a 4-backtick fence carries inner ``` fences as content and round-trips', (
   assert.deepEqual(parseBlocks(back), blocks); // idempotent round-trip
   assert.match(back, /^````markdown\n/);
 });
+
+// SOW-169: the GFM table block (was rendering as literal pipe text in the visual editor).
+test('a GFM table parses into a table block with head, aligns, and rows', () => {
+  const md = '| Action | Shortcut |\n| --- | :---: |\n| Toggle | Ctrl+1 |\n| Grow | Ctrl+Right |';
+  const b = parseBlocks(md);
+  assert.equal(b.length, 1);
+  assert.equal(b[0].type, 'table');
+  assert.deepEqual(b[0].head, ['Action', 'Shortcut']);
+  assert.deepEqual(b[0].aligns, ['', 'center']);
+  assert.deepEqual(b[0].rows, [['Toggle', 'Ctrl+1'], ['Grow', 'Ctrl+Right']]);
+});
+
+test('a table block round-trips to canonical GFM and back idempotently', () => {
+  const md = '| Action | Shortcut |\n| --- | :---: |\n| Toggle | Ctrl+1 |';
+  const blocks = parseBlocks(md);
+  const back = serializeBlocks(blocks);
+  assert.deepEqual(parseBlocks(back), blocks); // stable
+  assert.equal(back, '| Action | Shortcut |\n| --- | :---: |\n| Toggle | Ctrl+1 |');
+});
+
+test('a table adjacent to paragraphs is split out (upgrade from the old paragraph fallback)', () => {
+  const md = 'Intro line.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nOutro line.';
+  const b = parseBlocks(md);
+  assert.deepEqual(b.map((x) => x.type), ['paragraph', 'table', 'paragraph']);
+  assert.equal(b[0].text, 'Intro line.');
+  assert.equal(b[2].text, 'Outro line.');
+});
+
+test('an escaped pipe inside a cell survives the round-trip', () => {
+  const md = '| Key | Note |\n| --- | --- |\n| a \\| b | ok |';
+  const b = parseBlocks(md);
+  assert.deepEqual(b[0].rows, [['a | b', 'ok']]);
+  assert.equal(serializeBlocks(b), md);
+});
+
+test('emptyBlock("table") is a usable 2x2 starter', () => {
+  const t = emptyBlock('table');
+  assert.equal(t.type, 'table');
+  assert.equal(t.head.length, 2);
+  assert.equal(t.rows.length, 2);
+  assert.equal(serializeBlocks([t]).split('\n').length, 4); // head + delim + 2 rows
+});
+
+test('a pipe line WITHOUT a delimiter row stays a paragraph (not a false table)', () => {
+  const md = 'a | b | c is just prose\nsecond line';
+  const b = parseBlocks(md);
+  assert.equal(b[0].type, 'paragraph');
+});
+
+test('a ragged table (rows/delims != header cols) normalizes and round-trips idempotently', () => {
+  for (const md of [
+    '| A | B |\n| --- |\n| 1 |',                 // short delimiter + short row
+    '| A | B |\n| --- | --- |\n| 1 | 2 | 3 |',   // over-long row (extra cell dropped per GFM)
+    '| Only |\n| --- | --- |',                   // delimiter wider than header
+  ]) {
+    const b = parseBlocks(md);
+    assert.equal(b[0].type, 'table');
+    const cols = b[0].head.length;
+    assert.equal(b[0].aligns.length, cols, 'aligns normalized to header width');
+    for (const r of b[0].rows) assert.equal(r.length, cols, 'rows normalized to header width');
+    assert.deepEqual(parseBlocks(serializeBlocks(b)), b, 'idempotent after normalization');
+  }
+});

@@ -28,6 +28,7 @@ const CONVERT = [
   { key: 'code', label: 'Code', icon: 'code', desc: 'A code block' },
   { key: 'ul', label: 'Bulleted list', type: 'list', ordered: false, icon: 'listul', desc: 'A simple list' },
   { key: 'ol', label: 'Numbered list', type: 'list', ordered: true, icon: 'listol', desc: 'An ordered list' },
+  { key: 'table', label: 'Table', icon: 'table', desc: 'Rows and columns' },
   { key: 'image', label: 'Image', icon: 'img', desc: 'Upload or embed a picture' },
   { key: 'embed', label: 'Video / embed', icon: 'video', desc: 'YouTube or Vimeo' },
 ];
@@ -43,6 +44,7 @@ const blockFromKey = (key) => {
 };
 
 const ic = {
+  table: '<path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
   up: '<path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
   down: '<path d="M12 5v13M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
   x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
@@ -172,6 +174,25 @@ const CSS = `
   .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
   .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
   .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
+  /* SOW-169: the editable table block */
+  .tbl-card { padding:12px; }
+  .tbl-scroll { overflow-x:auto; }
+  .tbl { border-collapse:collapse; width:100%; font-size:14px; }
+  .tbl th, .tbl td { border:1px solid var(--s-line); padding:0; vertical-align:top; }
+  .tbl th { background:var(--s-surface-2); }
+  .tbl .corner { border:0; background:transparent; width:0; }
+  .tbl td.row-ctl { border:0; background:transparent; width:28px; text-align:center; }
+  .tbl .tc { min-width:80px; padding:7px 9px; outline:none; color:var(--s-fg); }
+  .tbl .tc:empty::before { content:attr(data-ph); color:var(--s-fg-mute,#8a8792); }
+  .tbl th .th-ctl { display:flex; gap:2px; justify-content:flex-end; padding:2px 4px; border-top:1px dashed var(--s-line); }
+  .tbtn { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:20px; padding:0 4px; border:1px solid var(--s-line); border-radius:5px; background:var(--s-surface); color:var(--s-fg-soft); font-size:11px; font-weight:700; cursor:pointer; }
+  .tbtn svg { width:12px; height:12px; }
+  .tbtn:hover { border-color:var(--s-green); color:var(--s-green); }
+  .tbtn.del:hover { border-color:#d9534f; color:#d9534f; }
+  .tbl-ctl { display:flex; gap:8px; margin-top:10px; }
+  .tbl-ctl .tadd { display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:12.5px; font-weight:600; border:1px solid var(--s-line); border-radius:7px; background:var(--s-surface); color:var(--s-fg); padding:5px 11px; cursor:pointer; }
+  .tbl-ctl .tadd svg { width:13px; height:13px; }
+  .tbl-ctl .tadd:hover { border-color:var(--s-green); color:var(--s-green); }
 `;
 
 class GbtiDocEditor extends GbtiElement {
@@ -252,6 +273,28 @@ class GbtiDocEditor extends GbtiElement {
         const items = (Array.isArray(b.items) ? b.items : ['']).map((it) => `<li>${inlineMdToHtml(it)}</li>`).join('') || '<li></li>';
         return `<${tag} class="ce ce-list" contenteditable="true" data-edit="list" data-id="${b._id}">${items}</${tag}>`;
       }
+      case 'table': {
+        // SOW-169: a real, editable table (cells are contenteditable; add/remove row+column; per-column align).
+        // MODEL-IS-TRUTH: cell edits mutate b.head / b.rows in place and .value re-serializes to GFM (never the DOM).
+        const head = Array.isArray(b.head) ? b.head : [];
+        const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+        const rows = Array.isArray(b.rows) ? b.rows : [];
+        const cols = Math.max(1, head.length);
+        const alignStyle = (c) => aligns[c] ? ` style="text-align:${aligns[c]}"` : '';
+        const alignLabel = (c) => ({ '': '–', left: 'L', center: 'C', right: 'R' }[aligns[c] || '']);
+        const cell = (r, c, v) => `<div class="tc" contenteditable="true" data-edit="cell" data-id="${b._id}" data-r="${r}" data-c="${c}" data-ph="">${inlineMdToHtml(v || '')}</div>`;
+        const headCells = Array.from({ length: cols }, (_, c) =>
+          `<th${alignStyle(c)}>${cell(-1, c, head[c])}<div class="th-ctl">`
+          + `<button type="button" class="tbtn" data-talign="${b._id}" data-c="${c}" title="Cycle column alignment">${alignLabel(c)}</button>`
+          + `<button type="button" class="tbtn del" data-tcolrm="${b._id}" data-c="${c}" title="Delete this column">${svg('x')}</button></div></th>`).join('');
+        const bodyRows = rows.map((row, r) =>
+          `<tr>` + Array.from({ length: cols }, (_, c) => `<td${alignStyle(c)}>${cell(r, c, row[c])}</td>`).join('')
+          + `<td class="row-ctl"><button type="button" class="tbtn del" data-trowrm="${b._id}" data-r="${r}" title="Delete this row">${svg('x')}</button></td></tr>`).join('');
+        return `<div class="card tbl-card"><div class="card-h">${svg('table')} Table</div>`
+          + `<div class="tbl-scroll"><table class="tbl"><thead><tr>${headCells}<th class="corner"></th></tr></thead><tbody>${bodyRows || ''}</tbody></table></div>`
+          + `<div class="tbl-ctl"><button type="button" class="tadd" data-taddrow="${b._id}">${svg('plus')} Row</button>`
+          + `<button type="button" class="tadd" data-taddcol="${b._id}">${svg('plus')} Column</button></div></div>`;
+      }
       case 'image': {
         // SOW-062 P6: a striped drop-zone placeholder when empty (click OR drag-drop an image), the preview when set.
         const hasUrl = !!b.url;
@@ -311,13 +354,20 @@ class GbtiDocEditor extends GbtiElement {
         }
         else if (f === 'code') b.code = el.innerText.replace(/\n$/, ''); // code stays literal
         else if (f === 'list') b.items = Array.from(el.querySelectorAll('li')).map((li) => inlineHtmlToMd(li.innerHTML));
+        else if (f === 'cell') { // SOW-169: a table cell -> b.head[c] (r=-1) or b.rows[r][c], in place, no re-render
+          const r = Number(el.dataset.r); const c = Number(el.dataset.c);
+          if (Number.isNaN(r) || Number.isNaN(c) || c < 0) return; // ignore a tampered index; never grow sparse arrays
+          const md = inlineHtmlToMd(el.innerHTML).replace(/\n$/, '');
+          if (r < 0) { if (!Array.isArray(b.head)) b.head = []; if (c < b.head.length) b.head[c] = md; }
+          else if (Array.isArray(b.rows) && r < b.rows.length && Array.isArray(b.rows[r]) && c < b.rows[r].length) { b.rows[r][c] = md; }
+        }
         else b[f] = el.value; // lang / url / alt inputs
         this._change();
       };
       el.addEventListener('input', on);
       el.addEventListener('compositionstart', () => { el._composing = true; });
       el.addEventListener('compositionend', () => { el._composing = false; on(); });
-      if (el.classList.contains('ce')) {
+      if (el.classList.contains('ce') || el.classList.contains('tc')) {
         // paste as PLAIN TEXT only (never author HTML -> CSP + round-trip safe)
         el.addEventListener('paste', (e) => {
           e.preventDefault();
@@ -341,6 +391,22 @@ class GbtiDocEditor extends GbtiElement {
     this.$$('[data-cvar]').forEach((el) => el.addEventListener('click', () => {
       const b = this._byId(el.dataset.cvar);
       if (b) { b.variant = el.dataset.cval; this._render(); this._focusBlock(b._id); this._change(); }
+    }));
+    // SOW-169: table structure controls. Each mutates the model then re-renders (structural, so caret loss is fine).
+    const tblCols = (b) => Math.max(1, (Array.isArray(b.head) ? b.head.length : 1));
+    const tblNorm = (b) => { const c = tblCols(b); if (!Array.isArray(b.head)) b.head = []; while (b.head.length < c) b.head.push(''); if (!Array.isArray(b.aligns)) b.aligns = []; while (b.aligns.length < c) b.aligns.push(''); b.aligns.length = c; b.rows = (Array.isArray(b.rows) ? b.rows : []).map((r) => { const row = Array.isArray(r) ? r.slice(0, c) : []; while (row.length < c) row.push(''); return row; }); };
+    this.$$('[data-taddrow]').forEach((el) => el.addEventListener('click', () => { const b = this._byId(el.dataset.taddrow); if (!b) return; tblNorm(b); b.rows.push(new Array(tblCols(b)).fill('')); this._render(); this._change(); }));
+    this.$$('[data-taddcol]').forEach((el) => el.addEventListener('click', () => { const b = this._byId(el.dataset.taddcol); if (!b) return; tblNorm(b); b.head.push(''); b.aligns.push(''); b.rows.forEach((r) => r.push('')); this._render(); this._change(); }));
+    this.$$('[data-trowrm]').forEach((el) => el.addEventListener('click', () => { const b = this._byId(el.dataset.trowrm); if (!b) return; const r = Number(el.dataset.r); if (Array.isArray(b.rows)) b.rows.splice(r, 1); this._render(); this._change(); }));
+    this.$$('[data-tcolrm]').forEach((el) => el.addEventListener('click', () => {
+      const b = this._byId(el.dataset.tcolrm); if (!b) return; const c = Number(el.dataset.c);
+      if (tblCols(b) <= 1) { const i = this._indexOf(b._id); if (i >= 0) { this._blocks.splice(i, 1); this._render(); this._change(); } return; } // last column -> drop the table
+      b.head.splice(c, 1); if (Array.isArray(b.aligns)) b.aligns.splice(c, 1); (b.rows || []).forEach((r) => r.splice(c, 1)); this._render(); this._change();
+    }));
+    this.$$('[data-talign]').forEach((el) => el.addEventListener('click', () => {
+      const b = this._byId(el.dataset.talign); if (!b) return; const c = Number(el.dataset.c);
+      const order = ['', 'left', 'center', 'right']; if (!Array.isArray(b.aligns)) b.aligns = [];
+      b.aligns[c] = order[(order.indexOf(b.aligns[c] || '') + 1) % order.length]; this._render(); this._change();
     }));
     this.$$('[data-up]').forEach((el) => el.addEventListener('click', () => this._move(el.dataset.up, -1)));
     this.$$('[data-down]').forEach((el) => el.addEventListener('click', () => this._move(el.dataset.down, 1)));

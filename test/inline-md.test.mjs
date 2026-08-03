@@ -107,3 +107,18 @@ test('isDangerousUrl catches obfuscated script schemes (entities, control chars,
 test('an entity-obfuscated dangerous href is neutralized in the markdown link path too', () => {
   assert.equal(inlineMdToHtml('[t](&#106;avascript:alertme)'), 't'); // decodes to javascript: -> link dropped
 });
+
+test('a script/handler smuggled into an attributed link inner is stripped; safe marks survive', () => {
+  assert.equal(
+    inlineHtmlToMd('<a href="https://x.com" rel="nofollow"><script>alert(1)</script>hi</a>'),
+    '<a href="https://x.com" rel="nofollow">alert(1)hi</a>', // <script> tags stripped, text kept, no active tag
+  );
+  assert.equal(
+    inlineHtmlToMd('<a href="https://x.com" rel="nofollow"><strong>bold</strong></a>'),
+    '<a href="https://x.com" rel="nofollow"><strong>bold</strong></a>', // nested mark preserved
+  );
+  assert.equal(
+    inlineHtmlToMd('<a href="https://x.com" target="_blank"><b onclick="x()">t</b></a>'),
+    '<a href="https://x.com" rel="noopener" target="_blank"><b>t</b></a>', // handler attribute stripped
+  );
+});
