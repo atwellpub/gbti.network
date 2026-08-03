@@ -7,6 +7,7 @@
 // `json` is for nested objects (e.g. product/profile links) entered as a small JSON blob.
 
 import { IMAGE_GEN_MODELS } from './image-models.mjs';
+import { BANNER_PRESET_KEYS } from '../../src/lib/banner-presets.mjs';
 
 const f = (key, label, kind, extra = {}) => ({ key, label, kind, ...extra });
 
@@ -49,7 +50,14 @@ export const FIELDS = Object.freeze({
     f('iconLarge', 'Icon (large, 1:1)', 'image', { frame: '1/1', previewPx: 96, hint: 'Optional crisper square for the 96px product-page slot on high-density screens. 192x192 or 256x256.' }),
     f('featuredImage', 'Featured cover (spotlight)', 'image', { required: true, frame: '16/10', hint: 'Must be 16:10 (1280x800). The spotlight box is locked to 16:10, so it fills without cropping.' }),
     f('banner', 'Banner', 'image', { frame: '3/1', hint: 'Wide 3:1 strip across the top of the product page (rendered 1200x400, cropped to fill).' }),
-    f('gallery', 'Gallery (screenshots)', 'array', { placeholder: 'image1.png, image2.png' }),
+    // sow-174: a curated color alternative to uploading a banner image, mutually exclusive with `banner` in
+    // the editor (rendered as its own swatch row folded into the banner field, not a generic dropdown).
+    f('bannerPreset', 'Banner color', 'enum', { options: BANNER_PRESET_KEYS }),
+    // sow-172/174: gallery entries carry optional captions, so this is `json`, not `array` -- `array` coerces
+    // through String(), which would flatten a captioned entry to "[object Object]" and destroy the caption
+    // the first time an author re-saved a captioned product.
+    f('gallery', 'Gallery (JSON array of "image.png" or {src,caption})', 'json', { placeholder: '["./images/shot-1.webp", {"src": "./images/shot-2.webp", "caption": "The settings panel"}]' }),
+    f('galleryStyle', 'Gallery style', 'enum', { options: ['grid', 'carousel'], hint: 'Leave unset to pick by count: 6 or more screenshots use the carousel, fewer use the captioned grid.' }),
     f('video', 'Video (YouTube/Vimeo URL)', 'text'),
     f('links', 'Links (JSON array: {type,url,visibility:public|members,primary,label})', 'json'),
     f('publishedAt', 'Published at', 'date'),

@@ -16943,6 +16943,18 @@ function isImageGenTarget(targets) {
   return Array.isArray(targets) && targets.some(isImageGenModel);
 }
 
+// src/lib/banner-presets.mjs
+var BANNER_PRESETS = [
+  { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
+  { key: "amber", label: "Amber", from: "#b57616", to: "#25232b" },
+  { key: "ink", label: "Ink", from: "#393542", to: "#25232b" },
+  // today's existing default hero, unchanged
+  { key: "wordpress", label: "WordPress", from: "#5a8de0", to: "#25232b" },
+  { key: "ide-plugins", label: "IDE Plugins", from: "#9277d4", to: "#25232b" },
+  { key: "mods", label: "Mods", from: "#d8a847", to: "#25232b" }
+];
+var BANNER_PRESET_KEYS = BANNER_PRESETS.map((p) => p.key);
+
 // client/src/schemas.mjs
 var STATUS = external_exports.enum(["draft", "published"]);
 var VISIBILITY = external_exports.enum(["public", "members"]);
@@ -17069,10 +17081,17 @@ var productSchema = external_exports.object({
   // upscaled into a genuine large asset. The render falls back to `icon`.
   iconLarge: external_exports.string().optional(),
   banner: external_exports.string().optional(),
+  // sow-174: mirrors src/content.config.ts. Mutually exclusive with `banner` in the editor.
+  bannerPreset: external_exports.enum(BANNER_PRESET_KEYS).optional(),
   featuredImage: external_exports.string(),
   // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional
   // here: a product published without it passed the client but broke the Astro build (SOW-025, same drift class).
-  gallery: external_exports.array(external_exports.string()).default([]),
+  // sow-172/174: a gallery entry is EITHER a bare path OR { src, caption }. Mirrors src/content.config.ts.
+  // The union matters beyond validation: zod STRIPS unknown keys, so without it a caption would silently
+  // vanish the next time this schema validated a save.
+  gallery: external_exports.array(external_exports.union([external_exports.string(), external_exports.object({ src: external_exports.string(), caption: external_exports.string().optional() })])).default([]),
+  galleryStyle: external_exports.enum(["grid", "carousel"]).optional(),
+  // sow-172: unset resolves by shot count
   video: external_exports.string().optional(),
   links: contentLinks,
   publishedAt: external_exports.coerce.date().optional(),
@@ -20590,7 +20609,14 @@ var FIELDS = Object.freeze({
     f("iconLarge", "Icon (large, 1:1)", "image", { frame: "1/1", previewPx: 96, hint: "Optional crisper square for the 96px product-page slot on high-density screens. 192x192 or 256x256." }),
     f("featuredImage", "Featured cover (spotlight)", "image", { required: true, frame: "16/10", hint: "Must be 16:10 (1280x800). The spotlight box is locked to 16:10, so it fills without cropping." }),
     f("banner", "Banner", "image", { frame: "3/1", hint: "Wide 3:1 strip across the top of the product page (rendered 1200x400, cropped to fill)." }),
-    f("gallery", "Gallery (screenshots)", "array", { placeholder: "image1.png, image2.png" }),
+    // sow-174: a curated color alternative to uploading a banner image, mutually exclusive with `banner` in
+    // the editor (rendered as its own swatch row folded into the banner field, not a generic dropdown).
+    f("bannerPreset", "Banner color", "enum", { options: BANNER_PRESET_KEYS }),
+    // sow-172/174: gallery entries carry optional captions, so this is `json`, not `array` -- `array` coerces
+    // through String(), which would flatten a captioned entry to "[object Object]" and destroy the caption
+    // the first time an author re-saved a captioned product.
+    f("gallery", 'Gallery (JSON array of "image.png" or {src,caption})', "json", { placeholder: '["./images/shot-1.webp", {"src": "./images/shot-2.webp", "caption": "The settings panel"}]' }),
+    f("galleryStyle", "Gallery style", "enum", { options: ["grid", "carousel"], hint: "Leave unset to pick by count: 6 or more screenshots use the carousel, fewer use the captioned grid." }),
     f("video", "Video (YouTube/Vimeo URL)", "text"),
     f("links", "Links (JSON array: {type,url,visibility:public|members,primary,label})", "json"),
     f("publishedAt", "Published at", "date")

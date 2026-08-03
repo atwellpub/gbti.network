@@ -13,6 +13,7 @@
 
 import { z } from 'zod';
 import { isImageGenTarget } from './image-models.mjs';
+import { BANNER_PRESET_KEYS } from '../../src/lib/banner-presets.mjs';
 
 export const STATUS = z.enum(['draft', 'published']);
 export const VISIBILITY = z.enum(['public', 'members']);
@@ -149,9 +150,15 @@ export const productSchema = z.object({
   // upscaled into a genuine large asset. The render falls back to `icon`.
   iconLarge: z.string().optional(),
   banner: z.string().optional(),
+  // sow-174: mirrors src/content.config.ts. Mutually exclusive with `banner` in the editor.
+  bannerPreset: z.enum(BANNER_PRESET_KEYS).optional(),
   featuredImage: z.string(), // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional
   // here: a product published without it passed the client but broke the Astro build (SOW-025, same drift class).
-  gallery: z.array(z.string()).default([]),
+  // sow-172/174: a gallery entry is EITHER a bare path OR { src, caption }. Mirrors src/content.config.ts.
+  // The union matters beyond validation: zod STRIPS unknown keys, so without it a caption would silently
+  // vanish the next time this schema validated a save.
+  gallery: z.array(z.union([z.string(), z.object({ src: z.string(), caption: z.string().optional() })])).default([]),
+  galleryStyle: z.enum(['grid', 'carousel']).optional(), // sow-172: unset resolves by shot count
   video: z.string().optional(),
   links: contentLinks,
   publishedAt: z.coerce.date().optional(),

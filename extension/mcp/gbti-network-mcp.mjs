@@ -17000,6 +17000,18 @@ function isImageGenTarget(targets) {
   return Array.isArray(targets) && targets.some(isImageGenModel);
 }
 
+// src/lib/banner-presets.mjs
+var BANNER_PRESETS = [
+  { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
+  { key: "amber", label: "Amber", from: "#b57616", to: "#25232b" },
+  { key: "ink", label: "Ink", from: "#393542", to: "#25232b" },
+  // today's existing default hero, unchanged
+  { key: "wordpress", label: "WordPress", from: "#5a8de0", to: "#25232b" },
+  { key: "ide-plugins", label: "IDE Plugins", from: "#9277d4", to: "#25232b" },
+  { key: "mods", label: "Mods", from: "#d8a847", to: "#25232b" }
+];
+var BANNER_PRESET_KEYS = BANNER_PRESETS.map((p) => p.key);
+
 // client/src/schemas.mjs
 var STATUS = external_exports.enum(["draft", "published"]);
 var VISIBILITY = external_exports.enum(["public", "members"]);
@@ -17126,10 +17138,17 @@ var productSchema = external_exports.object({
   // upscaled into a genuine large asset. The render falls back to `icon`.
   iconLarge: external_exports.string().optional(),
   banner: external_exports.string().optional(),
+  // sow-174: mirrors src/content.config.ts. Mutually exclusive with `banner` in the editor.
+  bannerPreset: external_exports.enum(BANNER_PRESET_KEYS).optional(),
   featuredImage: external_exports.string(),
   // REQUIRED, mirrors src/content.config.ts (the 16:10 spotlight cover). Was optional
   // here: a product published without it passed the client but broke the Astro build (SOW-025, same drift class).
-  gallery: external_exports.array(external_exports.string()).default([]),
+  // sow-172/174: a gallery entry is EITHER a bare path OR { src, caption }. Mirrors src/content.config.ts.
+  // The union matters beyond validation: zod STRIPS unknown keys, so without it a caption would silently
+  // vanish the next time this schema validated a save.
+  gallery: external_exports.array(external_exports.union([external_exports.string(), external_exports.object({ src: external_exports.string(), caption: external_exports.string().optional() })])).default([]),
+  galleryStyle: external_exports.enum(["grid", "carousel"]).optional(),
+  // sow-172: unset resolves by shot count
   video: external_exports.string().optional(),
   links: contentLinks,
   publishedAt: external_exports.coerce.date().optional(),

@@ -1,6 +1,7 @@
 import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
 import { isImageGenTarget } from '../client/src/image-models.mjs';
+import { BANNER_PRESET_KEYS } from './lib/banner-presets.mjs';
 
 /**
  * Canonical content schemas — source of truth: .data/schemas/content-schemas.md.
@@ -155,6 +156,10 @@ const productShape = ({ image }: { image: any }) => ({
   platforms: z.array(z.string()).default([]),
   pricing: z.enum(['free', 'freemium', 'paid']).optional(),
   version: z.string().optional(),
+  // sow-172: the minimum host/runtime the product needs ("WordPress 6.0+", "VS Code 1.90+"). Distinct
+  // from `platforms`, which lists WHICH hosts it runs on; this is the version floor for one of them.
+  // Rendered as a spec row in the detail page's left rail and in the end-of-body install panel.
+  requires: z.string().optional(),
   pricingUrl: z.string().url().optional(), // SOW-014: where to buy/upgrade, shown when pricing !== 'free'
   // sow-140: the RSS feed of the member-owned product/site. Declaring it does NOTHING by itself: the feed
   // only reaches the network's news pool once an admin approves the product slug in the admin-owned
@@ -163,11 +168,22 @@ const productShape = ({ image }: { image: any }) => ({
   icon: image(), // REQUIRED, 1:1. The SMALL icon (directory card renders it at 64, shown 56).
   iconLarge: image().optional(), // Optional 1:1 LARGE icon for the 96px detail slot; falls back to `icon`.
   banner: image().optional(),
+  // sow-174: an alternative to uploading a banner image. Curated presets only (see banner-presets.mjs for
+  // why); mutually exclusive with `banner` in the editor, resolved by resolveHero() in product-page.mjs.
+  bannerPreset: z.enum(BANNER_PRESET_KEYS as [string, ...string[]]).optional(),
   featuredImage: image(), // REQUIRED marquee cover for the Featured-product spotlight. Must be 16:10 (1280x800); the spotlight media box is locked to 16:10 so the image fills it without cropping.
-  gallery: z.array(image()).default([]),
+  // sow-172: a gallery entry is EITHER a bare image path (every product published before captions existed)
+  // OR { src, caption }. Both shapes normalize through normalizeGallery() in src/lib/product-page.mjs, so
+  // the page never branches on the shape. Captions are content, not decoration: the captioned-grid layout
+  // is built around them.
+  gallery: z.array(z.union([image(), z.object({ src: image(), caption: z.string().optional() })])).default([]),
+  // sow-172: how the screenshots render. Left unset it resolves by count (6+ shots -> carousel, fewer ->
+  // captioned grid), which is the rule the design handoff states in prose; set it to pin one per product.
+  galleryStyle: z.enum(['grid', 'carousel']).optional(),
   video: z.string().optional(), // YouTube/Vimeo URL or id (embed-only); a product demo rendered by VideoEmbed
   links: contentLinks, // SOW-014: array of typed, visibility-tagged links (was a flat object)
   publishedAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(), // sow-172: last meaningful revision; shown in the byline + rail spec block
   redirectFrom: z.array(z.string()).default([]),
 });
 const product = defineCollection({

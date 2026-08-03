@@ -1,4 +1,18 @@
 ---
+// sow-172: the product detail page, rebuilt on the "Doc Shell" layout (design direction 1b).
+//
+// The page exists to earn an install click, so the install call to action is never more than a glance away:
+// a banner hero, an install bar that pins under the site header and follows the reader down, a persistent
+// left rail (contents / specs / links / favourited by), and one 660px reading column. The site header and
+// footer are untouched; the install bar is a page element that stacks below the header's own sticky.
+//
+// This is a restyle and a reorder, not a rewrite of behaviour. Every contract the rest of the system relies
+// on is preserved verbatim: the data-gbti-region hooks the client edits in place, EditHooks / TouchSignal,
+// the SOW-016 gating modes via hasPublicPage / isStub / LockedBody, the SOW-014 inert members-only links,
+// and the SOW-050 shared ContentMeta / ContentActions / ContentFooter cluster.
+//
+// The layout CSS lives in src/styles/gbti-v3.css (.pd-*), not here, because the WorkBench draft preview
+// renders the same structure and must not drift from it.
 import { getCollection, render } from 'astro:content';
 import { Image } from 'astro:assets';
 import BaseLayout from '../../layouts/BaseLayout.astro';
@@ -13,10 +27,22 @@ import { refCodeForAuthor } from '../../lib/referral';
 import { defaultFeatureImage } from '../../lib/feature-image';
 import LockedBody from '../../components/LockedBody.astro';
 import { hasPublicPage, isStub } from '../../lib/content';
-import { breadcrumb, leafLabel } from '../../lib/taxonomy';
+import { breadcrumb } from '../../lib/taxonomy';
 import { favoriteCount } from '../../lib/favorites';
 import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the opt-in favoriter list
 import { aliasSlugsOf } from '../../lib/content-index.mjs'; // SOW-112: pre-rename slugs for count/discussion aliasing
+import {
+  normalizeGallery,
+  hasCaptions,
+  resolveGalleryStyle,
+  buildToc,
+  repoUrl as findRepo,
+  resolvePrimaryCta,
+  railLinks,
+  linkLabel,
+  isLockedLink,
+  resolveHero,
+} from '../../lib/product-page.mjs';
 
 export async function getStaticPaths() {
   const products = (await getCollection('product')).filter(hasPublicPage);
@@ -25,145 +51,265 @@ export async function getStaticPaths() {
 
 const { product } = Astro.props;
 const d = product.data;
-const { Content } = await render(product);
+const { Content, headings } = await render(product);
 const productUrl = new URL(`/products/${d.slug}/`, Astro.site ?? 'https://gbti.network').href;
 
-// SOW-014: typed, visibility-tagged links. Public links are live; member-only links render INERT
-// (locked) on the static site (open the GBTI client to unlock). This is not a confidentiality control.
-const LINK_LABELS: Record<string, string> = {
-  homepage: 'Homepage', repository: 'Repository', mirror: 'Mirror',
-  download: 'Download', documentation: 'Documentation', support: 'Support',
-};
-const linkLabel = (l: { type: string; label?: string }) => l.label ?? LINK_LABELS[l.type] ?? l.type;
+const stub = isStub(product);
 const links = d.links ?? [];
-// The repository is surfaced by the single "View on GitHub" button below (pointing at the real repo),
-// so it is not rendered as its own redundant button in the Get card.
-const repoUrl = links.find((l) => l.type === 'repository')?.url ?? null;
-const getLinks = links.filter((l) => l.type !== 'repository');
+const repoUrl = findRepo(links);
+const primary = resolvePrimaryCta(links, d.pricingUrl);
+const asideLinks = railLinks(links, primary, d.pricingUrl, d.pricing);
+
+// sow-174: the hero is an uploaded banner image, an author-chosen color preset, or the fallback chain (the
+// required 16:10 spotlight cover, then the existing default gradient) — resolveHero() picks exactly one.
+const hero = resolveHero(d.banner, d.bannerPreset, d.featuredImage);
+const markImage = d.iconLarge ?? d.icon;
+const category = breadcrumb(d.categories).join(' › ');
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const meta = [
-  ['Category', breadcrumb(d.categories).join(' › ')],
+const favs = favoriteCount('product', d.slug, aliasSlugsOf(d));
+
+const shots = stub ? [] : normalizeGallery(d.gallery);
+const galleryStyle = resolveGalleryStyle(d.galleryStyle, shots.length);
+const captioned = hasCaptions(shots);
+const toc = buildToc(headings, { hasBody: !stub, hasGallery: shots.length > 0, hasDiscussion: true });
+
+// The rail's spec block. Every row is conditional: a product that declares none of this shows no block at
+// all rather than a column of empty labels.
+const specs = [
   ...(d.version ? [['Version', d.version]] : []),
-  ...(d.platforms?.length ? [['Platforms', d.platforms.join(', ')]] : []),
-  ...(d.pricing ? [['Pricing', cap(d.pricing)]] : []),
+  ...(d.requires ? [['Requires', d.requires]] : []),
+  ...(d.platforms?.length ? [['Works with', d.platforms.join(', ')]] : []),
+  ...(d.updatedAt ? [['Updated', d.updatedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })]] : []),
+  ...(d.publishedAt ? [['Published', d.publishedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })]] : []),
 ] as [string, string][];
+
+// The end-of-body panel repeats the same offer for a reader who scrolled the whole page.
+const ctaSub = [d.pricing ? cap(d.pricing) : null, d.requires].filter(Boolean).join(' · ');
+const lockedHint = (l: { encrypted?: boolean }) =>
+  l.encrypted
+    ? 'Encrypted member content. Open in the GBTI client to unlock.'
+    : 'Members only. Open in the GBTI client to unlock.';
 ---
 <BaseLayout title={d.title} description={d.shortDescription} ogImage={(d.featuredImage ?? d.banner ?? d.icon)?.src ?? defaultFeatureImage('product')}>
-  <!-- Banner band (dark) -->
-  <section class="band-sm dark">
-    <div class="wrap">
-      {d.banner && (
-        <Image src={d.banner} alt={`${d.title} banner`} width={1200} height={400} class="card" style="width:100%;object-fit:cover;margin-bottom:32px" />
-      )}
-      <div class="flex items-center g24 wrap-w" style="text-align:center;justify-content:center;flex-direction:column">
-        {/* The 96px slot wants a 192px source at 2x, which a 128x128 icon cannot supply, so prefer the
-            optional larger square when the author provided one. Falls back to `icon` for every product
-            published before the field existed. */}
-        <Image src={d.iconLarge ?? d.icon} alt={`${d.title} icon`} width={96} height={96} class="card" style="width:96px;height:96px;flex:none;object-fit:contain;padding:8px;background:rgba(255,255,255,.08);border-radius:var(--r-lg)" />
-        <div style="max-width:680px">
-          <p class="eyebrow">{leafLabel(d.categories)}</p>
-          <h1 data-gbti-region="title" class="h1 mt12" style="color:#fff">{d.title}</h1>
-          <p class="lead mt16">{d.shortDescription}</p>
-          <div class="mt16" style="display:flex;justify-content:center">
-            <ContentMeta author={d.author} publishedAt={d.publishedAt} dark center />
-          </div>
-          <div class="mt16" style="display:flex;justify-content:center">
-            <ContentActions type="product" slug={d.slug} title={d.title} url={productUrl} author={d.author} categories={d.categories} count={favoriteCount('product', d.slug, aliasSlugsOf(d))} />
-          </div>
+  <div class="pd-shell">
+    <!-- Hero: the banner, scrimmed, with the product mark and the one-line pitch sitting on it. -->
+    <section class="pd-hero" data-preset={hero.preset}>
+      {hero.image && <Image src={hero.image} alt="" widths={[900, 1600]} sizes="100vw" class="pd-hero-img" />}
+      <div class="pd-hero-scrim"></div>
+      <div class="pd-wrap pd-hero-in">
+        <Image src={markImage} alt={`${d.title} icon`} width={124} height={124} class="pd-mark" />
+        <div class="pd-hero-txt">
+          {category && <p class="pd-eyebrow">{category}</p>}
+          <h1 data-gbti-region="title" class="pd-title">{d.title}</h1>
+          <p class="pd-pitch">{d.shortDescription}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install bar: in the flow directly under the hero, pinned to the top of the reading area on scroll. -->
+    <div class="pd-bar">
+      <div class="pd-wrap pd-bar-in">
+        <div class="pd-bar-id">
+          <Image src={d.icon} alt="" width={44} height={44} class="pd-bar-mark" />
+          <span class="pd-bar-name">{d.title}</span>
+        </div>
+        {d.version && <span class="pd-bar-spec">v{d.version}</span>}
+        {d.pricing && <span class="pd-bar-spec on">{cap(d.pricing)}</span>}
+        {favs > 0 && (
+          <span class="pd-bar-fav" title={`${favs} member${favs === 1 ? '' : 's'} favourited this`}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-heart" /></svg>{favs}
+          </span>
+        )}
+        <div class="pd-bar-actions">
+          {repoUrl && (
+            <a href={repoUrl} rel="noopener" class="btn btn-ghost pd-bar-gh">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-github" /></svg>
+              View on GitHub
+            </a>
+          )}
+          {primary && (isLockedLink(primary) ? (
+            <span class="btn btn-primary pd-locked-btn" data-tooltip={lockedHint(primary)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock" /></svg>
+              {linkLabel(primary)}
+            </span>
+          ) : (
+            <a href={primary.url} rel="noopener" class="btn btn-primary">{linkLabel(primary)}</a>
+          ))}
         </div>
       </div>
     </div>
-  </section>
 
-  <section class="band tint">
-    <div class="wrap">
+    <div class="pd-wrap">
       <div class="pd-grid">
-        <article class="card" style="padding:36px 40px" data-gbti-region="body">
-          {isStub(product) ? (
-            <LockedBody encPath={d.encryptedBody} kind="body" />
-          ) : (
-            <>
-              {d.video && (
-                <div class="pvideo">
-                  <VideoEmbed video={d.video} title={`${d.title} demo`} />
-                </div>
-              )}
-              <Prose>
-                <Content />
-              </Prose>
-              {d.encryptedBody && <LockedBody encPath={d.encryptedBody} kind="section" />}
-            </>
+        <aside class="pd-rail">
+          {toc.length > 0 && (
+            <nav class="pd-toc" aria-label="Contents" data-pd-toc>
+              <span class="pd-rail-lab">Contents</span>
+              {toc.map((t, i) => <a href={`#${t.id}`} data-pd-toc-link={t.id} class:list={[i === 0 && 'on']}>{t.label}</a>)}
+            </nav>
           )}
-        </article>
 
-        <aside class="flex col g24">
-          <div class="card" style="padding:26px">
-            <h2 class="h3">Get {d.title}</h2>
-            <div class="flex col g12 mt16">
-              {getLinks.map((l) => (
-                l.visibility === 'members' ? (
-                  <span class="btn btn-ghost" style="width:100%;cursor:not-allowed;opacity:.75" data-tooltip={l.encrypted ? 'Encrypted member content. Open in the GBTI client to unlock.' : 'Members only. Open in the GBTI client to unlock.'}>
-                    <svg viewBox="0 0 24 24" width="16" height="16"><use href="#ico-lock"/></svg>
-                    {linkLabel(l)} <span class="mono" style="font-size:11px;opacity:.8">{l.encrypted ? 'encrypted' : 'members'}</span>
-                  </span>
-                ) : (
-                  <a href={l.url} rel="noopener" class:list={['btn', l.primary ? 'btn-primary' : 'btn-ghost']} style="width:100%">{linkLabel(l)}</a>
-                )
-              ))}
-              {d.pricing && d.pricing !== 'free' && d.pricingUrl && (
-                <a href={d.pricingUrl} rel="noopener" class="btn btn-ghost" style="width:100%">Pricing</a>
-              )}
-              {repoUrl && (
-                <a href={repoUrl} rel="noopener" class="btn btn-ghost" style="width:100%">
-                  <svg viewBox="0 0 24 24" width="18" height="18"><use href="#ico-github"/></svg>
-                  View on GitHub
-                </a>
+          {specs.length > 0 && (
+            <div class="pd-block">
+              <dl class="pd-specs">
+                {specs.map(([k, v]) => (
+                  <div class="pd-spec"><dt>{k}</dt><dd>{v}</dd></div>
+                ))}
+              </dl>
+              {d.tags?.length > 0 && (
+                <div class="pd-tags">
+                  {d.tags.map((tag: string) => <a class="pd-tag" href={`/feeds/?tag=${encodeURIComponent(tag)}`}>{tag}</a>)}
+                </div>
               )}
             </div>
-          </div>
+          )}
 
-          <div class="card" style="padding:26px">
-            <p class="eyebrow">Details</p>
-            <dl class="flex col g12 mt16">
-              {meta.map(([k, v]) => (
-                <div class="flex justify-between g16" style="border-top:1.5px solid var(--line);padding-top:12px">
-                  <dt class="body-sm muted">{k}</dt>
-                  <dd class="body-sm" style="text-align:right;font-weight:600;color:var(--fg)">{v}</dd>
-                </div>
+          {asideLinks.length > 0 && (
+            <div class="pd-block pd-rail-links">
+              <span class="pd-rail-lab">Links</span>
+              {asideLinks.map((l) => (
+                isLockedLink(l) ? (
+                  <span class="pd-rail-link locked" data-tooltip={lockedHint(l)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock" /></svg>{linkLabel(l)}
+                  </span>
+                ) : (
+                  <a class="pd-rail-link" href={l.url} rel="noopener">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-link" /></svg>{linkLabel(l)}
+                  </a>
+                )
               ))}
-            </dl>
-          </div>
+            </div>
+          )}
 
-          <FavoritedBy type="product" slug={d.slug} aliases={aliasSlugsOf(d)} />
+          <div class="pd-block">
+            <FavoritedBy type="product" slug={d.slug} aliases={aliasSlugsOf(d)} />
+          </div>
         </aside>
-      </div>
 
-      {!isStub(product) && d.gallery.length > 0 && (
-        <div class="pgallery-wrap">
-          <p class="eyebrow">Screenshots</p>
-          <h2 class="h3 mt8">See {d.title} in action</h2>
-          <div class="pgallery mt20">
-            {d.gallery.map((img, i) => (
-              <a href={img.src} target="_blank" rel="noopener" class="pgallery-item card" aria-label={`Open screenshot ${i + 1} of ${d.title}`}>
-                <Image src={img} widths={[420, 840]} sizes="(max-width:700px) 100vw, 360px" alt={`${d.title} screenshot ${i + 1}`} />
-              </a>
-            ))}
+        <div class="pd-col">
+          <div class="pd-byline">
+            <ContentMeta author={d.author} publishedAt={d.publishedAt} updatedAt={d.updatedAt} />
+            <ContentActions type="product" slug={d.slug} title={d.title} url={productUrl} author={d.author} categories={d.categories} count={favs} />
           </div>
-        </div>
-      )}
 
-      <ContentFooter type="product" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
+          {!stub && d.video && (
+            <div class="pvideo">
+              <VideoEmbed video={d.video} title={`${d.title} demo`} />
+            </div>
+          )}
+
+          <article id="pd-overview" data-gbti-region="body">
+            {stub ? (
+              /* Mode B: a public stub page. The teaser says plainly what is behind the wall; LockedBody keeps
+                 owning the decrypt path, so a member's client still fills this in place. */
+              <div class="pd-teaser">
+                <span class="pd-gate-lab">Members only</span>
+                <h2 class="pd-gate-title">This write-up lives inside the network</h2>
+                <p class="pd-gate-sub">{d.shortDescription}</p>
+                <div class="pd-skel" aria-hidden="true"><i></i><i></i><i></i></div>
+                <LockedBody encPath={d.encryptedBody} kind="body" readerPath={product.id} readerType="product" />
+              </div>
+            ) : (
+              <>
+                <Prose>
+                  <Content />
+                </Prose>
+                {d.encryptedBody && (
+                  /* Mode C: the public body, then the withheld tail. Always last in the article region,
+                     never interleaved between public sections. */
+                  <div class="pd-locked-tail">
+                    <span class="pd-gate-lab">Members-only section</span>
+                    <LockedBody encPath={d.encryptedBody} kind="section" readerPath={product.id} readerType="product" />
+                  </div>
+                )}
+              </>
+            )}
+          </article>
+
+          {(primary || repoUrl) && (
+            <div class="pd-cta">
+              <div class="pd-cta-txt">
+                <div class="pd-cta-title">Ready to install?</div>
+                {ctaSub && <p class="pd-cta-sub">{ctaSub}</p>}
+              </div>
+              <div class="pd-cta-btns">
+                {primary && !isLockedLink(primary) && (
+                  <a href={primary.url} rel="noopener" class="btn btn-primary">{linkLabel(primary)}</a>
+                )}
+                {repoUrl && (
+                  <a href={repoUrl} rel="noopener" class="btn btn-ghost">
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-github" /></svg>
+                    View on GitHub
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {shots.length > 0 && (
+            <div id="pd-screenshots" class="pd-gallery pd-anchor">
+              <div class="pd-gal-head">
+                <span class="pd-rail-lab">Screenshots</span>
+              </div>
+              <h2 class="pd-gal-title">See {d.title} in action</h2>
+
+              {galleryStyle === 'grid' ? (
+                <div class="pd-shots">
+                  {shots.map((s, i) => (
+                    <figure class="pd-shot">
+                      <a href={s.src.src} target="_blank" rel="noopener" aria-label={`Open screenshot ${i + 1} of ${d.title}`}>
+                        <Image src={s.src} widths={[420, 840]} sizes="(max-width:900px) 100vw, 320px" alt={s.caption || `${d.title} screenshot ${i + 1}`} />
+                      </a>
+                      {captioned && <figcaption>{s.caption}</figcaption>}
+                    </figure>
+                  ))}
+                </div>
+              ) : (
+                <div class="pd-carousel" data-pd-carousel data-captions={JSON.stringify(shots.map((s) => s.caption))}>
+                  <div class="pd-stage">
+                    <div class="pd-frames" data-pd-frames>
+                      {shots.map((s, i) => (
+                        <div class="pd-frame">
+                          <Image src={s.src} widths={[660, 1320]} sizes="(max-width:900px) 100vw, 660px" alt={s.caption || `${d.title} screenshot ${i + 1}`} />
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" class="pd-arrow prev" data-pd-prev aria-label="Previous screenshot" hidden>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    </button>
+                    <button type="button" class="pd-arrow next" data-pd-next aria-label="Next screenshot" hidden>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    </button>
+                  </div>
+                  <div class="pd-cap-row">
+                    <span class="pd-count" data-pd-count>{String(1).padStart(2, '0')} / {String(shots.length).padStart(2, '0')}</span>
+                    {captioned && <p class="pd-cap" data-pd-cap>{shots[0].caption}</p>}
+                  </div>
+                  <div class="pd-strip" data-pd-strip>
+                    {shots.map((s, i) => (
+                      <button type="button" class="pd-thumb" data-pd-go={i} aria-current={i === 0 ? 'true' : 'false'} aria-label={`Screenshot ${i + 1}`}>
+                        <Image src={s.src} widths={[120, 240]} sizes="90px" alt="" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <ContentFooter type="product" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
+        </div>
+      </div>
     </div>
-  </section>
+  </div>
   <EditHooks type="product" owner={d.author} slug={d.slug} />
   <TouchSignal type="product" ownerId={refCodeForAuthor(d.author)} slug={d.slug} />
 </BaseLayout>
 
-<style>
-  /* sow-169: .pd-grid and .pvideo moved to src/styles/gbti-v3.css so the preview route shares them. */
-  .pgallery-wrap { margin-top: 44px; }
-  .pgallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-  .pgallery-item { display: block; padding: 0; overflow: hidden; line-height: 0; background: var(--ink-2, #1c1a22); transition: transform .15s ease, box-shadow .15s ease; }
-  .pgallery-item:hover { transform: translateY(-3px); box-shadow: var(--sh); }
-  .pgallery-item :global(img) { width: 100%; height: 188px; object-fit: cover; object-position: top; display: block; }
-</style>
+<script>
+  // The contents scroll-spy and the carousel controls. Shared with the WorkBench draft preview, which
+  // renders this same structure at runtime (src/lib/pd-enhance.mjs).
+  import { initToc, initCarousel } from '../../lib/pd-enhance.mjs';
+  initToc();
+  initCarousel();
+</script>

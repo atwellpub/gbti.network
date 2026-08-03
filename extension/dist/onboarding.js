@@ -2142,6 +2142,18 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-discussion", GbtiDiscussion);
 
+  // src/lib/banner-presets.mjs
+  var BANNER_PRESETS = [
+    { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
+    { key: "amber", label: "Amber", from: "#b57616", to: "#25232b" },
+    { key: "ink", label: "Ink", from: "#393542", to: "#25232b" },
+    // today's existing default hero, unchanged
+    { key: "wordpress", label: "WordPress", from: "#5a8de0", to: "#25232b" },
+    { key: "ide-plugins", label: "IDE Plugins", from: "#9277d4", to: "#25232b" },
+    { key: "mods", label: "Mods", from: "#d8a847", to: "#25232b" }
+  ];
+  var BANNER_PRESET_KEYS = BANNER_PRESETS.map((p) => p.key);
+
   // client-ui/src/elements/gbti-content-editor.mjs
   var _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
   var DOC = _svg('<path d="M7 3h7l4 4v14H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.2V7.5H18M9 12.5h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
@@ -2186,7 +2198,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       { title: "Details", open: true, keys: ["visibility", "shortDescription", "categories", "tags"] },
       { title: "Pricing", open: true, keys: ["pricing", "pricingUrl"] },
       { title: "Links", open: true, keys: ["links"] },
-      { title: "Media", open: true, keys: ["icon", "featuredImage", "banner"] }
+      { title: "Media", open: true, keys: ["icon", "featuredImage", "banner"] },
+      // sow-174: gallery/galleryStyle existed in the schema + form-fields already but were never listed in any
+      // section, so they were silently hidden-submitted with no control to see or change them. New section.
+      { title: "Gallery", open: false, keys: ["gallery", "galleryStyle"] }
     ],
     prompt: [
       { title: "Details", open: true, keys: ["visibility", "shortDescription", "targets", "categories", "tags"] },
@@ -2358,7 +2373,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const schema = RAIL_SCHEMA[this.type] || RAIL_SCHEMA.post;
       const schemaKeys = new Set(schema.flatMap((s) => s.keys));
       const fieldByKey = new Map(this.fields.map((f) => [f.key, f]));
-      const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== "publicStub");
+      const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== "publicStub" && f.key !== "bannerPreset");
       const sectionsHtml = schema.map((sec) => {
         let inner = sec.keys.map((key) => {
           const f = fieldByKey.get(key);
@@ -2536,6 +2551,27 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .coverframe .ph svg { width:26px; height:26px; opacity:.5; } .coverframe .ph .mono { font-family:var(--font-mono,monospace); font-size:11px; }
         .coverframe img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
         .coverbtns { display:flex; gap:8px; }
+        /* sow-174: banner color-preset swatches, folded into the banner cover control (mutually exclusive
+           with the image above it -- see doCoverImage/clearCover). */
+        .swatch-or { font-size:11.5px; color:var(--s-fg-mute); text-align:center; margin:2px 0; }
+        .swatchrow { display:flex; flex-wrap:wrap; gap:7px; }
+        .swatch { display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:12px; font-weight:600; color:var(--s-fg-soft); padding:6px 11px 6px 7px; border:1.5px solid var(--s-line-2); border-radius:999px; background:var(--s-surface); cursor:pointer; transition:border-color .15s,color .15s; }
+        .swatch:hover { border-color:var(--s-fg-mute); color:var(--s-fg); }
+        .swatch.on { border-color:var(--s-green); color:var(--s-fg); background:var(--s-tint); }
+        .sw-dot { width:16px; height:16px; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
+        /* sow-174: gallery-layout picker (Auto / Grid / Carousel), illustrated cards instead of a <select>. */
+        .gs-cards { display:flex; gap:10px; flex-wrap:wrap; }
+        .gs-card { display:flex; flex-direction:column; align-items:flex-start; gap:8px; width:132px; padding:12px; border:1.5px solid var(--s-line-2); border-radius:9px; background:var(--s-surface); font:inherit; text-align:left; cursor:pointer; transition:border-color .15s,background .15s; }
+        .gs-card:hover { border-color:var(--s-fg-mute); }
+        .gs-card.on { border-color:var(--s-green); background:var(--s-tint); }
+        .gs-shape { display:flex; align-items:center; gap:4px; width:100%; height:34px; }
+        .gs-tile { flex:1; align-self:stretch; border-radius:4px; background:var(--s-surface-3); }
+        .gs-frame { display:block; width:100%; height:22px; border-radius:4px; background:var(--s-surface-3); }
+        .gs-strip { display:flex; gap:3px; width:100%; height:8px; margin-top:2px; }
+        .gs-strip i { flex:1; border-radius:2px; background:var(--s-surface-3); font-style:normal; }
+        .gs-name { font-size:12.5px; font-weight:700; color:var(--s-fg); }
+        .gs-card.on .gs-name { color:var(--s-green-fg); }
+        .gs-desc { font-size:11px; line-height:1.35; color:var(--s-fg-mute); }
         /* SOW-062 P6: product links[] row editor */
         .linkrows { display:flex; flex-direction:column; gap:9px; margin-bottom:8px; }
         .linkrow { display:flex; flex-direction:column; gap:8px; padding:10px; border:1.5px solid var(--s-line-2); border-radius:8px; background:var(--s-surface-2); }
@@ -2727,6 +2763,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           if (cf) cf.className = "coverframe " + (fb.dataset.frame === "hero" ? "hero" : "card4");
         }));
       });
+      this.$$("[data-swatches]").forEach((row) => {
+        const cover = row.closest("[data-cover]");
+        const hidden = row.querySelector('[data-key="bannerPreset"]');
+        row.querySelectorAll("[data-preset]").forEach((btn) => btn.addEventListener("click", () => {
+          row.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("on", b === btn));
+          if (hidden) hidden.value = btn.dataset.preset;
+          if (cover) this.clearCover(cover);
+        }));
+      });
+      this.$$("[data-gscards]").forEach((row) => {
+        const hidden = row.querySelector('input[type="hidden"]');
+        row.querySelectorAll("[data-gs]").forEach((btn) => btn.addEventListener("click", () => {
+          row.querySelectorAll("[data-gs]").forEach((b) => b.classList.toggle("on", b === btn));
+          if (hidden) hidden.value = btn.dataset.gs;
+        }));
+      });
       const be = this.$("#body");
       if (be) {
         be.itemPath = this.itemPath;
@@ -2765,6 +2817,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const opts = (f.options || ["draft", "published"]).map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("");
         return wrap(`${label}<div class="statusrow"><span class="dotpill" data-statuspill><span class="d"></span><span data-statustxt>${esc(v || "draft")}</span></span><select class="selbox" data-key="status" data-kind="enum" style="flex:1">${opts}</select></div>`);
       }
+      if (f.kind === "enum" && f.key === "galleryStyle") {
+        const cards = [
+          { key: "", name: "Auto", desc: "Picks a layout by shot count", shape: "" },
+          { key: "grid", name: "Grid", desc: "Captioned, 2-up", shape: '<span class="gs-tile"></span><span class="gs-tile"></span>' },
+          { key: "carousel", name: "Carousel", desc: "One large frame + a filmstrip", shape: '<span class="gs-frame"></span><span class="gs-strip"><i></i><i></i><i></i></span>' }
+        ];
+        const cur = v || "";
+        const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? " on" : ""}" data-gs="${c.key}">
+        <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join("");
+        return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
+      }
       if (f.kind === "enum") {
         return wrap(`${label}<select class="selbox" data-key="${f.key}" data-kind="enum">${(f.options || []).map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`);
       }
@@ -2785,12 +2848,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const frameStyle = framed ? ` style="aspect-ratio:${esc(f.frame)}${f.previewPx ? `;max-width:${Number(f.previewPx)}px` : ""}"` : "";
         const picker = framed ? "" : '<div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>';
         const hint = f.hint ? `<div class="urlprev" style="color:var(--s-fg-soft)">${esc(f.hint)}</div>` : "";
+        const presetVal = f.key === "banner" ? String(this.preset?.input?.bannerPreset || "") : "";
+        const swatchesHtml = f.key === "banner" ? `<div class="swatchrow" data-swatches>${BANNER_PRESETS.map((p) => `<button type="button" class="swatch${p.key === presetVal ? " on" : ""}" data-preset="${p.key}" title="${esc(p.label)}">
+          <span class="sw-dot" style="background:linear-gradient(150deg,${p.from},${p.to})"></span>${esc(p.label)}</button>`).join("")}
+        <input data-key="bannerPreset" data-kind="enum" type="hidden" value="${esc(presetVal)}" /></div>` : "";
         return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? "" : " hidden"}>${label}${hint}
         <div class="cover" data-cover>
           ${picker}
           <div class="coverframe${framed ? "" : " card4"}" data-coverframe${frameStyle}>${this._coverFrameInner(url)}</div>
           <input type="file" accept="image/*" hidden data-cover-file />
           <div class="coverbtns"><button type="button" class="ebtn" data-cover-pick>${has ? "Replace image" : "Choose image"}</button><button type="button" class="ebtn" data-cover-clear${has ? "" : " hidden"}>Remove</button></div>
+          ${swatchesHtml ? `<div class="swatch-or">or pick a color</div>${swatchesHtml}` : ""}
           <input data-key="${f.key}" data-kind="image" type="hidden" value="${esc(v)}" />
         </div></div>`;
       }
@@ -3282,9 +3350,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (pick) pick.textContent = "Replace image";
       try {
         const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(",")[1] || "" });
-        const el = control.querySelector("[data-key]");
+        const el = control.querySelector('[data-key][data-kind="image"]');
         if (el) el.value = res.path;
         this.out(`Cover image staged: <code>${esc(res.path)}</code>`);
+        const swatches = control.querySelector("[data-swatches]");
+        if (swatches) {
+          swatches.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("on"));
+          const presetInput = swatches.querySelector('[data-key="bannerPreset"]');
+          if (presetInput) presetInput.value = "";
+        }
       } catch (err) {
         const h = failHint(err);
         this.out(esc(h.upgrade ? `${h.text} Upgrade at gbti.network/membership.` : h.text), "danger");
@@ -3292,7 +3366,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     clearCover(control) {
       if (!control) return;
-      const el = control.querySelector("[data-key]");
+      const el = control.querySelector('[data-key][data-kind="image"]');
       if (el) el.value = "";
       const cf = control.querySelector("[data-coverframe]");
       if (cf) cf.innerHTML = this._coverFrameInner("");

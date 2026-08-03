@@ -50,6 +50,9 @@ const href = authorHref(author);
   .ab-link:hover .ar { transform: translateX(3px); }
   @media (max-width: 560px) {
     .author-box { flex-wrap: wrap; }
-    .ab-link { width: 100%; margin-left: 61px; }
+    /* The link drops to its own row, indented to line up under the text column (46px avatar + 15px gap).
+       The width must SUBTRACT that indent: `width: 100%` with a left margin is 100% + 61px, which overflowed
+       the card by 61px on every article, prompt and product page (caught by check:overflow, sow-172). */
+    .ab-link { width: calc(100% - 61px); margin-left: 61px; }
   }
 </style>

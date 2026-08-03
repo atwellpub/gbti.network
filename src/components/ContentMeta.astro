@@ -13,11 +13,14 @@ import StackedAvatars from './StackedAvatars.astro';
 interface Props {
   author: string;
   publishedAt?: Date;
+  updatedAt?: Date; // sow-172: shown after the published date when a revision date exists, never instead of it
   stack?: AvatarItem[]; // when provided, render the stacked avatar set instead of a single author avatar
   center?: boolean;
   dark?: boolean;
 }
-const { author, publishedAt, stack, center = false, dark = false } = Astro.props;
+const { author, publishedAt, updatedAt, stack, center = false, dark = false } = Astro.props;
+// Same-day edits are noise in a byline, so an update only earns a line once it is a different day.
+const showUpdated = Boolean(updatedAt && (!publishedAt || updatedAt.toDateString() !== publishedAt.toDateString()));
 const prof = (await getCollection('profile')).find((p) => p.data.username === author)?.data;
 const name = prof?.displayName ?? authorDisplay(author);
 const avatar = authorAvatar(author, prof?.avatar);
@@ -30,6 +33,7 @@ const href = authorHref(author);
   <div class="cm-txt">
     <a href={href} class="cm-name">{name}</a>
     {publishedAt && <time class="cm-date" datetime={publishedAt.toISOString()}>{formatDate(publishedAt)}</time>}
+    {showUpdated && updatedAt && <time class="cm-date" datetime={updatedAt.toISOString()}>Updated {formatDate(updatedAt)}</time>}
   </div>
 </div>
 

@@ -11,6 +11,7 @@ import { resolveContentAsset } from '../assets.mjs'; // SOW-062 P3 + sow-165: re
 import './gbti-doc-editor.mjs'; // SOW-062 P5: the cohesive WYSIWYG body editor (same #body.value Markdown contract)
 import './gbti-discussion.mjs'; // SOW-062 P6: the shared discussion thread, embedded in the editor for published items
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
+import { BANNER_PRESETS } from '../../../src/lib/banner-presets.mjs'; // sow-174: the curated banner-color swatches
 
 // SOW-062 P6: inline icons for the edhead toolbar + section headers (the design's sprite is not in the shadow root).
 const _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
@@ -74,6 +75,9 @@ const RAIL_SCHEMA = {
     { title: 'Pricing', open: true, keys: ['pricing', 'pricingUrl'] },
     { title: 'Links', open: true, keys: ['links'] },
     { title: 'Media', open: true, keys: ['icon', 'featuredImage', 'banner'] },
+    // sow-174: gallery/galleryStyle existed in the schema + form-fields already but were never listed in any
+    // section, so they were silently hidden-submitted with no control to see or change them. New section.
+    { title: 'Gallery', open: false, keys: ['gallery', 'galleryStyle'] },
   ],
   prompt: [
     { title: 'Details', open: true, keys: ['visibility', 'shortDescription', 'targets', 'categories', 'tags'] },
@@ -221,7 +225,9 @@ class GbtiContentEditor extends GbtiElement {
     // NOTE: headerKeys (title, slug) MUST stay in hiddenFields so their hidden [data-key] mirror inputs are rendered
     // -- the inline header contenteditables (data-header) mirror INTO those inputs via _bindHeader, and gather()
     // reads them. Excluding headerKeys here drops title + slug from every publish/draft-save (both are required).
-    const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== 'publicStub');
+    // sow-174: bannerPreset is excluded exactly like publicStub above -- it renders its own swatch row folded
+    // into the banner field's own markup (see fieldHtml), never as an independent row.
+    const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== 'publicStub' && f.key !== 'bannerPreset');
     const sectionsHtml = schema.map((sec) => {
       let inner = sec.keys.map((key) => {
         const f = fieldByKey.get(key);
@@ -405,6 +411,27 @@ class GbtiContentEditor extends GbtiElement {
         .coverframe .ph svg { width:26px; height:26px; opacity:.5; } .coverframe .ph .mono { font-family:var(--font-mono,monospace); font-size:11px; }
         .coverframe img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
         .coverbtns { display:flex; gap:8px; }
+        /* sow-174: banner color-preset swatches, folded into the banner cover control (mutually exclusive
+           with the image above it -- see doCoverImage/clearCover). */
+        .swatch-or { font-size:11.5px; color:var(--s-fg-mute); text-align:center; margin:2px 0; }
+        .swatchrow { display:flex; flex-wrap:wrap; gap:7px; }
+        .swatch { display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:12px; font-weight:600; color:var(--s-fg-soft); padding:6px 11px 6px 7px; border:1.5px solid var(--s-line-2); border-radius:999px; background:var(--s-surface); cursor:pointer; transition:border-color .15s,color .15s; }
+        .swatch:hover { border-color:var(--s-fg-mute); color:var(--s-fg); }
+        .swatch.on { border-color:var(--s-green); color:var(--s-fg); background:var(--s-tint); }
+        .sw-dot { width:16px; height:16px; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
+        /* sow-174: gallery-layout picker (Auto / Grid / Carousel), illustrated cards instead of a <select>. */
+        .gs-cards { display:flex; gap:10px; flex-wrap:wrap; }
+        .gs-card { display:flex; flex-direction:column; align-items:flex-start; gap:8px; width:132px; padding:12px; border:1.5px solid var(--s-line-2); border-radius:9px; background:var(--s-surface); font:inherit; text-align:left; cursor:pointer; transition:border-color .15s,background .15s; }
+        .gs-card:hover { border-color:var(--s-fg-mute); }
+        .gs-card.on { border-color:var(--s-green); background:var(--s-tint); }
+        .gs-shape { display:flex; align-items:center; gap:4px; width:100%; height:34px; }
+        .gs-tile { flex:1; align-self:stretch; border-radius:4px; background:var(--s-surface-3); }
+        .gs-frame { display:block; width:100%; height:22px; border-radius:4px; background:var(--s-surface-3); }
+        .gs-strip { display:flex; gap:3px; width:100%; height:8px; margin-top:2px; }
+        .gs-strip i { flex:1; border-radius:2px; background:var(--s-surface-3); font-style:normal; }
+        .gs-name { font-size:12.5px; font-weight:700; color:var(--s-fg); }
+        .gs-card.on .gs-name { color:var(--s-green-fg); }
+        .gs-desc { font-size:11px; line-height:1.35; color:var(--s-fg-mute); }
         /* SOW-062 P6: product links[] row editor */
         .linkrows { display:flex; flex-direction:column; gap:9px; margin-bottom:8px; }
         .linkrow { display:flex; flex-direction:column; gap:8px; padding:10px; border:1.5px solid var(--s-line-2); border-radius:8px; background:var(--s-surface-2); }
@@ -607,6 +634,29 @@ class GbtiContentEditor extends GbtiElement {
       }));
     });
 
+    // sow-174: the banner swatch row -- mutually exclusive with the image side of the SAME [data-cover]
+    // control (resolveHero() only ever uses one or the other). Picking a swatch clears any staged image;
+    // doCoverImage (below) clears the swatch selection back the other way when a file is chosen.
+    this.$$('[data-swatches]').forEach((row) => {
+      const cover = row.closest('[data-cover]');
+      const hidden = row.querySelector('[data-key="bannerPreset"]');
+      row.querySelectorAll('[data-preset]').forEach((btn) => btn.addEventListener('click', () => {
+        row.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b === btn));
+        if (hidden) hidden.value = btn.dataset.preset;
+        if (cover) this.clearCover(cover);
+      }));
+    });
+
+    // sow-174: the gallery-layout cards (Auto / Grid / Carousel) -- a plain enum choice with illustrated
+    // options instead of a <select>, same hidden data-key contract as every other enum field.
+    this.$$('[data-gscards]').forEach((row) => {
+      const hidden = row.querySelector('input[type="hidden"]');
+      row.querySelectorAll('[data-gs]').forEach((btn) => btn.addEventListener('click', () => {
+        row.querySelectorAll('[data-gs]').forEach((b) => b.classList.toggle('on', b === btn));
+        if (hidden) hidden.value = btn.dataset.gs;
+      }));
+    });
+
     // SOW-062 P4: seed the block body editor from the preset body (its value setter parses Markdown -> blocks).
     const be = this.$('#body');
     // sow-165: hand the body editor the item's path BEFORE its value, so a repo-relative image block
@@ -649,6 +699,21 @@ class GbtiContentEditor extends GbtiElement {
       const opts = (f.options || ['draft', 'published']).map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('');
       return wrap(`${label}<div class="statusrow"><span class="dotpill" data-statuspill><span class="d"></span><span data-statustxt>${esc(v || 'draft')}</span></span><select class="selbox" data-key="status" data-kind="enum" style="flex:1">${opts}</select></div>`);
     }
+    // sow-174: gallery layout -> three illustrated cards (Auto / Grid / Carousel) instead of a bare select,
+    // matching the design mock's own live toggle. "Auto" is an empty value: the hidden input's default
+    // coercion (form.mjs) already turns '' into undefined on submit, which is exactly what resolveGalleryStyle()
+    // needs to fall back to picking by shot count -- no new gather/coerce path for this field.
+    if (f.kind === 'enum' && f.key === 'galleryStyle') {
+      const cards = [
+        { key: '', name: 'Auto', desc: 'Picks a layout by shot count', shape: '' },
+        { key: 'grid', name: 'Grid', desc: 'Captioned, 2-up', shape: '<span class="gs-tile"></span><span class="gs-tile"></span>' },
+        { key: 'carousel', name: 'Carousel', desc: 'One large frame + a filmstrip', shape: '<span class="gs-frame"></span><span class="gs-strip"><i></i><i></i><i></i></span>' },
+      ];
+      const cur = v || '';
+      const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? ' on' : ''}" data-gs="${c.key}">
+        <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join('');
+      return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
+    }
     // generic enum -> styled selbox
     if (f.kind === 'enum') {
       return wrap(`${label}<select class="selbox" data-key="${f.key}" data-kind="enum">${(f.options || []).map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`);
@@ -678,12 +743,22 @@ class GbtiContentEditor extends GbtiElement {
         ? ''
         : '<div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>';
       const hint = f.hint ? `<div class="urlprev" style="color:var(--s-fg-soft)">${esc(f.hint)}</div>` : '';
+      // sow-174: the banner field alone also offers a curated color preset, an alternative to uploading an
+      // image (resolveHero() in product-page.mjs treats an uploaded image and a chosen preset as mutually
+      // exclusive). bannerPreset is not its own row -- it is excluded from RAIL_SCHEMA and hiddenFields both,
+      // and folded in here exactly like publicStub is folded into the visibility field above.
+      const presetVal = f.key === 'banner' ? String(this.preset?.input?.bannerPreset || '') : '';
+      const swatchesHtml = f.key === 'banner' ? `<div class="swatchrow" data-swatches>${BANNER_PRESETS.map((p) =>
+        `<button type="button" class="swatch${p.key === presetVal ? ' on' : ''}" data-preset="${p.key}" title="${esc(p.label)}">
+          <span class="sw-dot" style="background:linear-gradient(150deg,${p.from},${p.to})"></span>${esc(p.label)}</button>`).join('')}
+        <input data-key="bannerPreset" data-kind="enum" type="hidden" value="${esc(presetVal)}" /></div>` : '';
       return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? '' : ' hidden'}>${label}${hint}
         <div class="cover" data-cover>
           ${picker}
           <div class="coverframe${framed ? '' : ' card4'}" data-coverframe${frameStyle}>${this._coverFrameInner(url)}</div>
           <input type="file" accept="image/*" hidden data-cover-file />
           <div class="coverbtns"><button type="button" class="ebtn" data-cover-pick>${has ? 'Replace image' : 'Choose image'}</button><button type="button" class="ebtn" data-cover-clear${has ? '' : ' hidden'}>Remove</button></div>
+          ${swatchesHtml ? `<div class="swatch-or">or pick a color</div>${swatchesHtml}` : ''}
           <input data-key="${f.key}" data-kind="image" type="hidden" value="${esc(v)}" />
         </div></div>`;
     }
@@ -1137,9 +1212,19 @@ class GbtiContentEditor extends GbtiElement {
     if (pick) pick.textContent = 'Replace image';
     try {
       const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(',')[1] || '' });
-      const el = control.querySelector('[data-key]');
+      // sow-174: scoped to data-kind="image" -- the banner control also holds a second [data-key] (the
+      // bannerPreset swatch input), and a bare [data-key] would grab whichever comes first in DOM order.
+      const el = control.querySelector('[data-key][data-kind="image"]');
       if (el) el.value = res.path;
       this.out(`Cover image staged: <code>${esc(res.path)}</code>`);
+      // A picked file supersedes any chosen color preset (resolveHero() prefers an uploaded image either way,
+      // but leaving a swatch marked "on" here would misrepresent which one is actually going to render).
+      const swatches = control.querySelector('[data-swatches]');
+      if (swatches) {
+        swatches.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('on'));
+        const presetInput = swatches.querySelector('[data-key="bannerPreset"]');
+        if (presetInput) presetInput.value = '';
+      }
     } catch (err) {
       const h = failHint(err); // SOW-072 P3: consistent failure copy + upgrade pointer across every composer
       this.out(esc(h.upgrade ? `${h.text} Upgrade at gbti.network/membership.` : h.text), 'danger');
@@ -1148,7 +1233,9 @@ class GbtiContentEditor extends GbtiElement {
 
   clearCover(control) {
     if (!control) return;
-    const el = control.querySelector('[data-key]');
+    // sow-174: see the matching note in doCoverImage -- scoped so this never touches the sibling bannerPreset
+    // hidden input when the banner control also carries the swatch row.
+    const el = control.querySelector('[data-key][data-kind="image"]');
     if (el) el.value = '';
     const cf = control.querySelector('[data-coverframe]');
     if (cf) cf.innerHTML = this._coverFrameInner('');
