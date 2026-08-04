@@ -12,6 +12,7 @@ import './gbti-doc-editor.mjs'; // SOW-062 P5: the cohesive WYSIWYG body editor 
 import './gbti-discussion.mjs'; // SOW-062 P6: the shared discussion thread, embedded in the editor for published items
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
 import { BANNER_PRESETS } from '../../../src/lib/banner-presets.mjs'; // sow-174: the curated banner-color swatches
+import { detectLinkSource } from '../../../src/lib/product-page.mjs'; // sow-175: wordpress.org/github.com URL detection
 
 // SOW-062 P6: inline icons for the edhead toolbar + section headers (the design's sprite is not in the shadow root).
 const _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
@@ -842,6 +843,28 @@ class GbtiContentEditor extends GbtiElement {
       const vb = e.target.closest('.lr-vis button');
       if (vb) { e.preventDefault(); vb.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === vb)); this._serializeLinks(); }
     });
+    // sow-175: auto-detect a wordpress.org / github.com URL on blur (not `input`, so this fires once when
+    // the author leaves the field rather than re-detecting on every keystroke of a paste). Type is set as a
+    // real VALUE, since it is functional (it changes how the page treats the link); label is set only as a
+    // PLACEHOLDER, never a value, so an untouched field still serializes as no override -- _serializeLinks()
+    // already omits an empty label, and the published page's own linkLabel() default takes over from there.
+    // Never overwrites a type or label the author already touched.
+    wrap.addEventListener('blur', (e) => {
+      const urlEl = e.target.closest?.('.lk-url');
+      if (!urlEl) return;
+      const row = urlEl.closest('.linkrow');
+      const source = detectLinkSource(urlEl.value.trim());
+      if (!source) return;
+      const typeEl = row.querySelector('.lk-type');
+      const labelEl = row.querySelector('.lk-label');
+      if (typeEl && !typeEl.value.trim()) {
+        typeEl.value = source === 'wordpress' ? 'download' : 'repository';
+        this._serializeLinks();
+      }
+      if (labelEl && !labelEl.value.trim()) {
+        labelEl.placeholder = source === 'wordpress' ? 'Download' : 'View on GitHub';
+      }
+    }, true); // capture: blur does not bubble
     this.$('[data-addlink]')?.addEventListener('click', (e) => {
       e.preventDefault();
       const tmp = document.createElement('div');

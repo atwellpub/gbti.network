@@ -15,6 +15,9 @@ import {
   linkLabel,
   isLockedLink,
   resolveHero,
+  parseGithubRepo,
+  detectLinkSource,
+  formatRelease,
   CAROUSEL_THRESHOLD,
   TOC_MIN_ENTRIES,
 } from '../src/lib/product-page.mjs';
@@ -219,4 +222,41 @@ test('resolveHero: no image and no preset falls back to featuredImage', () => {
 test('resolveHero: nothing at all set resolves to the existing ink default, not a crash', () => {
   assert.deepEqual(resolveHero(undefined, undefined, undefined), { image: null, preset: 'ink' });
   assert.deepEqual(resolveHero(null, null, null), { image: null, preset: 'ink' });
+});
+
+test('parseGithubRepo: a real repository URL, with or without a trailing slash or .git', () => {
+  assert.deepEqual(parseGithubRepo('https://github.com/gbti-network/radle-lite'), { owner: 'gbti-network', repo: 'radle-lite' });
+  assert.deepEqual(parseGithubRepo('https://github.com/gbti-network/radle-lite/'), { owner: 'gbti-network', repo: 'radle-lite' });
+  assert.deepEqual(parseGithubRepo('https://github.com/gbti-network/radle-lite.git'), { owner: 'gbti-network', repo: 'radle-lite' });
+  assert.deepEqual(parseGithubRepo('https://www.github.com/gbti-network/radle-lite'), { owner: 'gbti-network', repo: 'radle-lite' });
+});
+
+test('parseGithubRepo: a non-repo GitHub page, a non-GitHub host, and garbage all resolve to null', () => {
+  assert.equal(parseGithubRepo('https://github.com/gbti-network'), null); // an org page, no repo segment
+  assert.equal(parseGithubRepo('https://gitlab.com/gbti-network/radle-lite'), null);
+  assert.equal(parseGithubRepo('not a url'), null);
+  assert.equal(parseGithubRepo(''), null);
+  assert.equal(parseGithubRepo(undefined), null);
+});
+
+test('detectLinkSource: wordpress.org and github.com, everything else is null', () => {
+  assert.equal(detectLinkSource('https://wordpress.org/plugins/radle-lite/'), 'wordpress');
+  assert.equal(detectLinkSource('https://www.wordpress.org/plugins/radle-lite/'), 'wordpress');
+  assert.equal(detectLinkSource('https://github.com/gbti-network/radle-lite'), 'github');
+  assert.equal(detectLinkSource('https://example.com/download'), null);
+  assert.equal(detectLinkSource('not a url'), null);
+  assert.equal(detectLinkSource(undefined), null);
+});
+
+test('formatRelease: a normal release shapes to the rail-ready fields', () => {
+  const release = { tag_name: 'v2.4.1', html_url: 'https://github.com/gbti-network/radle-lite/releases/tag/v2.4.1', published_at: '2026-07-20T00:00:00Z', draft: false };
+  assert.deepEqual(formatRelease(release), { tag: 'v2.4.1', url: release.html_url, publishedAt: release.published_at });
+});
+
+test('formatRelease: a draft, a missing tag_name, and no response all withhold the row rather than render blank', () => {
+  assert.equal(formatRelease({ tag_name: 'v1.0.0', draft: true }), null);
+  assert.equal(formatRelease({ html_url: 'https://x', published_at: '2026-01-01' }), null); // no tag_name
+  assert.equal(formatRelease({ message: 'Not Found' }), null); // a GitHub error body
+  assert.equal(formatRelease(null), null);
+  assert.equal(formatRelease(undefined), null);
 });

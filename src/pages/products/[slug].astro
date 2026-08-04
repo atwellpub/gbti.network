@@ -42,6 +42,9 @@ import {
   linkLabel,
   isLockedLink,
   resolveHero,
+  parseGithubRepo,
+  detectLinkSource,
+  formatRelease,
 } from '../../lib/product-page.mjs';
 
 export async function getStaticPaths() {
@@ -73,6 +76,23 @@ const galleryStyle = resolveGalleryStyle(d.galleryStyle, shots.length);
 const captioned = hasCaptions(shots);
 const toc = buildToc(headings, { hasBody: !stub, hasGallery: shots.length > 0, hasDiscussion: true });
 
+// sow-175: the latest GitHub release, for a product whose repository link is a public GitHub repo. Build
+// time only (this is a static site with no per-visitor server), unauthenticated (60 req/hour is comfortable
+// at today's product count; see product-page.mjs for why). Fails closed on every edge — a private repo, no
+// releases yet, a rate limit, a network error, or a non-GitHub repository link all just omit the row rather
+// than fail the build.
+let release: { tag: string; url: string; publishedAt: string } | null = null;
+const ghRepo = repoUrl ? parseGithubRepo(repoUrl) : null;
+if (ghRepo) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${ghRepo.owner}/${ghRepo.repo}/releases/latest`);
+    if (res.ok) release = formatRelease(await res.json());
+  } catch { /* no release row; not a build failure */ }
+}
+const releaseAge = release
+  ? new Date(release.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  : null;
+
 // The rail's spec block. Every row is conditional: a product that declares none of this shows no block at
 // all rather than a column of empty labels.
 const specs = [
@@ -82,6 +102,9 @@ const specs = [
   ...(d.updatedAt ? [['Updated', d.updatedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })]] : []),
   ...(d.publishedAt ? [['Published', d.publishedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })]] : []),
 ] as [string, string][];
+
+// sow-175: whether the primary install button should carry the WordPress mark next to its label.
+const primaryIsWordpress = primary ? detectLinkSource(primary.url) === 'wordpress' : false;
 
 // The end-of-body panel repeats the same offer for a reader who scrolled the whole page.
 const ctaSub = [d.pricing ? cap(d.pricing) : null, d.requires].filter(Boolean).join(' · ');
@@ -133,7 +156,10 @@ const lockedHint = (l: { encrypted?: boolean }) =>
               {linkLabel(primary)}
             </span>
           ) : (
-            <a href={primary.url} rel="noopener" class="btn btn-primary">{linkLabel(primary)}</a>
+            <a href={primary.url} rel="noopener" class="btn btn-primary">
+              {primaryIsWordpress && <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-wordpress" /></svg>}
+              {linkLabel(primary)}
+            </a>
           ))}
         </div>
       </div>
@@ -149,12 +175,18 @@ const lockedHint = (l: { encrypted?: boolean }) =>
             </nav>
           )}
 
-          {specs.length > 0 && (
+          {(specs.length > 0 || release) && (
             <div class="pd-block">
               <dl class="pd-specs">
                 {specs.map(([k, v]) => (
                   <div class="pd-spec"><dt>{k}</dt><dd>{v}</dd></div>
                 ))}
+                {release && (
+                  <div class="pd-spec">
+                    <dt>Latest release</dt>
+                    <dd><a href={release.url} rel="noopener" class="pd-release-link">{release.tag}<span class="pd-release-age"> · {releaseAge}</span></a></dd>
+                  </div>
+                )}
               </dl>
               {d.tags?.length > 0 && (
                 <div class="pd-tags">
@@ -234,7 +266,10 @@ const lockedHint = (l: { encrypted?: boolean }) =>
               </div>
               <div class="pd-cta-btns">
                 {primary && !isLockedLink(primary) && (
-                  <a href={primary.url} rel="noopener" class="btn btn-primary">{linkLabel(primary)}</a>
+                  <a href={primary.url} rel="noopener" class="btn btn-primary">
+                    {primaryIsWordpress && <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-wordpress" /></svg>}
+                    {linkLabel(primary)}
+                  </a>
                 )}
                 {repoUrl && (
                   <a href={repoUrl} rel="noopener" class="btn btn-ghost">

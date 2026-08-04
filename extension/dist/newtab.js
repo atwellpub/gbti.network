@@ -7939,6 +7939,21 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   ];
   var BANNER_PRESET_KEYS = BANNER_PRESETS.map((p) => p.key);
 
+  // src/lib/product-page.mjs
+  function detectLinkSource(url) {
+    if (!url) return null;
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return null;
+    }
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "wordpress.org") return "wordpress";
+    if (host === "github.com") return "github";
+    return null;
+  }
+
   // client-ui/src/elements/gbti-content-editor.mjs
   var _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
   var DOC = _svg('<path d="M7 3h7l4 4v14H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.2V7.5H18M9 12.5h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
@@ -8734,6 +8749,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           this._serializeLinks();
         }
       });
+      wrap.addEventListener("blur", (e) => {
+        const urlEl = e.target.closest?.(".lk-url");
+        if (!urlEl) return;
+        const row = urlEl.closest(".linkrow");
+        const source = detectLinkSource(urlEl.value.trim());
+        if (!source) return;
+        const typeEl = row.querySelector(".lk-type");
+        const labelEl = row.querySelector(".lk-label");
+        if (typeEl && !typeEl.value.trim()) {
+          typeEl.value = source === "wordpress" ? "download" : "repository";
+          this._serializeLinks();
+        }
+        if (labelEl && !labelEl.value.trim()) {
+          labelEl.placeholder = source === "wordpress" ? "Download" : "View on GitHub";
+        }
+      }, true);
       this.$("[data-addlink]")?.addEventListener("click", (e) => {
         e.preventDefault();
         const tmp = document.createElement("div");

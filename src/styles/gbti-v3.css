@@ -1274,7 +1274,7 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .pd-toc .pd-rail-lab { padding: 0 0 9px 11px; }
 .pd-toc a {
   font-size: 13.5px; line-height: 1.35; padding: 7px 11px;
-  border-radius: var(--r-sm); border-left: 2px solid var(--line); color: var(--fg-mute);
+  border-left: 2px solid var(--line); color: var(--fg-mute);
   transition: color .15s ease, background .15s ease, border-color .15s ease;
 }
 .pd-toc a:hover { color: var(--fg); }
@@ -1284,6 +1284,12 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .pd-spec { display: flex; justify-content: space-between; gap: 8px; }
 .pd-spec dt { color: var(--fg-mute); }
 .pd-spec dd { margin: 0; text-align: right; color: var(--fg); }
+/* sow-175: the one spec row that is a link (GitHub's latest release), so it earns the link color; the age
+   half is muted rather than the release tag, so the tag itself keeps the same visual weight every other
+   spec value has. */
+.pd-release-link { color: var(--green-700); font-weight: 600; }
+.pd-release-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.pd-release-age { color: var(--fg-mute); font-weight: 400; }
 .pd-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .pd-tag {
   font-family: var(--f-mono); font-size: 10.5px; color: var(--fg-soft);

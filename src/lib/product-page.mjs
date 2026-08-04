@@ -199,3 +199,46 @@ export function resolveHero(banner, bannerPreset, featuredImage) {
   if (bannerPreset) return { image: null, preset: bannerPreset };
   return { image: featuredImage ?? null, preset: featuredImage ? null : 'ink' };
 }
+
+/**
+ * `{ owner, repo }` from a github.com repository URL, or `null` for anything else (a non-GitHub host, a
+ * malformed URL, GitHub's own non-repo pages). Used both to build the releases-API URL and, via
+ * `detectLinkSource`, to decide whether a pasted link is a GitHub repository at all.
+ */
+export function parseGithubRepo(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  if (u.hostname !== 'github.com' && u.hostname !== 'www.github.com') return null;
+  const [owner, repo] = u.pathname.split('/').filter(Boolean);
+  if (!owner || !repo) return null;
+  return { owner, repo: repo.replace(/\.git$/, '') };
+}
+
+/**
+ * Which well-known destination a URL points at, or `null`. Drives two independent things from one place
+ * so they can never disagree: the editor's auto-detected link type + button-text placeholder (sow-175),
+ * and the published page's decision to show the WordPress mark next to the install button.
+ * @returns {'wordpress'|'github'|null}
+ */
+export function detectLinkSource(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, '');
+  if (host === 'wordpress.org') return 'wordpress';
+  if (host === 'github.com') return 'github';
+  return null;
+}
+
+/**
+ * Shapes one GitHub releases-API response into what the rail renders. Kept separate from the fetch itself
+ * so the decision of "does this count as a real, displayable release" is unit-testable without mocking
+ * network: a draft is withheld (not yet a real release), and a response missing `tag_name` (an error body,
+ * or GitHub's shape changing under us) is treated as absent rather than rendering a blank row.
+ * @returns {{ tag: string, url: string, publishedAt: string }|null}
+ */
+export function formatRelease(release) {
+  if (!release || release.draft || !release.tag_name) return null;
+  return { tag: release.tag_name, url: release.html_url, publishedAt: release.published_at };
+}
