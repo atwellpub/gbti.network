@@ -20682,6 +20682,61 @@ function embedUrl(v) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
+var REL_ALLOWED = /* @__PURE__ */ new Set(["nofollow", "noopener", "noreferrer"]);
+var DANGEROUS_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+function decodeEntities(s) {
+  let p = String(s ?? "");
+  for (let i = 0; i < 4; i++) {
+    const n = p.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => {
+      try {
+        return String.fromCodePoint(parseInt(h, 16));
+      } catch {
+        return "";
+      }
+    }).replace(/&#(\d+);?/g, (_m, d) => {
+      try {
+        return String.fromCodePoint(parseInt(d, 10));
+      } catch {
+        return "";
+      }
+    }).replace(/&amp;/gi, "&");
+    if (n === p) break;
+    p = n;
+  }
+  return p;
+}
+var isDangerousAnchorHref = (url2) => {
+  const decoded = decodeEntities(url2).replace(/[\x00-\x20]+/g, "");
+  return DANGEROUS_SCHEME.test(decoded) || DANGEROUS_SCHEME.test(String(url2 ?? ""));
+};
+var attrOf = (attrs, name) => {
+  const m = new RegExp(`\\b${name}="([^"]*)"`, "i").exec(String(attrs || ""));
+  return m ? m[1] : "";
+};
+var escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+var SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
+var sanitizeAnchorInner = (html) => String(html ?? "").replace(
+  /<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
+  (_m, slash, tag) => SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ""
+);
+function rawAnchorHtml(attrs, inner) {
+  const href = decodeEntities(attrOf(attrs, "href"));
+  if (!href || isDangerousAnchorHref(href)) return sanitizeAnchorInner(inner);
+  const rel = [];
+  for (const tok of attrOf(attrs, "rel").toLowerCase().split(/\s+/)) if (REL_ALLOWED.has(tok) && !rel.includes(tok)) rel.push(tok);
+  const blank = attrOf(attrs, "target").toLowerCase() === "_blank";
+  if (blank && !rel.includes("noopener")) rel.push("noopener");
+  const relAttr = rel.length ? ` rel="${rel.join(" ")}"` : "";
+  const tgtAttr = blank ? ' target="_blank"' : "";
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeAnchorInner(inner)}</a>`;
+}
+function escapeKeepingLinks(s, keep) {
+  const stripped = String(s ?? "").replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+    keep.push(rawAnchorHtml(attrs, inner));
+    return `${keep.length - 1}`;
+  });
+  return escapeHtml(stripped);
+}
 var FN_ID = "[A-Za-z0-9_-]+";
 function collectFootnoteIds(lines) {
   const ids = /* @__PURE__ */ new Set();
@@ -20780,6 +20835,7 @@ function renderMarkdown(md) {
   let listBuf = [];
   const footnotes = [];
   const fn = { ids: collectFootnoteIds(lines), counts: /* @__PURE__ */ new Map() };
+  const linkKeep = [];
   const flushList = () => {
     if (listType) {
       out.push(`<${listType}>${listBuf.join("")}</${listType}>`);
@@ -20829,7 +20885,7 @@ function renderMarkdown(md) {
       footnotes.push({ id: def[1], html: parts.map((p) => inline(escapeHtml(p), fn)).join("<br/>") });
       continue;
     }
-    const esc2 = escapeHtml(line);
+    const esc2 = escapeKeepingLinks(line, linkKeep);
     let m;
     if (m = /^(#{1,6})\s+(.*)$/.exec(esc2)) {
       flushList();
@@ -20842,7 +20898,7 @@ function renderMarkdown(md) {
         flushList();
         listType = "ul";
       }
-      listBuf.push(`<li>${inline(escapeHtml(line.replace(/^\s*[-*]\s+/, "")), fn)}</li>`);
+      listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*[-*]\s+/, ""), linkKeep), fn)}</li>`);
       i++;
       continue;
     }
@@ -20851,13 +20907,13 @@ function renderMarkdown(md) {
         flushList();
         listType = "ol";
       }
-      listBuf.push(`<li>${inline(escapeHtml(line.replace(/^\s*\d+\.\s+/, "")), fn)}</li>`);
+      listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*\d+\.\s+/, ""), linkKeep), fn)}</li>`);
       i++;
       continue;
     }
     if (/^\s*>\s?/.test(line)) {
       flushList();
-      out.push(`<blockquote>${inline(escapeHtml(line.replace(/^\s*>\s?/, "")), fn)}</blockquote>`);
+      out.push(`<blockquote>${inline(escapeKeepingLinks(line.replace(/^\s*>\s?/, ""), linkKeep), fn)}</blockquote>`);
       i++;
       continue;
     }
@@ -20870,7 +20926,7 @@ function renderMarkdown(md) {
     const aligns = i + 1 < lines.length ? tableAlignments(lines[i + 1]) : null;
     if (aligns && line.includes("|")) {
       flushList();
-      const cell = (c) => inline(escapeHtml(c), fn);
+      const cell = (c) => inline(escapeKeepingLinks(c, linkKeep), fn);
       const cols = (row, tag) => row.map((c, n) => `<${tag}${aligns[n] ? ` style="text-align:${aligns[n]}"` : ""}>${cell(c)}</${tag}>`).join("");
       const head = `<thead><tr>${cols(splitTableRow(line), "th")}</tr></thead>`;
       i += 2;
@@ -20892,7 +20948,7 @@ function renderMarkdown(md) {
     const para = [esc2];
     i++;
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !new RegExp(`^(#{1,6})\\s|^\\s*[-*]\\s|^\\s*\\d+\\.\\s|^\`\`\`|^\\s*>|^\\[\\^${FN_ID}\\]:`).test(lines[i])) {
-      para.push(escapeHtml(lines[i]));
+      para.push(escapeKeepingLinks(lines[i], linkKeep));
       i++;
     }
     out.push(`<p>${inline(para.join(" "), fn)}</p>`);
@@ -20908,7 +20964,8 @@ function renderMarkdown(md) {
     }).join("");
     out.push(`<section class="md-footnotes"><h2>Footnotes</h2><ol>${items}</ol></section>`);
   }
-  return out.join("\n");
+  const joined = out.join("\n");
+  return linkKeep.length ? joined.replace(/(\d+)/g, (_m, i2) => linkKeep[Number(i2)] ?? "") : joined;
 }
 
 // membership/superadmin-actions.mjs

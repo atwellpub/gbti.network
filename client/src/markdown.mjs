@@ -10,6 +10,62 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+// Attributed <a> passthrough for prose lines (headings/paragraphs/lists/quotes/cells): an independent copy of
+// client-ui/src/markdown-blocks.mjs's rawAnchor/parseLinkAttrs, not an import of it, because this file is the
+// dependency-free renderer the client/ npm package publishes standalone (its package.json "files" ships only
+// client/src, never client-ui/). A stored body only ever carries raw <a> HTML for a link the doc editor's
+// link tool attributed with nofollow and/or open-in-new-tab (a plain link stays `[text](url)`), so this lets
+// that raw form survive the escape pass below instead of showing as literal tag text, matching how the
+// sow-158 site sanitizer already renders it on the published page. Code fences, callouts, and embed URLs
+// deliberately keep using the plain escapeHtml above: their content is literal source or an attribute value,
+// never author prose that could carry a link.
+const REL_ALLOWED = new Set(['nofollow', 'noopener', 'noreferrer']);
+const DANGEROUS_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+function decodeEntities(s) {
+  let p = String(s ?? '');
+  for (let i = 0; i < 4; i++) {
+    const n = p.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+      .replace(/&#(\d+);?/g, (_m, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch { return ''; } })
+      .replace(/&amp;/gi, '&');
+    if (n === p) break;
+    p = n;
+  }
+  return p;
+}
+// A decoded scheme check catches an obfuscated "javascript:" hiding behind entities before it ever reaches href.
+const isDangerousAnchorHref = (url) => {
+  const decoded = decodeEntities(url).replace(/[\x00-\x20]+/g, '');
+  return DANGEROUS_SCHEME.test(decoded) || DANGEROUS_SCHEME.test(String(url ?? ''));
+};
+const attrOf = (attrs, name) => { const m = new RegExp(`\\b${name}="([^"]*)"`, 'i').exec(String(attrs || '')); return m ? m[1] : ''; };
+const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
+const sanitizeAnchorInner = (html) => String(html ?? '').replace(/<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
+  (_m, slash, tag) => (SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ''));
+/** The canonical sanitized raw-<a> HTML for an author-attributed link (mirrors markdown-blocks.mjs's rawAnchor). */
+function rawAnchorHtml(attrs, inner) {
+  const href = decodeEntities(attrOf(attrs, 'href'));
+  if (!href || isDangerousAnchorHref(href)) return sanitizeAnchorInner(inner); // drop the link, keep safe text
+  const rel = [];
+  for (const tok of attrOf(attrs, 'rel').toLowerCase().split(/\s+/)) if (REL_ALLOWED.has(tok) && !rel.includes(tok)) rel.push(tok);
+  const blank = attrOf(attrs, 'target').toLowerCase() === '_blank';
+  if (blank && !rel.includes('noopener')) rel.push('noopener'); // target=_blank must carry noopener (tab-nabbing)
+  const relAttr = rel.length ? ` rel="${rel.join(' ')}"` : '';
+  const tgtAttr = blank ? ' target="_blank"' : '';
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeAnchorInner(inner)}</a>`;
+}
+// Extracts + sanitizes raw <a> tags from the RAW (pre-escape) line into `keep`, swapped for a placeholder the
+// escape pass cannot mangle, then escapes everything else exactly as escapeHtml always has. `keep` is threaded
+// in from renderMarkdown so one array collects every anchor found across the whole document for one final
+// restoration pass at the end (the same protect-placeholder-restore shape inline() already uses for code spans).
+function escapeKeepingLinks(s, keep) {
+  const stripped = String(s ?? '').replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+    keep.push(rawAnchorHtml(attrs, inner));
+    return `${keep.length - 1}`;
+  });
+  return escapeHtml(stripped);
+}
+
 // GFM footnote ids: alnum/dash/underscore only, so an id can never carry markdown punctuation (which the
 // later bold/italic passes would rewrite inside the emitted attributes) or need attribute escaping.
 const FN_ID = '[A-Za-z0-9_-]+';
@@ -129,6 +185,7 @@ export function renderMarkdown(md) {
   let listBuf = [];
   const footnotes = []; // GFM footnote definitions, rendered as one section at the end (like the site build)
   const fn = { ids: collectFootnoteIds(lines), counts: new Map() }; // known def ids + per-id reference counts
+  const linkKeep = []; // attributed <a> tags extracted by escapeKeepingLinks, restored in one pass at the end
   const flushList = () => {
     if (listType) {
       out.push(`<${listType}>${listBuf.join('')}</${listType}>`);
@@ -162,12 +219,12 @@ export function renderMarkdown(md) {
       continue;
     }
 
-    const esc = escapeHtml(line);
+    const esc = escapeKeepingLinks(line, linkKeep);
     let m;
     if ((m = /^(#{1,6})\s+(.*)$/.exec(esc))) { flushList(); out.push(`<h${m[1].length}>${inline(m[2], fn)}</h${m[1].length}>`); i++; continue; }
-    if (/^\s*[-*]\s+/.test(line)) { if (listType !== 'ul') { flushList(); listType = 'ul'; } listBuf.push(`<li>${inline(escapeHtml(line.replace(/^\s*[-*]\s+/, '')), fn)}</li>`); i++; continue; }
-    if (/^\s*\d+\.\s+/.test(line)) { if (listType !== 'ol') { flushList(); listType = 'ol'; } listBuf.push(`<li>${inline(escapeHtml(line.replace(/^\s*\d+\.\s+/, '')), fn)}</li>`); i++; continue; }
-    if (/^\s*>\s?/.test(line)) { flushList(); out.push(`<blockquote>${inline(escapeHtml(line.replace(/^\s*>\s?/, '')), fn)}</blockquote>`); i++; continue; }
+    if (/^\s*[-*]\s+/.test(line)) { if (listType !== 'ul') { flushList(); listType = 'ul'; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*[-*]\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
+    if (/^\s*\d+\.\s+/.test(line)) { if (listType !== 'ol') { flushList(); listType = 'ol'; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*\d+\.\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
+    if (/^\s*>\s?/.test(line)) { flushList(); out.push(`<blockquote>${inline(escapeKeepingLinks(line.replace(/^\s*>\s?/, ''), linkKeep), fn)}</blockquote>`); i++; continue; }
     if (/^\s*(---|\*\*\*)\s*$/.test(line)) { flushList(); out.push('<hr/>'); i++; continue; }
     // GFM table: a header row followed by a delimiter row, then body rows until a blank line or a row with
     // no pipe. Without this the pipes fell through to the paragraph gather and rendered as literal text,
@@ -175,7 +232,7 @@ export function renderMarkdown(md) {
     const aligns = i + 1 < lines.length ? tableAlignments(lines[i + 1]) : null;
     if (aligns && line.includes('|')) {
       flushList();
-      const cell = (c) => inline(escapeHtml(c), fn);
+      const cell = (c) => inline(escapeKeepingLinks(c, linkKeep), fn);
       const cols = (row, tag) => row
         .map((c, n) => `<${tag}${aligns[n] ? ` style="text-align:${aligns[n]}"` : ''}>${cell(c)}</${tag}>`)
         .join('');
@@ -194,7 +251,7 @@ export function renderMarkdown(md) {
     const para = [esc];
     i++;
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !new RegExp(`^(#{1,6})\\s|^\\s*[-*]\\s|^\\s*\\d+\\.\\s|^\`\`\`|^\\s*>|^\\[\\^${FN_ID}\\]:`).test(lines[i])) {
-      para.push(escapeHtml(lines[i]));
+      para.push(escapeKeepingLinks(lines[i], linkKeep));
       i++;
     }
     out.push(`<p>${inline(para.join(' '), fn)}</p>`);
@@ -215,5 +272,6 @@ export function renderMarkdown(md) {
       .join('');
     out.push(`<section class="md-footnotes"><h2>Footnotes</h2><ol>${items}</ol></section>`);
   }
-  return out.join('\n');
+  const joined = out.join('\n');
+  return linkKeep.length ? joined.replace(/(\d+)/g, (_m, i) => linkKeep[Number(i)] ?? '') : joined;
 }

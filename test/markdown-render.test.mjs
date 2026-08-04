@@ -37,6 +37,51 @@ test('reader: a raw <iframe> typed as body text stays escaped (only the embed fe
   assert.doesNotMatch(html, /<iframe /);
 });
 
+// sow-170 gap (2026-08-04): the WorkBench editor's link tool (client-ui/src/markdown-blocks.mjs) stores an
+// attributed link (nofollow and/or open-in-new-tab) as raw sanitized <a> HTML, since plain `[text](url)`
+// Markdown cannot express rel/target. The published site already renders that correctly (Astro's rehype-raw +
+// the sow-158 sanitizer allow target/rel on <a>), but this reader had no matching passthrough, so Preview and
+// gbti-reader/gbti-locked-content showed the literal tag text instead of a link. These mirror the exact
+// allowlist client-ui/src/markdown-blocks.mjs enforces, as an independent copy (see the comment above
+// escapeKeepingLinks in client/src/markdown.mjs for why it is not a shared import).
+test('reader: an attributed <a> (nofollow / target=_blank) round-trips to a real link, not literal tag text', () => {
+  const nofollow = renderMarkdown('Try <a href="https://x.com" rel="nofollow">this</a> now.');
+  assert.match(nofollow, /<a href="https:\/\/x\.com" rel="nofollow">this<\/a>/);
+  const blank = renderMarkdown('Try <a href="https://x.com" target="_blank">this</a> now.');
+  assert.match(blank, /<a href="https:\/\/x\.com" rel="noopener" target="_blank">this<\/a>/); // blank forces noopener
+  const both = renderMarkdown('Try <a href="https://x.com" rel="nofollow" target="_blank">this</a> now.');
+  assert.match(both, /<a href="https:\/\/x\.com" rel="nofollow noopener" target="_blank">this<\/a>/);
+});
+
+test('reader: a dangerous or disallowed attributed <a> is neutralized, not passed through', () => {
+  const dangerous = renderMarkdown('Try <a href="javascript:alert(1)">bad</a> now.');
+  assert.doesNotMatch(dangerous, /<a /); // the link is dropped entirely
+  assert.match(dangerous, /Try bad now\./); // the text survives, plain
+  const strippedAttrs = renderMarkdown('Try <a href="https://x.com" onclick="alert(1)" style="x">click</a> now.');
+  assert.doesNotMatch(strippedAttrs, /onclick|style=/); // only href/rel/target are ever read back out
+  const droppedRel = renderMarkdown('Try <a href="https://x.com" rel="sponsored external">click</a> now.');
+  assert.match(droppedRel, /<a href="https:\/\/x\.com">click<\/a>/); // non-allowlisted rel tokens vanish
+  const nestedScript = renderMarkdown('Try <a href="https://x.com" rel="nofollow"><script>alert(1)</script>hi</a> now.');
+  assert.doesNotMatch(nestedScript, /<script/);
+  assert.match(nestedScript, /<a href="https:\/\/x\.com" rel="nofollow">alert\(1\)hi<\/a>/);
+});
+
+test('reader: an attributed <a> works in a heading, a list item, and a table cell; a code fence still escapes it', () => {
+  assert.match(renderMarkdown('## See <a href="https://x.com" target="_blank">docs</a>'), /<h2>See <a href="https:\/\/x\.com" rel="noopener" target="_blank">docs<\/a><\/h2>/);
+  assert.match(renderMarkdown('- one <a href="https://x.com" rel="nofollow">two</a>'), /<li>one <a href="https:\/\/x\.com" rel="nofollow">two<\/a><\/li>/);
+  const table = renderMarkdown(['| A |', '|---|', '| <a href="https://x.com" target="_blank">go</a> |'].join('\n'));
+  assert.match(table, /<td><a href="https:\/\/x\.com" rel="noopener" target="_blank">go<\/a><\/td>/);
+  const fenced = renderMarkdown('```html\n<a href="https://x.com" target="_blank">example</a>\n```');
+  assert.match(fenced, /&lt;a href=&quot;https:\/\/x\.com&quot; target=&quot;_blank&quot;&gt;example&lt;\/a&gt;/); // literal source, not a live link
+});
+
+test('reader: two attributed links in one paragraph both convert, and plain numbers nearby are untouched', () => {
+  const html = renderMarkdown('First <a href="https://a.com" target="_blank">A</a> then <a href="https://b.com" rel="nofollow">B</a>. Release v2.4.1, 42 stars, 100 more.');
+  assert.match(html, /<a href="https:\/\/a\.com" rel="noopener" target="_blank">A<\/a>/);
+  assert.match(html, /<a href="https:\/\/b\.com" rel="nofollow">B<\/a>/);
+  assert.match(html, /Release v2\.4\.1, 42 stars, 100 more\./); // the placeholder-restore pass never touches plain digits
+});
+
 test('embedUrl normalizes YouTube + Vimeo forms and rejects everything else', () => {
   assert.equal(embedUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'https://www.youtube.com/embed/dQw4w9WgXcQ');
   assert.equal(embedUrl('https://youtu.be/dQw4w9WgXcQ'), 'https://www.youtube.com/embed/dQw4w9WgXcQ');

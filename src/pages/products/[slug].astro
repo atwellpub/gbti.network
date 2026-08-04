@@ -3,7 +3,7 @@
 //
 // The page exists to earn an install click, so the install call to action is never more than a glance away:
 // a banner hero, an install bar that pins under the site header and follows the reader down, a persistent
-// left rail (contents / specs / links / favourited by), and one 660px reading column. The site header and
+// left rail (contents / specs / links / favorited by), and one 660px reading column. The site header and
 // footer are untouched; the install bar is a page element that stacks below the header's own sticky.
 //
 // This is a restyle and a reorder, not a rewrite of behaviour. Every contract the rest of the system relies
@@ -139,7 +139,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
         {d.version && <span class="pd-bar-spec">v{d.version}</span>}
         {d.pricing && <span class="pd-bar-spec on">{cap(d.pricing)}</span>}
         {favs > 0 && (
-          <span class="pd-bar-fav" title={`${favs} member${favs === 1 ? '' : 's'} favourited this`}>
+          <span class="pd-bar-fav" title={`${favs} member${favs === 1 ? '' : 's'} favorited this`}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-heart" /></svg>{favs}
           </span>
         )}

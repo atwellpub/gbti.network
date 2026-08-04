@@ -13,7 +13,7 @@
 // published page (src/styles/gbti-v3.css and src/lib/pd-enhance.mjs), which is what keeps the two in step.
 //
 // noindex + member-only: the draft is read with the member's own credentialed session from
-// GET /membership/drafts, so a signed-out visitor gets nothing. Live-data regions (favourite counts,
+// GET /membership/drafts, so a signed-out visitor gets nothing. Live-data regions (favorite counts,
 // comments, contribution credits) render as inert placeholders rather than invented numbers.
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Prose from '../../components/blog/Prose.astro';
@@ -79,13 +79,14 @@ const labelOf = CATEGORY_LABELS;
             <div data-pv-links></div>
           </div>
           <div class="pd-block">
-            <p class="pv-inert">Favourited by renders here on the published page.</p>
+            <span class="pd-rail-lab">Favorited by</span>
+            <div class="pv-fav-skel" aria-hidden="true"><i></i><i></i><i></i></div>
           </div>
         </aside>
 
         <div class="pd-col">
           <div class="pd-byline">
-            <p class="pv-inert" style="margin:0">Byline, save, share and favourite controls appear here on the published page.</p>
+            <p class="pv-inert" style="margin:0">Byline, save, share and favorite controls appear here on the published page.</p>
           </div>
           <div class="pvideo" data-pv-video hidden></div>
           <article id="pd-overview">
@@ -114,6 +115,21 @@ const labelOf = CATEGORY_LABELS;
     .pv-view button.on { background: var(--ink-3); color: #fff; }
     .pv-inert { color: var(--fg-mute); font-size: 13px; font-style: italic; }
     @media (max-width: 640px) { .pv-note { order: 3; flex-basis: 100%; } }
+    /* The published page's .pd-toc and .pd-rail-links (gbti-v3.css) apply flex-direction:column straight to
+       their <a> children, because Astro renders those as direct children. Here every rail list lands one
+       level deeper, inside a [data-pv-*] wrapper the runtime script fills in, so each wrapper needs the same
+       column layout or its children fall back to inline flow and wrap like text. */
+    [data-pv-toc] { display: flex; flex-direction: column; gap: 2px; }
+    [data-pv-links] { display: flex; flex-direction: column; gap: 8px; }
+    /* "Favorited by": preview has no real favoriters yet (the draft is not published), so this emulates the
+       published card's shape (FavoritedBy.astro: a label + a small stacked-avatar row) rather than inventing
+       names or a count. */
+    .pv-fav-skel { display: flex; align-items: center; margin-top: 11px; }
+    .pv-fav-skel i { display: block; width: 20px; height: 20px; border-radius: 999px; background: var(--ink-3);
+      border: 2px solid var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .2); margin-left: -6px; }
+    .pv-fav-skel i:first-child { margin-left: 0; }
+    .pv-fav-skel i:nth-child(2) { opacity: .78; }
+    .pv-fav-skel i:nth-child(3) { opacity: .56; }
   </style>
 
   <script>
