@@ -8,7 +8,7 @@ shortDescription: >-
 categories:
   - devops
   - ide-plugins
-status: draft
+status: published
 visibility: public
 publicStub: false
 pricing: free
