@@ -23,6 +23,8 @@ import {
   publishComment,
   editComment,
   listComments,
+  publishShare,
+  ogPreview,
 } from './operations.mjs';
 import { startDeviceLogin, confirmDeviceLogin, logout } from './mcp-auth.mjs';
 
@@ -161,6 +163,37 @@ export const TOOLS = [
     inputSchema: obj({ id: { type: 'string' }, body: { type: 'string' }, authorNote: { type: 'boolean' } }, ['id', 'body']),
     handler: (ctx, args) => editComment(ctx, { id: args?.id, body: args?.body, authorNote: args?.authorNote }),
   },
+  // sow-181: post a SHARE from an agent. A Share is a link to something worth reading, so the tool takes a url
+  // and does the OG extraction ITSELF (ogPreview, the same SSRF-guarded Worker route the extension composer
+  // uses) rather than making the caller pre-fetch metadata. `visibility` is REQUIRED with no default so the
+  // agent has to ask the member public-or-members before anything is written: the schema default is `members`,
+  // and silently defaulting would quietly hide a share the member meant to publish, or publish one they meant
+  // to keep in the members stream.
+  {
+    name: 'add_share',
+    description: 'Post a SHARE (a link to something worth reading) to the network. REQUIRED `url` and REQUIRED `visibility`: "public" (anyone can see it, and it may syndicate) or "members" (the members-only stream, body encrypted). ALWAYS ask the member which one they want before calling; never guess. Title, description and image are auto-extracted from the url unless you pass them. Optional: title, shortDescription, image, category (one flat topic key), tags[], body (your own note about the link). author is forced to you; posting a Share is paid-only and goes through the gate. Returns the PR number + url.',
+    inputSchema: obj(
+      {
+        url: { type: 'string', description: 'The link being shared (absolute http/https URL).' },
+        visibility: { type: 'string', enum: ['public', 'members'], description: 'REQUIRED: ask the member. "public" is visible to everyone and may syndicate to social channels; "members" stays in the members-only stream.' },
+        title: { type: 'string' },
+        shortDescription: { type: 'string' },
+        image: { type: 'string' },
+        category: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        body: { type: 'string', description: 'Optional note in your own words about why the link is worth reading.' },
+        message: { type: 'string' }, prBody: { type: 'string' },
+      },
+      ['url', 'visibility'],
+    ),
+    handler: (ctx, args) => addShare(ctx, args ?? {}),
+  },
+  {
+    name: 'preview_link',
+    description: 'Fetch the OpenGraph metadata for a url (title, description, image) WITHOUT posting anything. Useful to show the member what a Share will look like before calling add_share. Server-side and SSRF-guarded.',
+    inputSchema: obj({ url: { type: 'string' } }, ['url']),
+    handler: (ctx, args) => ogPreview(ctx, { url: args?.url }),
+  },
   {
     name: 'list_comments',
     description: 'Read the published comment thread for a target. Args: targetType ("post"|"product"|"prompt"|"share"|"news"), targetSlug (content slug, or "<author>/<shareId>" for a share), optional limit. Reads merged/published comments (a just-posted comment appears after its PR merges + the site deploys).',
@@ -168,6 +201,39 @@ export const TOOLS = [
     handler: (ctx, args) => listComments(ctx, { targetType: args?.targetType, targetSlug: args?.targetSlug, limit: args?.limit }),
   },
 ];
+
+/**
+ * sow-181: add_share = extract THEN publish, in one call.
+ *
+ * The OG fetch is best-effort on purpose: a link whose metadata cannot be read (a 403, a site with no OG
+ * tags, a timeout) must still be shareable, so a failed extraction degrades to the url alone rather than
+ * failing the share. Anything the caller passed explicitly always wins over the extracted value, so an agent
+ * can correct a bad title without losing the rest.
+ */
+export async function addShare(ctx, args = {}) {
+  const url = String(args.url || '').trim();
+  if (!url) throw new OperationError('bad-request', 'url is required');
+  const visibility = args.visibility;
+  if (visibility !== 'public' && visibility !== 'members') {
+    throw new OperationError('bad-request', 'visibility is required and must be "public" or "members". Ask the member which they want before posting.');
+  }
+  let og = null;
+  try { og = await ogPreview(ctx, { url }); } catch { og = null; } // best-effort: never block a share on extraction
+  const input = stripBlank({
+    url,
+    visibility,
+    title: args.title ?? og?.title,
+    shortDescription: args.shortDescription ?? og?.description,
+    image: args.image ?? og?.image,
+    category: args.category,
+    tags: Array.isArray(args.tags) ? args.tags : undefined,
+  });
+  // NB: publishShare's `title` is the PULL REQUEST title, not the share's. Leave it unset so it derives
+  // "New Share: <share title>" itself; passing args.title here would conflate the two.
+  return publishShare(ctx, { input, body: args.body ?? '', message: args.message, prBody: args.prBody });
+}
+
+const stripBlank = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
