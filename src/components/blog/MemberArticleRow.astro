@@ -5,6 +5,7 @@ import type { CollectionEntry } from 'astro:content';
 import { authorDisplay, authorHref, formatDate } from '../../lib/authors';
 import { buildAvatarIndex, avatarStack } from '../../lib/avatars';
 import StackedAvatars from '../StackedAvatars.astro';
+import { categoryLabel } from '../../lib/taxonomy';
 
 // Horizontal article card (image left 240px, content right) used in the home "Member Articles"
 // section, matching the legacy member-articles component.
@@ -13,7 +14,7 @@ interface Props {
 }
 const { post } = Astro.props;
 const d = post.data;
-const category = d.categories?.[0];
+const category = d.categories?.[0] ? categoryLabel(d.categories[0]) : undefined;
 const index = buildAvatarIndex(await getCollection('profile'));
 const comments = await getCollection('comment');
 const stack = avatarStack({ author: d.author, contributors: d.contributors, comments, targetType: 'post', targetSlug: d.slug, index });
@@ -27,7 +28,7 @@ const stack = avatarStack({ author: d.author, contributors: d.contributors, comm
     )}
   </a>
   <div class="flex flex-col gap-2 py-1 pr-1">
-    {category && <span class="chip chip-green" style="align-self:flex-start;text-transform:capitalize">{category}</span>}
+    {category && <span class="chip chip-green" style="align-self:flex-start">{category}</span>}
     <h3 class="row-title mt8">
       <a href={`/articles/${d.slug}/`}>{d.title}</a>
     </h3>

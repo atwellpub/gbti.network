@@ -1,24 +1,22 @@
 ---
+// sow-179 Phase 2: this page resolves which of the three article layouts renders the post, then stays thin.
+// ContentFooter + the article-only closing blocks (OpenHistory / RelatedPosts / ContributionCredits /
+// FavoritedBy) are composed once here and slotted into every layout's "closing" slot, so a layout may
+// reorder them (Journal moves FavoritedBy into its rail) but never re-implements them.
 import { getCollection, render } from 'astro:content';
-import { Image } from 'astro:assets';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import Prose from '../../components/blog/Prose.astro';
+import ArticleCard from '../../components/blog/ArticleCard.astro';
 import RelatedPosts from '../../components/blog/RelatedPosts.astro';
 import ContributionCredits from '../../components/blog/ContributionCredits.astro';
 import OpenHistory from '../../components/blog/OpenHistory.astro';
-import ContentMeta from '../../components/ContentMeta.astro';
-import ContentActions from '../../components/ContentActions.astro';
 import ContentFooter from '../../components/ContentFooter.astro';
-import VideoEmbed from '../../components/VideoEmbed.astro';
 import EditHooks from '../../components/EditHooks.astro';
 import TouchSignal from '../../components/TouchSignal.astro';
 import { refCodeForAuthor } from '../../lib/referral';
 import { defaultFeatureImage } from '../../lib/feature-image';
-import { favoriteCount } from '../../lib/favorites';
 import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the opt-in favoriter list
 import { aliasSlugsOf } from '../../lib/content-index.mjs'; // SOW-112: pre-rename slugs for count/discussion aliasing
-import LockedBody from '../../components/LockedBody.astro';
-import { hasPublicPage, isStub } from '../../lib/content';
+import { hasPublicPage, isStub as isStubFn } from '../../lib/content';
 import { buildAvatarIndex, avatarStack } from '../../lib/avatars';
 
 export async function getStaticPaths() {
@@ -29,7 +27,7 @@ export async function getStaticPaths() {
 const { post } = Astro.props;
 const d = post.data;
 const { Content } = await render(post);
-const taxonomy = [...d.categories, ...d.tags];
+const stub = isStubFn(post);
 const postUrl = new URL(`/articles/${d.slug}/`, Astro.site ?? 'https://gbti.network').href;
 
 const avatarIndex = buildAvatarIndex(await getCollection('profile'));
@@ -41,50 +39,21 @@ const stack = avatarStack({
   targetSlug: d.slug,
   index: avatarIndex,
 });
+
+// sow-179: only 'card' exists so far (Phase 2); Phase 3/4 add 'editorial'/'journal' to this map as those
+// layouts are built. The ?? fallback means an unrecognized or not-yet-built value still renders, never 404s.
+const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard };
+const Layout = LAYOUTS[d.layout] ?? ArticleCard;
 ---
 <BaseLayout title={d.title} description={d.excerpt} ogImage={d.coverImage?.src ?? defaultFeatureImage('post')} ogType="article">
-  <section class="band" style="background:var(--paper-2)">
-    <div class="wrap">
-      <!-- Reading column, surfaced as a V3 paper card -->
-      <article class="card mx-auto" style="max-width:820px;padding:clamp(28px,5vw,56px)">
-        <header class="tcenter">
-          <h1 data-gbti-region="title" class="h1">{d.title}</h1>
-
-          <div class="mt-20 flex col items-center g12">
-            <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} center />
-            <ContentActions type="post" slug={d.slug} title={d.title} url={postUrl} author={d.author} categories={d.categories} count={favoriteCount('post', d.slug, aliasSlugsOf(d))} />
-          </div>
-
-          {taxonomy.length > 0 && (
-            <ul class="mt-20 flex wrap-w justify-center g8" style="list-style:none;padding:0;margin-top:20px">
-              {taxonomy.map((t) => (
-                <li class="chip">{t}</li>
-              ))}
-            </ul>
-          )}
-        </header>
-
-        {d.video ? (
-          <div class="mt-32"><VideoEmbed video={d.video} title={d.title} /></div>
-        ) : d.coverImage ? (
-          <Image src={d.coverImage} alt={d.title} width={1200} height={675} class="mt-32 w-full object-cover" style="border-radius:var(--r-lg)" />
-        ) : null}
-
-        <div class="mt-32" data-gbti-region="body">
-          <Prose>
-            {isStub(post) ? <LockedBody encPath={d.encryptedBody} kind="body" /> : <Content />}
-            {!isStub(post) && d.encryptedBody && <LockedBody encPath={d.encryptedBody} kind="section" />}
-          </Prose>
-        </div>
-      </article>
-
-      <ContentFooter type="post" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
-      <OpenHistory filePath={post.filePath} author={d.author} contributors={d.contributors} />
-      <RelatedPosts post={post} />
-      <ContributionCredits contributors={d.contributors} />
-      <FavoritedBy type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />
-    </div>
-  </section>
+  <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack}>
+    <Content slot="body" />
+    <ContentFooter slot="closing" type="post" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
+    <OpenHistory slot="closing" filePath={post.filePath} author={d.author} contributors={d.contributors} />
+    <RelatedPosts slot="closing" post={post} />
+    <ContributionCredits slot="closing" contributors={d.contributors} />
+    <FavoritedBy slot="closing" type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />
+  </Layout>
   <EditHooks type="post" owner={d.author} slug={d.slug} />
   <TouchSignal type="post" ownerId={refCodeForAuthor(d.author)} slug={d.slug} />
 </BaseLayout>

@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import ArticleCard from '../../components/blog/ArticleCard.astro';
+import ArticleTeaser from '../../components/blog/ArticleTeaser.astro';
 import { isListed, byNewest } from '../../lib/content';
 
 const posts = (await getCollection('post')).filter(isListed).sort(byNewest);
@@ -22,7 +22,7 @@ const categories = [...new Set(posts.map((p) => p.data.categories?.[0]).filter(B
       </div>
 
       <div id="post-grid" class="works-grid blog-grid">
-        {posts.map((post) => <ArticleCard post={post} />)}
+        {posts.map((post) => <ArticleTeaser post={post} />)}
       </div>
     </div>
   </section>

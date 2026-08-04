@@ -1450,3 +1450,51 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
   .pd-shot:hover img { transform: none; }
   .pd-frames { scroll-behavior: auto; }
 }
+
+/* ==================== article layouts (sow-179) ==================== */
+/* Editorial and Journal "mirror the product Doc Shell" in STRUCTURE per the design handoff, not literally:
+   this is a deliberate separate .art-* namespace copying the .pd-* patterns worth copying, rather than
+   reusing .pd-* classes on article markup, so a future product-only tweak can never silently affect an
+   article page. Only the pieces genuinely identical in both new layouts (per the design mock) live here;
+   each layout's own grid/hero shape is built alongside its markup. Card (layout: 'card') is unchanged today
+   and does not use this namespace yet. */
+.art-shell { --art-off: var(--head-h); }
+.art-wrap { max-width: 1140px; margin: 0 auto; padding: 0 34px; }
+@media (max-width: 560px) { .art-wrap { padding: 0 20px; } }
+
+.art-rail-lab { font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-mute); }
+
+/* Contents rail: identical square-left-edge active/inactive treatment as the product page's .pd-toc, the
+   design mock's own tocDemo script data matches this almost verbatim. */
+.art-toc { display: flex; flex-direction: column; gap: 2px; }
+.art-toc .art-rail-lab { padding: 0 0 9px 11px; }
+.art-toc a {
+  font-size: 13.5px; line-height: 1.35; padding: 7px 11px;
+  border-left: 2px solid var(--line); color: var(--fg-mute);
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.art-toc a:hover { color: var(--fg); }
+.art-toc a.on { border-left-color: var(--green); color: var(--fg); background: var(--green-tint); }
+
+/* Gating (SOW-016): a Mode B stub teaser and a Mode C locked tail, styled for the first time on articles --
+   the product page's .pd-teaser/.pd-locked-tail is the working reference this copies, green for "the whole
+   piece opens with membership," amber for "the rest of this piece opens with membership." */
+.art-teaser, .art-locked-tail { border: 1.5px solid var(--green); border-radius: 2px; background: var(--green-tint); padding: 24px 26px; }
+.art-locked-tail { margin-top: 30px; border-color: var(--amber); background: var(--amber-tint); }
+.art-gate-lab { font-family: var(--f-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--green-700); }
+.art-locked-tail .art-gate-lab { color: var(--amber-text); }
+.art-gate-title { margin: 9px 0 10px; font-family: var(--f-display); font-weight: 600; font-size: 22px; color: var(--fg); }
+.art-locked-tail .art-gate-title { font-size: 19px; margin-bottom: 6px; }
+.art-gate-sub { margin: 0; font-size: 15px; line-height: 1.65; color: var(--fg-soft); }
+.art-skel { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 4px; }
+.art-skel i { display: block; height: 10px; border-radius: var(--r-pill); background: var(--line-2); }
+.art-skel i:nth-child(1) { width: 94%; }
+.art-skel i:nth-child(2) { width: 80%; opacity: .72; }
+.art-skel i:nth-child(3) { width: 64%; opacity: .48; }
+.art-teaser .locked-notice, .art-locked-tail .locked-notice { border: 0; background: none; padding: 14px 0 0; }
+.art-locked-tail .locked-notice > svg { color: var(--amber-text); }
+.art-locked-tail .locked-sub a, .art-locked-tail .open-ext { color: var(--amber-text); border-color: var(--amber-text); }
+
+/* Favorited-by, rail context: strips the standalone card chrome exactly like the product rail already does
+   (.pd-rail .card), so FavoritedBy.astro reads as one more rail block rather than a boxed card inside a box. */
+.art-rail .card { background: none; border: 0; box-shadow: none; padding: 0 !important; }

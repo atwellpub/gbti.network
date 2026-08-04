@@ -2,7 +2,7 @@
 import { getCollection } from 'astro:content';
 import type { CollectionEntry } from 'astro:content';
 import { isPublic } from '../../lib/content';
-import ArticleCard from './ArticleCard.astro';
+import ArticleTeaser from './ArticleTeaser.astro';
 
 interface Props {
   post: CollectionEntry<'post'>;
@@ -32,7 +32,7 @@ const related = (await getCollection('post'))
       <h2 class="h2">Related posts</h2>
     </div>
     <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-      {related.map((p) => <ArticleCard post={p} />)}
+      {related.map((p) => <ArticleTeaser post={p} />)}
     </div>
   </section>
 )}

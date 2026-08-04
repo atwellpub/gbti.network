@@ -1,70 +1,72 @@
 ---
+// sow-179 Phase 2: the "Card" article layout (layout: 'card'), extracted faithfully from the article detail
+// page's only layout, with no visual change. Today's centered 820px reading card, name free for this full-page
+// layout because the earlier feed/listing teaser of the same name is now ArticleTeaser.astro. Same props +
+// slots contract as every article layout: d (the post's frontmatter data), isStub (already-resolved SOW-016
+// Mode B boolean), a "body" slot carrying the rendered <Content />, and a "closing" slot carrying the shared
+// + article-only components ([slug].astro composes and slots both in, this component never re-implements them).
 import { Image } from 'astro:assets';
-import { getCollection } from 'astro:content';
-import type { CollectionEntry } from 'astro:content';
-import { authorDisplay, authorHref, formatDate } from '../../lib/authors';
-import { buildAvatarIndex, avatarStack } from '../../lib/avatars';
-import { isStub } from '../../lib/content';
-import StackedAvatars from '../StackedAvatars.astro';
-import { defaultFeatureImage } from '../../lib/feature-image';
+import Prose from './Prose.astro';
+import VideoEmbed from '../VideoEmbed.astro';
+import LockedBody from '../LockedBody.astro';
+import ContentMeta from '../ContentMeta.astro';
+import ContentActions from '../ContentActions.astro';
+import { favoriteCount } from '../../lib/favorites';
+import { aliasSlugsOf } from '../../lib/content-index.mjs';
+import { breadcrumb } from '../../lib/taxonomy';
 
 interface Props {
-  post: CollectionEntry<'post'>;
+  d: any; // CollectionEntry<'post'>['data']
+  isStub: boolean;
+  postId: string; // post.id, for LockedBody's extension deep-link (SOW-112 QA parity with the product page)
+  postUrl: string;
+  stack: any[]; // avatarStack() result, ContentMeta's stacked byline avatars
 }
-const { post } = Astro.props;
-const d = post.data;
-const category = d.categories?.[0];
-const stub = isStub(post); // SOW-016: a listed members post is a Mode B stub (the body is gated)
-
-// Stacked avatars: the author plus accepted contributors plus commenters (getCollection is cached
-// per build). Author first, deduped.
-const index = buildAvatarIndex(await getCollection('profile'));
-const comments = await getCollection('comment');
-const stack = avatarStack({ author: d.author, contributors: d.contributors, comments, targetType: 'post', targetSlug: d.slug, index });
+const { d, isStub, postId, postUrl, stack } = Astro.props;
+// sow-179: categories is one hierarchical path (house/taxonomy.yml), not independent chips -- render it as a
+// single labelled breadcrumb like the product page already does, instead of merging its raw keys into the tag
+// chip list. Tags stay a flat, free-form chip list.
+const category = breadcrumb(d.categories).join(' › ');
 ---
-<article
-  data-category={category}
-  class="archive-card card card-hover group flex h-full flex-col overflow-hidden"
->
-  <a href={`/articles/${d.slug}/`} class="relative block overflow-hidden pb-[56.25%]" style="background:var(--tint)">
-    {d.coverImage ? (
-      <Image src={d.coverImage} alt="" width={600} height={338} class="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
-    ) : (
-      <img src={defaultFeatureImage('post')} alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover" />
-    )}
-  </a>
-  <div class="flex flex-1 flex-col gap-2 p-6">
-    <div class="flex items-center g8 wrap-w" style="align-self:flex-start">
-      {category && (
-        <span class="chip chip-green" style="text-transform:capitalize">{category}</span>
-      )}
-      {stub && (
-        <span class="chip chip-green" style="display:inline-flex;align-items:center;gap:4px">
-          <svg viewBox="0 0 24 24" width="12" height="12"><use href="#ico-lock"/></svg>Members only
-        </span>
-      )}
-    </div>
-    {d.publishedAt && (
-      <time datetime={d.publishedAt.toISOString()} class="body-sm muted mono mt12">{formatDate(d.publishedAt)}</time>
-    )}
-    <h2 class="h4 mt8 card-title">
-      <a href={`/articles/${d.slug}/`}>{d.title}</a>
-    </h2>
-    <div class="byline mt-auto pt-3">
-      <StackedAvatars items={stack} size="sm" />
-      <a href={authorHref(d.author)} class="body-sm link" style="font-weight:600">{authorDisplay(d.author)}</a>
-    </div>
-  </div>
-</article>
+<section class="band" style="background:var(--paper-2)">
+  <div class="wrap">
+    <!-- Reading column, surfaced as a V3 paper card -->
+    <article class="card mx-auto" style="max-width:820px;padding:clamp(28px,5vw,56px)">
+      <header class="tcenter">
+        {category && <p class="eyebrow">{category}</p>}
+        <h1 data-gbti-region="title" class="h1 mt-8">{d.title}</h1>
 
-<style>
-  /* shared .h4 sizing; only the title link colour + hover are card-specific */
-  .card-title a { color: var(--fg); transition: color .15s ease; }
-  .group:hover .card-title a { color: var(--green-700); }
-  /* Branded cover for posts with no coverImage: a gradient with the GBTI mark, so the card reads as an
-     intentional cover rather than an empty placeholder. */
-  .ac-fallback { display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(120% 120% at 30% 20%, var(--green-tint), var(--tint-warm)); }
-  .ac-mark { font-family: var(--f-display); font-weight: 800; font-size: clamp(56px, 22%, 104px);
-    line-height: 1; color: var(--green); opacity: .22; user-select: none; }
-</style>
+        <div class="mt-20 flex col items-center g12">
+          <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} center />
+          <ContentActions type="post" slug={d.slug} title={d.title} url={postUrl} author={d.author} categories={d.categories} count={favoriteCount('post', d.slug, aliasSlugsOf(d))} />
+        </div>
+
+        {d.tags.length > 0 && (
+          <ul class="mt-20 flex wrap-w justify-center g8" style="list-style:none;padding:0;margin-top:20px">
+            {d.tags.map((t: string) => (
+              <li class="chip">{t}</li>
+            ))}
+          </ul>
+        )}
+      </header>
+
+      {d.video ? (
+        <div class="mt-32"><VideoEmbed video={d.video} title={d.title} /></div>
+      ) : d.coverImage ? (
+        <>
+          <Image src={d.coverImage} alt={d.coverAlt || d.title} width={1200} height={675} class="mt-32 w-full object-cover" style="border-radius:var(--r-lg)" />
+          {d.coverAlt && <p class="mt-8 body-sm muted tcenter">{d.coverAlt}</p>}
+        </>
+      ) : null}
+
+      <div class="mt-32" data-gbti-region="body">
+        <Prose>
+          {isStub ? <LockedBody encPath={d.encryptedBody} kind="body" readerPath={postId} readerType="post" /> : <slot name="body" />}
+          {!isStub && d.encryptedBody && <LockedBody encPath={d.encryptedBody} kind="section" readerPath={postId} readerType="post" />}
+        </Prose>
+      </div>
+    </article>
+
+    <slot name="closing" />
+  </div>
+</section>

@@ -1,7 +1,8 @@
 ---
 // SOW-050: the unified content action cluster, identical across articles / products / prompts. Favorite +
-// Collection (the existing inert <gbti-favorite>/<gbti-collection> the client upgrades) + a Share reveal (a
-// native <details> popover holding the shared ShareRow, so it needs no extra JS). One row, one look everywhere.
+// Collection (the existing inert <gbti-favorite>/<gbti-collection> the client upgrades) + the shared ShareRow
+// icons rendered directly (sow-179: no more a <details> disclosure behind a "Share" toggle, the four targets
+// are visible immediately, matching the design handoff). One row, one look everywhere.
 // SOW-114: with the GBTI extension installed, Favorite/Save deep-link into the in-extension reader (via the
 // SOW-036 gbti:open relay) instead of the sign-in modal, and an "Open in extension" control appears beside
 // Share. Without the extension nothing changes (the inert [data-signin] modal path stands).
@@ -26,15 +27,8 @@ const itemPath = author ? contentItemPath(type, author, slug) : null;
 <div class="content-actions" data-gbti-region="actions" data-gbti-type={type} data-gbti-item-path={itemPath}>
   <FavoriteButton targetType={type} targetSlug={slug} count={count} />
   <CollectionButton targetType={type} targetSlug={slug} />
-  <details class="share-pop">
-    <summary class="share-toggle" aria-label="Share">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 15V3M8 7l4-4 4 4"/></svg>
-      Share
-    </summary>
-    <div class="share-pop-body">
-      <ShareRow type={type} title={title} url={url} categories={categories} />
-    </div>
-  </details>
+  <span class="act-div" aria-hidden="true"></span>
+  <ShareRow type={type} title={title} url={url} categories={categories} />
   {itemPath && (
     <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-puzzle"/></svg>
@@ -81,18 +75,7 @@ const itemPath = author ? contentItemPath(type, author, slug) : null;
 
 <style>
   .content-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .share-pop { position: relative; }
-  .share-toggle { list-style: none; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-    font-family: var(--f-sans); font-weight: 600; font-size: 13px; color: var(--fg-soft); background: var(--paper);
-    border: 1.5px solid var(--line); border-radius: var(--r-pill); padding: 6px 14px;
-    transition: border-color .15s, color .15s; }
-  .share-toggle::-webkit-details-marker { display: none; }
-  .share-toggle::marker { content: ''; }
-  .share-toggle:hover { border-color: var(--line-2); color: var(--fg); }
-  .share-pop[open] .share-toggle { border-color: var(--green); color: var(--green-700); }
-  .share-pop-body { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; padding: 10px;
-    background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--sh-md); }
-  @media (max-width: 560px) { .share-pop-body { left: auto; right: 0; } }
+  .act-div { width: 1px; height: 22px; background: var(--line-2); flex: none; }
   /* SOW-114: shown only when the extension stamp is present (the script clears [hidden]). The explicit
      [hidden] rule keeps the display value from beating the attribute. */
   .ext-open { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;

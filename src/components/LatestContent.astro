@@ -5,7 +5,7 @@
 // empty, and the whole block omits when there is nothing to show.
 import { getCollection } from 'astro:content';
 import { isListed, byNewest } from '../lib/content';
-import ArticleCard from './blog/ArticleCard.astro';
+import ArticleTeaser from './blog/ArticleTeaser.astro';
 import ProductCard from './products/ProductCard.astro';
 import PromptCard from './prompts/PromptCard.astro';
 
@@ -29,7 +29,7 @@ const any = posts.length + products.length + prompts.length;
       {posts.length > 0 && (
         <div class="latest-sec">
           <div class="latest-head"><h2 class="h3">Latest articles</h2><a class="link" href="/articles/">All articles</a></div>
-          <div class="latest-grid">{posts.map((p) => <ArticleCard post={p} />)}</div>
+          <div class="latest-grid">{posts.map((p) => <ArticleTeaser post={p} />)}</div>
         </div>
       )}
       {products.length > 0 && (

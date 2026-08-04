@@ -126,6 +126,12 @@ const post = defineCollection({
     excerpt: z.string().max(200).optional(),
     categories: z.array(z.string()).default([]),
     tags: z.array(z.string()).default([]),
+    // sow-179: which of the three article layouts renders this post (editorial/journal/card, see
+    // src/components/blog/Article*.astro). Defaults to 'card' for now, today's only layout and the one every
+    // existing post already renders as; Phase 3 flips this default to 'editorial' once that layout exists and
+    // every already-published post has been explicitly backfilled to layout: 'card' first, so nothing live
+    // silently changes shape before that backfill lands.
+    layout: z.enum(['editorial', 'journal', 'card']).default('card'),
     coverImage: image().optional(),
     coverAlt: z.string().max(250).optional(), // SOW-062 P3: cover-image alt text (accessibility)
     video: z.string().optional(), // YouTube/Vimeo URL or ID — embed only

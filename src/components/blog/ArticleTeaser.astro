@@ -1,0 +1,73 @@
+---
+import { Image } from 'astro:assets';
+import { getCollection } from 'astro:content';
+import type { CollectionEntry } from 'astro:content';
+import { authorDisplay, authorHref, formatDate } from '../../lib/authors';
+import { buildAvatarIndex, avatarStack } from '../../lib/avatars';
+import { isStub } from '../../lib/content';
+import StackedAvatars from '../StackedAvatars.astro';
+import { defaultFeatureImage } from '../../lib/feature-image';
+import { categoryLabel } from '../../lib/taxonomy';
+
+interface Props {
+  post: CollectionEntry<'post'>;
+}
+const { post } = Astro.props;
+const d = post.data;
+// sow-179: categoryLabel maps the taxonomy key to its real label (categories[0] is still the top-level
+// segment, same choice as before, just no longer the raw key text-transform:capitalize was approximating).
+const category = d.categories?.[0] ? categoryLabel(d.categories[0]) : undefined;
+const stub = isStub(post); // SOW-016: a listed members post is a Mode B stub (the body is gated)
+
+// Stacked avatars: the author plus accepted contributors plus commenters (getCollection is cached
+// per build). Author first, deduped.
+const index = buildAvatarIndex(await getCollection('profile'));
+const comments = await getCollection('comment');
+const stack = avatarStack({ author: d.author, contributors: d.contributors, comments, targetType: 'post', targetSlug: d.slug, index });
+---
+<article
+  data-category={category}
+  class="archive-card card card-hover group flex h-full flex-col overflow-hidden"
+>
+  <a href={`/articles/${d.slug}/`} class="relative block overflow-hidden pb-[56.25%]" style="background:var(--tint)">
+    {d.coverImage ? (
+      <Image src={d.coverImage} alt="" width={600} height={338} class="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+    ) : (
+      <img src={defaultFeatureImage('post')} alt="" loading="lazy" class="absolute inset-0 h-full w-full object-cover" />
+    )}
+  </a>
+  <div class="flex flex-1 flex-col gap-2 p-6">
+    <div class="flex items-center g8 wrap-w" style="align-self:flex-start">
+      {category && (
+        <span class="chip chip-green">{category}</span>
+      )}
+      {stub && (
+        <span class="chip chip-green" style="display:inline-flex;align-items:center;gap:4px">
+          <svg viewBox="0 0 24 24" width="12" height="12"><use href="#ico-lock"/></svg>Members only
+        </span>
+      )}
+    </div>
+    {d.publishedAt && (
+      <time datetime={d.publishedAt.toISOString()} class="body-sm muted mono mt12">{formatDate(d.publishedAt)}</time>
+    )}
+    <h2 class="h4 mt8 card-title">
+      <a href={`/articles/${d.slug}/`}>{d.title}</a>
+    </h2>
+    <div class="byline mt-auto pt-3">
+      <StackedAvatars items={stack} size="sm" />
+      <a href={authorHref(d.author)} class="body-sm link" style="font-weight:600">{authorDisplay(d.author)}</a>
+    </div>
+  </div>
+</article>
+
+<style>
+  /* shared .h4 sizing; only the title link colour + hover are card-specific */
+  .card-title a { color: var(--fg); transition: color .15s ease; }
+  .group:hover .card-title a { color: var(--green-700); }
+  /* Branded cover for posts with no coverImage: a gradient with the GBTI mark, so the card reads as an
+     intentional cover rather than an empty placeholder. */
+  .ac-fallback { display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(120% 120% at 30% 20%, var(--green-tint), var(--tint-warm)); }
+  .ac-mark { font-family: var(--f-display); font-weight: 800; font-size: clamp(56px, 22%, 104px);
+    line-height: 1; color: var(--green); opacity: .22; user-select: none; }
+</style>

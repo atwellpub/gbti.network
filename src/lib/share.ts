@@ -1,8 +1,8 @@
-// Programmatic social-share text builder (see .data/ops/share-ops/README.md). One schema per content
+// Programmatic social-share intent builder (see .data/ops/share-ops/README.md). One schema per content
 // type drives the lead sentence and the base discovery hashtags; the content's top-level category adds
-// one more hashtag. Each platform gets text shaped to its norm: X carries hashtags (discovery), the
-// messaging targets (WhatsApp / SMS) drop them as noise, Substack Notes keeps them. No SDKs, no trackers,
-// every target is a plain intent URL or a copy string. Reused across prompt / post / product pages.
+// one more hashtag. X carries the lead + hashtags in its own intent params; LinkedIn and Reddit scrape or
+// accept a title from the URL itself, so they need no text payload. No SDKs, no trackers, every target is
+// a plain intent URL, plus a client-side copy-link. Reused across prompt / post / product pages.
 
 import { categoryLabel, topKey } from './taxonomy';
 
@@ -32,18 +32,16 @@ export interface ShareLinks {
   lead: string; // the conversational lead sentence
   hashtags: string[]; // ['#gbti', '#aiprompts', '#ai'] — display form
   x: string; // X intent href (hashtags carried in the intent's hashtags param)
-  whatsapp: string; // wa.me intent href (no hashtags)
-  sms: string; // sms: URI (no hashtags)
-  substackText: string; // copy string for the Substack Notes composer (keeps hashtags)
-  plain: string; // generic full payload: "lead title url #tags"
+  linkedin: string; // LinkedIn share-offsite href (url only; LinkedIn scrapes the page's own OG tags)
+  reddit: string; // reddit submit href (url + title, no hashtags; Reddit has no hashtag concept)
 }
 
 /**
  * Build every share variant for one content item. Pure + framework-free, so it is unit-testable and the
  * same logic serves prompts, posts, and products. Platform shaping:
  *  - X: text = "lead title", url + hashtags ride their own intent params (hashtags help discovery).
- *  - WhatsApp / SMS: one combined "lead title url" string, NO hashtags (noise in a DM).
- *  - Substack: copy "lead title url #tags" (Notes supports hashtags); the page opens the composer.
+ *  - LinkedIn: url only, its share-offsite endpoint pulls title/description from the page's OG tags.
+ *  - Reddit: url + title as separate params, its submit page has no hashtag concept.
  */
 export function buildShare({ type, title, url, categories }: ShareInput): ShareLinks {
   const schema = SHARE_SCHEMA[type];
@@ -60,8 +58,6 @@ export function buildShare({ type, title, url, categories }: ShareInput): ShareL
 
   const lead = schema.lead;
   const headline = `${lead} ${title}`.trim(); // the human sentence, no url, no tags
-  const messaging = `${headline} ${url}`.trim(); // WhatsApp / SMS: no hashtags
-  const plain = `${messaging}${hashtags.length ? ' ' + hashtags.join(' ') : ''}`.trim();
 
   return {
     lead,
@@ -69,9 +65,7 @@ export function buildShare({ type, title, url, categories }: ShareInput): ShareL
     x: `https://twitter.com/intent/tweet?text=${enc(headline)}&url=${enc(url)}${
       uniqueTokens.length ? `&hashtags=${enc(uniqueTokens.join(','))}` : ''
     }`,
-    whatsapp: `https://wa.me/?text=${enc(messaging)}`,
-    sms: `sms:?&body=${enc(messaging)}`,
-    substackText: plain,
-    plain,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}`,
+    reddit: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(title)}`,
   };
 }

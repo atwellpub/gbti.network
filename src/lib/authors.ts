@@ -18,13 +18,17 @@ export function authorAvatar(username: string, profileAvatar?: string): string |
   return profileAvatar ?? (username === 'gbti' ? GBTI_AVATAR : undefined);
 }
 
-/** Format a date the way the legacy site did: ordinal day + short month + year ("13th Oct 2025"). */
+/** Format a date the way the legacy site did: ordinal day + short month + year ("13th Oct 2025"). UTC
+ *  throughout: a date-only frontmatter value (publishedAt: 2026-08-04) parses to UTC midnight, so reading
+ *  local parts renders the day before in any negative-offset timezone (confirmed both directions: a UTC
+ *  build renders the 4th, a local CDT build of the same value renders the 3rd). Reading the UTC parts
+ *  makes the rendered date match the date the author actually wrote, everywhere it builds or previews. */
 export function formatDate(d?: Date): string {
   if (!d) return '';
-  const day = d.getDate();
+  const day = d.getUTCDate();
   const j = day % 10;
   const k = day % 100;
   const suffix = j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
-  const month = d.toLocaleDateString('en-US', { month: 'short' });
-  return `${day}${suffix} ${month} ${d.getFullYear()}`;
+  const month = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  return `${day}${suffix} ${month} ${d.getUTCFullYear()}`;
 }

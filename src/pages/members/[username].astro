@@ -5,7 +5,7 @@ import { refCodeForAuthor } from '../../lib/referral';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Container from '../../components/Container.astro';
 import ProfileHeader from '../../components/members/ProfileHeader.astro';
-import ArticleCard from '../../components/blog/ArticleCard.astro';
+import ArticleTeaser from '../../components/blog/ArticleTeaser.astro';
 import ProductCard from '../../components/products/ProductCard.astro';
 import PromptCard from '../../components/prompts/PromptCard.astro';
 import SubscribeButton from '../../components/SubscribeButton.astro';
@@ -54,7 +54,7 @@ const total = posts.length + products.length + prompts.length;
             <h2 class="h2">{isOrg ? 'Articles' : `Articles by ${d.displayName}`}</h2>
           </div>
           <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            {posts.map((p) => <ArticleCard post={p} />)}
+            {posts.map((p) => <ArticleTeaser post={p} />)}
           </div>
         </div>
       )}
