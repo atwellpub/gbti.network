@@ -26,7 +26,7 @@ import TouchSignal from '../../components/TouchSignal.astro';
 import { refCodeForAuthor } from '../../lib/referral';
 import { defaultFeatureImage } from '../../lib/feature-image';
 import LockedBody from '../../components/LockedBody.astro';
-import { hasPublicPage, isStub } from '../../lib/content';
+import { hasPublicPage, isStub, contentRepoPath } from '../../lib/content';
 import { breadcrumb } from '../../lib/taxonomy';
 import { favoriteCount } from '../../lib/favorites';
 import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the opt-in favoriter list
@@ -70,6 +70,12 @@ const markImage = d.iconLarge ?? d.icon;
 const category = breadcrumb(d.categories).join(' › ');
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const favs = favoriteCount('product', d.slug, aliasSlugsOf(d));
+
+// sow-175: the hero's Edit affordance. The href is public build-time data (same path EditHooks already
+// exposes); only VISIBILITY is a runtime decision, toggled client-side from the member signal once resolved,
+// so an anonymous or non-owning visitor never sees the button flash before script runs.
+const editPath = contentRepoPath('product', d.author, d.slug);
+const editHref = editPath ? `/workbench/#tab=product&edit=${encodeURIComponent(editPath)}` : null;
 
 const shots = stub ? [] : normalizeGallery(d.gallery);
 const galleryStyle = resolveGalleryStyle(d.galleryStyle, shots.length);
@@ -119,6 +125,12 @@ const lockedHint = (l: { encrypted?: boolean }) =>
     <section class="pd-hero" data-preset={hero.preset}>
       {hero.image && <Image src={hero.image} alt="" widths={[900, 1600]} sizes="100vw" class="pd-hero-img" />}
       <div class="pd-hero-scrim"></div>
+      {editHref && (
+        <a href={editHref} target="_blank" rel="noopener" class="pd-hero-edit" data-pd-hero-edit data-pd-owner={d.author} hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          Edit
+        </a>
+      )}
       <div class="pd-wrap pd-hero-in">
         <Image src={markImage} alt={`${d.title} icon`} width={124} height={124} class="pd-mark" />
         <div class="pd-hero-txt">
@@ -347,4 +359,17 @@ const lockedHint = (l: { encrypted?: boolean }) =>
   import { initToc, initCarousel } from '../../lib/pd-enhance.mjs';
   initToc();
   initCarousel();
+
+  // sow-175: the hero Edit button. The href is already baked in server-side; only visibility is decided here,
+  // from the site-wide member signal BaseLayout already hydrates. Presentation only, matching every other use
+  // of this signal: the SOW-005 gate is the real boundary if a non-owner ever reached the editor directly.
+  import { readMemberSignal, onMemberSignal, currentIdentity } from '../../lib/member-signal';
+  import { canEditItem } from '../../lib/product-page.mjs';
+  const editBtn = document.querySelector('[data-pd-hero-edit]');
+  if (editBtn) {
+    const owner = editBtn.dataset.pdOwner || '';
+    const apply = (identity) => { editBtn.hidden = !canEditItem(identity, owner); };
+    apply(currentIdentity(readMemberSignal()));
+    onMemberSignal(apply);
+  }
 </script>

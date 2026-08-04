@@ -242,3 +242,16 @@ export function formatRelease(release) {
   if (!release || release.draft || !release.tag_name) return null;
   return { tag: release.tag_name, url: release.html_url, publishedAt: release.published_at };
 }
+
+/**
+ * Whether a signed-in identity may see the page's Edit affordance: they own the item, or they are superadmin.
+ * Presentation only, matching every other use of the member signal (member-signal.ts) — the SOW-005 gate is
+ * the real boundary on publish, so a false positive here only offers a link, never a write.
+ * @param {{ login?: string|null, role?: string }|null} identity
+ * @param {string} owner
+ */
+export function canEditItem(identity, owner) {
+  if (!identity) return false;
+  if (identity.role === 'superadmin') return true;
+  return !!identity.login && !!owner && identity.login.toLowerCase() === String(owner).toLowerCase();
+}

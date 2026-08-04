@@ -1199,6 +1199,20 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
   position: absolute; inset: 0;
   background: linear-gradient(to top, rgba(20,18,25,.96) 6%, rgba(20,18,25,.55) 48%, rgba(20,18,25,.1) 100%);
 }
+/* sow-175: the owner/superadmin Edit affordance. Server-rendered hidden; a script reveals it once the member
+   signal resolves (see the page's own script block), so it never flashes for a visitor. Glass rather than a
+   solid box because it sits over the banner image itself, not a page background. */
+.pd-hero-edit {
+  position: absolute; top: 16px; right: 16px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: #fff; text-decoration: none;
+  padding: 9px 16px; border-radius: 999px;
+  background: rgba(37, 35, 43, .45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, .22);
+  transition: background .15s ease, border-color .15s ease;
+}
+.pd-hero-edit:hover { background: rgba(37, 35, 43, .68); border-color: rgba(255, 255, 255, .38); }
+.pd-hero-edit svg { width: 15px; height: 15px; flex: none; }
 .pd-hero-in { position: relative; width: 100%; display: flex; align-items: flex-end; gap: 16px; padding-bottom: 24px; }
 .pd-mark {
   width: 62px; height: 62px; flex: none; border-radius: 8px;

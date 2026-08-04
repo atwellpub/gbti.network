@@ -18,6 +18,7 @@ import {
   parseGithubRepo,
   detectLinkSource,
   formatRelease,
+  canEditItem,
   CAROUSEL_THRESHOLD,
   TOC_MIN_ENTRIES,
 } from '../src/lib/product-page.mjs';
@@ -259,4 +260,21 @@ test('formatRelease: a draft, a missing tag_name, and no response all withhold t
   assert.equal(formatRelease({ message: 'Not Found' }), null); // a GitHub error body
   assert.equal(formatRelease(null), null);
   assert.equal(formatRelease(undefined), null);
+});
+
+test('canEditItem: the owner (case-insensitive) may edit; a stranger may not', () => {
+  assert.equal(canEditItem({ login: 'atwellpub', role: 'member' }, 'atwellpub'), true);
+  assert.equal(canEditItem({ login: 'AtwellPub', role: 'member' }, 'atwellpub'), true); // login case differs
+  assert.equal(canEditItem({ login: 'someoneelse', role: 'member' }, 'atwellpub'), false);
+});
+
+test('canEditItem: superadmin may edit any item, even one they do not own', () => {
+  assert.equal(canEditItem({ login: 'gbtilabs', role: 'superadmin' }, 'atwellpub'), true);
+  assert.equal(canEditItem({ login: null, role: 'superadmin' }, 'atwellpub'), true); // role alone is enough
+});
+
+test('canEditItem: signed out, or signed in with no matching login/role, sees no edit affordance', () => {
+  assert.equal(canEditItem(null, 'atwellpub'), false);
+  assert.equal(canEditItem({ login: 'atwellpub', role: 'admin' }, ''), false); // no owner to compare against
+  assert.equal(canEditItem({ login: null, role: 'member' }, 'atwellpub'), false);
 });
