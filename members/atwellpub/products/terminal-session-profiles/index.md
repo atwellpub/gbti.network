@@ -24,7 +24,7 @@ platforms:
   - VS Code
 icon: ./images/terminal-session-profiles-icon-128x128-1.webp
 iconLarge: ./images/terminal-session-profiles-icon-256x256.webp
-featuredImage: members/atwellpub/images/banner-c-columns.webp
+featuredImage: ../../images/banner-c-columns.webp
 video: https://youtu.be/eaAsh42seho
 links:
   - type: download
