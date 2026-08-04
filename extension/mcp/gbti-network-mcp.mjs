@@ -17102,6 +17102,9 @@ var postSchema = external_exports.object({
   excerpt: external_exports.string().max(200).optional(),
   categories: external_exports.array(external_exports.string()).default([]),
   tags: tagsSchema,
+  // sow-179: mirrors src/content.config.ts's layout field exactly, including the 'editorial' default (see
+  // that file's comment; every already-published post carries its own explicit layout: 'card').
+  layout: external_exports.enum(["editorial", "journal", "card"]).default("editorial"),
   coverImage: external_exports.string().optional(),
   coverAlt: external_exports.string().max(250).optional(),
   // SOW-062 P3: cover-image alt text (accessibility)
@@ -17334,6 +17337,26 @@ function buildContentFile({ type, username, input, body = "", scope = "member" }
   if (Array.isArray(frontmatter.tags) && !frontmatter.tags.length) delete frontmatter.tags;
   const markdown = serializeContentFile(frontmatter, body);
   return { path: path4, frontmatter, markdown, type, username, slug, scope };
+}
+function shareId(createdAt, title) {
+  const ts = String(createdAt ?? "").replace(/[^0-9]/g, "").slice(0, 14);
+  const slug = String(title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  const stamp = ts || "00000000000000";
+  return slug ? `${stamp}-${slug}` : `${stamp}-share`;
+}
+function buildShareFile({ username, input, body = "" }) {
+  if (!username) throw new Error("buildShareFile: username is required");
+  const cleaned = stripUndefined({ status: "published", ...input ?? {}, type: "share", author: username });
+  const result = shareSchema.safeParse(cleaned);
+  if (!result.success) throw new ContentValidationError("share", result.error.issues);
+  const id = cleaned.id;
+  const bodyStr = String(body ?? "").trim();
+  if (bodyStr.length > MAX_BODY_BYTES) {
+    throw new ContentValidationError("share", [{ path: ["body"], message: `body exceeds ${MAX_BODY_BYTES} bytes` }]);
+  }
+  const path4 = `members/${username}/shares/${id}.md`;
+  const markdown = serializeContentFile(cleaned, body);
+  return { path: path4, frontmatter: cleaned, markdown, type: "share", username, slug: id, id };
 }
 function shareSummary(relPath, frontmatter = {}, body = "") {
   const fm = frontmatter || {};
@@ -18471,12 +18494,32 @@ function mergeCommentEchoes({ deployed = [], echoes = [], prState = () => "unkno
   return { comments, reap, pending };
 }
 
-// client/src/fork-sync-client.mjs
+// client/src/member-og-client.mjs
 var trimBase2 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var OgClientError = class extends Error {
+};
+async function ogPreview({ url: url2, token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new OgClientError("not signed in");
+  const res = await fetch(trimBase2(signupBase) + "/membership/og-preview", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url2 })
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new OgClientError(data?.message || data?.error || `og-preview request failed (${res.status})`);
+  return data;
+}
+
+// client/src/fork-sync-client.mjs
+var trimBase3 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
 async function workerSyncFork({ token, signupBase, fetch = globalThis.fetch, branch = "main" } = {}) {
   if (!token || !signupBase) return { ok: false, synced: false, reason: "not-signed-in" };
   try {
-    const res = await fetch(`${trimBase2(signupBase)}/membership/sync-fork`, {
+    const res = await fetch(`${trimBase3(signupBase)}/membership/sync-fork`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ branch })
@@ -18517,12 +18560,12 @@ async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_B
 }
 
 // client/src/drafts-client.mjs
-var trimBase3 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var trimBase4 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
 var DraftsClientError = class extends Error {
 };
 async function call2(method, body, { token, signupBase, fetch = globalThis.fetch }) {
   if (!token || !signupBase) throw new DraftsClientError("not signed in");
-  const res = await fetch(trimBase3(signupBase) + "/membership/drafts", {
+  const res = await fetch(trimBase4(signupBase) + "/membership/drafts", {
     method,
     headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
     ...body ? { body: JSON.stringify(body) } : {}
@@ -19051,6 +19094,45 @@ async function saveDraft(ctx2, { type, input, body, message, path: path4 } = {})
   await commitToBranchOnFork({ repo, branch, files, message: message ?? `Draft: ${built.slug ?? built.type}` });
   return { ok: true, branch, type: built.type, slug: built.slug ?? null, path: staging ? staging.oldPath : built.path, state: "staged", ...staging ? { renamed: { from: staging.oldSlug, to: built.slug } } : {} };
 }
+async function publishShare(ctx2, { input = {}, body = "", message, title, prBody } = {}) {
+  const id = requireIdentity(ctx2);
+  const repo = requireRepo(ctx2);
+  const membership = await membershipOf(ctx2);
+  if (isBlockedFromPublishing(membership)) {
+    throw new OperationError("membership-required", "Posting Shares on gbti.network requires a paid membership. Upgrade to a paid membership at https://gbti.network to post your Share.", { membership });
+  }
+  const createdAt = input.createdAt ?? (ctx2.now?.() ?? (/* @__PURE__ */ new Date()).toISOString());
+  const id_ = input.id ?? shareId(createdAt, input.title);
+  let built;
+  try {
+    built = buildShareFile({ username: id.username, input: { ...input, id: id_, createdAt }, body });
+  } catch (err) {
+    throw new OperationError("invalid-content", err.message, err instanceof ContentValidationError ? err.issues : void 0);
+  }
+  const token = ctx2.store?.get?.("githubToken");
+  const encrypt = (plaintext, assetId) => encryptViaWorker({ plaintext, assetId, token, signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch });
+  let plan;
+  try {
+    plan = await planMemberFiles({ built, body, encrypt });
+  } catch (err) {
+    if (err instanceof MemberContentLockedError) {
+      throw new OperationError("membership-required", "Publishing a members-only Share requires a paid membership. Upgrade at https://gbti.network.", { membership });
+    }
+    throw err;
+  }
+  const files = plan ? plan.files : [{ path: built.path, content: built.markdown }];
+  const shareTitle = title ?? `New Share${built.frontmatter.title ? `: ${built.frontmatter.title}` : ""}`;
+  const pr = isHostedCtx(ctx2) ? await hostedPublishFiles(ctx2, { branch: `gbti/share-${id_}`, files, title: shareTitle }) : await publishFiles({
+    repo,
+    branch: `gbti/share-${id_}`,
+    // idempotent by branch: re-publishing the same id updates the same PR
+    files,
+    message: message ?? `Share: ${built.frontmatter.title || id_}`,
+    title: shareTitle,
+    body: prBody
+  });
+  return { ...pr, id: id_, path: built.path, visibility: built.frontmatter.visibility ?? "members", encrypted: Boolean(plan?.encPath) };
+}
 var commentSuffix = () => Math.random().toString(36).slice(2, 8);
 async function planAndPublishComment(ctx2, repo, built, body, { message, title, prBody }) {
   const token = ctx2.store?.get?.("githubToken");
@@ -19146,6 +19228,16 @@ async function editComment(ctx2, { id, body, authorNote } = {}) {
     prBody: void 0
   });
   return { ...r, edited: true, targetType: fm.targetType, targetSlug: fm.targetSlug };
+}
+async function ogPreview2(ctx2, { url: url2 } = {}) {
+  requireIdentity(ctx2);
+  const token = ctx2.store?.get?.("githubToken");
+  try {
+    return await ogPreview({ url: url2, token, signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch });
+  } catch (err) {
+    if (err instanceof OgClientError) throw new OperationError("og-preview-failed", err.message);
+    throw err;
+  }
 }
 async function listPRs(ctx2) {
   const id = requireIdentity(ctx2);
@@ -19517,6 +19609,38 @@ var TOOLS = [
     inputSchema: obj({ id: { type: "string" }, body: { type: "string" }, authorNote: { type: "boolean" } }, ["id", "body"]),
     handler: (ctx2, args) => editComment(ctx2, { id: args?.id, body: args?.body, authorNote: args?.authorNote })
   },
+  // sow-181: post a SHARE from an agent. A Share is a link to something worth reading, so the tool takes a url
+  // and does the OG extraction ITSELF (ogPreview, the same SSRF-guarded Worker route the extension composer
+  // uses) rather than making the caller pre-fetch metadata. `visibility` is REQUIRED with no default so the
+  // agent has to ask the member public-or-members before anything is written: the schema default is `members`,
+  // and silently defaulting would quietly hide a share the member meant to publish, or publish one they meant
+  // to keep in the members stream.
+  {
+    name: "add_share",
+    description: 'Post a SHARE (a link to something worth reading) to the network. REQUIRED `url` and REQUIRED `visibility`: "public" (anyone can see it, and it may syndicate) or "members" (the members-only stream, body encrypted). ALWAYS ask the member which one they want before calling; never guess. Title, description and image are auto-extracted from the url unless you pass them. Optional: title, shortDescription, image, category (one flat topic key), tags[], body (your own note about the link). author is forced to you; posting a Share is paid-only and goes through the gate. Returns the PR number + url.',
+    inputSchema: obj(
+      {
+        url: { type: "string", description: "The link being shared (absolute http/https URL)." },
+        visibility: { type: "string", enum: ["public", "members"], description: 'REQUIRED: ask the member. "public" is visible to everyone and may syndicate to social channels; "members" stays in the members-only stream.' },
+        title: { type: "string" },
+        shortDescription: { type: "string" },
+        image: { type: "string" },
+        category: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+        body: { type: "string", description: "Optional note in your own words about why the link is worth reading." },
+        message: { type: "string" },
+        prBody: { type: "string" }
+      },
+      ["url", "visibility"]
+    ),
+    handler: (ctx2, args) => addShare(ctx2, args ?? {})
+  },
+  {
+    name: "preview_link",
+    description: "Fetch the OpenGraph metadata for a url (title, description, image) WITHOUT posting anything. Useful to show the member what a Share will look like before calling add_share. Server-side and SSRF-guarded.",
+    inputSchema: obj({ url: { type: "string" } }, ["url"]),
+    handler: (ctx2, args) => ogPreview2(ctx2, { url: args?.url })
+  },
   {
     name: "list_comments",
     description: 'Read the published comment thread for a target. Args: targetType ("post"|"product"|"prompt"|"share"|"news"), targetSlug (content slug, or "<author>/<shareId>" for a share), optional limit. Reads merged/published comments (a just-posted comment appears after its PR merges + the site deploys).',
@@ -19524,6 +19648,31 @@ var TOOLS = [
     handler: (ctx2, args) => listComments(ctx2, { targetType: args?.targetType, targetSlug: args?.targetSlug, limit: args?.limit })
   }
 ];
+async function addShare(ctx2, args = {}) {
+  const url2 = String(args.url || "").trim();
+  if (!url2) throw new OperationError("bad-request", "url is required");
+  const visibility = args.visibility;
+  if (visibility !== "public" && visibility !== "members") {
+    throw new OperationError("bad-request", 'visibility is required and must be "public" or "members". Ask the member which they want before posting.');
+  }
+  let og = null;
+  try {
+    og = await ogPreview2(ctx2, { url: url2 });
+  } catch {
+    og = null;
+  }
+  const input = stripBlank({
+    url: url2,
+    visibility,
+    title: args.title ?? og?.title,
+    shortDescription: args.shortDescription ?? og?.description,
+    image: args.image ?? og?.image,
+    category: args.category,
+    tags: Array.isArray(args.tags) ? args.tags : void 0
+  });
+  return publishShare(ctx2, { input, body: args.body ?? "", message: args.message, prBody: args.prBody });
+}
+var stripBlank = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== void 0 && v !== null && v !== ""));
 var TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 function rpcResult(id, result) {
   return { jsonrpc: "2.0", id, result };

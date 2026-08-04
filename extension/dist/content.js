@@ -8108,11 +8108,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .pill:hover, .pill.on { color:var(--brand); border-color:var(--brand); }
   .pill svg { flex:none; }
   .pill .c { font-variant-numeric: tabular-nums; }
+  /* sow-179: icon-only, count stacked below, for the Editorial/Journal sticky action rail. */
+  .pill.rail { flex-direction:column; gap:2px; width:38px; height:38px; padding:0; justify-content:center;
+    border-radius:7px; font-size:10.5px; }
 `;
   var GbtiFavorite = class extends GbtiElement {
     render() {
       const targetType = this.dataset?.gbtiTargetType;
       const targetSlug = this.dataset?.gbtiTargetSlug;
+      const rail = this.dataset?.gbtiSize === "rail";
       if (this._count === void 0) {
         const n = parseInt(this.dataset?.gbtiCount || "0", 10);
         this._count = Number.isFinite(n) && n > 0 ? n : 0;
@@ -8121,7 +8125,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const c = Math.max(0, this._count);
       const label = !this.client ? "Sign in to favorite" : this._faved ? "Remove favorite" : "Add favorite";
       this.set(
-        this.css(CSS18) + `<button class="pill ${this._faved ? "on" : ""}" type="button" aria-pressed="${this._faved}" aria-label="${label}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ""}</button>`
+        this.css(CSS18) + `<button class="pill ${rail ? "rail" : ""} ${this._faved ? "on" : ""}" type="button" aria-pressed="${this._faved}" aria-label="${label}${c > 0 ? `, ${c} so far` : ""}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ""}</button>`
       );
       this.on(".pill", "click", () => this._onClick(targetType, targetSlug));
     }
@@ -8163,6 +8167,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     border:1.5px solid var(--line); border-radius:999px; padding:5px 11px;
     transition:color .15s ease, border-color .15s ease; }
   .pill:hover, .pill.on { color:var(--brand); border-color:var(--brand); }
+  /* sow-179: icon-only (aria-label already carries the name), for the Editorial/Journal sticky action rail. */
+  .pill.rail { width:38px; height:38px; padding:0; justify-content:center; border-radius:7px; }
+  .pill.rail span { display:none; }
   .pop { position:absolute; z-index:50; top:calc(100% + 8px); left:0; width:260px; max-height:340px; overflow:auto;
     background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:12px;
     box-shadow:0 12px 36px rgba(0,0,0,.18); padding:10px; -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); }
