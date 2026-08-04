@@ -246,6 +246,20 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
   // client-ui/src/markdown-blocks.mjs
   var MEMBERS_MARKER = "<!-- members-only -->";
+  var isTableDelimLine = (l) => /^\s*\|?(\s*:?-{1,}:?\s*\|)+\s*:?-{1,}:?\s*\|?\s*$/.test(l) || /^\s*\|(\s*:?-{1,}:?\s*\|)+\s*$/.test(l);
+  function splitTableRow(line) {
+    let s = String(line).trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+  }
+  function tableAlign(spec) {
+    const s = String(spec).trim();
+    const l = s.startsWith(":");
+    const r = s.endsWith(":");
+    return l && r ? "center" : r ? "right" : l ? "left" : "";
+  }
+  var isTableStart = (lines, i) => i + 1 < lines.length && lines[i].includes("|") && isTableDelimLine(lines[i + 1]);
   var CALLOUT_VARIANTS = ["info", "note", "warning", "tip"];
   var normalizeVariant = (v) => CALLOUT_VARIANTS.includes(v) ? v : "note";
   var isMarker = (l) => l.trim() === MEMBERS_MARKER;
@@ -279,6 +293,24 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       case "list": {
         const items = Array.isArray(b.items) ? b.items : String(b.text ?? "").split("\n").filter((x) => x !== "");
         return items.map((it, i) => (b.ordered ? `${i + 1}. ` : "- ") + it).join("\n");
+      }
+      case "table": {
+        const head = Array.isArray(b.head) ? b.head : [];
+        const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+        const rows = Array.isArray(b.rows) ? b.rows : [];
+        const cols = Math.max(1, head.length);
+        const cell = (c) => String(c ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+        const pad = (arr) => {
+          const a = arr.slice(0, cols);
+          while (a.length < cols) a.push("");
+          return a;
+        };
+        const line = (cells) => "| " + pad(cells).map(cell).join(" | ") + " |";
+        const delim = "| " + pad(head).map((_, i) => {
+          const a = aligns[i] || "";
+          return a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---";
+        }).join(" | ") + " |";
+        return [line(head), delim, ...rows.map(line)].join("\n");
       }
       case "image":
         return `![${b.alt ?? ""}](${b.url ?? ""})`;
@@ -349,6 +381,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         blocks.push({ type: "list", ordered, items });
         continue;
       }
+      if (isTableStart(lines, i)) {
+        const head = splitTableRow(lines[i]);
+        const cols = Math.max(1, head.length);
+        const aligns = splitTableRow(lines[i + 1]).map(tableAlign).slice(0, cols);
+        while (aligns.length < cols) aligns.push("");
+        i += 2;
+        const rows = [];
+        while (i < n && lines[i].trim() !== "" && lines[i].includes("|") && !isMarker(lines[i]) && !isFence(lines[i]) && !isHeading(lines[i]) && !isQuote(lines[i])) {
+          const row = splitTableRow(lines[i]).slice(0, cols);
+          while (row.length < cols) row.push("");
+          rows.push(row);
+          i++;
+        }
+        blocks.push({ type: "table", head, aligns, rows });
+        continue;
+      }
       m = line.match(/^!\[([^\]]*)\]\(([^)]*)\)\s*$/);
       if (m) {
         blocks.push({ type: "image", alt: m[1], url: m[2] });
@@ -363,7 +411,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const para = [];
       while (i < n) {
         const l = lines[i];
-        if (l.trim() === "" || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || isBareUrl(l) && isVideoUrl(l)) break;
+        if (l.trim() === "" || isMarker(l) || isFence(l) || isHeading(l) || isQuote(l) || isListItem(l) || isImageOnly(l) || isBareUrl(l) && isVideoUrl(l) || isTableStart(lines, i)) break;
         para.push(l);
         i++;
       }
@@ -382,6 +430,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return { type: "quote", text: "" };
       case "list":
         return { type: "list", ordered: false, items: [""] };
+      case "table":
+        return { type: "table", head: ["Column 1", "Column 2"], aligns: ["", ""], rows: [["", ""], ["", ""]] };
       case "image":
         return { type: "image", alt: "", url: "" };
       case "embed":
@@ -394,18 +444,94 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return { type: "paragraph", text: "" };
     }
   }
+  var REL_ALLOWED = /* @__PURE__ */ new Set(["nofollow", "noopener", "noreferrer"]);
+  var DANGEROUS_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+  function isDangerousUrl(url) {
+    const decoded = decodeEnt(String(url ?? "")).replace(/[\x00-\x20]+/g, "");
+    return DANGEROUS_SCHEME.test(decoded) || DANGEROUS_SCHEME.test(String(url ?? ""));
+  }
+  function sanitizeRel(rel) {
+    const kept = [];
+    for (const tok of String(rel || "").trim().split(/\s+/)) {
+      const t = tok.toLowerCase();
+      if (REL_ALLOWED.has(t) && !kept.includes(t)) kept.push(t);
+    }
+    return kept;
+  }
+  var attrOf = (attrs, name) => {
+    const m = new RegExp(`\\b${name}="([^"]*)"`, "i").exec(String(attrs || ""));
+    return m ? m[1] : "";
+  };
+  var decodeEntOnce = (s) => String(s ?? "").replace(/&#x([0-9a-f]+);?/gi, (_m, h) => {
+    try {
+      return String.fromCodePoint(parseInt(h, 16));
+    } catch {
+      return "";
+    }
+  }).replace(/&#(\d+);?/g, (_m, d) => {
+    try {
+      return String.fromCodePoint(parseInt(d, 10));
+    } catch {
+      return "";
+    }
+  }).replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+  var decodeEnt = (s) => {
+    let p = String(s ?? "");
+    for (let i = 0; i < 4; i += 1) {
+      const n = decodeEntOnce(p);
+      if (n === p) break;
+      p = n;
+    }
+    return p;
+  };
+  var escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function parseLinkAttrs(attrs) {
+    const rawHref = decodeEnt(attrOf(attrs, "href"));
+    const href = isDangerousUrl(rawHref) ? "" : rawHref;
+    const rel = sanitizeRel(attrOf(attrs, "rel"));
+    const blank = attrOf(attrs, "target").toLowerCase() === "_blank";
+    if (blank && !rel.includes("noopener")) rel.push("noopener");
+    return { href, rel, blank, attributed: rel.length > 0 || blank };
+  }
+  var SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
+  function sanitizeInner(html) {
+    return String(html ?? "").replace(
+      /<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
+      (_m, slash, tag) => SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ""
+    );
+  }
+  function rawAnchor(href, rel, blank, inner) {
+    const relAttr = rel.length ? ` rel="${rel.join(" ")}"` : "";
+    const tgtAttr = blank ? ' target="_blank"' : "";
+    return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeInner(inner)}</a>`;
+  }
   function inlineMdToHtml(md) {
-    let h = String(md ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => /^\s*(?:javascript|data|vbscript):/i.test(url) ? text : `<a href="${String(url).replace(/"/g, "&quot;").replace(/'/g, "&#39;")}">${text}</a>`);
+    let src = String(md ?? "");
+    const keep = [];
+    src = src.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+      const a = parseLinkAttrs(attrs);
+      keep.push(a.href ? rawAnchor(a.href, a.rel, a.blank, inner) : inner);
+      return `\0A${keep.length - 1}\0`;
+    });
+    let h = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => isDangerousUrl(url) ? text : `<a href="${String(url).replace(/"/g, "&quot;").replace(/'/g, "&#39;")}">${text}</a>`);
     h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     h = h.replace(/~~([^~]+)~~/g, "<s>$1</s>");
     h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
-    return h.replace(/\n/g, "<br>");
+    h = h.replace(/\n/g, "<br>");
+    return h.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
   }
   function inlineHtmlToMd(html) {
     let s = String(html ?? "");
-    s = s.replace(/<a [^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)");
+    const keep = [];
+    s = s.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
+      const a = parseLinkAttrs(attrs);
+      if (!a.href) return inner;
+      if (!a.attributed) return `[${inner}](${a.href})`;
+      keep.push(rawAnchor(a.href, a.rel, a.blank, inner));
+      return `\0A${keep.length - 1}\0`;
+    });
     s = s.replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, "**$2**");
     s = s.replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, "*$2*");
     s = s.replace(/<(s|strike|del)>([\s\S]*?)<\/\1>/gi, "~~$2~~");
@@ -413,7 +539,36 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     s = s.replace(/<br\s*\/?>/gi, "\n");
     s = s.replace(/<div>/gi, "\n").replace(/<\/div>/gi, "");
     s = s.replace(/<[^>]+>/g, "");
-    return s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    s = s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    return s.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
+  }
+
+  // client-ui/src/assets.mjs
+  var SITE = "https://gbti.network";
+  var CONTENT_REPO = "gbti-network/gbti.network";
+  function resolveMarkdownAssets(markdown, itemPath, repo = CONTENT_REPO) {
+    const md = String(markdown ?? "");
+    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
+    if (!folder2) return md;
+    return md.replace(
+      /(!\[[^\]]*\]\()(\.\/)([^\s)]+\))/g,
+      (_m, pre, _dot, rest) => `${pre}https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${rest}`
+    );
+  }
+  function resolveContentAsset(value, itemPath, repo = CONTENT_REPO, site = SITE) {
+    if (!value) return "";
+    const s = String(value);
+    if (/^https?:\/\//.test(s) || /^\/\//.test(s) || /^\/_astro\//.test(s)) return resolveAsset(s, site) || s;
+    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
+    if (folder2) return `https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${s.replace(/^\.?\/+/, "")}`;
+    if (/^\.{1,2}\//.test(s)) return "";
+    return resolveAsset(s, site) || "";
+  }
+  function resolveAsset(thumb, site = SITE) {
+    if (!thumb || typeof thumb !== "string") return null;
+    if (/^https?:\/\//.test(thumb)) return thumb;
+    if (/^\/\//.test(thumb)) return `https:${thumb}`;
+    return `${site}${thumb.startsWith("/") ? "" : "/"}${thumb}`;
   }
 
   // client-ui/src/elements/gbti-doc-editor.mjs
@@ -432,6 +587,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { key: "code", label: "Code", icon: "code", desc: "A code block" },
     { key: "ul", label: "Bulleted list", type: "list", ordered: false, icon: "listul", desc: "A simple list" },
     { key: "ol", label: "Numbered list", type: "list", ordered: true, icon: "listol", desc: "An ordered list" },
+    { key: "table", label: "Table", icon: "table", desc: "Rows and columns" },
     { key: "image", label: "Image", icon: "img", desc: "Upload or embed a picture" },
     { key: "embed", label: "Video / embed", icon: "video", desc: "YouTube or Vimeo" }
   ];
@@ -445,6 +601,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return nb;
   };
   var ic = {
+    table: '<path d="M4 5h16v14H4zM4 10h16M4 15h16M10 5v14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
     up: '<path d="M12 19V6M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
     down: '<path d="M12 5v13M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
     x: '<path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
@@ -566,8 +723,42 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .sel-tb { display:none; gap:1px; padding:4px; background:var(--ink); border:0; box-shadow:0 12px 30px rgba(0,0,0,.4); }
   .sel-tb button { min-width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:7px; background:transparent; color:#e6e4ee; cursor:pointer; font-weight:700; font-size:13px; padding:0 6px; }
   .sel-tb button:hover { background:rgba(255,255,255,.12); color:#fff; }
+  /* SOW-170: the inline link editor (URL + nofollow + open-in-new-tab) */
+  .link-panel { position:absolute; z-index:21; display:none; flex-direction:column; gap:8px; padding:10px; min-width:260px; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.28); }
+  .link-panel input[type="url"] { font:inherit; color:var(--s-fg); background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:7px; padding:7px 9px; }
+  .link-panel label { display:flex; align-items:center; gap:7px; font-size:13px; color:var(--s-fg-soft); cursor:pointer; }
+  .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
+  .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
+  .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
+  /* SOW-169: the editable table block */
+  .tbl-card { padding:12px; }
+  .tbl-scroll { overflow-x:auto; }
+  .tbl { border-collapse:collapse; width:100%; font-size:14px; }
+  .tbl th, .tbl td { border:1px solid var(--s-line); padding:0; vertical-align:top; }
+  .tbl th { background:var(--s-surface-2); }
+  .tbl .corner { border:0; background:transparent; width:0; }
+  .tbl td.row-ctl { border:0; background:transparent; width:28px; text-align:center; }
+  .tbl .tc { min-width:80px; padding:7px 9px; outline:none; color:var(--s-fg); }
+  .tbl .tc:empty::before { content:attr(data-ph); color:var(--s-fg-mute,#8a8792); }
+  .tbl th .th-ctl { display:flex; gap:2px; justify-content:flex-end; padding:2px 4px; border-top:1px dashed var(--s-line); }
+  .tbtn { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:20px; padding:0 4px; border:1px solid var(--s-line); border-radius:5px; background:var(--s-surface); color:var(--s-fg-soft); font-size:11px; font-weight:700; cursor:pointer; }
+  .tbtn svg { width:12px; height:12px; }
+  .tbtn:hover { border-color:var(--s-green); color:var(--s-green); }
+  .tbtn.del:hover { border-color:#d9534f; color:#d9534f; }
+  .tbl-ctl { display:flex; gap:8px; margin-top:10px; }
+  .tbl-ctl .tadd { display:inline-flex; align-items:center; gap:5px; font:inherit; font-size:12.5px; font-weight:600; border:1px solid var(--s-line); border-radius:7px; background:var(--s-surface); color:var(--s-fg); padding:5px 11px; cursor:pointer; }
+  .tbl-ctl .tadd svg { width:13px; height:13px; }
+  .tbl-ctl .tadd:hover { border-color:var(--s-green); color:var(--s-green); }
 `;
   var GbtiDocEditor = class extends GbtiElement {
+    // sow-165: the owning editor sets this so a repo-relative body image resolves against the item's folder.
+    set itemPath(v) {
+      this._itemPath = v || null;
+      if (this.isConnected) this._render();
+    }
+    get itemPath() {
+      return this._itemPath || null;
+    }
     set value(md) {
       this._blocks = parseBlocks(md).map(withId);
       if (this.isConnected) this._render();
@@ -651,9 +842,21 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           const items = (Array.isArray(b.items) ? b.items : [""]).map((it) => `<li>${inlineMdToHtml(it)}</li>`).join("") || "<li></li>";
           return `<${tag} class="ce ce-list" contenteditable="true" data-edit="list" data-id="${b._id}">${items}</${tag}>`;
         }
+        case "table": {
+          const head = Array.isArray(b.head) ? b.head : [];
+          const aligns = Array.isArray(b.aligns) ? b.aligns : [];
+          const rows = Array.isArray(b.rows) ? b.rows : [];
+          const cols = Math.max(1, head.length);
+          const alignStyle = (c) => aligns[c] ? ` style="text-align:${aligns[c]}"` : "";
+          const alignLabel = (c) => ({ "": "–", left: "L", center: "C", right: "R" })[aligns[c] || ""];
+          const cell = (r, c, v) => `<div class="tc" contenteditable="true" data-edit="cell" data-id="${b._id}" data-r="${r}" data-c="${c}" data-ph="">${inlineMdToHtml(v || "")}</div>`;
+          const headCells = Array.from({ length: cols }, (_, c) => `<th${alignStyle(c)}>${cell(-1, c, head[c])}<div class="th-ctl"><button type="button" class="tbtn" data-talign="${b._id}" data-c="${c}" title="Cycle column alignment">${alignLabel(c)}</button><button type="button" class="tbtn del" data-tcolrm="${b._id}" data-c="${c}" title="Delete this column">${svg("x")}</button></div></th>`).join("");
+          const bodyRows = rows.map((row, r) => `<tr>` + Array.from({ length: cols }, (_, c) => `<td${alignStyle(c)}>${cell(r, c, row[c])}</td>`).join("") + `<td class="row-ctl"><button type="button" class="tbtn del" data-trowrm="${b._id}" data-r="${r}" title="Delete this row">${svg("x")}</button></td></tr>`).join("");
+          return `<div class="card tbl-card"><div class="card-h">${svg("table")} Table</div><div class="tbl-scroll"><table class="tbl"><thead><tr>${headCells}<th class="corner"></th></tr></thead><tbody>${bodyRows || ""}</tbody></table></div><div class="tbl-ctl"><button type="button" class="tadd" data-taddrow="${b._id}">${svg("plus")} Row</button><button type="button" class="tadd" data-taddcol="${b._id}">${svg("plus")} Column</button></div></div>`;
+        }
         case "image": {
           const hasUrl = !!b.url;
-          const src = hasUrl ? esc(b.url.startsWith("http") ? b.url : `https://gbti.network/${b.url}`) : "";
+          const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : "";
           return `<div class="card"><div class="card-h">${svg("img")} Image</div><div class="imgframe">` + (hasUrl ? `<img src="${src}" alt="" />` : `<div class="imgph" data-imgdrop="${b._id}" title="Drop an image here, or click to upload">${svg("img")}<span class="imgph-t">Drop an image here, or click to upload</span></div>`) + `<input type="file" accept="image/*" hidden data-imgfile="${b._id}" /></div><input data-edit="url" data-id="${b._id}" value="${esc(b.url || "")}" placeholder="Image URL or repo path" /><input data-edit="alt" data-id="${b._id}" value="${esc(b.alt || "")}" placeholder="Alt text" /><div class="up"><button type="button" class="up-btn" data-imgpick="${b._id}">${svg("img")} ${hasUrl ? "Replace image" : "Choose image"}</button><span class="up-st" data-imgst="${b._id}"></span></div></div>`;
         }
         case "embed":
@@ -720,7 +923,18 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
             b.text = inlineHtmlToMd(el.innerHTML).replace(/\n$/, "");
           } else if (f === "code") b.code = el.innerText.replace(/\n$/, "");
           else if (f === "list") b.items = Array.from(el.querySelectorAll("li")).map((li) => inlineHtmlToMd(li.innerHTML));
-          else b[f] = el.value;
+          else if (f === "cell") {
+            const r = Number(el.dataset.r);
+            const c = Number(el.dataset.c);
+            if (Number.isNaN(r) || Number.isNaN(c) || c < 0) return;
+            const md = inlineHtmlToMd(el.innerHTML).replace(/\n$/, "");
+            if (r < 0) {
+              if (!Array.isArray(b.head)) b.head = [];
+              if (c < b.head.length) b.head[c] = md;
+            } else if (Array.isArray(b.rows) && r < b.rows.length && Array.isArray(b.rows[r]) && c < b.rows[r].length) {
+              b.rows[r][c] = md;
+            }
+          } else b[f] = el.value;
           this._change();
         };
         el.addEventListener("input", on);
@@ -731,7 +945,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           el._composing = false;
           on();
         });
-        if (el.classList.contains("ce")) {
+        if (el.classList.contains("ce") || el.classList.contains("tc")) {
           el.addEventListener("paste", (e) => {
             e.preventDefault();
             const t = (e.clipboardData || window.clipboardData)?.getData("text/plain") || "";
@@ -760,6 +974,75 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           this._focusBlock(b._id);
           this._change();
         }
+      }));
+      const tblCols = (b) => Math.max(1, Array.isArray(b.head) ? b.head.length : 1);
+      const tblNorm = (b) => {
+        const c = tblCols(b);
+        if (!Array.isArray(b.head)) b.head = [];
+        while (b.head.length < c) b.head.push("");
+        if (!Array.isArray(b.aligns)) b.aligns = [];
+        while (b.aligns.length < c) b.aligns.push("");
+        b.aligns.length = c;
+        b.rows = (Array.isArray(b.rows) ? b.rows : []).map((r) => {
+          const row = Array.isArray(r) ? r.slice(0, c) : [];
+          while (row.length < c) row.push("");
+          return row;
+        });
+      };
+      this.$$("[data-taddrow]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.taddrow);
+        if (!b) return;
+        tblNorm(b);
+        b.rows.push(new Array(tblCols(b)).fill(""));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-taddcol]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.taddcol);
+        if (!b) return;
+        tblNorm(b);
+        b.head.push("");
+        b.aligns.push("");
+        b.rows.forEach((r) => r.push(""));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-trowrm]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.trowrm);
+        if (!b) return;
+        const r = Number(el.dataset.r);
+        if (Array.isArray(b.rows)) b.rows.splice(r, 1);
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-tcolrm]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.tcolrm);
+        if (!b) return;
+        const c = Number(el.dataset.c);
+        if (tblCols(b) <= 1) {
+          const i = this._indexOf(b._id);
+          if (i >= 0) {
+            this._blocks.splice(i, 1);
+            this._render();
+            this._change();
+          }
+          return;
+        }
+        b.head.splice(c, 1);
+        if (Array.isArray(b.aligns)) b.aligns.splice(c, 1);
+        (b.rows || []).forEach((r) => r.splice(c, 1));
+        this._render();
+        this._change();
+      }));
+      this.$$("[data-talign]").forEach((el) => el.addEventListener("click", () => {
+        const b = this._byId(el.dataset.talign);
+        if (!b) return;
+        const c = Number(el.dataset.c);
+        const order = ["", "left", "center", "right"];
+        if (!Array.isArray(b.aligns)) b.aligns = [];
+        b.aligns[c] = order[(order.indexOf(b.aligns[c] || "") + 1) % order.length];
+        this._render();
+        this._change();
       }));
       this.$$("[data-up]").forEach((el) => el.addEventListener("click", () => this._move(el.dataset.up, -1)));
       this.$$("[data-down]").forEach((el) => el.addEventListener("click", () => this._move(el.dataset.down, 1)));
@@ -1003,7 +1286,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!this.isConnected) return;
       let sel;
       try {
-        sel = document.getSelection();
+        sel = this.root?.getSelection?.() ?? document.getSelection();
       } catch {
         return;
       }
@@ -1048,7 +1331,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     _wrap(w) {
       let sel;
       try {
-        sel = document.getSelection();
+        sel = this.root?.getSelection?.() ?? document.getSelection();
       } catch {
         return;
       }
@@ -1057,9 +1340,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!ce) return;
       if (ce.dataset.edit === "code") return;
       if (w === "link") {
-        const url = (typeof prompt === "function" ? prompt("Link URL", "https://") : "") || "";
-        if (url && typeof document !== "undefined") document.execCommand("createLink", false, url);
-      } else if (w === "code") this._toggleInline(sel, "code");
+        this._openLinkPanel(sel, ce);
+        return;
+      }
+      if (w === "code") this._toggleInline(sel, "code");
       else if (typeof document !== "undefined") document.execCommand(w);
       const b = this._byId(ce.dataset.id);
       if (b) {
@@ -1067,6 +1351,112 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this._change();
       }
       this._hideTb();
+    }
+    // SOW-170: the inline LINK editor. Standard Markdown links carry no rel/target, so an attributed link is stored
+    // as sanitized raw <a> HTML (see markdown-blocks.mjs); this panel is where the author sets the URL + nofollow +
+    // open-in-new-tab, on a new selection or an existing link. Fail-safe: a dangerous URL scheme is rejected.
+    _linkAnchorIn(range) {
+      let n = range.commonAncestorContainer;
+      n = n && n.nodeType === 1 ? n : n && n.parentNode;
+      while (n && n !== this.root && !(n.classList && n.classList.contains("ce"))) {
+        if (n.tagName === "A") return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+    _openLinkPanel(sel, ce) {
+      const range = sel.getRangeAt(0).cloneRange();
+      const existing = this._linkAnchorIn(range);
+      this._lk = { range, ce, existing };
+      const host = this.$(".doc-blocks");
+      if (!host) return;
+      if (!this._lp) {
+        const lp = document.createElement("div");
+        lp.className = "link-panel";
+        lp.innerHTML = `<input type="url" data-lk-url placeholder="https://..." /><label><input type="checkbox" data-lk-nofollow /> nofollow</label><label><input type="checkbox" data-lk-blank /> New tab</label><div class="lp-btns"><button type="button" data-lk-apply>Apply</button><button type="button" data-lk-remove title="Remove link">Remove</button></div>`;
+        lp.addEventListener("mousedown", (e) => {
+          if (e.target.tagName !== "INPUT") e.preventDefault();
+        });
+        lp.querySelector("[data-lk-apply]").addEventListener("click", () => this._applyLink());
+        lp.querySelector("[data-lk-remove]").addEventListener("click", () => this._applyLink(true));
+        lp.querySelector("[data-lk-url]").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            this._applyLink();
+          }
+        });
+        host.appendChild(lp);
+        this._lp = lp;
+      }
+      const rel = existing ? existing.getAttribute("rel") || "" : "";
+      this._lp.querySelector("[data-lk-url]").value = existing ? existing.getAttribute("href") || "" : "";
+      this._lp.querySelector("[data-lk-nofollow]").checked = /\bnofollow\b/i.test(rel);
+      this._lp.querySelector("[data-lk-blank]").checked = (existing && existing.getAttribute("target")) === "_blank";
+      this._lp.querySelector("[data-lk-remove]").style.display = existing ? "" : "none";
+      const hr = host.getBoundingClientRect();
+      const r = range.getBoundingClientRect();
+      this._lp.style.top = `${r.bottom - hr.top + 6}px`;
+      this._lp.style.left = `${Math.max(0, r.left - hr.left)}px`;
+      this._lp.style.display = "flex";
+      this._hideTb();
+      setTimeout(() => this._lp.querySelector("[data-lk-url]").focus(), 0);
+    }
+    _hideLinkPanel() {
+      if (this._lp) this._lp.style.display = "none";
+      this._lk = null;
+    }
+    _applyLink(remove = false) {
+      const lk = this._lk;
+      if (!lk) return;
+      const ce = lk.ce;
+      const url = String(this._lp.querySelector("[data-lk-url]").value || "").trim();
+      const nofollow = this._lp.querySelector("[data-lk-nofollow]").checked;
+      const blank = this._lp.querySelector("[data-lk-blank]").checked;
+      if (url && isDangerousUrl(url)) {
+        this._hideLinkPanel();
+        return;
+      }
+      try {
+        ce.focus();
+        const s = this.root?.getSelection?.() ?? document.getSelection();
+        s.removeAllRanges();
+        s.addRange(lk.range);
+      } catch {
+      }
+      if (remove || !url) {
+        if (lk.existing && lk.existing.parentNode) {
+          const a = lk.existing;
+          while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+          a.remove();
+        }
+      } else {
+        const rel = [nofollow ? "nofollow" : null, blank ? "noopener" : null].filter(Boolean).join(" ");
+        if (lk.existing) {
+          lk.existing.setAttribute("href", url);
+          if (rel) lk.existing.setAttribute("rel", rel);
+          else lk.existing.removeAttribute("rel");
+          if (blank) lk.existing.setAttribute("target", "_blank");
+          else lk.existing.removeAttribute("target");
+        } else {
+          const a = document.createElement("a");
+          a.setAttribute("href", url);
+          if (rel) a.setAttribute("rel", rel);
+          if (blank) a.setAttribute("target", "_blank");
+          try {
+            a.appendChild(lk.range.extractContents());
+            lk.range.insertNode(a);
+          } catch {
+          }
+        }
+      }
+      const b = this._byId(ce.dataset.id);
+      if (b) {
+        b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, "");
+        this._render();
+        this._focusBlock(b._id);
+        this._change();
+      }
+      this._hideLinkPanel();
     }
     // SOW-062 P6: toggle an inline tag around the selection (execCommand has no 'code'); ported from the design.
     _toggleInline(sel, tag) {
@@ -1273,25 +1663,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       input[f.key] = val;
     }
     return input;
-  }
-
-  // client-ui/src/assets.mjs
-  var SITE = "https://gbti.network";
-  var CONTENT_REPO = "gbti-network/gbti.network";
-  function resolveMarkdownAssets(markdown, itemPath, repo = CONTENT_REPO) {
-    const md = String(markdown ?? "");
-    const folder2 = String(itemPath || "").replace(/\/[^/]*$/, "").replace(/^\/+/, "");
-    if (!folder2) return md;
-    return md.replace(
-      /(!\[[^\]]*\]\()(\.\/)([^\s)]+\))/g,
-      (_m, pre, _dot, rest) => `${pre}https://cdn.jsdelivr.net/gh/${repo}@main/${folder2}/${rest}`
-    );
-  }
-  function resolveAsset(thumb, site = SITE) {
-    if (!thumb || typeof thumb !== "string") return null;
-    if (/^https?:\/\//.test(thumb)) return thumb;
-    if (/^\/\//.test(thumb)) return `https:${thumb}`;
-    return `${site}${thumb.startsWith("/") ? "" : "/"}${thumb}`;
   }
 
   // client-ui/src/workbench-cache.mjs
@@ -1806,6 +2177,33 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-discussion", GbtiDiscussion);
 
+  // src/lib/banner-presets.mjs
+  var BANNER_PRESETS = [
+    { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
+    { key: "amber", label: "Amber", from: "#b57616", to: "#25232b" },
+    { key: "ink", label: "Ink", from: "#393542", to: "#25232b" },
+    // today's existing default hero, unchanged
+    { key: "wordpress", label: "WordPress", from: "#5a8de0", to: "#25232b" },
+    { key: "ide-plugins", label: "IDE Plugins", from: "#9277d4", to: "#25232b" },
+    { key: "mods", label: "Mods", from: "#d8a847", to: "#25232b" }
+  ];
+  var BANNER_PRESET_KEYS = BANNER_PRESETS.map((p) => p.key);
+
+  // src/lib/product-page.mjs
+  function detectLinkSource(url) {
+    if (!url) return null;
+    let u;
+    try {
+      u = new URL(url);
+    } catch {
+      return null;
+    }
+    const host = u.hostname.replace(/^www\./, "");
+    if (host === "wordpress.org") return "wordpress";
+    if (host === "github.com") return "github";
+    return null;
+  }
+
   // client-ui/src/elements/gbti-content-editor.mjs
   var _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
   var DOC = _svg('<path d="M7 3h7l4 4v14H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.2V7.5H18M9 12.5h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
@@ -1841,7 +2239,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { key: "discussions", label: "Discussions" }
   ];
   var TYPE_LABEL = { post: "Article", product: "Product", prompt: "Prompt", profile: "Profile" };
-  var CONTENT_REPO2 = "gbti-network/gbti.network";
   var RAIL_SCHEMA = {
     post: [
       { title: "Details", open: true, keys: ["visibility", "excerpt", "categories", "tags"] },
@@ -1851,7 +2248,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       { title: "Details", open: true, keys: ["visibility", "shortDescription", "categories", "tags"] },
       { title: "Pricing", open: true, keys: ["pricing", "pricingUrl"] },
       { title: "Links", open: true, keys: ["links"] },
-      { title: "Media", open: true, keys: ["icon", "featuredImage", "banner"] }
+      { title: "Media", open: true, keys: ["icon", "featuredImage", "banner"] },
+      // sow-174: gallery/galleryStyle existed in the schema + form-fields already but were never listed in any
+      // section, so they were silently hidden-submitted with no control to see or change them. New section.
+      { title: "Gallery", open: false, keys: ["gallery", "galleryStyle"] }
     ],
     prompt: [
       { title: "Details", open: true, keys: ["visibility", "shortDescription", "targets", "categories", "tags"] },
@@ -1994,14 +2394,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // via jsDelivr over GitHub (the built site only serves the /_astro/-optimized variant, whose path the editor does
     // not have). This is why resolveAsset alone produced a broken `gbti.network/./images/...` url. Falls back safely.
     resolveCover(value) {
-      if (!value) return "";
-      const s = String(value);
-      if (/^https?:\/\//.test(s) || /^\/_astro\//.test(s) || s.startsWith("//")) return resolveAsset(s) || s;
-      if (this.itemPath) {
-        const folder2 = String(this.itemPath).replace(/\/index\.md$/, "").replace(/^\/+/, "");
-        return `https://cdn.jsdelivr.net/gh/${CONTENT_REPO2}@main/${folder2}/${s.replace(/^\.?\/+/, "")}`;
-      }
-      return resolveAsset(s) || "";
+      return resolveContentAsset(value, this.itemPath);
     }
     async render() {
       if (!this.client) return;
@@ -2030,7 +2423,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const schema = RAIL_SCHEMA[this.type] || RAIL_SCHEMA.post;
       const schemaKeys = new Set(schema.flatMap((s) => s.keys));
       const fieldByKey = new Map(this.fields.map((f) => [f.key, f]));
-      const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== "publicStub");
+      const hiddenFields = this.fields.filter((f) => !schemaKeys.has(f.key) && !docSecKeys.has(f.key) && f.key !== "publicStub" && f.key !== "bannerPreset");
       const sectionsHtml = schema.map((sec) => {
         let inner = sec.keys.map((key) => {
           const f = fieldByKey.get(key);
@@ -2136,6 +2529,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .notice a { color:var(--s-green-fg); }
         #out { margin-top:14px; }
         .preview { background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:10px; padding:12px 14px; color:var(--s-fg); margin-top:12px; }
+        /* sow-062 review feedback: tables render for real now; give them borders and their own horizontal
+           scroll so a wide table never widens the editor column on a phone. */
+        .preview table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.1em; font-size:14px; }
+        .preview table th, .preview table td { border:1px solid var(--s-line); padding:6px 10px; text-align:left; vertical-align:top; }
+        .preview table th { background:var(--s-surface); font-weight:700; white-space:nowrap; }
         .rail { display:flex; flex-direction:column; gap:14px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow-y:auto; }
         /* The rail is a height-capped flex column and .rsec has overflow:hidden (zero min size), so without
            this the flex algorithm SHRINKS the section cards to fit instead of scrolling: every card clipped
@@ -2203,6 +2601,27 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .coverframe .ph svg { width:26px; height:26px; opacity:.5; } .coverframe .ph .mono { font-family:var(--font-mono,monospace); font-size:11px; }
         .coverframe img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
         .coverbtns { display:flex; gap:8px; }
+        /* sow-174: banner color-preset swatches, folded into the banner cover control (mutually exclusive
+           with the image above it -- see doCoverImage/clearCover). */
+        .swatch-or { font-size:11.5px; color:var(--s-fg-mute); text-align:center; margin:2px 0; }
+        .swatchrow { display:flex; flex-wrap:wrap; gap:7px; }
+        .swatch { display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:12px; font-weight:600; color:var(--s-fg-soft); padding:6px 11px 6px 7px; border:1.5px solid var(--s-line-2); border-radius:999px; background:var(--s-surface); cursor:pointer; transition:border-color .15s,color .15s; }
+        .swatch:hover { border-color:var(--s-fg-mute); color:var(--s-fg); }
+        .swatch.on { border-color:var(--s-green); color:var(--s-fg); background:var(--s-tint); }
+        .sw-dot { width:16px; height:16px; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
+        /* sow-174: gallery-layout picker (Auto / Grid / Carousel), illustrated cards instead of a <select>. */
+        .gs-cards { display:flex; gap:10px; flex-wrap:wrap; }
+        .gs-card { display:flex; flex-direction:column; align-items:flex-start; gap:8px; width:132px; padding:12px; border:1.5px solid var(--s-line-2); border-radius:9px; background:var(--s-surface); font:inherit; text-align:left; cursor:pointer; transition:border-color .15s,background .15s; }
+        .gs-card:hover { border-color:var(--s-fg-mute); }
+        .gs-card.on { border-color:var(--s-green); background:var(--s-tint); }
+        .gs-shape { display:flex; align-items:center; gap:4px; width:100%; height:34px; }
+        .gs-tile { flex:1; align-self:stretch; border-radius:4px; background:var(--s-surface-3); }
+        .gs-frame { display:block; width:100%; height:22px; border-radius:4px; background:var(--s-surface-3); }
+        .gs-strip { display:flex; gap:3px; width:100%; height:8px; margin-top:2px; }
+        .gs-strip i { flex:1; border-radius:2px; background:var(--s-surface-3); font-style:normal; }
+        .gs-name { font-size:12.5px; font-weight:700; color:var(--s-fg); }
+        .gs-card.on .gs-name { color:var(--s-green-fg); }
+        .gs-desc { font-size:11px; line-height:1.35; color:var(--s-fg-mute); }
         /* SOW-062 P6: product links[] row editor */
         .linkrows { display:flex; flex-direction:column; gap:9px; margin-bottom:8px; }
         .linkrow { display:flex; flex-direction:column; gap:8px; padding:10px; border:1.5px solid var(--s-line-2); border-radius:8px; background:var(--s-surface-2); }
@@ -2284,6 +2703,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            ${this.itemPath ? `<button class="ebtn" id="copyid" type="button" title="Copy this content's ID (its repo path) for the MCP server">${COPY} <span class="lbl">Copy ID</span></button>` : ""}
            ${isPub ? `<button class="ebtn" id="viewpub" type="button" title="Open the live public page in a new tab">${GLOBE} <span class="lbl">View Public Entry</span></button>` : ""}
            ${canStage ? `<button class="ebtn" id="draft" type="button">${SAVE} Save draft</button>` : ""}
+           ${canStage ? `<button class="ebtn" id="preview" type="button" title="Save the draft, then open it in a new tab as the page it will become">${GLOBE} <span class="lbl">Preview</span></button>` : ""}
            <button class="ebtn${blocked ? "" : " ebtn-primary"}" id="publish" type="button"${isPub && !this.staged ? " hidden" : ""}${blocked ? ' title="Publishing requires a paid membership"' : ""}>${blocked ? "Membership required" : `${MERGE} Publish`}</button>
          </div>
          <div class="edgrid">
@@ -2348,6 +2768,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       });
       this.$$("#docview [data-view]").forEach((b) => b.addEventListener("click", () => this.setDocView(b.dataset.view)));
       this.on("#draft", "click", () => this.doDraft());
+      this.on("#preview", "click", () => this.doPreview());
       this.on("#publish", "click", () => this.doPublish());
       this._dirty = false;
       if (!this._dirtyRootWired) {
@@ -2392,8 +2813,27 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           if (cf) cf.className = "coverframe " + (fb.dataset.frame === "hero" ? "hero" : "card4");
         }));
       });
+      this.$$("[data-swatches]").forEach((row) => {
+        const cover = row.closest("[data-cover]");
+        const hidden = row.querySelector('[data-key="bannerPreset"]');
+        row.querySelectorAll("[data-preset]").forEach((btn) => btn.addEventListener("click", () => {
+          row.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("on", b === btn));
+          if (hidden) hidden.value = btn.dataset.preset;
+          if (cover) this.clearCover(cover);
+        }));
+      });
+      this.$$("[data-gscards]").forEach((row) => {
+        const hidden = row.querySelector('input[type="hidden"]');
+        row.querySelectorAll("[data-gs]").forEach((btn) => btn.addEventListener("click", () => {
+          row.querySelectorAll("[data-gs]").forEach((b) => b.classList.toggle("on", b === btn));
+          if (hidden) hidden.value = btn.dataset.gs;
+        }));
+      });
       const be = this.$("#body");
-      if (be) be.value = this.preset?.body ?? "";
+      if (be) {
+        be.itemPath = this.itemPath;
+        be.value = this.preset?.body ?? "";
+      }
       const deps = new Set(this.fields.filter((f) => f.showIf?.field).map((f) => f.showIf.field));
       for (const dep of deps) {
         const el = this.$(`[data-key="${dep}"]`);
@@ -2427,6 +2867,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const opts = (f.options || ["draft", "published"]).map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("");
         return wrap(`${label}<div class="statusrow"><span class="dotpill" data-statuspill><span class="d"></span><span data-statustxt>${esc(v || "draft")}</span></span><select class="selbox" data-key="status" data-kind="enum" style="flex:1">${opts}</select></div>`);
       }
+      if (f.kind === "enum" && f.key === "galleryStyle") {
+        const cards = [
+          { key: "", name: "Auto", desc: "Picks a layout by shot count", shape: "" },
+          { key: "grid", name: "Grid", desc: "Captioned, 2-up", shape: '<span class="gs-tile"></span><span class="gs-tile"></span>' },
+          { key: "carousel", name: "Carousel", desc: "One large frame + a filmstrip", shape: '<span class="gs-frame"></span><span class="gs-strip"><i></i><i></i><i></i></span>' }
+        ];
+        const cur = v || "";
+        const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? " on" : ""}" data-gs="${c.key}">
+        <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join("");
+        return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
+      }
       if (f.kind === "enum") {
         return wrap(`${label}<select class="selbox" data-key="${f.key}" data-kind="enum">${(f.options || []).map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`);
       }
@@ -2443,12 +2894,21 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (f.kind === "image") {
         const url = v ? this.resolveCover(v) : "";
         const has = !!url;
-        return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? "" : " hidden"}>${label}
+        const framed = typeof f.frame === "string" && f.frame.includes("/");
+        const frameStyle = framed ? ` style="aspect-ratio:${esc(f.frame)}${f.previewPx ? `;max-width:${Number(f.previewPx)}px` : ""}"` : "";
+        const picker = framed ? "" : '<div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>';
+        const hint = f.hint ? `<div class="urlprev" style="color:var(--s-fg-soft)">${esc(f.hint)}</div>` : "";
+        const presetVal = f.key === "banner" ? String(this.preset?.input?.bannerPreset || "") : "";
+        const swatchesHtml = f.key === "banner" ? `<div class="swatchrow" data-swatches>${BANNER_PRESETS.map((p) => `<button type="button" class="swatch${p.key === presetVal ? " on" : ""}" data-preset="${p.key}" title="${esc(p.label)}">
+          <span class="sw-dot" style="background:linear-gradient(150deg,${p.from},${p.to})"></span>${esc(p.label)}</button>`).join("")}
+        <input data-key="bannerPreset" data-kind="enum" type="hidden" value="${esc(presetVal)}" /></div>` : "";
+        return `<div class="fld cover-field" data-fkey="${f.key}"${visible ? "" : " hidden"}>${label}${hint}
         <div class="cover" data-cover>
-          <div class="framepick"><button type="button" class="on" data-frame="card4">4:3 card</button><button type="button" data-frame="hero">Hero</button></div>
-          <div class="coverframe card4" data-coverframe>${this._coverFrameInner(url)}</div>
+          ${picker}
+          <div class="coverframe${framed ? "" : " card4"}" data-coverframe${frameStyle}>${this._coverFrameInner(url)}</div>
           <input type="file" accept="image/*" hidden data-cover-file />
           <div class="coverbtns"><button type="button" class="ebtn" data-cover-pick>${has ? "Replace image" : "Choose image"}</button><button type="button" class="ebtn" data-cover-clear${has ? "" : " hidden"}>Remove</button></div>
+          ${swatchesHtml ? `<div class="swatch-or">or pick a color</div>${swatchesHtml}` : ""}
           <input data-key="${f.key}" data-kind="image" type="hidden" value="${esc(v)}" />
         </div></div>`;
       }
@@ -2539,6 +2999,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           this._serializeLinks();
         }
       });
+      wrap.addEventListener("blur", (e) => {
+        const urlEl = e.target.closest?.(".lk-url");
+        if (!urlEl) return;
+        const row = urlEl.closest(".linkrow");
+        const source = detectLinkSource(urlEl.value.trim());
+        if (!source) return;
+        const typeEl = row.querySelector(".lk-type");
+        const labelEl = row.querySelector(".lk-label");
+        if (typeEl && !typeEl.value.trim()) {
+          typeEl.value = source === "wordpress" ? "download" : "repository";
+          this._serializeLinks();
+        }
+        if (labelEl && !labelEl.value.trim()) {
+          labelEl.placeholder = source === "wordpress" ? "Download" : "View on GitHub";
+        }
+      }, true);
       this.$("[data-addlink]")?.addEventListener("click", (e) => {
         e.preventDefault();
         const tmp = document.createElement("div");
@@ -2847,6 +3323,54 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     // SOW-082: Save the current content as a draft on the member's own fork (no PR). Allowed for trial + paid; a
     // trial member's members-only content is refused server-side with a clean upgrade nudge (membership-required).
+    // sow-169 phase 4: preview the item as the page it will become, in a new tab.
+    //
+    // It SAVES first, and that is forced rather than chosen: a new tab cannot read this editor's unsaved
+    // in-memory state, and in the extension the editor runs on chrome-extension:// while the preview is
+    // gbti.network, so no storage is shared at all. Saving to the draft store is the only mechanism that
+    // works identically on both hosts, so the button title says so and the status line repeats it.
+    //
+    // The tab is opened SYNCHRONOUSLY on the click and its location set after the save resolves, because a
+    // window.open() issued after an await is a popup the browser blocks.
+    //
+    // sow-170 fix: the open must NOT pass 'noopener' -- `window.open('', ..., 'noopener')` returns null (that is
+    // what noopener does), so the code could never navigate the tab it opened and fell to a second window.open()
+    // after the await, leaving a blank orphan tab beside the preview. We open with a real handle, sever the opener
+    // ourselves (the security intent of noopener) and paint a same-origin interstitial so the tab is not a stark
+    // blank while the draft saves.
+    async doPreview() {
+      const slug = String(this.gather()?.input?.slug || "").trim();
+      if (!slug) {
+        this.out("Give the item a permalink before previewing it.", "danger");
+        return;
+      }
+      const tab = typeof window !== "undefined" ? window.open("", "_blank") : null;
+      if (tab) {
+        try {
+          tab.opener = null;
+        } catch {
+        }
+        try {
+          tab.document.write('<!doctype html><title>Preparing preview</title><body style="margin:0;font:15px/1.5 system-ui,sans-serif;color:#6c6976;background:#faf9fb;display:flex;align-items:center;justify-content:center;height:100vh">Preparing your preview&hellip;</body>');
+        } catch {
+        }
+      }
+      const restore = this._btnBusy("#preview", "Saving…");
+      this._setChip("Saving…", "busy");
+      try {
+        await this.doDraft();
+        const url = `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}`;
+        if (tab) tab.location = url;
+        else window.open(url, "_blank", "noopener");
+        this.out('<span class="tag ok">saved</span> Draft saved and opened in a new tab as a preview.');
+      } catch (err) {
+        if (tab) tab.close();
+        const h = failHint(err);
+        this.out(esc(h.text), "danger");
+      } finally {
+        restore();
+      }
+    }
     async doDraft() {
       const restore = this._btnBusy("#draft", "Saving…");
       this._setChip("Saving…", "busy");
@@ -2908,9 +3432,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (pick) pick.textContent = "Replace image";
       try {
         const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(",")[1] || "" });
-        const el = control.querySelector("[data-key]");
+        const el = control.querySelector('[data-key][data-kind="image"]');
         if (el) el.value = res.path;
         this.out(`Cover image staged: <code>${esc(res.path)}</code>`);
+        const swatches = control.querySelector("[data-swatches]");
+        if (swatches) {
+          swatches.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("on"));
+          const presetInput = swatches.querySelector('[data-key="bannerPreset"]');
+          if (presetInput) presetInput.value = "";
+        }
       } catch (err) {
         const h = failHint(err);
         this.out(esc(h.upgrade ? `${h.text} Upgrade at gbti.network/membership.` : h.text), "danger");
@@ -2918,7 +3448,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     clearCover(control) {
       if (!control) return;
-      const el = control.querySelector("[data-key]");
+      const el = control.querySelector('[data-key][data-kind="image"]');
       if (el) el.value = "";
       const cf = control.querySelector("[data-coverframe]");
       if (cf) cf.innerHTML = this._coverFrameInner("");
@@ -3952,6 +4482,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.set(this.css(CSS8) + `<p class="nudge">Admin actions are available to moderators and above.</p>`);
         return;
       }
+      const caps = this.hasAttribute("caps") ? this.getAttribute("caps").split(",").map((s) => s.trim()).filter(Boolean) : null;
+      const capOn = (g) => !caps || caps.includes(g);
       this.set(
         this.css(CSS8) + `<div class="rolebar"><span class="lbl">Acting as</span><span class="badge">${esc(role)}</span></div>
 
@@ -3966,7 +4498,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            </div>
          </div>
 
-         ${rank >= RANK2.admin ? `<div class="grp">
+         ${rank >= RANK2.admin && capOn("membership") ? `<div class="grp">
            <h4>Member status</h4>
            <p class="desc">Ban deplatforms a member regardless of payment; grandfather grants permanent paid access with no Stripe subscription. Keyed by the immutable github_id.</p>
            <input class="fld" id="gid" placeholder="github_id" />
@@ -3979,7 +4511,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            </div>
          </div>` : ""}
 
-         ${rank >= RANK2.superadmin ? `<div class="grp">
+         ${rank >= RANK2.superadmin && capOn("roles") ? `<div class="grp">
            <h4>Role assignment</h4>
            <p class="desc">Set a member's role. Superadmin owns roles.yml and the root of trust, so assign it carefully.</p>
            <div class="role-row">
@@ -4006,13 +4538,13 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this.on("#deplatform", "click", run("deplatform", cpath));
       this.on("#republish", "click", run("republish", cpath));
       this.on("#remove", "click", run("remove", cpath));
-      if (rank >= RANK2.admin) {
+      if (rank >= RANK2.admin && capOn("membership")) {
         this.on("#ban", "click", run("ban", gid));
         this.on("#unban", "click", run("unban", () => ({ githubId: this.$("#gid").value.trim() })));
         this.on("#grandfather", "click", run("grandfather", gid));
         this.on("#ungrandfather", "click", run("ungrandfather", () => ({ githubId: this.$("#gid").value.trim() })));
       }
-      if (rank >= RANK2.superadmin) {
+      if (rank >= RANK2.superadmin && capOn("roles")) {
         this.on("#setrole", "click", run("role", () => ({ githubId: this.$("#rid").value.trim(), role: this.$("#role").value })));
       }
     }
@@ -8757,6 +9289,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .head h3 { margin:0; font-family:var(--font-display, var(--font-body)); font-size:16px; }
   .refresh { background:transparent; border:0; color:var(--muted); cursor:pointer; font:inherit; font-size:13px; }
   .refresh:hover { color:var(--brand); }
+  .pager { display:flex; justify-content:center; margin-top:14px; }
+  .load-older { background:var(--panel); border:1.5px solid var(--line); border-radius:10px; color:var(--fg); cursor:pointer; font:inherit; font-size:13px; padding:8px 18px; }
+  .load-older:hover { border-color:var(--brand); color:var(--brand); }
+  .load-older:disabled { opacity:.6; cursor:default; }
   .muted { color:var(--muted); font-size:13.5px; }
   /* SOW-092: a share whose link is a recognized video plays inline in place of the static image. */
   .share-embed { position:relative; aspect-ratio:16/9; overflow:hidden; background:#000; border-radius:10px; margin-top:10px; }
@@ -8891,7 +9427,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._locked = LOCKED4.has(membership);
       if (this._locked) return quiet ? void 0 : this._splash();
       try {
-        this._items = (await this.client.listShares())?.items ?? [];
+        const r = await this.client.listShares();
+        this._items = r?.items ?? [];
+        this._nextBefore = r?.nextBefore ?? null;
       } catch {
         if (!quiet) this.set(this.css(CSS24) + `<p class="muted">Could not load Shares right now.</p>`);
         return;
@@ -8921,8 +9459,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.on(".refresh", "click", () => this.reload());
         return;
       }
-      this.set(this.css(CSS24) + head + `<div data-list></div>`);
+      const pager = this._nextBefore ? `<div class="pager"><button class="load-older" type="button" data-load-older>Load older</button></div>` : "";
+      this.set(this.css(CSS24) + head + `<div data-list></div>${pager}`);
       this.on(".refresh", "click", () => this.reload());
+      if (this._nextBefore) this.on("[data-load-older]", "click", () => this._loadOlder());
       const list = document.createElement("gbti-card-list");
       list.mode = "detailed";
       list.items = items.map((it) => shareToItem(it));
@@ -8934,6 +9474,30 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         }
       });
       this.$("[data-list]")?.replaceChildren(list);
+    }
+    /** Append the next older page (website cookie adapter only; feature-detected by the nextBefore cursor). */
+    async _loadOlder() {
+      if (!this._nextBefore || this._loadingMore) return;
+      this._loadingMore = true;
+      const btn = this.$("[data-load-older]");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Loading…";
+      }
+      try {
+        const r = await this.client.listShares({ before: this._nextBefore });
+        this._items = [...this._items || [], ...r && r.items || []];
+        this._nextBefore = r?.nextBefore ?? null;
+      } catch {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Load older";
+        }
+        this._loadingMore = false;
+        return;
+      }
+      this._loadingMore = false;
+      this.render();
     }
     // The focused reading view: the Share's body + an always-open discussion thread.
     _renderReading(share) {
@@ -13661,16 +14225,23 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const c = ov.counts;
       const mLabel = MEMBERSHIP_LABEL[ov.membership] || "Member";
       const isStaff = ["moderator", "admin", "superadmin"].includes(ov.role);
+      const isExt = typeof location !== "undefined" && location.protocol === "chrome-extension:";
+      const settingsHref = isExt ? "account.html" : "/account/";
+      const adminHref = isExt ? "admin.html" : "/admin/";
       const tiles = [
-        { nm: "Articles", href: "workspace.html#tab=post", n: c.post },
-        { nm: "Prompts", href: "workspace.html#tab=prompt", n: c.prompt },
-        { nm: "Products", href: "workspace.html#tab=product", n: c.product },
-        { nm: "Pull requests", href: "workspace.html#tab=prs", n: c.prs },
-        { nm: "Saved", href: "workspace.html#tab=saved", n: c.saved },
-        { nm: "Following", href: "workspace.html#tab=subs", n: c.subs },
-        { nm: "Earnings", href: "workspace.html#tab=earnings", n: null },
-        { nm: "Settings", href: "account.html", n: null },
-        ...isStaff ? [{ nm: "Admin tools", href: "admin.html", n: null }] : []
+        // The workspace's OWN tab nav uses a BARE `#tab=` hash, not the extension page `workspace.html#tab=`. On the
+        // website the workspace lives at /workbench/, so `workspace.html#...` resolved to /workbench/workspace.html
+        // -> 404. A bare hash stays on the current page (extension workspace.html OR website /workbench/) and the
+        // _onHash listener switches the tab in place, no reload, on BOTH hosts.
+        { nm: "Articles", href: "#tab=post", n: c.post },
+        { nm: "Prompts", href: "#tab=prompt", n: c.prompt },
+        { nm: "Products", href: "#tab=product", n: c.product },
+        { nm: "Pull requests", href: "#tab=prs", n: c.prs },
+        { nm: "Saved", href: "#tab=saved", n: c.saved },
+        { nm: "Following", href: "#tab=subs", n: c.subs },
+        { nm: "Earnings", href: "#tab=earnings", n: null },
+        { nm: "Settings", href: settingsHref, n: null },
+        ...isStaff ? [{ nm: "Admin tools", href: adminHref, n: null }] : []
       ];
       const tileHtml = tiles.map((t) => `<a class="ov-tile" href="${esc(t.href)}"><span class="ov-n">${t.n == null ? "" : esc(t.n)}</span><span class="ov-nm">${esc(t.nm)}</span></a>`).join("");
       const draft = c.drafts ? `<span class="ov-draft">${esc(c.drafts)} draft${c.drafts === 1 ? "" : "s"} in progress</span>` : "";
@@ -15528,6 +16099,11 @@ From the author:
   .body img { max-width:100%; height:auto; border-radius:10px; }
   .body ul,.body ol { padding-left:1.4em; margin:0 0 1em; }
   .body blockquote { margin:0 0 1em; padding:2px 0 2px 14px; border-left:3px solid var(--line); color:var(--muted); }
+  /* sow-062 review feedback: GFM tables now render as real tables, so they need borders and, on a phone,
+     their own horizontal scroll rather than pushing the article wider than the viewport. */
+  .body table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.2em; font-size:14.5px; }
+  .body table th, .body table td { border:1px solid var(--line); padding:7px 11px; text-align:left; vertical-align:top; }
+  .body table th { background:var(--hover); font-weight:700; white-space:nowrap; }
   .body > pre, .body code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .body :not(pre) > code { background:var(--hover); border:1px solid var(--line); border-radius:5px; padding:.08em .35em; font-size:.9em; }
   /* SOW-062 5d: body callout + embed blocks (rendered by client/src/markdown.mjs) */
@@ -15796,7 +16372,8 @@ From the author:
       const ini = esc((name || "?").trim().charAt(0).toUpperCase() || "?");
       const note = e.headline ? `<p class="a-note">${esc(e.headline)}</p>` : "";
       let follow = "";
-      if (a.isSelf) follow = ["post", "product", "prompt"].includes(it.type) ? `<a class="follow edit" href="workspace.html#tab=${esc(it.type)}">Edit in workspace</a>` : "";
+      const wsBase = typeof location !== "undefined" && location.protocol === "chrome-extension:" ? "workspace.html" : "/workbench/";
+      if (a.isSelf) follow = ["post", "product", "prompt"].includes(it.type) ? `<a class="follow edit" href="${wsBase}#tab=${esc(it.type)}">Edit in workspace</a>` : "";
       else if (a.canFollow) follow = `<button class="follow${a.following ? " on" : ""}" data-follow type="button">${a.following ? "Following" : "Follow"}</button>`;
       else follow = `<a class="follow muted" href="${SITE14}/membership/" target="_blank" rel="noopener" title="Members can follow other members">Follow</a>`;
       const links = e.links || {};
