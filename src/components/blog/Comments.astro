@@ -136,3 +136,45 @@ const avatarOf = (username: string) => authorAvatar(username, profileAvatar.get(
   .cmt-edited { display: inline-block; font-size: 12px; color: var(--fg-mute); text-decoration: none; }
   .cmt-edited:hover { color: var(--green-700); text-decoration: underline; text-underline-offset: 2px; }
 </style>
+
+<script>
+  // sow-158: the public content pages never called setClient(), so a member signed in on the WEBSITE saw only
+  // the inert "use the GBTI extension" fallback, even though the whole comment pipeline (cookie auth + CSRF +
+  // server-side paid gate) has shipped. This wires it: it REUSES the header's existing cookie hydration
+  // (member-signal.ts runs hydrateMemberSignal once, cached, so this adds no extra /membership/status call);
+  // when that resolves a signed-in member, it injects the client and upgrades every <gbti-comment-box> on the
+  // page. The element then renders per membership on its own (a compose form for a paid member, an upgrade
+  // nudge for trial/locked). An anonymous visitor resolves to null, nothing is imported, and the inert fallback
+  // stays, so their page weight is unchanged. The server + the SOW-005 gate remain the real boundary; this is
+  // presentation wiring only, and paid-only posting is enforced server-side regardless of what renders here.
+  import { onMemberSignal, currentIdentity, readMemberSignal } from '../../lib/member-signal';
+
+  // Read a non-HttpOnly cookie (the gbti_csrf double-submit token); its presence is the cheap "there is a web
+  // session" signal the gated pages already use, with no network.
+  function readCookie(name: string): string | null {
+    for (const part of document.cookie.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+    }
+    return null;
+  }
+
+  let mounted = false;
+  async function mountComments(signal: any) {
+    if (mounted || !signal || !signal.login) return; // signed out / not yet resolved -> leave the fallback
+    // Only mount the WEBSITE client for a real cookie session. An extension-only member (a display signal but no
+    // gbti_csrf cookie) is upgraded by the extension itself; a web client would have no session to authenticate.
+    if (!readCookie('gbti_csrf')) return;
+    if (!document.querySelector('gbti-comment-box')) return; // no composer on this page
+    mounted = true;
+    const signupBase = document.documentElement.dataset.signupBase || '';
+    const { createWorkbenchClient } = await import('../../lib/workbench-client');
+    const { setClient } = await import('../../../client-ui/src/base.mjs');
+    setClient(createWorkbenchClient({ signupBase, login: String(signal.login), githubId: signal.githubId != null ? String(signal.githubId) : null }));
+    // Defining the element upgrades every baked <gbti-comment-box>; it renders per membership on the client fan-out.
+    await import('../../../client-ui/src/elements/gbti-comment-box.mjs');
+  }
+
+  mountComments(currentIdentity(readMemberSignal())); // extension signal, if present, before the cookie resolves
+  onMemberSignal(mountComments);                      // the winning cookie member arrives here once hydrated
+</script>
