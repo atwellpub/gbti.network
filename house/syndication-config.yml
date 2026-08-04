@@ -43,8 +43,8 @@ syndication:
     bluesky: true
     reddit: false
     devto: false
-    hashnode: false
-    dailydev: false
+    hashnode: true
+    dailydev: true
   manual_assist_channels:
     - x
     - linkedin
@@ -59,8 +59,8 @@ syndication:
       bluesky: 'off'
       x: 'off'
       linkedin: 'off'
-      hashnode: 'off'
-      dailydev: 'off'
+      hashnode: on-manual
+      dailydev: on-manual
     post:
       x: on-manual
       linkedin: on-manual
@@ -69,13 +69,13 @@ syndication:
     product:
       x: on-manual
       linkedin: on-manual
-      hashnode: 'off'
-      dailydev: 'off'
+      hashnode: on-manual
+      dailydev: on-manual
     prompt:
       x: on-manual
       linkedin: on-manual
-      hashnode: 'off'
-      dailydev: 'off'
+      hashnode: on-manual
+      dailydev: on-manual
   channel_templates:
     devto:
       devto-footer: >-
