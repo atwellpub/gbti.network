@@ -11,7 +11,8 @@
 # Auto-generated: written by `npm run reconcile --apply` from the edge store. Hand edits are overwritten. The
 # static build reads it via src/lib/favorites.ts; counts refresh on the next reconcile + batched build (the
 # same two-tier freshness model as comments). Empty pre-launch.
-generatedAt: '2026-07-25T09:13:32.126Z'
+generatedAt: '2026-08-04T09:59:39.137Z'
 counts:
+  product:radle: 1
   prompt:generic-anti-trope-writing-prompt: 1
   prompt:responsive-design-audit-with-playwright: 1
