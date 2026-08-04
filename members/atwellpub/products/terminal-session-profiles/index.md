@@ -40,7 +40,7 @@ type: product
 author: atwellpub
 ---
 
-Over the past two years, the introduction of tools such as Claude Code has made terminal management a much more central part of the day-to-day development workbench. Terminals are no longer temporary scratch space. They often represent distinct, long-running parts of a project, each with its own name, working directory, and purpose.
+The rise of coding agent tools such as Claude Code has made terminal management a much more central part of the day-to-day development workbench. Terminals are no longer temporary scratch space. They often represent distinct, long-running parts of a project, each with its own name, working directory, and purpose.
 
 Our own terminal configuration commonly includes several named Claude Code sessions, each with its own name inside Claude Code and remote control enabled by default. We also tend to keep one PowerShell terminal open for running Windows commands and one WSL terminal for working directly within Windows Subsystem for Linux. It is therefore not unusual for us to have three to five terminal tabs open within a single project.
 
