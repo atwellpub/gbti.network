@@ -10,6 +10,7 @@ publishedAt: 2024-09-11
 updatedAt: 2025-09-11
 excerpt: "Wondering who created the Chrono Trigger soundtrack? We dive into the origins of one of the world's greatest SNES era RPG Soundtracks."
 categories: ["entertainment"]
+layout: card
 coverImage: "./images/ChronoTrigger.webp"
 redirectFrom: ["/entertainment/the-story-behind-chrono-triggers-soundtrack/"]
 ---

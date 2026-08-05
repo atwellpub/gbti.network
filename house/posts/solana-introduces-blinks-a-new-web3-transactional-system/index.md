@@ -9,6 +9,7 @@ publishedAt: 2024-07-08
 updatedAt: 2025-07-08
 excerpt: "Discover how Solana Blinks transform Web3 transactions by making blockchain interactions accessible through shareable links."
 categories: ["blockchain", "solana"]
+layout: card
 coverImage: "./images/solana-blink-1.webp"
 redirectFrom: ["/blockchain/solana/solana-introduces-blinks-a-new-web3-transactional-system/"]
 ---

@@ -9,6 +9,7 @@ publishedAt: 2023-12-23
 updatedAt: 2024-09-30
 excerpt: "Explore the best self-hosted and desktop note-taking apps of 2024, with detailed comparisons of features, security, and user experience. Ideal for both personal and professional use, this guide hel…"
 categories: ["devops", "frameworks"]
+layout: card
 coverImage: "./images/Notetaking-Applications-2024.webp"
 redirectFrom: ["/devops/frameworks/exploring-the-best-self-hosted-desktop-note-taking-apps-in-2024/"]
 ---

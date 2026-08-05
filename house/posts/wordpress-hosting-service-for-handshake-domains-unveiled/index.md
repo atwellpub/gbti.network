@@ -9,6 +9,7 @@ publishedAt: 2023-09-28
 updatedAt: 2023-10-04
 excerpt: "Sia recently awarded a grant for Nathan Woodburn to help launch a WordPress hosting service for Handshake domains. Background Handshake domains have gained significant traction. However, hosting Wo…"
 categories: ["blockchain"]
+layout: card
 redirectFrom: ["/blockchain/wordpress-hosting-service-for-handshake-domains-unveiled/"]
 ---
 

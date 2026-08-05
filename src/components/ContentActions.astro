@@ -20,15 +20,17 @@ interface Props {
   author?: string; // content owner; composes the repo item path for the extension deep-link (SOW-114)
   categories?: string[];
   count?: number; // build-time favorite count
+  variant?: 'row' | 'rail'; // sow-179: 'rail' is the Editorial/Journal sticky vertical action rail
 }
-const { type, slug, title, url, author, categories = [], count } = Astro.props;
+const { type, slug, title, url, author, categories = [], count, variant = 'row' } = Astro.props;
 const itemPath = author ? contentItemPath(type, author, slug) : null;
+const railSize = variant === 'rail' ? 'rail' : 'md';
 ---
-<div class="content-actions" data-gbti-region="actions" data-gbti-type={type} data-gbti-item-path={itemPath}>
-  <FavoriteButton targetType={type} targetSlug={slug} count={count} />
-  <CollectionButton targetType={type} targetSlug={slug} />
+<div class:list={['content-actions', variant === 'rail' && 'ca-rail']} data-gbti-region="actions" data-gbti-type={type} data-gbti-item-path={itemPath}>
+  <FavoriteButton targetType={type} targetSlug={slug} count={count} size={railSize} />
+  <CollectionButton targetType={type} targetSlug={slug} size={railSize} />
   <span class="act-div" aria-hidden="true"></span>
-  <ShareRow type={type} title={title} url={url} categories={categories} />
+  <ShareRow type={type} title={title} url={url} categories={categories} variant={variant} />
   {itemPath && (
     <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-puzzle"/></svg>
@@ -76,6 +78,9 @@ const itemPath = author ? contentItemPath(type, author, slug) : null;
 <style>
   .content-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .act-div { width: 1px; height: 22px; background: var(--line-2); flex: none; }
+  /* sow-179: the sticky rail stacks everything in one narrow column; the divider follows, becoming horizontal. */
+  .ca-rail { flex-direction: column; align-items: center; gap: 8px; flex-wrap: nowrap; }
+  .ca-rail .act-div { width: 20px; height: 1px; }
   /* SOW-114: shown only when the extension stamp is present (the script clears [hidden]). The explicit
      [hidden] rule keeps the display value from beating the attribute. */
   .ext-open { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;

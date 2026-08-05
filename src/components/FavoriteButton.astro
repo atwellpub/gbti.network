@@ -10,7 +10,7 @@ interface Props {
   targetType: 'post' | 'product' | 'prompt' | 'share'; // SOW-050 P3: Shares are a first-class basket type
   targetSlug: string;
   count?: number;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'rail'; // sow-179: 'rail' is the icon-only 38px button for the Editorial/Journal sticky rail
 }
 const { targetType, targetSlug, count = 0, size = 'md' } = Astro.props;
 ---
@@ -18,8 +18,9 @@ const { targetType, targetSlug, count = 0, size = 'md' } = Astro.props;
   data-gbti-target-type={targetType}
   data-gbti-target-slug={targetSlug}
   data-gbti-count={count}
+  data-gbti-size={size}
   data-gbti-region="favorite"
-  class:list={['gbti-favorite', size === 'sm' && 'fav-sm']}
+  class:list={['gbti-favorite', size === 'sm' && 'fav-sm', size === 'rail' && 'fav-rail']}
 >
   <button type="button" class="fav-pill" data-signin aria-label={`Favorite this ${targetType}${count > 0 ? `, ${count} so far` : ''}`}>
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-heart" /></svg>
@@ -38,6 +39,12 @@ const { targetType, targetSlug, count = 0, size = 'md' } = Astro.props;
   .fav-pill:hover { color: var(--green-700); border-color: var(--green); }
   .fav-pill svg { flex: none; }
   .fav-sm .fav-pill { padding: 4px 9px; font-size: 12px; }
+  /* sow-179: icon-only, count stacked below, matching the sticky rail's 38px rounded-square buttons. */
+  .fav-rail .fav-pill {
+    flex-direction: column; gap: 2px; width: 38px; height: 38px; padding: 0; justify-content: center;
+    border-radius: 7px; background: var(--paper-2); font-size: 10.5px;
+  }
   [data-theme="dark"] .fav-pill { background: transparent; border-color: var(--line-dark-2); color: var(--on-dark-soft); }
   [data-theme="dark"] .fav-pill:hover { color: var(--green-mint); border-color: var(--green); }
+  [data-theme="dark"] .fav-rail .fav-pill { background: var(--paper-2); }
 </style>

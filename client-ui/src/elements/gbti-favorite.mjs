@@ -20,12 +20,16 @@ const CSS = `
   .pill:hover, .pill.on { color:var(--brand); border-color:var(--brand); }
   .pill svg { flex:none; }
   .pill .c { font-variant-numeric: tabular-nums; }
+  /* sow-179: icon-only, count stacked below, for the Editorial/Journal sticky action rail. */
+  .pill.rail { flex-direction:column; gap:2px; width:38px; height:38px; padding:0; justify-content:center;
+    border-radius:7px; font-size:10.5px; }
 `;
 
 class GbtiFavorite extends GbtiElement {
   render() {
     const targetType = this.dataset?.gbtiTargetType;
     const targetSlug = this.dataset?.gbtiTargetSlug;
+    const rail = this.dataset?.gbtiSize === 'rail';
     if (this._count === undefined) {
       const n = parseInt(this.dataset?.gbtiCount || '0', 10);
       this._count = Number.isFinite(n) && n > 0 ? n : 0;
@@ -35,7 +39,7 @@ class GbtiFavorite extends GbtiElement {
     const label = !this.client ? 'Sign in to favorite' : this._faved ? 'Remove favorite' : 'Add favorite';
     this.set(
       this.css(CSS) +
-        `<button class="pill ${this._faved ? 'on' : ''}" type="button" aria-pressed="${this._faved}" aria-label="${label}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ''}</button>`,
+        `<button class="pill ${rail ? 'rail' : ''} ${this._faved ? 'on' : ''}" type="button" aria-pressed="${this._faved}" aria-label="${label}${c > 0 ? `, ${c} so far` : ''}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ''}</button>`,
     );
     this.on('.pill', 'click', () => this._onClick(targetType, targetSlug));
   }

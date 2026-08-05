@@ -9,6 +9,7 @@ publishedAt: 2023-09-02
 updatedAt: 2025-07-08
 excerpt: "In this article we look into how to get a telegram channel ID to assist with custom API based integrations with Telegram applications."
 categories: ["gbti", "products", "andshare"]
+layout: card
 coverImage: "./images/atwellpub_how_to_get_telegram_bb489e9d-e169-4471-aed7-2f6af472eccf.webp"
 redirectFrom: ["/gbti/products/andshare/how-to-get-a-telegram-channel-id/"]
 ---

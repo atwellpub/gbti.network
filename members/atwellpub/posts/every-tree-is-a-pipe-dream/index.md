@@ -9,6 +9,7 @@ publishedAt: 2025-06-23
 updatedAt: 2025-07-26
 excerpt: "Explore how positive engagement with our ideas and a proper mentality can help our dreams to come true over time."
 categories: ["entertainment"]
+layout: card
 coverImage: "./images/every-tree-is-a-pipe-dream-1.webp"
 redirectFrom: ["/entertainment/every-tree-is-a-pipe-dream/"]
 ---

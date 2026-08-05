@@ -1,0 +1,16 @@
+---
+// sow-179: the "contents" rail shared by the Editorial and Journal article layouts (Card has no rail). Mirrors
+// the product page's .pd-toc under the .art-* namespace; scroll-spy is the same initToc() from pd-enhance.mjs,
+// called with the 'art' prefix so both rails can share one implementation without colliding selectors.
+interface Props {
+  toc: { id: string; label: string }[];
+  label?: string;
+}
+const { toc, label = 'Contents' } = Astro.props;
+---
+{toc.length > 0 && (
+  <nav class="art-toc" aria-label="Contents" data-art-toc>
+    <span class="art-rail-lab">{label}</span>
+    {toc.map((t, i) => <a href={`#${t.id}`} data-art-toc-link={t.id} class:list={[i === 0 && 'on']}>{t.label}</a>)}
+  </nav>
+)}

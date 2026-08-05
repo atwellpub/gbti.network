@@ -9,6 +9,7 @@ publishedAt: 2023-11-26
 updatedAt: 2024-06-29
 excerpt: "Explore the detailed analysis of Skynet's collapse in the blockchain industry. Understand the key factors that led to its downfall, implications for the crypto world, and future insights. Visit now…"
 categories: ["blockchain"]
+layout: card
 coverImage: "./images/Fall-of-Skynet-6.webp"
 redirectFrom: ["/blockchain/the-collapse-of-skynet-what-happened/"]
 ---

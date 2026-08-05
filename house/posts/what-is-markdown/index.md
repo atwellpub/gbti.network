@@ -9,6 +9,7 @@ publishedAt: 2024-07-30
 updatedAt: 2024-07-30
 excerpt: "Learn the basic fundamentals of Markdown, a simple and readable text formatting language, with our comprehensive guide."
 categories: ["devops", "frameworks"]
+layout: card
 coverImage: "./images/atwellpub_outline_structure_8a896d01-7aee-4ac2-99a0-fb3448586813.webp"
 redirectFrom: ["/devops/frameworks/what-is-markdown/"]
 ---

@@ -9,6 +9,7 @@ publishedAt: 2025-06-09
 updatedAt: 2025-06-23
 excerpt: "Learn multiple ways to automate Git sign-offs at the project level using commit templates, aliases, and scripts. Never forget the -s flag again!"
 categories: ["devops", "frameworks", "git"]
+layout: card
 coverImage: "./images/git-signoff-2.webp"
 redirectFrom: ["/devops/frameworks/git/how-to-automatically-sign-off-git-commits/"]
 ---

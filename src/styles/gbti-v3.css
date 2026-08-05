@@ -1498,3 +1498,75 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 /* Favorited-by, rail context: strips the standalone card chrome exactly like the product rail already does
    (.pd-rail .card), so FavoritedBy.astro reads as one more rail block rather than a boxed card inside a box. */
 .art-rail .card { background: none; border: 0; box-shadow: none; padding: 0 !important; }
+
+/* Tag chips: identical shape to the product page's .pd-tags/.pd-tag, kept under this own prefix per the
+   .art-* namespace decision above. */
+.art-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.art-tag {
+  font-family: var(--f-mono); font-size: 10.5px; color: var(--fg-soft);
+  border: 1px solid var(--line-2); border-radius: var(--r-xs); padding: 2px 7px;
+  transition: color .15s ease, border-color .15s ease;
+}
+.art-tag:hover { color: var(--fg); border-color: var(--fg-mute); }
+
+/* ==================== Editorial layout (sow-179 Phase 3) ==================== */
+/* Cover becomes a full-width hero; the title and byline sit on it. Only Editorial uses these -e- classes;
+   Journal keeps its cover inset in the reading column instead, per the design mock. */
+.art-e-hero { position: relative; aspect-ratio: 16 / 7; display: flex; align-items: flex-end; overflow: hidden; background: var(--ink); }
+.art-e-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.art-e-hero::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(10,9,13,.94) 4%, rgba(10,9,13,.55) 48%, rgba(10,9,13,.1) 100%);
+}
+.art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; }
+/* No-cover variant: the same header content, flat on the page background instead of over an image. */
+.art-e-header-flat { padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; }
+
+.art-e-cats { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.art-e-cat {
+  font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: #0f1a13; background: var(--green); border-radius: var(--r-xs); padding: 4px 9px;
+}
+.art-e-cat:hover { background: var(--green-mint); }
+
+.art-e-title { margin: 0 0 14px; font-family: var(--f-display); font-weight: 600; letter-spacing: -.02em; color: #fff; max-width: 20ch; text-wrap: pretty; }
+.art-e-hero .art-e-title { font-size: clamp(28px, 4vw, 40px); line-height: 1.1; }
+.art-e-header-flat .art-e-title { font-size: clamp(26px, 3.6vw, 38px); line-height: 1.12; color: var(--fg); max-width: 22ch; }
+.art-e-header-flat .art-e-cat { color: #0f1a13; }
+
+.art-e-cap { margin: 0; padding: 10px clamp(20px, 4vw, 40px) 0; font-size: 12.5px; color: var(--fg-mute); }
+
+.art-e-grid { display: grid; grid-template-columns: 60px minmax(0, 1fr) 190px; gap: clamp(18px, 3vw, 26px); padding: 26px clamp(20px, 4vw, 40px) 44px; align-items: start; }
+
+.art-e-actions-rail { position: sticky; top: calc(var(--art-off) + 14px); align-self: start; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.art-e-col { min-width: 0; max-width: 660px; }
+.art-e-col :where(h2, h3)[id], .art-e-anchor { scroll-margin-top: calc(var(--art-off) + 20px); }
+.art-e-col .prose-gbti { font-size: 16.5px; line-height: 1.75; }
+.art-e-col .prose-gbti h2 { font-family: var(--f-display); font-weight: 600; font-size: 26px; margin: 36px 0 14px; }
+.art-e-col .prose-gbti h3 { font-size: 20px; margin: 30px 0 10px; }
+.art-e-col .prose-gbti > :first-child { margin-top: 0; }
+
+.art-e-aside { position: sticky; top: calc(var(--art-off) + 14px); align-self: start; display: flex; flex-direction: column; gap: 16px; }
+.art-e-aside > * + * { padding-top: 15px; border-top: 1px solid var(--line); }
+
+/* Responsive overrides LAST, deliberately after every base rule above: several of these re-set a property
+   (display, position, flex-direction) a base rule above also sets on the SAME selector, and same-specificity
+   ties resolve by source order, not by which media query is "more specific" about width. A rule placed before
+   the base definition it means to override would silently lose regardless of whether its media condition
+   matches -- this bit twice during Phase 3's own build (the aside not hiding, the rail not un-stacking) before
+   landing here.
+
+   The .ca-rail override below needs a THIRD class on top of that: ContentActions.astro's own scoped .ca-rail
+   rule (flex-direction: column) compiles to a one-class-plus-Astro-scope-attribute selector, equal specificity
+   to a plain two-class selector, and its chunk happens to load in a later <link> than this file's, so an
+   equal-specificity tie goes to Astro's rule regardless of source order inside THIS file. Confirmed directly
+   against the built dist/ output, not assumed. */
+@media (max-width: 900px) {
+  .art-e-grid { grid-template-columns: 56px minmax(0, 1fr); }
+  .art-e-aside { display: none; }
+}
+@media (max-width: 640px) {
+  .art-e-grid { grid-template-columns: minmax(0, 1fr); }
+  .art-e-actions-rail { position: static; flex-direction: row; justify-content: center; }
+  .art-e-grid .art-e-actions-rail .ca-rail { flex-direction: row; flex-wrap: wrap; }
+}

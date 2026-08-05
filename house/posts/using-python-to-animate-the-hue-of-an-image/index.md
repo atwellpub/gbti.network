@@ -9,6 +9,7 @@ publishedAt: 2024-01-23
 updatedAt: 2025-02-01
 excerpt: "Take a look at how we animated the hue of a image across 30 frames using a custom python script. Follow us for more tutorials like this!"
 categories: ["devops", "frameworks", "python"]
+layout: card
 coverImage: "./images/py-animate-hue-featured-image-5.webp"
 redirectFrom: ["/devops/frameworks/python/using-python-to-animate-the-hue-of-an-image/"]
 ---

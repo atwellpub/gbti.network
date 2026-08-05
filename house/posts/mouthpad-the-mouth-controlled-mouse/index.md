@@ -9,6 +9,7 @@ publishedAt: 2024-01-06
 updatedAt: 2025-07-08
 excerpt: "Let's take a look at MouthPad^: a revolutionary mouth-controlled mouse enhancing internet accessibility for computers and other devices."
 categories: ["devops", "accessibility"]
+layout: card
 coverImage: "./images/MouthPad-1600-x-900-optimized.webp"
 redirectFrom: ["/devops/accessibility/mouthpad-the-mouth-controlled-mouse/"]
 ---

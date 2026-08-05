@@ -16,6 +16,9 @@ const CSS = `
     border:1.5px solid var(--line); border-radius:999px; padding:5px 11px;
     transition:color .15s ease, border-color .15s ease; }
   .pill:hover, .pill.on { color:var(--brand); border-color:var(--brand); }
+  /* sow-179: icon-only (aria-label already carries the name), for the Editorial/Journal sticky action rail. */
+  .pill.rail { width:38px; height:38px; padding:0; justify-content:center; border-radius:7px; }
+  .pill.rail span { display:none; }
   .pop { position:absolute; z-index:50; top:calc(100% + 8px); left:0; width:260px; max-height:340px; overflow:auto;
     background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:12px;
     box-shadow:0 12px 36px rgba(0,0,0,.18); padding:10px; -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); }

@@ -11,11 +11,12 @@ interface Props {
   title: string;
   url: string; // absolute, canonical URL
   categories?: string[];
+  variant?: 'row' | 'rail'; // sow-179: 'rail' stacks vertically for the Editorial/Journal sticky action rail
 }
-const { type, title, url, categories = [] } = Astro.props;
+const { type, title, url, categories = [], variant = 'row' } = Astro.props;
 const share = buildShare({ type, title, url, categories });
 ---
-<div class="share-row">
+<div class:list={['share-row', variant === 'rail' && 'share-rail']}>
   <a class="share-btn" href={share.x} target="_blank" rel="noopener" aria-label="Share on X" data-tooltip="Share on X">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
   </a>
@@ -42,6 +43,12 @@ const share = buildShare({ type, title, url, categories });
      aim precisely. Mouse/trackpad users keep the tighter visual size. */
   @media (hover: none) and (pointer: coarse) {
     .share-btn { width: 44px; height: 44px; }
+  }
+  /* sow-179: the sticky action rail stacks these vertically as 38px rounded squares, matching Favorite/Save. */
+  .share-rail { flex-direction: column; gap: 6px; }
+  .share-rail .share-btn { width: 38px; height: 38px; border-radius: 7px; background: var(--paper-2); }
+  @media (hover: none) and (pointer: coarse) {
+    .share-rail .share-btn { width: 38px; height: 38px; }
   }
 </style>
 

@@ -8,15 +8,16 @@
 interface Props {
   targetType: 'post' | 'product' | 'prompt' | 'share'; // SOW-050 P3: Shares are a first-class basket type
   targetSlug: string;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'rail'; // sow-179: 'rail' is the icon-only 38px button for the Editorial/Journal sticky rail
 }
 const { targetType, targetSlug, size = 'md' } = Astro.props;
 ---
 <gbti-collection
   data-gbti-target-type={targetType}
   data-gbti-target-slug={targetSlug}
+  data-gbti-size={size}
   data-gbti-region="collection"
-  class:list={['gbti-collection', size === 'sm' && 'col-sm']}
+  class:list={['gbti-collection', size === 'sm' && 'col-sm', size === 'rail' && 'col-rail']}
 >
   <button type="button" class="col-pill" data-signin aria-label={`Save this ${targetType} to a collection`}>
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-folder" /></svg>
@@ -35,6 +36,10 @@ const { targetType, targetSlug, size = 'md' } = Astro.props;
   .col-pill:hover { color: var(--green-700); border-color: var(--green); }
   .col-pill svg { flex: none; }
   .col-sm .col-pill { padding: 4px 9px; font-size: 12px; }
+  /* sow-179: icon-only (label hidden), matching the sticky rail's 38px rounded-square buttons. */
+  .col-rail .col-pill { width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 7px; background: var(--paper-2); }
+  .col-rail .col-label { display: none; }
   [data-theme="dark"] .col-pill { background: transparent; border-color: var(--line-dark-2); color: var(--on-dark-soft); }
   [data-theme="dark"] .col-pill:hover { color: var(--green-mint); border-color: var(--green); }
+  [data-theme="dark"] .col-rail .col-pill { background: var(--paper-2); }
 </style>

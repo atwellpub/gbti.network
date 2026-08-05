@@ -9,6 +9,7 @@ publishedAt: 2024-06-05
 updatedAt: 2024-06-29
 excerpt: "Explore how the upcoming T+1 settlement cycle change may influence wire transfers and the operational strategies of financial institutions."
 categories: ["business", "finance"]
+layout: card
 coverImage: "./images/t1settlement-bank-wire.webp"
 redirectFrom: ["/business/finance/will-the-t1-settlement-affect-bank-wire-transfers/"]
 ---

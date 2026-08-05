@@ -1,0 +1,91 @@
+---
+// sow-179 Phase 3: the "Editorial" article layout (layout: 'editorial'), built from the design handoff's 2a
+// mock. The cover becomes a full-bleed hero with the title and byline on it; a sticky icon rail carries the
+// actions; a sticky aside carries the contents rail and tags. Same props + slots contract as every article
+// layout: d (the post's frontmatter data), isStub (already-resolved SOW-016 Mode B boolean), a "body" slot
+// carrying the rendered <Content />, and a "closing" slot carrying the shared + article-only components
+// ([slug].astro composes and slots both in, this component never re-implements them).
+import { Image } from 'astro:assets';
+import Prose from './Prose.astro';
+import VideoEmbed from '../VideoEmbed.astro';
+import LockedBody from '../LockedBody.astro';
+import ContentMeta from '../ContentMeta.astro';
+import ContentActions from '../ContentActions.astro';
+import ArticleContents from './ArticleContents.astro';
+import { favoriteCount } from '../../lib/favorites';
+import { aliasSlugsOf } from '../../lib/content-index.mjs';
+import { breadcrumb } from '../../lib/taxonomy';
+import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
+
+interface Props {
+  d: any; // CollectionEntry<'post'>['data']
+  isStub: boolean;
+  postId: string; // post.id, for LockedBody's extension deep-link (SOW-112 QA parity with the product page)
+  postUrl: string;
+  stack: any[]; // avatarStack() result, ContentMeta's stacked byline avatars
+  toc: { id: string; label: string }[]; // buildArticleToc() result, computed once by [slug].astro
+}
+const { d, isStub, postId, postUrl, stack, toc } = Astro.props;
+const category = breadcrumb(d.categories).join(' › ');
+// A video never becomes the hero (it cannot carry an overlaid title/gradient the way a still image does), so
+// the hero treatment is cover-image-only; a video renders inline at the top of the reading column instead,
+// same as every other layout.
+const hasHero = Boolean(d.coverImage) && !d.video;
+const dims = coverDimensions('editorial');
+---
+<section class="art-shell band">
+  {hasHero ? (
+    <div class="art-e-hero">
+      <Image src={d.coverImage} alt={d.coverAlt || d.title} width={dims.width} height={dims.height} />
+      <div class="art-e-hero-in">
+        {category && <div class="art-e-cats"><span class="art-e-cat">{category}</span></div>}
+        <h1 data-gbti-region="title" class="art-e-title">{d.title}</h1>
+        <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} dark />
+      </div>
+    </div>
+  ) : (
+    <div class="art-e-header-flat">
+      {category && <div class="art-e-cats"><span class="art-e-cat">{category}</span></div>}
+      <h1 data-gbti-region="title" class="art-e-title">{d.title}</h1>
+      <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} />
+    </div>
+  )}
+  {hasHero && d.coverAlt && <p class="art-e-cap">{d.coverAlt}</p>}
+
+  <div class="art-e-grid art-wrap">
+    <div class="art-e-actions-rail">
+      <ContentActions type="post" slug={d.slug} title={d.title} url={postUrl} author={d.author} categories={d.categories} count={favoriteCount('post', d.slug, aliasSlugsOf(d))} variant="rail" />
+    </div>
+
+    <div class="art-e-col">
+      {d.video && <div class="mb-32"><VideoEmbed video={d.video} title={d.title} /></div>}
+      <article id={ART_OVERVIEW_ID} data-gbti-region="body">
+        <Prose>
+          {isStub ? <LockedBody encPath={d.encryptedBody} kind="body" readerPath={postId} readerType="post" /> : <slot name="body" />}
+          {!isStub && d.encryptedBody && <LockedBody encPath={d.encryptedBody} kind="section" readerPath={postId} readerType="post" />}
+        </Prose>
+      </article>
+    </div>
+
+    <aside class="art-e-aside">
+      <ArticleContents toc={toc} label="In this article" />
+      {d.tags.length > 0 && (
+        <div>
+          <span class="art-rail-lab">Tagged</span>
+          <div class="art-tags">
+            {d.tags.map((tag: string) => <a class="art-tag" href={`/feeds/?tag=${encodeURIComponent(tag)}`}>{tag}</a>)}
+          </div>
+        </div>
+      )}
+    </aside>
+  </div>
+
+  <div class="art-wrap">
+    <slot name="closing" />
+  </div>
+</section>
+
+<script>
+  import { initToc } from '../../lib/pd-enhance.mjs';
+  initToc(document, 'art');
+</script>

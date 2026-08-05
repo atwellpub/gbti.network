@@ -10,6 +10,7 @@ publishedAt: 2024-12-16
 updatedAt: 2024-12-16
 excerpt: "We recently ported our PHPStorm plugin, Snapshots for AI, over to VSCode. We've also made it a completely free tool. Read more inside."
 categories: ["gbti", "products"]
+layout: card
 coverImage: "./images/Featured-Image.webp"
 redirectFrom: ["/gbti/products/snapshots-for-ai-now-supports-vscode-windsurf-and-cursor/"]
 ---

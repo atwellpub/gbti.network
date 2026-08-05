@@ -21,6 +21,7 @@ interface Props {
   postId: string; // post.id, for LockedBody's extension deep-link (SOW-112 QA parity with the product page)
   postUrl: string;
   stack: any[]; // avatarStack() result, ContentMeta's stacked byline avatars
+  toc?: { id: string; label: string }[]; // [slug].astro passes this to every layout; Card has no rail, unused
 }
 const { d, isStub, postId, postUrl, stack } = Astro.props;
 // sow-179: categories is one hierarchical path (house/taxonomy.yml), not independent chips -- render it as a

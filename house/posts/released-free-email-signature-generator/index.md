@@ -9,6 +9,7 @@ publishedAt: 2025-03-09
 updatedAt: 2025-03-20
 excerpt: "We've recently published our latest utility, a professional email signature generator that is completely free to use. Check it out!"
 categories: ["gbti"]
+layout: card
 coverImage: "./images/email-signature-generator-2-1.webp"
 redirectFrom: ["/gbti/released-free-email-signature-generator/"]
 ---

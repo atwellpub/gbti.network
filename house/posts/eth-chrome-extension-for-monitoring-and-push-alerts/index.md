@@ -9,6 +9,7 @@ publishedAt: 2024-03-16
 updatedAt: 2025-07-08
 excerpt: "Open source Chrome extension that displays the current Ethereum (ETH) price on the e badge icon. Push alerts for price targeting set by user."
 categories: ["devops", "frameworks", "chrome-extensions"]
+layout: card
 coverImage: "./images/atwellpub_Google_Chrome__Ethereum_3b15e854-e3ec-4711-8efa-518685ca031b.webp"
 redirectFrom: ["/devops/frameworks/chrome-extensions/eth-chrome-extension-for-monitoring-and-push-alerts/"]
 ---

@@ -13,13 +13,18 @@
  * A narrow band near the top of the viewport decides what counts as "current", so the rail tracks reading
  * position rather than merely the last thing clicked. Entries whose target is missing are skipped rather
  * than assumed, which is what lets the preview reuse this against a partially rendered draft.
+ *
+ * `prefix` selects the data-attribute family so the same behaviour serves more than one contents rail
+ * (product's `data-pd-toc*`, the article layouts' `data-art-toc*`) without duplicating this function.
  */
-export function initToc(root = document) {
-  const nav = root.querySelector('[data-pd-toc]');
+export function initToc(root = document, prefix = 'pd') {
+  const nav = root.querySelector(`[data-${prefix}-toc]`);
   if (!nav) return;
-  const links = Array.from(nav.querySelectorAll('[data-pd-toc-link]'));
+  const linkAttr = `data-${prefix}-toc-link`;
+  const linkKey = `${prefix}TocLink`;
+  const links = Array.from(nav.querySelectorAll(`[${linkAttr}]`));
   const targets = links
-    .map((a) => ({ a, el: root.getElementById ? root.getElementById(a.dataset.pdTocLink || '') : document.getElementById(a.dataset.pdTocLink || '') }))
+    .map((a) => ({ a, el: root.getElementById ? root.getElementById(a.dataset[linkKey] || '') : document.getElementById(a.dataset[linkKey] || '') }))
     .filter((t) => Boolean(t.el));
   if (!targets.length) return;
 

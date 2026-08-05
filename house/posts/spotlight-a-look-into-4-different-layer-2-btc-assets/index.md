@@ -9,6 +9,7 @@ publishedAt: 2023-12-10
 updatedAt: 2024-06-29
 excerpt: "Explore the future of Bitcoin transactions with our in-depth look at Layer 2 solutions: Lightning Network, Rootstock (RSK), Stacks, and Liquid Network. Understand how these technologies are revolut…"
 categories: ["blockchain"]
+layout: card
 coverImage: "./images/Bitcoin-Layer-2-6.webp"
 redirectFrom: ["/blockchain/spotlight-a-look-into-4-different-layer-2-btc-assets/"]
 ---

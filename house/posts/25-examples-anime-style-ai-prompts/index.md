@@ -9,6 +9,7 @@ publishedAt: 2025-06-12
 updatedAt: 2025-09-16
 excerpt: "We've compiled a list of 35+ examples of AI-generated animated art that goes much further than \"Ghiblify\" for your entertainment."
 categories: ["ai"]
+layout: card
 coverImage: "./images/anime-art-styles-1.webp"
 redirectFrom: ["/ai/25-examples-anime-style-ai-prompts/"]
 ---

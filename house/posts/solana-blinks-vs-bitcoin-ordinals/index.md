@@ -9,6 +9,7 @@ publishedAt: 2024-07-08
 updatedAt: 2024-08-18
 excerpt: "Discover the key differences between Solana's Blinks transactional protocols and Bitcoin Ordinal protocols."
 categories: ["blockchain", "web3"]
+layout: card
 coverImage: "./images/A_comic_book_style_landscape_illustration_featurin.webp"
 redirectFrom: ["/blockchain/web3/solana-blinks-vs-bitcoin-ordinals/"]
 ---

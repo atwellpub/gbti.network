@@ -9,6 +9,7 @@ publishedAt: 2025-06-30
 updatedAt: 2025-07-29
 excerpt: "Introducing our WordPress Perplexity Plugin for AI-powered text lookups. Allow readers to quickly drill down into topics with Perplexity AI."
 categories: ["ai"]
+layout: card
 coverImage: "./images/featured-image-3.webp"
 redirectFrom: ["/ai/introducing-our-new-wordpress-perplexity-ai-plugin/"]
 ---

@@ -6,6 +6,7 @@
 import { getCollection, render } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import ArticleCard from '../../components/blog/ArticleCard.astro';
+import ArticleEditorial from '../../components/blog/ArticleEditorial.astro';
 import RelatedPosts from '../../components/blog/RelatedPosts.astro';
 import ContributionCredits from '../../components/blog/ContributionCredits.astro';
 import OpenHistory from '../../components/blog/OpenHistory.astro';
@@ -18,6 +19,7 @@ import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the op
 import { aliasSlugsOf } from '../../lib/content-index.mjs'; // SOW-112: pre-rename slugs for count/discussion aliasing
 import { hasPublicPage, isStub as isStubFn } from '../../lib/content';
 import { buildAvatarIndex, avatarStack } from '../../lib/avatars';
+import { buildArticleToc } from '../../lib/article-page.mjs';
 
 export async function getStaticPaths() {
   const posts = (await getCollection('post')).filter(hasPublicPage);
@@ -26,9 +28,10 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props;
 const d = post.data;
-const { Content } = await render(post);
+const { Content, headings } = await render(post);
 const stub = isStubFn(post);
 const postUrl = new URL(`/articles/${d.slug}/`, Astro.site ?? 'https://gbti.network').href;
+const toc = buildArticleToc(headings, { hasBody: !stub, hasDiscussion: true });
 
 const avatarIndex = buildAvatarIndex(await getCollection('profile'));
 const stack = avatarStack({
@@ -40,13 +43,13 @@ const stack = avatarStack({
   index: avatarIndex,
 });
 
-// sow-179: only 'card' exists so far (Phase 2); Phase 3/4 add 'editorial'/'journal' to this map as those
-// layouts are built. The ?? fallback means an unrecognized or not-yet-built value still renders, never 404s.
-const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard };
+// sow-179: 'journal' is next (Phase 4). The ?? fallback means an unrecognized or not-yet-built value still
+// renders, never 404s.
+const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard, editorial: ArticleEditorial };
 const Layout = LAYOUTS[d.layout] ?? ArticleCard;
 ---
 <BaseLayout title={d.title} description={d.excerpt} ogImage={d.coverImage?.src ?? defaultFeatureImage('post')} ogType="article">
-  <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack}>
+  <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack} toc={toc}>
     <Content slot="body" />
     <ContentFooter slot="closing" type="post" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
     <OpenHistory slot="closing" filePath={post.filePath} author={d.author} contributors={d.contributors} />

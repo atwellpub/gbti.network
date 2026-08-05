@@ -9,6 +9,7 @@ publishedAt: 2025-10-13
 updatedAt: 2025-10-18
 excerpt: "In this article we share the top 10 completely free email signature generators that we were able to find as well as several paid options."
 categories: ["business", "marketing"]
+layout: card
 coverImage: "./images/Top-Free-Email-Generators-5.webp"
 redirectFrom: ["/generators/top-10-free-email-signature-generators-in-2025/"]
 ---

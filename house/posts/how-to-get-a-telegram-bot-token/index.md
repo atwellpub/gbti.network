@@ -9,6 +9,7 @@ publishedAt: 2023-09-02
 updatedAt: 2023-10-04
 excerpt: "Creating a Telegram bot and getting a bot token involves a few steps: Step 1: Talk to BotFather Step 2: Create a New Bot Step 3: Store the Token Note The token will look something like this: Replac…"
 categories: ["gbti", "products", "andshare"]
+layout: card
 redirectFrom: ["/gbti/products/andshare/how-to-get-a-telegram-bot-token/"]
 ---
 
