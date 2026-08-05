@@ -12,6 +12,7 @@ import Footer from '../components/Footer.astro';
 import SigninModal from '../components/SigninModal.astro';
 import ReferralCapture from '../components/ReferralCapture.astro';
 import TouchTracker from '../components/TouchTracker.astro';
+import { SITE_NAME } from '../lib/brand';
 import CookieConsent from '../components/CookieConsent.astro';
 import CloudflareAnalytics from '../components/CloudflareAnalytics.astro';
 import { SIGNUP_BASE } from '../lib/membership'; // sow-158 Phase 2: the Worker origin, stamped site-wide for the cookie hydrator
@@ -38,7 +39,7 @@ const {
   bare = false,
 } = Astro.props;
 
-const siteName = 'The GBTI Network';
+const siteName = SITE_NAME;
 const fullTitle = title === siteName ? title : `${title} | ${siteName}`;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 // Every page gets an OG image so a shared link never previews blank. A page-specific image (a post cover, a

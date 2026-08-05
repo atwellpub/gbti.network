@@ -63,6 +63,7 @@ import { SIGNUP_BASE } from '../../lib/membership';
 
   <script>
     import { newsTargetSlug } from '../../lib/home-feed.mjs';
+    import { SITE_NAME } from '../../lib/brand';
 
     const view = document.querySelector<HTMLElement>('[data-news-item]');
     const target = document.querySelector<HTMLElement>('[data-news-target]');
@@ -122,7 +123,7 @@ import { SIGNUP_BASE } from '../../lib/membership';
         const it = items.find((x: any) => String(x?.guid) === guid);
         if (!guid || !it) { missing(); return; }
 
-        document.title = String(it.title || 'News') + ' | The GBTI Network';
+        document.title = String(it.title || 'News') + ` | ${SITE_NAME}`;
         target.replaceChildren();
 
         // meta row
