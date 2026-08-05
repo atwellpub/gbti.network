@@ -301,7 +301,8 @@ const lockedHint = (l: { encrypted?: boolean }) =>
                 <div class="pd-shots">
                   {shots.map((s, i) => (
                     <figure class="pd-shot">
-                      <a href={s.src.src} target="_blank" rel="noopener" aria-label={`Open screenshot ${i + 1} of ${d.title}`}>
+                      <a href={s.src.src} target="_blank" rel="noopener" aria-label={`Open screenshot ${i + 1} of ${d.title}`}
+                         data-lightbox data-lightbox-group="pd-gallery" data-cap={s.caption || ''}>
                         <Image src={s.src} widths={[420, 840]} sizes="(max-width:900px) 100vw, 320px" alt={s.caption || `${d.title} screenshot ${i + 1}`} />
                       </a>
                       {captioned && <figcaption>{s.caption}</figcaption>}
@@ -313,7 +314,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
                   <div class="pd-stage">
                     <div class="pd-frames" data-pd-frames>
                       {shots.map((s, i) => (
-                        <div class="pd-frame">
+                        <div class="pd-frame" data-lightbox data-lightbox-group="pd-gallery" data-full={s.src.src} data-cap={s.caption || ''}>
                           <Image src={s.src} widths={[660, 1320]} sizes="(max-width:900px) 100vw, 660px" alt={s.caption || `${d.title} screenshot ${i + 1}`} />
                         </div>
                       ))}

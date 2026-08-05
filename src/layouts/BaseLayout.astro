@@ -14,6 +14,7 @@ import ReferralCapture from '../components/ReferralCapture.astro';
 import TouchTracker from '../components/TouchTracker.astro';
 import { SITE_NAME } from '../lib/brand';
 import CookieConsent from '../components/CookieConsent.astro';
+import Lightbox from '../components/Lightbox.astro';
 import CloudflareAnalytics from '../components/CloudflareAnalytics.astro';
 import { SIGNUP_BASE } from '../lib/membership'; // sow-158 Phase 2: the Worker origin, stamped site-wide for the cookie hydrator
 
@@ -119,6 +120,7 @@ const ogImageUrl = new URL(ogImage || DEFAULT_OG_IMAGE, Astro.site).href;
     <ReferralCapture />
     <TouchTracker />
     <CookieConsent />
+    <Lightbox />{/* SOW-175: site-wide click-to-enlarge for body images + product galleries */}
     {/* SOW-030: reflect the GBTI extension's page-safe identity signal onto <html> (is-gbti-member /
         is-gbti-paid / data-gbti-role) so components + CSS can show a signed-in / member experience. Presentation
         only and UNTRUSTED for security (see src/lib/member-signal.ts); the token never reaches the page.
