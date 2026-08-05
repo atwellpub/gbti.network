@@ -88,6 +88,22 @@ export async function authorizeAdmin(request, env, deps = {}) {
 }
 
 /**
+ * sow-183: authorize a SUPERADMIN caller. Same fail-closed mirror gate as authorizeAdmin (identity from the
+ * verified token/cookie, role from the fresh SIGNUP_KV mirror, banned denied), but the floor is superadmin,
+ * not admin/moderator. Used by the hosted-authoring endpoint (membership-author.mjs) to decide whether a
+ * write may target a folder other than the caller's own (house/, or another member's, for content authorship
+ * reassignment) -- a narrower, separate question from "is this caller admin-tier" (authorizeAdmin), so it
+ * gets its own gate rather than overloading authorizeAdmin's floor. Returns { ok:true, githubId, role } or
+ * { ok:false, status, body }.
+ */
+export async function authorizeSuperadmin(request, env, deps = {}) {
+  const r = await resolveCaller(request, env, deps);
+  if (!r.ok) return r;
+  if (r.role !== 'superadmin') return fail(403, 'forbidden', 'superadmin access is required');
+  return { ok: true, githubId: r.githubId, role: r.role };
+}
+
+/**
  * sow-161: authorize a STAFF caller (moderator OR admin OR superadmin) for content moderation. Same fail-closed
  * mirror gate as authorizeAdmin (identity from the verified token/cookie, role from the fresh mirror, banned
  * denied), but the floor is moderator, not admin, so a moderator can deplatform/republish/remove content. The

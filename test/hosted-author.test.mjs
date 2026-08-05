@@ -210,3 +210,75 @@ test('id contract: a share-length itemId round-trips; 81+ chars still rejected',
   assert.equal(parseHostedRef(branch), '2002207');
   assert.equal(hostedBranchFor('1', 'a'.repeat(81)), null);
 });
+
+// sow-183: allowAnyFolder additionally permits house/ or another member's folder, for a superadmin content
+// authorship reassignment. The CALLER decides this flag (after its own independent superadmin check); this
+// module has no privilege concept of its own, it only enforces the shape once told.
+test('validateHostedRequest: allowAnyFolder=false (the default) is byte-for-byte the existing own-folder-only behavior', () => {
+  for (const path of ['members/other/posts/x.md', 'house/posts/x/index.md', 'house/roles.yml']) {
+    const r = validateHostedRequest({ files: [{ path, content: 'x' }], itemId: 'x', folder: 'atwellpub' });
+    assert.equal(r.ok, false, `${path} must still be rejected with no allowAnyFolder`);
+  }
+});
+
+test('validateHostedRequest: allowAnyFolder=true permits house/ and another member\'s folder', () => {
+  const house = validateHostedRequest({ files: [{ path: 'house/posts/welcome/index.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
+  assert.equal(house.ok, true);
+  const other = validateHostedRequest({ files: [{ path: 'members/gbtilabs/posts/welcome/index.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
+  assert.equal(other.ok, true);
+  // still own-folder-friendly too (a superadmin editing their OWN content is unaffected)
+  const own = validateHostedRequest({ files: [{ path: 'members/atwellpub/posts/x/index.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
+  assert.equal(own.ok, true);
+});
+
+test('validateHostedRequest: allowAnyFolder=true STILL rejects governance files, root config, and traversal', () => {
+  for (const path of [
+    'house/roles.yml', // Tier S, never authorable via content publish regardless of role
+    'CODEOWNERS',
+    '.github/workflows/x.yml',
+    'scripts/pr-gate.mjs',
+    'members/atwellpub/../../house/roles.yml',
+    'house/../CODEOWNERS',
+    '/members/other/posts/x.md',
+    'members/other/posts/..',
+    'members', // the bare word, no trailing content
+    'house', // ditto
+  ]) {
+    const r = validateHostedRequest({ files: [{ path, content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
+    assert.equal(r.ok, false, `${path} must be rejected even with allowAnyFolder`);
+  }
+});
+
+test('validateHostedRequest: allowAnyFolder=true still enforces a well-formed target username shape', () => {
+  // ANY_MEMBER_FOLDER_RE requires the same shape as a real folder name; garbage after members/ is rejected,
+  // it does not silently fall through to "own folder" or otherwise pass.
+  const r = validateHostedRequest({ files: [{ path: 'members/Not_Valid!/posts/x.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
+  assert.equal(r.ok, false);
+});
+
+test('validateHostedRequest: allowAnyFolder=true, house/roles.yml is rejected even disguised as an image path (no house/images/ convention exists)', () => {
+  const b64 = Buffer.from('a fake png payload').toString('base64');
+  // house/ has no images/ convention on EITHER host today (planAuthorshipMove does not move cover images;
+  // a reassigned item's coverImage keeps pointing at its original author's members/<x>/images/, a known,
+  // separate, minor gap -- not something this endpoint should paper over by inventing a new house/images/
+  // allowance it does not actually need to serve).
+  const r = validateHostedRequest({
+    files: [{ path: 'house/images/cover.png', contentBase64: b64 }],
+    itemId: 'x', folder: 'atwellpub', allowAnyFolder: true,
+  });
+  assert.equal(r.ok, false);
+  const bad = validateHostedRequest({
+    files: [{ path: 'house/not-images/cover.png', contentBase64: b64 }],
+    itemId: 'x', folder: 'atwellpub', allowAnyFolder: true,
+  });
+  assert.equal(bad.ok, false);
+});
+
+test('validateHostedRequest: allowAnyFolder=true, an image upload to another member\'s images/ computes its tail correctly', () => {
+  const b64 = Buffer.from('a fake png payload').toString('base64');
+  const r = validateHostedRequest({
+    files: [{ path: 'members/gbtilabs/images/cover.png', contentBase64: b64 }],
+    itemId: 'x', folder: 'atwellpub', allowAnyFolder: true,
+  });
+  assert.equal(r.ok, true);
+});

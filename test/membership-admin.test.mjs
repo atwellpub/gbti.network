@@ -2,7 +2,7 @@
 // -> role from the SIGNUP_KV overrides mirror) + the Stripe enumeration. Pure over injected deps; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeAdmin, authorizeStaff, membershipAdminStatuses } from '../workers/signup/membership-admin.mjs';
+import { authorizeAdmin, authorizeStaff, authorizeSuperadmin, membershipAdminStatuses } from '../workers/signup/membership-admin.mjs';
 import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 1b: mint a website session cookie
 
 const req = (token) => ({ headers: { get: (k) => (k === 'Authorization' && token ? `Bearer ${token}` : null) } });
@@ -139,4 +139,53 @@ test('membershipAdminStatuses: a Stripe error fails closed to 502 (no partial da
   const makeStripe = () => ({ async *listCustomers() { throw new Error('stripe down'); } });
   const r = await membershipAdminStatuses(req('sa'), envWith(freshMirror()), { fetchUser, makeStripe, now });
   assert.equal(r.status, 502);
+});
+
+// sow-183: authorizeSuperadmin gates the hosted-authoring endpoint's cross-folder write (house/ or another
+// member's folder, for content authorship reassignment). Same fail-closed mirror gate as authorizeAdmin, but
+// the floor is superadmin, not admin -- an admin alone must NOT pass.
+test('authorizeSuperadmin: a superadmin passes; admin, moderator, and member are all forbidden', async () => {
+  const env = envWith(freshMirror());
+  const sa = await authorizeSuperadmin(req('sa'), env, { fetchUser, now });
+  assert.equal(sa.ok, true);
+  assert.equal(sa.role, 'superadmin');
+  assert.equal(sa.githubId, '1');
+  const admin = await authorizeSuperadmin(req('admin'), env, { fetchUser, now });
+  assert.equal(admin.ok, false);
+  assert.equal(admin.status, 403);
+  const mod = await authorizeSuperadmin(req('mod'), env, { fetchUser, now });
+  assert.equal(mod.status, 403);
+  const member = await authorizeSuperadmin(req('member'), env, { fetchUser, now });
+  assert.equal(member.status, 403);
+});
+
+test('authorizeSuperadmin: no token -> 401, before any mirror read', async () => {
+  const r = await authorizeSuperadmin(req(null), envWith(freshMirror()), { fetchUser, now });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 401);
+});
+
+test('authorizeSuperadmin: a BANNED superadmin is denied (ban overrides staff, same as authorizeAdmin)', async () => {
+  const banned = freshMirror({ bans: { bans: [{ github_id: '1' }] } });
+  const r = await authorizeSuperadmin(req('sa'), envWith(banned), { fetchUser, now });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+});
+
+test('authorizeSuperadmin: a stale or missing mirror fails closed (403), never silently grants', async () => {
+  const stale = freshMirror({ generatedAt: new Date('2020-01-01').toISOString() });
+  assert.equal((await authorizeSuperadmin(req('sa'), envWith(stale), { fetchUser, now })).status, 403);
+  assert.equal((await authorizeSuperadmin(req('sa'), envWith(null), { fetchUser, now })).status, 403);
+});
+
+// GET, no CSRF: this tests authorizeSuperadmin's own role gate in isolation (matching the existing
+// authorizeAdmin cookie test's convention); the mutation-path CSRF enforcement is resolveIdentity's own
+// concern, already covered by its own test suite.
+test('sow-161-style: authorizeSuperadmin with allowCookie accepts a valid superadmin session cookie', async () => {
+  const session = await signSession({ githubId: '1', githubLogin: 'super' }, 'secret');
+  const reqCookie = new Request('https://signup.gbti.network/membership/author', { headers: { Cookie: 'gbti_session=' + session } });
+  const env = { ...envWith(freshMirror()), SESSION_SECRET: 'secret' };
+  const r = await authorizeSuperadmin(reqCookie, env, { allowCookie: true, now });
+  assert.equal(r.ok, true);
+  assert.equal(r.githubId, '1');
 });

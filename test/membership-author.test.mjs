@@ -229,6 +229,62 @@ test('hosted author: the enroll rate limiter blocks a repeat nudge (provisioning
   assert.equal(dispatched.length, 0, 'no dispatch when rate-limited');
 });
 
+// ---- sow-183: a SUPERADMIN caller may target house/ or another member's folder (content authorship
+// reassignment). authorizeSuper is called with the SAME deps as the paid gate, so it reads env.SIGNUP_KV
+// directly (membership-admin.mjs's resolveCaller, unlike resolveEffective, is not deps.kv-injectable) --
+// these tests give env a real-shaped fake mirror rather than faking authorizeSuper itself, so the actual
+// role-resolution wiring is exercised end to end, not just stubbed away.
+const freshMirror = (overrides = {}) => ({
+  generatedAt: new Date().toISOString(),
+  roles: { superadmins: [], admins: [], moderators: [] },
+  bans: { bans: [] },
+  ...overrides,
+});
+
+test('sow-183: a superadmin reassigns a house item to another member\'s folder (write new + delete old)', async () => {
+  const rec = [];
+  const superMirror = freshMirror({ roles: { superadmins: [{ github_id: '2002207' }], admins: [], moderators: [] } });
+  const envSuper = { ...env, SIGNUP_KV: { get: async () => superMirror } };
+  const fetchImpl = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    if (/\/contents\/house\/posts\/reassigned-post\/index\.md\?ref=/.test(url) && method === 'GET') {
+      return { ok: true, status: 200, async json() { return { sha: 'oldsha' }; } };
+    }
+    return ghFetch(rec)(url, init);
+  };
+  const body = {
+    itemId: 'reassigned-post', title: 'Reassigned post',
+    files: [
+      { path: 'members/rfilipo/posts/reassigned-post/index.md', content: '---\ntitle: x\nauthor: rfilipo\n---\nbody' },
+      { path: 'house/posts/reassigned-post/index.md', content: null },
+    ],
+  };
+  const r = await membershipAuthor(req(body), envSuper, { ...deps(rec), fetchImpl });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.branch, 'hosted/2002207/reassigned-post', 'branch stays keyed to the ACTING superadmin, not the target folder');
+  const put = rec.find((c) => c.method === 'PUT' && /\/contents\/members\/rfilipo\/posts\/reassigned-post\/index\.md$/.test(c.url));
+  assert.ok(put, 'the new-location file is committed to ANOTHER member\'s folder');
+  const del = rec.find((c) => c.method === 'DELETE' && /\/contents\/house\/posts\/reassigned-post\/index\.md$/.test(c.url));
+  assert.ok(del, 'the old house-scope file is deleted');
+});
+
+test('sow-183: a plain member (mirror present, no superadmin grant) is still rejected out-of-folder', async () => {
+  const rec = [];
+  const envMember = { ...env, SIGNUP_KV: { get: async () => freshMirror() } }; // '2002207' is in no role list
+  const r = await membershipAuthor(req({ ...goodBody, files: [{ path: 'house/posts/x/index.md', content: 'x' }] }), envMember, deps(rec));
+  assert.equal(r.status, 400, 'a present-but-non-superadmin mirror must not relax the own-folder rule');
+  assert.equal(rec.length, 0);
+});
+
+test('sow-183: a BANNED superadmin does not get allowAnyFolder (ban overrides staff, same as authorizeAdmin)', async () => {
+  const rec = [];
+  const envBanned = { ...env, SIGNUP_KV: { get: async () => freshMirror({ roles: { superadmins: [{ github_id: '2002207' }], admins: [], moderators: [] }, bans: { bans: [{ github_id: '2002207' }] } }) } };
+  const r = await membershipAuthor(req({ ...goodBody, files: [{ path: 'house/posts/x/index.md', content: 'x' }] }), envBanned, deps(rec));
+  assert.equal(r.status, 400);
+  assert.equal(rec.length, 0);
+});
+
 test('sow-158 Phase 3a: a website (cookie) caller publishes with NO bearer re-check', async () => {
   // authorizePaid resolves the cookie session (via:'cookie') and carries the HMAC-verified github_id; the
   // endpoint must skip the fetchUser(bearer) re-check (the cookie holds no token) and still open the hosted PR.

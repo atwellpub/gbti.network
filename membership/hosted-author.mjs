@@ -110,19 +110,39 @@ function utf8Bytes(s) {
   return new TextEncoder().encode(s).length;
 }
 
+// sow-183: a content path lives under SOME member's folder or house/. Shape-only (isCleanPath already ruled
+// out traversal/unclean segments by the time this runs) -- it does not confirm the folder is a REAL
+// registered member, matching the fact that a superadmin can already reach any path via the fork+gate path
+// today (classify-pr.mjs's decide() auto-merges a superadmin on any path); this is not a NEW ceiling, just
+// the hosted-authoring endpoint's own shape check, same rigor as its existing own-folder-only pattern.
+const ANY_MEMBER_FOLDER_RE = /^members\/[a-z0-9][a-z0-9-]{0,63}\//;
+// EXPLICIT house CONTENT subdirectories only -- never a bare 'house/' prefix. house/ also holds Tier-S/A
+// governance (roles.yml, bans.yml, grandfathered.yml, members-index.yml, taxonomy.yml, ...), and a bare
+// prefix match would treat 'house/roles.yml' as a valid content path too. Mirrors reviewFileContent's own
+// HOUSE_CONTENT allowlist (workers/signup/github-app.mjs) for the read side, plus the two sidecar dirs a
+// content write also needs: comments/ (the from-the-author intro) and _enc/ (an encrypted body envelope).
+const HOUSE_CONTENT_PREFIXES = ['house/posts/', 'house/products/', 'house/prompts/', 'house/comments/', 'house/_enc/'];
+
 /**
- * Validate a hosted author request against the member's OWNED folder (resolved by the caller from the
+ * Validate a hosted author request against the caller's OWNED folder (resolved by the caller from the
  * members-index by github_id, exactly as the gate does; never from the current GitHub login). Returns
  * { ok: true, paths } or { ok: false, error, status } with a member-safe error string. Fail closed:
  * any doubt rejects the whole request.
+ *
+ * sow-183: `allowAnyFolder` additionally permits the house CONTENT subdirectories (HOUSE_CONTENT_PREFIXES,
+ * never house/roles.yml or any other governance file) or ANY OTHER member's folder, for a content
+ * authorship reassignment. The CALLER (membershipAuthor) sets this ONLY after an independent superadmin
+ * check (authorizeSuperadmin, resolved from the SIGNUP_KV roles mirror) -- never from anything in the
+ * request body itself, so a non-superadmin cannot self-grant it by simply asking. Every other check
+ * (clean paths, size caps, file count, duplicates) is unchanged and applies identically either way.
  */
-export function validateHostedRequest({ files, itemId, folder } = {}) {
+export function validateHostedRequest({ files, itemId, folder, allowAnyFolder = false } = {}) {
   const bad = (error, status = 400) => ({ ok: false, error, status });
   if (!FOLDER_RE.test(String(folder ?? ''))) return bad('no member folder resolved for this account', 409);
   if (!ITEM_ID_RE.test(String(itemId ?? ''))) return bad('itemId must be lowercase letters, digits, and hyphens (max 64)');
   if (!Array.isArray(files) || files.length === 0) return bad('files must be a non-empty array');
   if (files.length > HOSTED_MAX_FILES) return bad(`too many files (max ${HOSTED_MAX_FILES})`);
-  const prefix = `members/${folder}/`;
+  const ownPrefix = `members/${folder}/`;
   const paths = [];
   let totalBytes = 0;
   let imageBytes = 0;
@@ -130,8 +150,22 @@ export function validateHostedRequest({ files, itemId, folder } = {}) {
   for (const f of files) {
     if (!f || typeof f.path !== 'string') return bad('every file needs a path');
     if (!isCleanPath(f.path)) return bad('a file path is not a clean repo-relative path');
-    if (!f.path.startsWith(prefix) || f.path.length <= prefix.length) {
-      return bad('every file must live inside your own member folder');
+    const inOwnFolder = f.path.startsWith(ownPrefix) && f.path.length > ownPrefix.length;
+    // sow-183: which folder prefix actually matched -- own, house/, or (allowAnyFolder only) another
+    // member's -- so the image-tail check below (own-folder "images/x.png") is computed against the RIGHT
+    // folder for a cross-folder write, not always the caller's own.
+    let matchedPrefix = null;
+    if (inOwnFolder) matchedPrefix = ownPrefix;
+    else if (allowAnyFolder) {
+      const housePrefix = HOUSE_CONTENT_PREFIXES.find((p) => f.path.startsWith(p) && f.path.length > p.length);
+      if (housePrefix) matchedPrefix = housePrefix;
+      else {
+        const m = ANY_MEMBER_FOLDER_RE.exec(f.path);
+        if (m) matchedPrefix = m[0];
+      }
+    }
+    if (!matchedPrefix) {
+      return bad(allowAnyFolder ? 'every file must live under a member folder or house/' : 'every file must live inside your own member folder');
     }
     if (seen.has(f.path)) return bad('duplicate file path');
     seen.add(f.path);
@@ -139,7 +173,7 @@ export function validateHostedRequest({ files, itemId, folder } = {}) {
     if (isBinary) {
       // sow-158 image upload: a binary entry is a base64-encoded raster image, own-folder images/ only, capped.
       if (typeof f.content === 'string') return bad('a file cannot carry both content and contentBase64');
-      const tail = f.path.slice(prefix.length);
+      const tail = f.path.slice(matchedPrefix.length);
       if (!IMAGE_PATH_TAIL_RE.test(tail)) return bad('an uploaded image must be a png, jpg, webp, or gif under your images/ folder');
       const bytes = base64DecodedBytes(f.contentBase64);
       if (bytes < 0) return bad('an uploaded image is not valid base64');

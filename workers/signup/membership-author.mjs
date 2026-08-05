@@ -14,6 +14,7 @@
 
 import { githubFetchUser } from './oauth.mjs';
 import { authorizePaid } from './membership-content.mjs';
+import { authorizeSuperadmin } from './membership-admin.mjs';
 import { getInstallationToken } from './github-app.mjs';
 import { rateLimit } from './abuse.mjs';
 import { kickDispatch } from './checkout.mjs';
@@ -39,7 +40,7 @@ async function ghJson(fetchImpl, url, init) {
 export async function membershipAuthor(request, env, deps = {}) {
   const {
     fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, authorize = authorizePaid,
-    kv = env?.SIGNUP_KV, limiter = rateLimit,
+    authorizeSuper = authorizeSuperadmin, kv = env?.SIGNUP_KV, limiter = rateLimit,
     upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
   } = deps;
 
@@ -98,8 +99,16 @@ export async function membershipAuthor(request, env, deps = {}) {
     return { status: 409, body: { error: 'folder_not_provisioned', provisioning, message: 'your member folder is being provisioned — try publishing again in a few minutes' } };
   }
 
+  // sow-183: a SUPERADMIN caller may target a file set outside their own folder (house/, or another
+  // member's folder) for content authorship reassignment. Independently re-resolved (own fail-closed gate,
+  // the same shape as authorizeAdmin/authorizeStaff/authorizeCurator) rather than trusted from the request
+  // body -- a non-superadmin (or a failed re-check) gets allowAnyFolder=false and validateHostedRequest
+  // falls back to the existing own-folder-only rule.
+  const superadmin = await authorizeSuper(request, env, deps);
+  const allowAnyFolder = superadmin.ok === true;
+
   const itemId = String(payload?.itemId ?? '');
-  const check = validateHostedRequest({ files: payload?.files, itemId, folder });
+  const check = validateHostedRequest({ files: payload?.files, itemId, folder, allowAnyFolder });
   if (!check.ok) return { status: check.status ?? 400, body: { error: 'bad_request', message: check.error } };
   const branch = hostedBranchFor(githubId, itemId);
   if (!branch) return { status: 400, body: { error: 'bad_request', message: 'invalid itemId' } };
