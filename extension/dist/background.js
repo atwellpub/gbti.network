@@ -20584,6 +20584,9 @@ var FIELDS = Object.freeze({
     f("excerpt", "Excerpt", "textarea"),
     f("categories", "Categories", "array"),
     TAGS,
+    // sow-179: which of the three article layouts renders this post. Defaults to editorial (see
+    // src/content.config.ts); journal and card are the other two, see src/components/blog/Article*.astro.
+    f("layout", "Layout", "enum", { options: ["editorial", "journal", "card"], hint: "How this article page is laid out. Editorial: full-width cover hero. Journal: sticky rail beside a single reading column. Card: a centered card, no rail." }),
     f("coverImage", "Cover image", "image"),
     f("coverAlt", "Cover image alt text", "text", { placeholder: "Describe the image for screen readers" }),
     f("video", "Video (YouTube/Vimeo URL)", "text"),

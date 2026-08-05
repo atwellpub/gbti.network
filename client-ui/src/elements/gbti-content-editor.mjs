@@ -69,6 +69,10 @@ const HIDDEN_KEYS = new Set(['canonicalUrl']);
 const RAIL_SCHEMA = {
   post: [
     { title: 'Details', open: true, keys: ['visibility', 'excerpt', 'categories', 'tags'] },
+    // sow-179: its own section, not folded into Details or Media, since it governs how BOTH read together.
+    // "Article layout" rather than "Layout" for the section title -- the field's own label is "Layout", and
+    // stacking the same word as both the section header and the field label directly below it read redundant.
+    { title: 'Article layout', open: true, keys: ['layout'] },
     { title: 'Media', open: false, keys: ['coverImage', 'coverAlt'] },
   ],
   product: [
@@ -713,6 +717,21 @@ class GbtiContentEditor extends GbtiElement {
         { key: 'carousel', name: 'Carousel', desc: 'One large frame + a filmstrip', shape: '<span class="gs-frame"></span><span class="gs-strip"><i></i><i></i><i></i></span>' },
       ];
       const cur = v || '';
+      const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? ' on' : ''}" data-gs="${c.key}">
+        <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join('');
+      return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
+    }
+    // sow-179: article layout -> three illustrated cards (Editorial / Journal / Card), the same pattern as
+    // the galleryStyle picker above (reuses its .gs-* CSS and the generic [data-gscards] click handler
+    // as-is, no new wiring needed). Unlike galleryStyle there is no "Auto" option: the schema default
+    // (editorial) is a real, always-on choice, not a fallback computed from something else.
+    if (f.kind === 'enum' && f.key === 'layout') {
+      const cards = [
+        { key: 'editorial', name: 'Editorial', desc: 'Full-width cover hero, title on it', shape: '<span class="gs-frame"></span><span class="gs-strip"><i></i><i></i></span>' },
+        { key: 'journal', name: 'Journal', desc: 'Sticky rail beside one reading column', shape: '<span class="gs-tile" style="flex:0 0 26%"></span><span class="gs-tile"></span>' },
+        { key: 'card', name: 'Card', desc: 'Centered card, no rail', shape: '<span class="gs-tile" style="flex:0 0 62%;margin:0 auto"></span>' },
+      ];
+      const cur = v || 'editorial';
       const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? ' on' : ''}" data-gs="${c.key}">
         <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join('');
       return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
