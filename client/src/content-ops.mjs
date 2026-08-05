@@ -7,6 +7,7 @@
 
 import yaml from 'js-yaml';
 import { AUTHORABLE_TYPES, SYSTEM_MANAGED, schemaFor, shareSchema, commentSchema } from './schemas.mjs';
+import { encAssetFor } from './member-content.mjs';
 
 const SUBDIR = Object.freeze({ post: 'posts', product: 'products', prompt: 'prompts' });
 const MAX_BODY_BYTES = 1_000_000; // 1MB cap on a content body (well under GitHub's per-file limit + the 2MB HTTP cap)
@@ -127,6 +128,71 @@ export function buildContentFile({ type, username, input, body = '', scope = 'me
 
   // `username` stays the ACTOR (the fork/commit context); `scope` + `path` carry the TARGET (member or house).
   return { path, frontmatter, markdown, type, username, slug, scope };
+}
+
+/**
+ * SOW-183: plan a cross-folder AUTHORSHIP move for an existing item -- reassigning it from one (scope,
+ * username) target to another (house -> a specific member, member -> house, or member -> a different
+ * member), keyed by the SAME (type, slug) throughout, since the public URL is built from slug alone and
+ * never depends on author (src/lib/content-index.mjs toIndexItem/contentItemPath). This is the same shape as
+ * the existing SOW-112 slug-rename (delete-old + write-new + move the intro comment + re-derive the .enc
+ * sibling), generalized from "same folder, new slug" to "any folder, same slug" -- the two are really one
+ * operation (a full identity move), just keyed on a different field. Privilege-free like every other builder
+ * in this file: the CALLER enforces who may invoke this (superadmin-only, per SOW-183); this function only
+ * computes the resulting file set.
+ *
+ * A content item's path is DERIVED from its target (scope + username), never read from disk, so a bare
+ * frontmatter `author:` edit with no file move would leave the item unreachable at its new author's computed
+ * path. This function always produces both the delete of the old path and the write of the new one together.
+ *
+ * @param {'post'|'product'|'prompt'} type
+ * @param {string} slug                                unchanged across the move
+ * @param {{scope:'member'|'house', username?:string}} from   the item's CURRENT target
+ * @param {{scope:'member'|'house', username?:string}} to     the NEW target
+ * @param {object} oldFrontmatter                       the item's current, already-parsed frontmatter
+ * @param {string} oldBody                               the item's current, already-parsed body (the public
+ *                                                        part only; an encryptedBody pointer travels via
+ *                                                        oldFrontmatter, not through this body string)
+ * @param {string|null} [oldEncText]     the current .enc envelope's raw text; REQUIRED when
+ *                                       oldFrontmatter.encryptedBody is set (throws otherwise, fail closed
+ *                                       rather than silently dropping a gated body)
+ * @param {string|null} [introText]      the current from-the-author intro comment's raw text, product/prompt
+ *                                       only; null/omitted when the item has none
+ * @returns {{ path: string, noop?: boolean, files: Array<{path:string, content:string|null}>, frontmatter: object }}
+ */
+export function planAuthorshipMove({ type, slug, from, to, oldFrontmatter, oldBody, oldEncText = null, introText = null }) {
+  if (!AUTHORABLE_TYPES.includes(type)) throw new Error(`planAuthorshipMove: ${type} is not an authorable type`);
+  if (!slug) throw new Error('planAuthorshipMove: slug is required');
+  const fromTarget = resolveTarget(from);
+  const toTarget = resolveTarget(to);
+  const oldPath = contentPath(type, from?.username, slug, fromTarget.scope);
+  const newPath = contentPath(type, to?.username, slug, toTarget.scope);
+  if (oldPath === newPath) return { path: oldPath, noop: true, files: [], frontmatter: oldFrontmatter ?? {} };
+
+  const fm = { ...(oldFrontmatter ?? {}), author: toTarget.author };
+  const files = [];
+
+  if (typeof fm.encryptedBody === 'string' && fm.encryptedBody) {
+    if (oldEncText == null) throw new Error('planAuthorshipMove: the item has an encryptedBody but oldEncText was not provided');
+    const oldEnc = fm.encryptedBody;
+    const { path: newEnc } = encAssetFor(type, to?.username, slug, toTarget.scope);
+    fm.encryptedBody = newEnc;
+    files.push({ path: newEnc, content: oldEncText }, { path: oldEnc, content: null });
+  }
+
+  files.push({ path: newPath, content: serializeContentFile(fm, oldBody) }, { path: oldPath, content: null });
+
+  // The from-the-author intro comment (product/prompt only) moves + re-stamps its author; the slug (and so
+  // its id/targetSlug, both keyed on slug) is unchanged by an authorship-only move, unlike a slug rename.
+  if (['product', 'prompt'].includes(type) && introText != null) {
+    const oldIntroPath = `${fromTarget.folder}/comments/intro-${slug}.md`;
+    const newIntroPath = `${toTarget.folder}/comments/intro-${slug}.md`;
+    const intro = parseContentFile(introText);
+    const introFm = { ...(intro.frontmatter ?? {}), author: toTarget.author };
+    files.push({ path: newIntroPath, content: serializeContentFile(introFm, intro.body) }, { path: oldIntroPath, content: null });
+  }
+
+  return { path: newPath, files, frontmatter: fm };
 }
 
 /** SOW-018: derive a filesystem-safe, sortable Share id (a timestamp-slug) from its createdAt + optional title.

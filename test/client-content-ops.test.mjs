@@ -11,6 +11,8 @@ import {
   sanitizeInput,
   buildContentFile,
   parseContentFile,
+  serializeContentFile,
+  planAuthorshipMove,
   ContentValidationError,
 } from '../client/src/content-ops.mjs';
 
@@ -156,4 +158,153 @@ test('parseContentFile: round-trips what buildContentFile produced', () => {
   assert.equal(parsed.frontmatter.title, 'P');
   assert.equal(parsed.frontmatter.author, 'alice');
   assert.equal(parsed.body.trim(), 'Prompt body'); // file ends with a trailing newline by convention
+});
+
+// SOW-183: planAuthorshipMove generalizes the SOW-112 slug-rename shape (delete-old + write-new + move the
+// intro + re-derive the .enc) to an author-driven cross-folder move, keyed on the SAME slug throughout (the
+// public URL never depends on author, only on contentPath's folder does).
+test('planAuthorshipMove: member -> member, deletes the old path and writes the new one with author updated', () => {
+  const oldFm = { type: 'post', title: 'T', slug: 'hello', author: 'alice', status: 'published' };
+  const r = planAuthorshipMove({
+    type: 'post', slug: 'hello',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'member', username: 'bob' },
+    oldFrontmatter: oldFm, oldBody: 'Body text.',
+  });
+  assert.equal(r.path, 'members/bob/posts/hello/index.md');
+  assert.equal(r.noop, undefined);
+  assert.equal(r.frontmatter.author, 'bob');
+  assert.deepEqual(r.files.map((f) => f.path), ['members/bob/posts/hello/index.md', 'members/alice/posts/hello/index.md']);
+  const written = r.files.find((f) => f.path === 'members/bob/posts/hello/index.md');
+  assert.match(written.content, /author: bob/);
+  assert.match(written.content, /Body text\./);
+  const deleted = r.files.find((f) => f.path === 'members/alice/posts/hello/index.md');
+  assert.equal(deleted.content, null);
+});
+
+test('planAuthorshipMove: member -> house sets author to gbti and writes under house/', () => {
+  const r = planAuthorshipMove({
+    type: 'post', slug: 'hello',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'house' },
+    oldFrontmatter: { type: 'post', title: 'T', slug: 'hello', author: 'alice' }, oldBody: 'x',
+  });
+  assert.equal(r.path, 'house/posts/hello/index.md');
+  assert.equal(r.frontmatter.author, 'gbti');
+  assert.deepEqual(r.files.map((f) => f.path), ['house/posts/hello/index.md', 'members/alice/posts/hello/index.md']);
+});
+
+test('planAuthorshipMove: house -> member sets author to the new username and writes under members/', () => {
+  const r = planAuthorshipMove({
+    type: 'prompt', slug: 'seo',
+    from: { scope: 'house' }, to: { scope: 'member', username: 'gbtilabs' },
+    oldFrontmatter: { type: 'prompt', title: 'SEO', slug: 'seo', author: 'gbti' }, oldBody: 'x',
+  });
+  assert.equal(r.path, 'members/gbtilabs/prompts/seo/index.md');
+  assert.equal(r.frontmatter.author, 'gbtilabs');
+  assert.deepEqual(r.files.map((f) => f.path), ['members/gbtilabs/prompts/seo/index.md', 'house/prompts/seo/index.md']);
+});
+
+test('planAuthorshipMove: from and to resolve to the same path -> a noop, no files', () => {
+  const r = planAuthorshipMove({
+    type: 'post', slug: 'hello',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'member', username: 'alice' },
+    oldFrontmatter: { author: 'alice' }, oldBody: 'x',
+  });
+  assert.equal(r.noop, true);
+  assert.deepEqual(r.files, []);
+  assert.equal(r.path, 'members/alice/posts/hello/index.md');
+});
+
+test('planAuthorshipMove: an encryptedBody item re-derives the .enc at the new target and moves both', () => {
+  const oldFm = { type: 'product', title: 'T', slug: 'thing', author: 'alice', visibility: 'members', encryptedBody: 'members/alice/_enc/product-thing-body.enc' };
+  const r = planAuthorshipMove({
+    type: 'product', slug: 'thing',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'member', username: 'bob' },
+    oldFrontmatter: oldFm, oldBody: '', oldEncText: '{"v":1,"ct":"opaque"}',
+  });
+  assert.equal(r.frontmatter.encryptedBody, 'members/bob/_enc/product-thing-body.enc');
+  const encWrite = r.files.find((f) => f.path === 'members/bob/_enc/product-thing-body.enc');
+  const encDelete = r.files.find((f) => f.path === 'members/alice/_enc/product-thing-body.enc');
+  assert.equal(encWrite.content, '{"v":1,"ct":"opaque"}');
+  assert.equal(encDelete.content, null);
+  // the index.md write reflects the NEW encryptedBody pointer, not the old one
+  const idxWrite = r.files.find((f) => f.path === 'members/bob/products/thing/index.md');
+  assert.match(idxWrite.content, /encryptedBody: members\/bob\/_enc\/product-thing-body\.enc/);
+});
+
+test('planAuthorshipMove: an encryptedBody item with no oldEncText throws (fail closed, never drops a gated body)', () => {
+  const oldFm = { type: 'post', slug: 'hello', author: 'alice', encryptedBody: 'members/alice/_enc/post-hello-body.enc' };
+  assert.throws(
+    () => planAuthorshipMove({ type: 'post', slug: 'hello', from: { scope: 'member', username: 'alice' }, to: { scope: 'house' }, oldFrontmatter: oldFm, oldBody: '' }),
+    /oldEncText was not provided/,
+  );
+});
+
+test('planAuthorshipMove: no encryptedBody -> no .enc files at all, just the index.md move', () => {
+  const r = planAuthorshipMove({
+    type: 'post', slug: 'hello',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'house' },
+    oldFrontmatter: { type: 'post', slug: 'hello', author: 'alice' }, oldBody: 'x',
+  });
+  assert.equal(r.files.length, 2); // just the index.md write + delete
+  assert.equal(r.files.some((f) => f.path.includes('_enc')), false);
+});
+
+test('planAuthorshipMove: a product/prompt intro comment moves + re-stamps author, slug/id untouched', () => {
+  const introText = serializeContentFile({ id: 'intro-thing', targetType: 'product', targetSlug: 'thing', author: 'alice', authorNote: true, visibility: 'public' }, 'From the author.');
+  const r = planAuthorshipMove({
+    type: 'product', slug: 'thing',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'member', username: 'bob' },
+    oldFrontmatter: { type: 'product', slug: 'thing', author: 'alice' }, oldBody: 'x',
+    introText,
+  });
+  const introWrite = r.files.find((f) => f.path === 'members/bob/comments/intro-thing.md');
+  const introDelete = r.files.find((f) => f.path === 'members/alice/comments/intro-thing.md');
+  assert.ok(introWrite, 'the intro is written at the new author\'s folder');
+  assert.ok(introDelete && introDelete.content === null, 'the old intro is deleted');
+  const movedFm = parseContentFile(introWrite.content).frontmatter;
+  assert.equal(movedFm.author, 'bob');
+  assert.equal(movedFm.id, 'intro-thing', 'slug is unchanged by an authorship-only move, so the intro id is untouched');
+  assert.equal(movedFm.targetSlug, 'thing');
+});
+
+test('planAuthorshipMove: house <-> member intro comment paths follow house/comments/, not members/gbti/comments/', () => {
+  const introText = serializeContentFile({ id: 'intro-seo', targetType: 'prompt', targetSlug: 'seo', author: 'gbti', authorNote: true, visibility: 'public' }, 'Why we built this.');
+  const r = planAuthorshipMove({
+    type: 'prompt', slug: 'seo',
+    from: { scope: 'house' }, to: { scope: 'member', username: 'gbtilabs' },
+    oldFrontmatter: { type: 'prompt', slug: 'seo', author: 'gbti' }, oldBody: 'x',
+    introText,
+  });
+  assert.ok(r.files.some((f) => f.path === 'house/comments/intro-seo.md' && f.content === null));
+  assert.ok(r.files.some((f) => f.path === 'members/gbtilabs/comments/intro-seo.md' && f.content));
+});
+
+test('planAuthorshipMove: a post has no intro-comment concept, introText is ignored even if provided', () => {
+  const r = planAuthorshipMove({
+    type: 'post', slug: 'hello',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'house' },
+    oldFrontmatter: { type: 'post', slug: 'hello', author: 'alice' }, oldBody: 'x',
+    introText: 'this should be ignored for posts',
+  });
+  assert.equal(r.files.some((f) => f.path.includes('/comments/intro-')), false);
+});
+
+test('planAuthorshipMove: no introText -> no intro files (the item never had one)', () => {
+  const r = planAuthorshipMove({
+    type: 'product', slug: 'thing',
+    from: { scope: 'member', username: 'alice' }, to: { scope: 'house' },
+    oldFrontmatter: { type: 'product', slug: 'thing', author: 'alice' }, oldBody: 'x',
+  });
+  assert.equal(r.files.some((f) => f.path.includes('/comments/intro-')), false);
+});
+
+test('planAuthorshipMove: an unknown/non-authorable type or a missing slug throws', () => {
+  assert.throws(
+    () => planAuthorshipMove({ type: 'comment', slug: 'x', from: { scope: 'member', username: 'a' }, to: { scope: 'house' }, oldFrontmatter: {}, oldBody: '' }),
+    /not an authorable type/,
+  );
+  assert.throws(
+    () => planAuthorshipMove({ type: 'post', slug: '', from: { scope: 'member', username: 'a' }, to: { scope: 'house' }, oldFrontmatter: {}, oldBody: '' }),
+    /slug is required/,
+  );
 });
