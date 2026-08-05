@@ -205,8 +205,21 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
   // SOW-014: the from-the-author intro comment for a post/product/prompt. Its id is deterministic
   // (intro-<slug>), and a house item keeps its notes under house/comments/. Only a PUBLIC authorNote:true
   // comment qualifies (a members note must never reach an off-network channel); shares have no intro.
-  const resolveAuthorNote = deps.resolveAuthorNote ?? ((item) => {
-    if (!item || item.type === 'share') return null;
+  const resolveAuthorNote = deps.resolveAuthorNote ?? ((item, rel) => {
+    if (!item) return null;
+    // sow-147 (owner, 2026-08-05): a SHARE's "author comment" IS its markdown body — the text the composer
+    // collects under "What are you reading, building, or finding?" and the same field the sow-181 add_share
+    // MCP tool writes. Shares carry no intro-comment file, so read the body straight off the share itself.
+    if (item.type === 'share') {
+      if (item.visibility !== 'public') return null; // a members share body is encrypted; it never syndicates
+      try {
+        const text = readFile(rel);
+        if (text == null) return null;
+        const { frontmatter, body } = parseContentFile(text);
+        if (frontmatter?.encryptedBody) return null; // belt and braces: a stub carries no plaintext to quote
+        return String(body || '').trim() || null;
+      } catch { return null; }
+    }
     const author = String(item.author || '');
     const slug = String(item.slug || '');
     if (!author || !slug) return null;
@@ -235,7 +248,7 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
       authorMastodon: resolveAuthorMastodon(b.item.author),
       authorReddit: resolveAuthorReddit(b.item.author),
       authorDevto: resolveAuthorDevto(b.item.author),
-      authorNote: resolveAuthorNote(b.item),
+      authorNote: resolveAuthorNote(b.item, b.rel),
       moderation,
     }));
   }

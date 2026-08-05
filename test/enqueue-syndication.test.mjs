@@ -27,13 +27,16 @@ const ENV = { CF_ACCOUNT_ID: 'a', CF_KV_NAMESPACE_ID: 'n', CF_API_TOKEN: 't' };
 
 const POST = `---\ntitle: My Post\nstatus: published\nvisibility: public\nauthor: alice\nshortDescription: A short blurb.\ncoverImage: https://img/x.jpg\n---\nBody.`;
 const DRAFT = `---\ntitle: Draft\nstatus: draft\nauthor: alice\n---\nx`;
-const SHARE = `---\ntitle: A share\nstatus: published\nauthor: alice\nurl: https://ext.com/x\ncategory: devops\nshortDescription: A devops find.\n---\nx`;
+const SHARE = `---\ntitle: A share\nstatus: published\nauthor: alice\nurl: https://ext.com/x\ncategory: devops\nshortDescription: A devops find.\n---\nWorth your time, the pipeline section alone.`;
+// sow-147: a MEMBERS share, whose body must never resolve as the author note (it is encrypted content).
+const SHARE_MEMBERS = `---\ntitle: A members share\nstatus: published\nvisibility: members\nauthor: alice\nurl: https://ext.com/m\ncategory: devops\n---\nMy private note.`;
 const PROFILE = `---\ntype: profile\nusername: alice\ndisplayName: "Alice Q"\n---\nHi.`;
 
 const FILES = {
   'members/alice/posts/x/index.md': POST,
   'members/alice/posts/d/index.md': DRAFT,
   'members/alice/shares/s1.md': SHARE,
+  'members/alice/shares/s2.md': SHARE_MEMBERS,
   'members/alice/profile.md': PROFILE,
 };
 const deps = (store, config = CFG_POSTS_ON) => ({
@@ -201,4 +204,23 @@ test('a non-authorNote or members intro is not carried as authorNote', async () 
   assert.equal(await run(null), null, 'no intro file');
   assert.equal(await run(`---\ntype: comment\nid: intro-p1\nauthor: alice\ntargetType: prompt\ntargetSlug: p1\nauthorNote: true\nvisibility: members\nstatus: published\ncreatedAt: 2026-07-30\n---\nSecret.`), null, 'members visibility');
   assert.equal(await run(`---\ntype: comment\nid: intro-p1\nauthor: alice\ntargetType: prompt\ntargetSlug: p1\nvisibility: public\nstatus: published\ncreatedAt: 2026-07-30\n---\nJust a reply.`), null, 'not flagged authorNote');
+});
+
+// sow-147 (owner, 2026-08-05: "make the share comment the same as the author note"): a share carries no
+// intro-comment file, so its author note IS its markdown body — the text the composer collects and the
+// add_share MCP tool writes. Without this, every {author-note} token rendered empty for every share.
+test('a PUBLIC share resolves {author-note} from its own body', async () => {
+  const store = new Map();
+  await main({ argv: ['--apply'], env: { ...ENV, SYNDICATE_ADDED: 'members/alice/shares/s1.md' }, deps: deps(store, CFG_SHARES_ON) });
+  const item = JSON.parse(store.get([...store.keys()].find((k) => k.startsWith('synd:item:'))));
+  assert.equal(item.source, 'share');
+  assert.equal(item.authorNote, 'Worth your time, the pipeline section alone.');
+});
+
+// The visibility guard: a members share body is encrypted member content and must never leave as plaintext.
+test('a MEMBERS share resolves no author note', async () => {
+  const store = new Map();
+  await main({ argv: ['--apply'], env: { ...ENV, SYNDICATE_ADDED: 'members/alice/shares/s2.md' }, deps: deps(store, CFG_SHARES_ON) });
+  const key = [...store.keys()].find((k) => k.startsWith('synd:item:'));
+  if (key) assert.equal(JSON.parse(store.get(key)).authorNote, null);
 });
