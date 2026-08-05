@@ -9585,7 +9585,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-shares", GbtiShares);
 
-  // node_modules/js-yaml/dist/js-yaml.mjs
+  // ../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp2 = Object.defineProperty;
   var __getOwnPropDesc2 = Object.getOwnPropertyDescriptor;
