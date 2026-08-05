@@ -1,7 +1,7 @@
 // SOW-033: the pure PR classifier behind the member workspace PR tab. No DOM, no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPull, classifyDraft, prLifecycle, submitAck, failHint, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, sortItems, filterByStatus, mergeTypeItems, sortModeFor, scopeFor } from '../client-ui/src/workspace-core.mjs';
+import { classifyPull, classifyDraft, prLifecycle, submitAck, failHint, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, publicPathFor, sortItems, filterByStatus, mergeTypeItems, sortModeFor, scopeFor } from '../client-ui/src/workspace-core.mjs';
 
 test('merged PR -> Accepted (regardless of gate status)', () => {
   assert.deepEqual(classifyPull({ merged: true }, null), { label: 'Accepted', tone: 'ok' });
@@ -177,6 +177,26 @@ test('typeForContentPath derives the content type from the path subtree', () => 
   assert.equal(typeForContentPath('members/alice/posts/x/index.md'), 'post');
   assert.equal(typeForContentPath('members/alice/products/y/index.md'), 'product');
   assert.equal(typeForContentPath('members/alice/profile.md'), null);
+});
+
+// SOW-173: publicPathFor maps a published row to its live public route + slug.
+test('publicPathFor maps each type to its public route and derives the slug', () => {
+  // post -> /articles/ (SOW-136 flattened posts to the articles route), from a member folder
+  assert.equal(publicPathFor({ type: 'post', path: 'members/alice/posts/hello-world/index.md' }), '/articles/hello-world/');
+  assert.equal(publicPathFor({ type: 'product', path: 'members/bob/products/my-tool/index.md' }), '/products/my-tool/');
+  assert.equal(publicPathFor({ type: 'prompt', path: 'members/cara/prompts/deep-focus/index.md' }), '/prompts/deep-focus/');
+  // house content shares the same routes (no member/house special case)
+  assert.equal(publicPathFor({ type: 'post', path: 'house/posts/launch-notes/index.md' }), '/articles/launch-notes/');
+  // a trailing folder path without index.md still resolves
+  assert.equal(publicPathFor({ type: 'product', path: 'members/bob/products/my-tool' }), '/products/my-tool/');
+});
+
+test('publicPathFor returns null for an unknown type or an underivable slug', () => {
+  assert.equal(publicPathFor({ type: 'profile', path: 'members/alice/profile.md' }), null);
+  assert.equal(publicPathFor({ type: 'share', path: 'members/alice/shares/x.md' }), null);
+  assert.equal(publicPathFor({ type: 'product', path: '' }), null);
+  assert.equal(publicPathFor({ type: 'product', path: 'index.md' }), null);
+  assert.equal(publicPathFor({}), null);
 });
 
 // SOW-104: planHashRoute -- a rail nav exits the WorkBench editor instead of being swallowed.

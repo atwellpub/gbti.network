@@ -67,6 +67,22 @@ export function typeForContentPath(path) {
   return m ? m[1].slice(0, -1) : null;
 }
 
+// SOW-173: the public site route per content type. `post` renders at /articles/ (SOW-136 flattened posts to the
+// articles route); products and prompts keep their own directory route. House and member content share these.
+const PUBLIC_ROUTE = { post: 'articles', product: 'products', prompt: 'prompts' };
+
+/** SOW-173: the public page path for a published item, as a site-relative `/route/<slug>/`, or null when the
+ *  type has no public route or a slug cannot be derived. `type` is the row's content type; `path` is the item's
+ *  repo path (`.../<slug>/index.md`). Host-agnostic: the caller prefixes the site origin for the extension. */
+export function publicPathFor({ type, path } = {}) {
+  const route = PUBLIC_ROUTE[type];
+  if (!route) return null;
+  const clean = String(path || '').replace(/\/index\.md$/i, '').replace(/\/+$/, '');
+  const slug = clean.split('/').filter(Boolean).pop();
+  if (!slug || /index\.md$/i.test(slug)) return null;
+  return `/${route}/${slug}/`;
+}
+
 export function classifyPull(pr = {}, status = null) {
   if (pr.merged === true || pr.state === 'merged') return { label: 'Accepted', tone: 'ok' };
   if (pr.state === 'closed') return { label: 'Declined', tone: 'muted' };

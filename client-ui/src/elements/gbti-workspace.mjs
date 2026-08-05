@@ -6,10 +6,11 @@
 // injected client) so it runs in the extension now and the npm CMS later. Fail-soft: every read falls back to an
 // empty state, never throws.
 import { GbtiElement, define, esc, getIdentity } from '../base.mjs';
-import { classifyPull, classifyDraft, prLifecycle, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, submitAck, sortItems, filterByStatus, mergeTypeItems, sortModeFor, WORKSPACE_SORT_KEY, scopeFor, WORKSPACE_SCOPE_KEY } from '../workspace-core.mjs';
+import { classifyPull, classifyDraft, prLifecycle, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, publicPathFor, submitAck, sortItems, filterByStatus, mergeTypeItems, sortModeFor, WORKSPACE_SORT_KEY, scopeFor, WORKSPACE_SCOPE_KEY } from '../workspace-core.mjs';
 import { wbCacheGet, wbCacheSet, wbCacheInvalidateMany } from '../workbench-cache.mjs'; // SOW-073: SWR workbench cache
 
 const WB_CONTENT_TYPES = new Set(['post', 'prompt', 'product']); // SOW-073: types whose publish invalidates a tab
+const SITE = 'https://gbti.network'; // SOW-173: the live site origin, prefixed onto a View link from the extension host
 import { glyphFor } from '../cat-glyph.mjs'; // SOW-062: the SOW-049 type glyph, reused on the WorkBench list rows
 import './gbti-content-editor.mjs';
 import './gbti-contrib-inbox.mjs';
@@ -729,9 +730,18 @@ class GbtiWorkspace extends GbtiElement {
       : it.status === 'draft'
         ? `<button class="btn" data-status="${i}" data-to="published" type="button">Republish</button>`
         : '';
+    // SOW-173: a View link to the live public page, shown only for a PUBLISHED item (drafts and fork-staged rows
+    // have no public page). Host-aware: a same-origin path on the website, the absolute site URL in a new browser
+    // tab in the extension (chrome-extension:// pages cannot resolve a site-relative path), mirroring the workspace's
+    // existing external-link pattern (the PR + membership anchors).
+    const pub = it.status === 'published' ? publicPathFor({ type: it.type, path: it.path }) : null;
+    const isExt = (typeof location !== 'undefined' && location.protocol === 'chrome-extension:');
+    const view = pub
+      ? `<a class="btn" href="${esc(isExt ? SITE + pub : pub)}"${isExt ? ' target="_blank" rel="noopener"' : ''} title="View the live page">View</a>`
+      : '';
     return `<li class="row"><span class="gl" style="--ka:${esc(g.accent)}"><svg viewBox="0 0 24 24" aria-hidden="true">${g.svg}</svg></span>`
       + `<span class="t"><b>${esc(it.title)}</b><span class="meta">${esc(it.type || '')}</span></span>`
-      + `<span class="right">${status} ${stagedTag} ${vis}<button class="btn" data-edit="${i}" type="button">Manage</button>${flip}</span></li>`;
+      + `<span class="right">${status} ${stagedTag} ${vis}${view}<button class="btn" data-edit="${i}" type="button">Manage</button>${flip}</span></li>`;
   }
 
   // SOW-052: the Overview hub — a membership line, a tile per section (with counts; tiles deep-link via #tab=),
