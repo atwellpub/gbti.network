@@ -17,6 +17,35 @@ export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share
 export const IMAGE_FIELD_KEYS = ['coverImage', 'image', 'banner', 'featuredImage', 'icon'];
 const WEB_IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/;
 
+// sow-182: a house-authored index item, matched by PATH rather than by author string. 'gbti' (the shared house
+// pseudo-author) is not an individual to filter by the way memberContent (client-ui/src/member-view-core.mjs)
+// filters a real member's username; house content is identified by living under house/, not by who "owns" it.
+const HOUSE_PATH_RE = /^house\/(posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+
+export function isHousePath(path) {
+  return HOUSE_PATH_RE.test(String(path || ''));
+}
+
+/**
+ * Filter a per-type public index item list to house-authored content, newest-first, capped. Pure. Mirrors
+ * memberContent's sort/cap shape exactly (dateless items sink to the bottom rather than producing NaN
+ * comparisons; the cap applies after the sort so the newest survive), so House content and My content page
+ * identically in the WorkBench list; only the selection predicate differs.
+ * @param {Array} items  raw index items ({ path, publishedAt, title, ... })
+ * @param {number} [cap=24]
+ */
+export function houseContent(items, cap = 24) {
+  if (!Array.isArray(items)) return [];
+  const mine = items.filter((it) => it && isHousePath(it.path));
+  mine.sort((a, b) => {
+    const av = Number.isFinite(a?.publishedAt) ? a.publishedAt : -Infinity;
+    const bv = Number.isFinite(b?.publishedAt) ? b.publishedAt : -Infinity;
+    if (bv !== av) return bv - av; // newest first; dateless (-Infinity) sinks to the bottom
+    return String(a?.title || '').localeCompare(String(b?.title || ''));
+  });
+  return mine.slice(0, Math.max(0, cap));
+}
+
 /**
  * Sanitize an uploaded image filename to a clean own-folder leaf: lowercase, only [a-z0-9._-], no path segments,
  * no leading dot/hyphen, and it MUST end in a web-image extension (png/jpg/jpeg/webp/gif — NO svg on web upload).

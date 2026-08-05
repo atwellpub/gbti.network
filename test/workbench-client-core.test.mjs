@@ -3,7 +3,7 @@
 // filter/tier-gate, the comment-visibility coercion, and the favorite derivation. Uses a FAKE encrypt (no Worker).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles } from '../src/lib/workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, isHousePath, houseContent } from '../src/lib/workbench-client-core.mjs';
 import { buildCommentFile, buildContentFile, buildShareFile, shareId, commentId, parseContentFile, serializeContentFile } from '../client/src/content-ops.mjs';
 
 const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', aad: assetId, ct: 'CT(' + plaintext + ')' });
@@ -216,4 +216,44 @@ test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or 
   assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'post', oldSlug: 'old', newSlug: 'new', introText }), []);
   // No existing intro (introText null) -> nothing to move.
   assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'product', oldSlug: 'old', newSlug: 'new', introText: null }), []);
+});
+
+// sow-182: house-content selection for the website WorkBench's House content scope, mirroring memberContent's
+// (client-ui/src/member-view-core.mjs) sort/cap shape but selecting by path, since house/ has no individual
+// author to filter by (the shared pseudo-author 'gbti' is not a member).
+const houseItems = [
+  { type: 'post', title: 'H-A', path: 'house/posts/h-a/index.md', publishedAt: 300 },
+  { type: 'post', title: 'H-B', path: 'house/posts/h-b/index.md', publishedAt: 100 },
+  { type: 'post', title: 'H-C-dateless', path: 'house/posts/h-c/index.md', publishedAt: null },
+  { type: 'prompt', title: 'H-D-prompt', path: 'house/prompts/h-d/index.md', publishedAt: 200 },
+  { type: 'post', title: 'M-alice', path: 'members/alice/posts/m-alice/index.md', publishedAt: 999 },
+  { type: 'post', title: 'bad-path', path: 'house/roles.yml', publishedAt: 999 }, // governance file, never a content item
+];
+
+test('isHousePath: matches house content paths only, not member paths or house governance files', () => {
+  assert.equal(isHousePath('house/posts/hello/index.md'), true);
+  assert.equal(isHousePath('house/products/thing/index.md'), true);
+  assert.equal(isHousePath('house/prompts/thing/index.md'), true);
+  assert.equal(isHousePath('members/alice/posts/hello/index.md'), false);
+  assert.equal(isHousePath('house/roles.yml'), false);
+  assert.equal(isHousePath('house/posts/../../etc/passwd'), false);
+  assert.equal(isHousePath(''), false);
+  assert.equal(isHousePath(null), false);
+});
+
+test('houseContent: selects house/ items by path, newest-first, dateless last, across content types', () => {
+  const out = houseContent(houseItems);
+  assert.deepEqual(out.map((i) => i.title), ['H-A', 'H-D-prompt', 'H-B', 'H-C-dateless']);
+  // the member item and the bad-path governance-file entry are excluded
+  assert.equal(out.some((i) => i.title === 'M-alice' || i.title === 'bad-path'), false);
+});
+
+test('houseContent: cap applies after the sort (keeps the newest N)', () => {
+  const out = houseContent(houseItems, 2);
+  assert.deepEqual(out.map((i) => i.title), ['H-A', 'H-D-prompt']);
+});
+
+test('houseContent: a non-array input returns []', () => {
+  assert.deepEqual(houseContent(undefined), []);
+  assert.deepEqual(houseContent({}), []);
 });

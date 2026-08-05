@@ -14,15 +14,22 @@
 //
 // Now live on the web (earlier phases): members-only PUBLISH (via the cookie /membership/encrypt), IMAGE upload
 // (binary base64 entries), and PERMALINK RENAME (rename-at-publish, SOW-112 v2 — a changed permalink field makes
-// the publish a rename: the new path + the old-path deletes + redirectFrom in ONE hosted PR). Still refused:
-//   - HOUSE scope: house content publishes through fork mode (operations re-checks superadmin server-side).
+// the publish a rename: the new path + the old-path deletes + redirectFrom in ONE hosted PR). SOW-182: house
+// content now LISTS and READS on the web (the public index already carried it; /membership/file already
+// allowed house/ paths for any signed-in member, see reviewFileContent in workers/signup/github-app.mjs). Still
+// refused:
+//   - HOUSE PUBLISH: writing house/ requires a superadmin check this Worker's hosted-authoring endpoint
+//     (/membership/author, workers/signup/membership-author.mjs) does not have yet — it resolves every write to
+//     the CALLER's own member folder and has no house/ or superadmin concept at all today, unlike the
+//     extension's fork-based publish (which re-checks superadmin server-side via requireSuperadminForHouse).
+//     Porting that is real new Worker-side authorization code, not a client-side fix; deliberately not done here.
 
 import { buildContentFile, buildCommentFile, buildShareFile, shareId as makeShareId, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, houseContent } from './workbench-client-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
@@ -348,16 +355,20 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       };
     },
 
-    // Own + house content is fetched from the same-origin public per-type index (published items only), filtered
-    // to the member's own folder. Drafts + members-only-A items are surfaced separately (listDrafts / the locked
-    // card), matching the website's tokenless read reach.
+    // Own + house content is fetched from the same-origin public per-type index (published items only). "My
+    // content" filters to the member's own folder; "House content" (superadmin-only in the UI, gbti-workspace.mjs
+    // gates the toggle on role==='superadmin') filters to house/ instead, by path rather than by author string
+    // (sow-182). Drafts + members-only-A items are surfaced separately (listDrafts / the locked card), matching
+    // the website's tokenless read reach; house content has no draft concept (SOW-145: it publishes directly),
+    // and the index is published-only, so an unpublished house item never appears here either way.
     async listContent({ type, scope }: any = {}) {
-      if (scope === 'house') return { items: [] }; // house listing is extension-only (the server re-checks superadmin)
       const json = TYPE_INDEX[type];
       if (!json) return { items: [] }; // profile + unknown types have no public index
       let raw: any = null;
       try { raw = await sameOriginJson('/' + json); } catch { return { items: [] }; }
-      const items = memberContent(Array.isArray(raw?.items) ? raw.items : [], user, 9999).map((it: any) => ({ ...it, status: 'published' }));
+      const rawItems: any[] = Array.isArray(raw?.items) ? raw.items : [];
+      const selected = scope === 'house' ? houseContent(rawItems, 9999) : memberContent(rawItems, user, 9999);
+      const items = selected.map((it: any) => ({ ...it, status: 'published' }));
       return { items };
     },
 
