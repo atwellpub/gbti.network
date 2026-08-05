@@ -1570,3 +1570,28 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
   .art-e-actions-rail { position: static; flex-direction: row; justify-content: center; }
   .art-e-grid .art-e-actions-rail .ca-rail { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ==================== Journal layout (sow-179 Phase 4) ==================== */
+/* One combined left rail (byline, actions, contents, tags, favorited-by) plus a single reading column; the
+   cover sits inset in the column instead of as a hero. Mirrors the product Doc Shell in STRUCTURE, not
+   literally -- see the .art-* namespace note above this section. */
+.art-j-grid { display: grid; grid-template-columns: 212px minmax(0, 1fr); gap: 34px; padding: 36px clamp(20px, 4vw, 34px) 44px; align-items: start; }
+
+.art-j-rail { position: sticky; top: calc(var(--art-off) + 14px); align-self: start; display: flex; flex-direction: column; gap: 18px; }
+.art-j-rail > * + * { padding-top: 16px; border-top: 1px solid var(--line); }
+
+.art-j-col { min-width: 0; max-width: 660px; }
+.art-j-title { margin: 0 0 16px; font-family: var(--f-display); font-weight: 600; font-size: clamp(26px, 3.4vw, 36px); line-height: 1.13; letter-spacing: -.02em; color: var(--fg); text-wrap: pretty; }
+.art-j-cover { margin: 0 0 8px; border: 1.5px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.art-j-cover img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.art-j-cap { margin: 0 0 28px; font-size: 12.5px; color: var(--fg-mute); }
+.art-j-col :where(h2, h3)[id], .art-j-anchor { scroll-margin-top: calc(var(--art-off) + 20px); }
+.art-j-col .prose-gbti { font-size: 16.5px; line-height: 1.78; }
+.art-j-col .prose-gbti h2 { font-family: var(--f-display); font-weight: 600; font-size: 25px; margin: 36px 0 14px; }
+.art-j-col .prose-gbti h3 { font-size: 19px; margin: 30px 0 10px; }
+.art-j-col .prose-gbti > :first-child { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .art-j-grid { grid-template-columns: minmax(0, 1fr); }
+  .art-j-rail { position: static; }
+}

@@ -1,0 +1,88 @@
+---
+// sow-179 Phase 4: the "Journal" article layout (layout: 'journal'), built from the design handoff's 2b mock.
+// One combined sticky left rail (byline, actions, contents, tags, favorited-by) beside a single reading
+// column; the cover sits inset in the column instead of as a hero, and the title comes before it. Same props
+// contract as every article layout: d, isStub, postId, postUrl, stack, toc. Two slots: "body" (the rendered
+// <Content />) and "closing" (the shared components every layout composes, unchanged, per [slug].astro's own
+// header comment); a THIRD slot, "rail", is Journal-only -- [slug].astro reslots FavoritedBy into it instead
+// of "closing" for this layout, matching the design mock's "Favorited by" placement inside the rail.
+import { Image } from 'astro:assets';
+import Prose from './Prose.astro';
+import VideoEmbed from '../VideoEmbed.astro';
+import LockedBody from '../LockedBody.astro';
+import ContentMeta from '../ContentMeta.astro';
+import ContentActions from '../ContentActions.astro';
+import ArticleContents from './ArticleContents.astro';
+import { favoriteCount } from '../../lib/favorites';
+import { aliasSlugsOf } from '../../lib/content-index.mjs';
+import { breadcrumb, leafLabel } from '../../lib/taxonomy';
+import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
+
+interface Props {
+  d: any; // CollectionEntry<'post'>['data']
+  isStub: boolean;
+  postId: string;
+  postUrl: string;
+  stack: any[];
+  toc: { id: string; label: string }[];
+}
+const { d, isStub, postId, postUrl, stack, toc } = Astro.props;
+const category = leafLabel(d.categories);
+const dims = coverDimensions('journal');
+---
+<section class="art-shell band">
+  <div class="art-j-grid art-wrap">
+    <aside class="art-j-rail art-rail">
+      <div>
+        {category && <span class="art-rail-lab" style="color:var(--green-700)">{category}</span>}
+        <div class="mt-12">
+          <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} />
+        </div>
+      </div>
+
+      <div>
+        <ContentActions type="post" slug={d.slug} title={d.title} url={postUrl} author={d.author} categories={d.categories} count={favoriteCount('post', d.slug, aliasSlugsOf(d))} />
+      </div>
+
+      <ArticleContents toc={toc} label="Contents" />
+
+      {d.tags.length > 0 && (
+        <div>
+          <span class="art-rail-lab">Tagged</span>
+          <div class="art-tags">
+            {d.tags.map((tag: string) => <a class="art-tag" href={`/feeds/?tag=${encodeURIComponent(tag)}`}>{tag}</a>)}
+          </div>
+        </div>
+      )}
+
+      <slot name="rail" />
+    </aside>
+
+    <div class="art-j-col">
+      <h1 data-gbti-region="title" class="art-j-title">{d.title}</h1>
+
+      {d.video ? (
+        <div class="art-j-cover"><VideoEmbed video={d.video} title={d.title} /></div>
+      ) : d.coverImage ? (
+        <>
+          <div class="art-j-cover"><Image src={d.coverImage} alt={d.coverAlt || d.title} width={dims.width} height={dims.height} /></div>
+          {d.coverAlt && <p class="art-j-cap">{d.coverAlt}</p>}
+        </>
+      ) : null}
+
+      <article id={ART_OVERVIEW_ID} data-gbti-region="body">
+        <Prose>
+          {isStub ? <LockedBody encPath={d.encryptedBody} kind="body" readerPath={postId} readerType="post" /> : <slot name="body" />}
+          {!isStub && d.encryptedBody && <LockedBody encPath={d.encryptedBody} kind="section" readerPath={postId} readerType="post" />}
+        </Prose>
+      </article>
+
+      <slot name="closing" />
+    </div>
+  </div>
+</section>
+
+<script>
+  import { initToc } from '../../lib/pd-enhance.mjs';
+  initToc(document, 'art');
+</script>

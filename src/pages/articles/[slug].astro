@@ -7,6 +7,7 @@ import { getCollection, render } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import ArticleCard from '../../components/blog/ArticleCard.astro';
 import ArticleEditorial from '../../components/blog/ArticleEditorial.astro';
+import ArticleJournal from '../../components/blog/ArticleJournal.astro';
 import RelatedPosts from '../../components/blog/RelatedPosts.astro';
 import ContributionCredits from '../../components/blog/ContributionCredits.astro';
 import OpenHistory from '../../components/blog/OpenHistory.astro';
@@ -43,10 +44,13 @@ const stack = avatarStack({
   index: avatarIndex,
 });
 
-// sow-179: 'journal' is next (Phase 4). The ?? fallback means an unrecognized or not-yet-built value still
-// renders, never 404s.
-const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard, editorial: ArticleEditorial };
+// sow-179: the ?? fallback means an unrecognized value still renders, never 404s.
+const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard, editorial: ArticleEditorial, journal: ArticleJournal };
 const Layout = LAYOUTS[d.layout] ?? ArticleCard;
+// Journal moves FavoritedBy into its rail (a dedicated "rail" slot); every other layout keeps it in "closing"
+// alongside the rest of the shared components. ArticleCard/ArticleEditorial have no "rail" slot, so targeting
+// it there would just be silently dropped -- reslot explicitly rather than rely on that.
+const favoritedBySlot = d.layout === 'journal' ? 'rail' : 'closing';
 ---
 <BaseLayout title={d.title} description={d.excerpt} ogImage={d.coverImage?.src ?? defaultFeatureImage('post')} ogType="article">
   <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack} toc={toc}>
@@ -55,7 +59,7 @@ const Layout = LAYOUTS[d.layout] ?? ArticleCard;
     <OpenHistory slot="closing" filePath={post.filePath} author={d.author} contributors={d.contributors} />
     <RelatedPosts slot="closing" post={post} />
     <ContributionCredits slot="closing" contributors={d.contributors} />
-    <FavoritedBy slot="closing" type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />
+    <FavoritedBy slot={favoritedBySlot} type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />
   </Layout>
   <EditHooks type="post" owner={d.author} slug={d.slug} />
   <TouchSignal type="post" ownerId={refCodeForAuthor(d.author)} slug={d.slug} />
