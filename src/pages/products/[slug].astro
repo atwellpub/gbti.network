@@ -43,7 +43,7 @@ import {
   isLockedLink,
   resolveHero,
   parseGithubRepo,
-  detectLinkSource,
+  iconForUrl,
   formatRelease,
 } from '../../lib/product-page.mjs';
 
@@ -109,9 +109,6 @@ const specs = [
   ...(d.publishedAt ? [['Published', d.publishedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })]] : []),
 ] as [string, string][];
 
-// sow-175: whether the primary install button should carry the WordPress mark next to its label.
-const primaryIsWordpress = primary ? detectLinkSource(primary.url) === 'wordpress' : false;
-
 // The end-of-body panel repeats the same offer for a reader who scrolled the whole page.
 const ctaSub = [d.pricing ? cap(d.pricing) : null, d.requires].filter(Boolean).join(' · ');
 const lockedHint = (l: { encrypted?: boolean }) =>
@@ -158,7 +155,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
         <div class="pd-bar-actions">
           {repoUrl && (
             <a href={repoUrl} rel="noopener" class="btn btn-ghost pd-bar-gh">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-github" /></svg>
+              {iconForUrl(repoUrl) && <svg viewBox="0 0 24 24" aria-hidden="true"><use href={`#${iconForUrl(repoUrl)}`} /></svg>}
               View on GitHub
             </a>
           )}
@@ -169,7 +166,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
             </span>
           ) : (
             <a href={primary.url} rel="noopener" class="btn btn-primary">
-              {primaryIsWordpress && <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-wordpress" /></svg>}
+              {iconForUrl(primary.url) && <svg viewBox="0 0 24 24" aria-hidden="true"><use href={`#${iconForUrl(primary.url)}`} /></svg>}
               {linkLabel(primary)}
             </a>
           ))}
@@ -279,13 +276,13 @@ const lockedHint = (l: { encrypted?: boolean }) =>
               <div class="pd-cta-btns">
                 {primary && !isLockedLink(primary) && (
                   <a href={primary.url} rel="noopener" class="btn btn-primary">
-                    {primaryIsWordpress && <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-wordpress" /></svg>}
+                    {iconForUrl(primary.url) && <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href={`#${iconForUrl(primary.url)}`} /></svg>}
                     {linkLabel(primary)}
                   </a>
                 )}
                 {repoUrl && (
                   <a href={repoUrl} rel="noopener" class="btn btn-ghost">
-                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-github" /></svg>
+                    {iconForUrl(repoUrl) && <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href={`#${iconForUrl(repoUrl)}`} /></svg>}
                     View on GitHub
                   </a>
                 )}

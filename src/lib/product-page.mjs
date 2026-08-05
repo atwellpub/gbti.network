@@ -231,6 +231,32 @@ export function detectLinkSource(url) {
   return null;
 }
 
+// sow-176: brand marks for the install buttons, keyed by the link's HOST. Kept as a data table (not the
+// `type` enum, which cannot express a destination) so the install bar, the Get card and the workbench preview
+// all resolve the SAME icon from one place. Scoped to the brands the network actually ships to today plus Open
+// VSX (the VS Code sibling). GitHub and WordPress fold in here too, retiring their hardcoded copies.
+const ICON_HOSTS = {
+  'github.com': 'ico-github',
+  'wordpress.org': 'ico-wordpress',
+  'marketplace.visualstudio.com': 'ico-vscode',
+  'open-vsx.org': 'ico-openvsx',
+  'plugins.jetbrains.com': 'ico-jetbrains',
+  'modrinth.com': 'ico-modrinth',
+};
+
+/**
+ * The sprite id for a link's brand icon, or `null` for an unknown host. Fail silent: an unmapped destination
+ * renders with no icon exactly as before, because a wrong brand mark is worse than none. Pure + node-testable.
+ * @returns {string|null}
+ */
+export function iconForUrl(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, '');
+  return ICON_HOSTS[host] ?? null;
+}
+
 /**
  * Shapes one GitHub releases-API response into what the rail renders. Kept separate from the fetch itself
  * so the decision of "does this count as a real, displayable release" is unit-testable without mocking

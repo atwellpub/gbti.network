@@ -17,6 +17,7 @@ import {
   resolveHero,
   parseGithubRepo,
   detectLinkSource,
+  iconForUrl,
   formatRelease,
   canEditItem,
   CAROUSEL_THRESHOLD,
@@ -277,4 +278,23 @@ test('canEditItem: signed out, or signed in with no matching login/role, sees no
   assert.equal(canEditItem(null, 'atwellpub'), false);
   assert.equal(canEditItem({ login: 'atwellpub', role: 'admin' }, ''), false); // no owner to compare against
   assert.equal(canEditItem({ login: null, role: 'member' }, 'atwellpub'), false);
+});
+
+test('sow-176 iconForUrl: maps a known destination host to its sprite id, www stripped, full URLs ok', () => {
+  assert.equal(iconForUrl('https://github.com/gbti-network/x'), 'ico-github');
+  assert.equal(iconForUrl('https://www.github.com/o/r'), 'ico-github'); // www. stripped
+  assert.equal(iconForUrl('https://wordpress.org/plugins/clean-image-meta/'), 'ico-wordpress');
+  assert.equal(iconForUrl('https://marketplace.visualstudio.com/items?itemName=gbti.terminal'), 'ico-vscode');
+  assert.equal(iconForUrl('https://open-vsx.org/extension/gbti/terminal'), 'ico-openvsx');
+  assert.equal(iconForUrl('https://plugins.jetbrains.com/plugin/12345'), 'ico-jetbrains');
+  assert.equal(iconForUrl('https://modrinth.com/mod/flan'), 'ico-modrinth');
+});
+
+test('sow-176 iconForUrl: fails silent (null) for unknown host, unmapped subdomain, malformed, or empty', () => {
+  assert.equal(iconForUrl('https://gumroad.com/l/x'), null); // unknown brand -> no icon, never a wrong one
+  assert.equal(iconForUrl('https://gist.github.com/o/abc'), null); // a different subdomain, not github.com
+  assert.equal(iconForUrl('not a url'), null);
+  assert.equal(iconForUrl(''), null);
+  assert.equal(iconForUrl(null), null);
+  assert.equal(iconForUrl(undefined), null);
 });
