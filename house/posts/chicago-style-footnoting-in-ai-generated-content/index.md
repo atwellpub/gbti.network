@@ -9,7 +9,7 @@ publishedAt: 2025-06-13
 updatedAt: 2025-06-30
 excerpt: "Discover the best citation style for AI-assisted writing—Chicago style, APA, MLA, Harvard style or Vancouver style—and keep your content transparent and reader-friendly."
 categories: ["ai"]
-layout: editorial
+layout: journal
 coverImage: "./images/ai-footnotes-and-citations.webp"
 redirectFrom: ["/ai/chicago-style-footnoting-in-ai-generated-content/"]
 ---

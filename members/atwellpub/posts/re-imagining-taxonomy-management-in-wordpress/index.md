@@ -9,7 +9,7 @@ publishedAt: 2025-04-08
 updatedAt: 2026-06-13
 excerpt: "We set out to create a better category and taxonomy management experience for WordPress users. Take a look at our work!"
 categories: ["gbti"]
-layout: editorial
+layout: journal
 coverImage: "./images/Advanced-Taxonomy-Manager-2.webp"
 redirectFrom: ["/gbti/re-imagining-taxonomy-management-in-wordpress/"]
 ---

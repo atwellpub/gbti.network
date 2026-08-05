@@ -9,7 +9,7 @@ publishedAt: 2025-08-18
 updatedAt: 2025-09-16
 excerpt: "Explore 20+ free React landing page templates to launch your SaaS quickly. Built with React, Next.js, and Tailwind CSS, these templates save time and deliver polished designs."
 categories: ["devops", "frameworks", "react"]
-layout: editorial
+layout: journal
 coverImage: "./images/Free-React-Landing-Page-Templates-1.webp"
 redirectFrom: ["/devops/frameworks/react/15-free-react-landing-page-templates-to-launch-your-saas/"]
 ---

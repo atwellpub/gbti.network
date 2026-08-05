@@ -32,9 +32,9 @@ const railSize = variant === 'rail' ? 'rail' : 'md';
   <span class="act-div" aria-hidden="true"></span>
   <ShareRow type={type} title={title} url={url} categories={categories} variant={variant} />
   {itemPath && (
-    <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension">
+    <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension" aria-label="Open this item in the GBTI extension">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-puzzle"/></svg>
-      Open in extension
+      <span class="ext-open-label">Open in extension</span>
     </button>
   )}
 </div>
@@ -89,4 +89,11 @@ const railSize = variant === 'rail' ? 'rail' : 'md';
     transition: border-color .15s, color .15s; }
   .ext-open:hover { border-color: var(--green); color: var(--green-700); }
   .ext-open[hidden] { display: none; }
+  /* sow-183 QA fix: in the sticky rail, every other control (Favorite/Save/Share) is an icon-only 38px
+     rounded-square button -- the labeled pill stood out as a mismatched shape dropped into that column. */
+  .ca-rail .ext-open { width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 7px; background: var(--paper-2); }
+  .ca-rail .ext-open-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  [data-theme="dark"] .ext-open { background: transparent; border-color: var(--line-dark-2); color: var(--on-dark-soft); }
+  [data-theme="dark"] .ext-open:hover { color: var(--green-mint); border-color: var(--green); }
+  [data-theme="dark"] .ca-rail .ext-open { background: var(--paper-2); }
 </style>

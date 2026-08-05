@@ -119,7 +119,7 @@ export const postSchema = z.object({
   tags: tagsSchema,
   // sow-179: mirrors src/content.config.ts's layout field exactly, including the 'editorial' default (see
   // that file's comment; every already-published post carries its own explicit layout: 'card').
-  layout: z.enum(['editorial', 'journal', 'card']).default('editorial'),
+  layout: z.enum(['editorial', 'journal', 'card']).default('journal'),
   coverImage: z.string().optional(),
   coverAlt: z.string().max(250).optional(), // SOW-062 P3: cover-image alt text (accessibility)
   video: z.string().optional(),

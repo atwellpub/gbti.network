@@ -9,7 +9,7 @@ publishedAt: 2025-02-10
 updatedAt: 2026-06-13
 excerpt: "Radle Lite is a free WordPress plugin that replaces the default WordPress discussion engine with a Reddit powered discussion engine."
 categories: ["gbti"]
-layout: editorial
+layout: journal
 coverImage: "./images/image.webp"
 redirectFrom: ["/gbti/radle-lite-is-now-on-the-wordpress-plugin-directory/"]
 ---

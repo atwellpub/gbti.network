@@ -1481,7 +1481,9 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    article page. Only the pieces genuinely identical in both new layouts (per the design mock) live here;
    each layout's own grid/hero shape is built alongside its markup. Card (layout: 'card') is unchanged today
    and does not use this namespace yet. */
-.art-shell { --art-off: var(--head-h); }
+/* Editorial/Journal open on a full-bleed hero or a flat title block sitting right below the nav, unlike a
+   generic .band content section -- the inherited .band top padding (104px) left a large empty gap above it. */
+.art-shell { --art-off: var(--head-h); padding-top: 0; }
 .art-wrap { max-width: 1140px; margin: 0 auto; padding: 0 34px; }
 @media (max-width: 560px) { .art-wrap { padding: 0 20px; } }
 
@@ -1535,15 +1537,24 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 /* ==================== Editorial layout (sow-179 Phase 3) ==================== */
 /* Cover becomes a full-width hero; the title and byline sit on it. Only Editorial uses these -e- classes;
    Journal keeps its cover inset in the reading column instead, per the design mock. */
-.art-e-hero { position: relative; aspect-ratio: 16 / 7; display: flex; align-items: flex-end; overflow: hidden; background: var(--ink); }
+/* sow-183 responsive audit: was aspect-ratio: 16/7, which has no ceiling -- at a 2560px desktop that is a
+   ~1120px-tall hero, most of it empty gradient around whatever the source cover image's own artwork happens
+   to compose. A clamped height keeps the SAME proportions the design was tuned at (490-630px, matching the
+   old aspect-ratio's own output between the site's 1180px content width and a common 1440px laptop) but
+   stops it growing past a sensible ceiling on genuinely wide desktops -- compression, not restructuring: the
+   hero is still full-bleed and still the same shape, just capped like every other clamp() in this file. */
+/* sow-183 QA fix: the hero used to run edge-to-edge at any viewport width; it now keeps the SAME 1140px shape
+   as the reading grid below (.art-wrap), so the banner never balloons wider than the column it illustrates. */
+.art-e-hero { position: relative; height: clamp(320px, 42vw, 640px); max-width: 1140px; margin: 0 auto; overflow: hidden; background: var(--ink); border-radius: var(--r-lg); }
 .art-e-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .art-e-hero::after {
   content: ''; position: absolute; inset: 0;
   background: linear-gradient(to top, rgba(10,9,13,.94) 4%, rgba(10,9,13,.55) 48%, rgba(10,9,13,.1) 100%);
 }
-.art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; }
-/* No-cover variant: the same header content, flat on the page background instead of over an image. */
-.art-e-header-flat { position: relative; padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; }
+.art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; box-sizing: border-box; }
+/* No-cover variant: the same header content, flat on the page background instead of over an image. Same
+   sow-183 width cap as the hero, for the same reason (was full-bleed with no ceiling). */
+.art-e-header-flat { position: relative; max-width: 1140px; margin: 0 auto; padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; box-sizing: border-box; }
 /* sow-183: the flat header's Edit pill sits inside the padded box, not flush with the section edge. */
 .art-e-header-flat .detail-edit { top: clamp(28px, 5vw, 44px); right: clamp(20px, 4vw, 40px); }
 
@@ -1559,9 +1570,15 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .art-e-header-flat .art-e-title { font-size: clamp(26px, 3.6vw, 38px); line-height: 1.12; color: var(--fg); max-width: 22ch; }
 .art-e-header-flat .art-e-cat { color: #0f1a13; }
 
-.art-e-cap { margin: 0; padding: 10px clamp(20px, 4vw, 40px) 0; font-size: 12.5px; color: var(--fg-mute); }
+.art-e-cap { max-width: 1140px; margin: 0 auto; padding: 10px clamp(20px, 4vw, 40px) 0; font-size: 12.5px; color: var(--fg-mute); box-sizing: border-box; }
 
-.art-e-grid { display: grid; grid-template-columns: 60px minmax(0, 1fr) 190px; gap: clamp(18px, 3vw, 26px); padding: 26px clamp(20px, 4vw, 40px) 44px; align-items: start; }
+/* sow-183 responsive audit: rail/aside widths are now clamp()-driven (were fixed 60px/190px), so a narrowing
+   DESKTOP browser compresses this 3-column shape continuously all the way toward the ~650px floor instead of
+   jumping straight to hiding the aside at a single breakpoint -- see the pd-grid precedent (sow-173) this
+   mirrors: "the old single max-width breakpoint flipped this to one column on a mouse-driven desktop browser
+   ... width alone cannot tell a narrowed window from a real phone apart." The full mobile RESTRUCTURING
+   (collapse to one column, hide the aside, rail goes horizontal) is gated on touch below, not on width alone. */
+.art-e-grid { display: grid; grid-template-columns: clamp(44px, 6vw, 60px) minmax(0, 1fr) clamp(140px, 16vw, 190px); gap: clamp(14px, 2.4vw, 26px); padding: 26px clamp(20px, 4vw, 40px) 44px; align-items: start; }
 
 .art-e-actions-rail { position: sticky; top: calc(var(--art-off) + 14px); align-self: start; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .art-e-col { min-width: 0; max-width: 660px; }
@@ -1586,12 +1603,14 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    to a plain two-class selector, and its chunk happens to load in a later <link> than this file's, so an
    equal-specificity tie goes to Astro's rule regardless of source order inside THIS file. Confirmed directly
    against the built dist/ output, not assumed. */
-@media (max-width: 900px) {
-  .art-e-grid { grid-template-columns: 56px minmax(0, 1fr); }
+/* sow-183: mobile-native RESTRUCTURING, gated on touch (mirrors pd-grid's own gate, sow-173) -- a narrowed
+   desktop browser window never matches (hover:none)+(pointer:coarse) no matter how far it shrinks, so it
+   stays on the clamp()-compressed 3-column shape above all the way to this same 640px floor Editorial has
+   used since Phase 3; only a real phone/tablet, or any window below the 479px device-agnostic safety net,
+   restructures. The aside/TOC stays visible (compressed) at every plain-width narrowing, same as pd-toc. */
+@media (hover: none) and (pointer: coarse) and (max-width: 640px), (max-width: 479px) {
+  .art-e-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .art-e-aside { display: none; }
-}
-@media (max-width: 640px) {
-  .art-e-grid { grid-template-columns: minmax(0, 1fr); }
   .art-e-actions-rail { position: static; flex-direction: row; justify-content: center; }
   .art-e-grid .art-e-actions-rail .ca-rail { flex-direction: row; flex-wrap: wrap; }
 }
@@ -1600,7 +1619,11 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 /* One combined left rail (byline, actions, contents, tags, favorited-by) plus a single reading column; the
    cover sits inset in the column instead of as a hero. Mirrors the product Doc Shell in STRUCTURE, not
    literally -- see the .art-* namespace note above this section. */
-.art-j-grid { display: grid; grid-template-columns: 212px minmax(0, 1fr); gap: 34px; padding: 36px clamp(20px, 4vw, 34px) 44px; align-items: start; }
+/* sow-183 responsive audit: the rail width + gap are now clamp()-driven (were fixed 212px/34px), the same
+   continuous-compression reasoning as art-e-grid above -- a narrowing desktop browser shrinks this 2-column
+   shape smoothly instead of jumping to one column at 900px, a width very much still "usable" for a two-column
+   doc shell on a mouse-driven laptop. */
+.art-j-grid { display: grid; grid-template-columns: clamp(160px, 20vw, 212px) minmax(0, 1fr); gap: clamp(20px, 3vw, 34px); padding: 36px clamp(20px, 4vw, 34px) 44px; align-items: start; }
 
 .art-j-rail { position: sticky; top: calc(var(--art-off) + 14px); align-self: start; display: flex; flex-direction: column; gap: 18px; }
 .art-j-rail > * + * { padding-top: 16px; border-top: 1px solid var(--line); }
@@ -1622,7 +1645,10 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .art-j-col .prose-gbti h3 { font-size: 19px; margin: 30px 0 10px; }
 .art-j-col .prose-gbti > :first-child { margin-top: 0; }
 
-@media (max-width: 900px) {
-  .art-j-grid { grid-template-columns: minmax(0, 1fr); }
+/* sow-183: mobile-native RESTRUCTURING, gated on touch, mirroring art-e-grid's own gate immediately above and
+   pd-grid's original precedent (sow-173) -- a narrowed desktop browser stays two-column (compressed) at any
+   width; only a real phone/tablet, or the 479px device-agnostic floor, collapses to one column. */
+@media (hover: none) and (pointer: coarse) and (max-width: 640px), (max-width: 479px) {
+  .art-j-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .art-j-rail { position: static; }
 }

@@ -9,7 +9,7 @@ publishedAt: 2023-11-26
 updatedAt: 2024-06-29
 excerpt: "Discover Lume Web's 2023 milestones in decentralized web technology, including robust technology integration and user-focused product development. Explore their ambitious plans for 2024, aiming to…"
 categories: ["blockchain"]
-layout: editorial
+layout: journal
 coverImage: "./images/Lume-Featured-Image-5.webp"
 redirectFrom: ["/blockchain/lume-web-submits-their-2023-year-in-review-and-makes-their-case-for-additional-funding-for-2024/"]
 ---

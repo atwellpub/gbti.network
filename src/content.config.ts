@@ -130,7 +130,7 @@ const post = defineCollection({
     // src/components/blog/Article*.astro). Every already-published post was backfilled to an explicit
     // layout: 'card' when this default flipped, so this default only ever governs a NEW post going forward,
     // never a silent shape change to something already live. journal still resolves to Card until Phase 4.
-    layout: z.enum(['editorial', 'journal', 'card']).default('editorial'),
+    layout: z.enum(['editorial', 'journal', 'card']).default('journal'),
     coverImage: image().optional(),
     coverAlt: z.string().max(250).optional(), // SOW-062 P3: cover-image alt text (accessibility)
     video: z.string().optional(), // YouTube/Vimeo URL or ID — embed only

@@ -9,7 +9,7 @@ publishedAt: 2025-09-11
 updatedAt: 2025-09-12
 excerpt: "Enjoy a curated list of 50+ WordPress YouTube channels you can subscribe to today —spanning podcasts, agencies, solo creators, and more."
 categories: ["blog"]
-layout: editorial
+layout: journal
 coverImage: "./images/50-wordpress-youtubers.webp"
 redirectFrom: []
 ---

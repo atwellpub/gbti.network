@@ -9,7 +9,7 @@ publishedAt: 2023-09-30
 updatedAt: 2023-10-04
 excerpt: "Tailwind CSS is a utility-first CSS framework for rapidly building custom user interfaces. Instead of providing a set of pre-defined CSS classes for you to use in your HTML, Tailwind provides low-l…"
 categories: ["devops"]
-layout: editorial
+layout: journal
 coverImage: "./images/up-ec0971b7-e284-41db-ae8e-4fc347453fc1.webp"
 redirectFrom: ["/devops/what-is-tailwind/"]
 ---

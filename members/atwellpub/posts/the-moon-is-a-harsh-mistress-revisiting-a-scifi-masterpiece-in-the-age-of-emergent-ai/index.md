@@ -9,7 +9,7 @@ publishedAt: 2025-07-06
 updatedAt: 2025-08-23
 excerpt: "Revolution, consciousness, and artificial intelligence: Heinlein's libertarian masterpiece predicted both our political and technological future. Examine how 'The Moon is a Harsh Mistress' anticipa…"
 categories: ["entertainment"]
-layout: editorial
+layout: journal
 coverImage: "./images/mannie-and-mike-luna-authority.webp"
 redirectFrom: ["/entertainment/the-moon-is-a-harsh-mistress-revisiting-a-scifi-masterpiece-in-the-age-of-emergent-ai/"]
 ---

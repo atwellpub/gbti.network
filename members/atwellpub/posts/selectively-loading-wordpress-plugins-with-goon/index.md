@@ -9,7 +9,7 @@ publishedAt: 2024-07-19
 updatedAt: 2025-01-03
 excerpt: "GBTI Takes a look at the Goon Plugin for WordPress, which helps users selectively load plugins based on rules and filters."
 categories: ["devops", "frameworks", "wordpress"]
-layout: editorial
+layout: journal
 coverImage: "./images/atwellpub_Andrija_technician_WordPre_4caf0460-ed60-4d15-9950-ac42dbb2ffb8.webp"
 redirectFrom: ["/devops/frameworks/wordpress/selectively-loading-wordpress-plugins-with-goon/"]
 ---

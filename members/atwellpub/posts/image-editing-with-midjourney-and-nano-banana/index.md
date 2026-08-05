@@ -13,7 +13,7 @@ excerpt: >-
 categories:
   - gbti
   - member-tutorials
-layout: editorial
+layout: journal
 coverImage: ./images/nice-weather-for-ducks.webp
 redirectFrom:
   - /member-tutorials/image-editing-with-midjourney-and-nano-banana/
