@@ -17277,6 +17277,44 @@ function schemaFor(type) {
   return SCHEMAS[type] ?? null;
 }
 
+// client/src/member-content.mjs
+var MemberContentLockedError = class extends Error {
+  constructor(message = "member content is locked (an active paid membership is required)") {
+    super(message);
+    this.name = "MemberContentLockedError";
+  }
+};
+var base = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+async function encryptViaWorker({ plaintext, assetId, token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
+  const res = await fetch(base(signupBase) + "/membership/encrypt", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ plaintext, assetId })
+  });
+  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError("cannot encrypt: an active paid membership is required");
+  if (!res.ok) throw new Error("encrypt failed (" + res.status + ")");
+  const data = await res.json();
+  if (!data || data.ok !== true || !data.envelope) throw new Error("encrypt: malformed response");
+  return data.envelope;
+}
+var MEMBER_MARKER = "<!-- members-only -->";
+function splitMemberMarkdown(body) {
+  const text = String(body ?? "");
+  const idx = text.indexOf(MEMBER_MARKER);
+  if (idx === -1) return { publicPart: text, memberPart: null };
+  return {
+    publicPart: text.slice(0, idx).trimEnd(),
+    memberPart: text.slice(idx + MEMBER_MARKER.length).replace(/^\s+/, "")
+  };
+}
+function encAssetFor(type, username, slug, scope = "member") {
+  const assetId = `${type}:${slug}:body`;
+  const folder = scope === "house" ? "house" : `members/${username}`;
+  const path4 = `${folder}/_enc/${type}-${slug}-body.enc`;
+  return { assetId, path: path4 };
+}
+
 // client/src/content-ops.mjs
 var SUBDIR = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var MAX_BODY_BYTES = 1e6;
@@ -18398,44 +18436,6 @@ async function publishFiles({ repo, branch, files, message, title, body, clobber
   if (existing) return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
   const pull = await repo.openPull({ title: title ?? message ?? "Update", head, base: base2, body: body ?? "" });
   return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
-}
-
-// client/src/member-content.mjs
-var MemberContentLockedError = class extends Error {
-  constructor(message = "member content is locked (an active paid membership is required)") {
-    super(message);
-    this.name = "MemberContentLockedError";
-  }
-};
-var base = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-async function encryptViaWorker({ plaintext, assetId, token, signupBase, fetch = globalThis.fetch }) {
-  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
-  const res = await fetch(base(signupBase) + "/membership/encrypt", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-    body: JSON.stringify({ plaintext, assetId })
-  });
-  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError("cannot encrypt: an active paid membership is required");
-  if (!res.ok) throw new Error("encrypt failed (" + res.status + ")");
-  const data = await res.json();
-  if (!data || data.ok !== true || !data.envelope) throw new Error("encrypt: malformed response");
-  return data.envelope;
-}
-var MEMBER_MARKER = "<!-- members-only -->";
-function splitMemberMarkdown(body) {
-  const text = String(body ?? "");
-  const idx = text.indexOf(MEMBER_MARKER);
-  if (idx === -1) return { publicPart: text, memberPart: null };
-  return {
-    publicPart: text.slice(0, idx).trimEnd(),
-    memberPart: text.slice(idx + MEMBER_MARKER.length).replace(/^\s+/, "")
-  };
-}
-function encAssetFor(type, username, slug, scope = "member") {
-  const assetId = `${type}:${slug}:body`;
-  const folder = scope === "house" ? "house" : `members/${username}`;
-  const path4 = `${folder}/_enc/${type}-${slug}-body.enc`;
-  return { assetId, path: path4 };
 }
 
 // client/src/member-comment-echo-client.mjs

@@ -11,6 +11,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
+    {/* FAIL-SAFE for the public/_headers /embed rules, which `! ` remove the global CSP and set a bespoke one.
+        That remove-and-reset in one rule block is verified but UNDOCUMENTED Cloudflare behavior, so if it ever
+        degenerates to the removal alone this page would ship naked. This meta carries the same directives MINUS
+        frame-ancestors, which the CSP spec REQUIRES a meta-delivered policy to ignore, so it can neither restore
+        the framing block that broke the extension nor be relied on to set one. Header and meta intersect, so keep
+        the two in step: anything permitted here must also be permitted there. */}
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src https://www.youtube.com https://player.vimeo.com https://www.tiktok.com https://rumble.com; base-uri 'none'; object-src 'none'; form-action 'none'"
+    />
     <title>Video</title>
     <style is:global>
       html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }

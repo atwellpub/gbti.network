@@ -17220,6 +17220,57 @@ function schemaFor(type) {
   return SCHEMAS[type] ?? null;
 }
 
+// client/src/member-content.mjs
+var MemberContentLockedError = class extends Error {
+  constructor(message = "member content is locked (an active paid membership is required)") {
+    super(message);
+    this.name = "MemberContentLockedError";
+  }
+};
+var base = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+async function decryptViaWorker({ envelope, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
+  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
+  const res = await fetch2(base(signupBase) + "/membership/decrypt", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify(envelope)
+  });
+  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError();
+  if (!res.ok) throw new Error("decrypt failed (" + res.status + ")");
+  const data = await res.json();
+  if (!data || data.ok !== true || typeof data.text !== "string") throw new Error("decrypt: malformed response");
+  return data.text;
+}
+async function encryptViaWorker({ plaintext, assetId, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
+  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
+  const res = await fetch2(base(signupBase) + "/membership/encrypt", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ plaintext, assetId })
+  });
+  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError("cannot encrypt: an active paid membership is required");
+  if (!res.ok) throw new Error("encrypt failed (" + res.status + ")");
+  const data = await res.json();
+  if (!data || data.ok !== true || !data.envelope) throw new Error("encrypt: malformed response");
+  return data.envelope;
+}
+var MEMBER_MARKER = "<!-- members-only -->";
+function splitMemberMarkdown(body) {
+  const text = String(body ?? "");
+  const idx = text.indexOf(MEMBER_MARKER);
+  if (idx === -1) return { publicPart: text, memberPart: null };
+  return {
+    publicPart: text.slice(0, idx).trimEnd(),
+    memberPart: text.slice(idx + MEMBER_MARKER.length).replace(/^\s+/, "")
+  };
+}
+function encAssetFor(type, username, slug, scope = "member") {
+  const assetId = `${type}:${slug}:body`;
+  const folder = scope === "house" ? "house" : `members/${username}`;
+  const path = `${folder}/_enc/${type}-${slug}-body.enc`;
+  return { assetId, path };
+}
+
 // client/src/content-ops.mjs
 var SUBDIR = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var MAX_BODY_BYTES = 1e6;
@@ -18341,57 +18392,6 @@ async function publishFiles({ repo, branch, files, message, title, body, clobber
   if (existing) return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
   const pull = await repo.openPull({ title: title ?? message ?? "Update", head, base: base3, body: body ?? "" });
   return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
-}
-
-// client/src/member-content.mjs
-var MemberContentLockedError = class extends Error {
-  constructor(message = "member content is locked (an active paid membership is required)") {
-    super(message);
-    this.name = "MemberContentLockedError";
-  }
-};
-var base = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-async function decryptViaWorker({ envelope, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
-  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
-  const res = await fetch2(base(signupBase) + "/membership/decrypt", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-    body: JSON.stringify(envelope)
-  });
-  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError();
-  if (!res.ok) throw new Error("decrypt failed (" + res.status + ")");
-  const data = await res.json();
-  if (!data || data.ok !== true || typeof data.text !== "string") throw new Error("decrypt: malformed response");
-  return data.text;
-}
-async function encryptViaWorker({ plaintext, assetId, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
-  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
-  const res = await fetch2(base(signupBase) + "/membership/encrypt", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-    body: JSON.stringify({ plaintext, assetId })
-  });
-  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError("cannot encrypt: an active paid membership is required");
-  if (!res.ok) throw new Error("encrypt failed (" + res.status + ")");
-  const data = await res.json();
-  if (!data || data.ok !== true || !data.envelope) throw new Error("encrypt: malformed response");
-  return data.envelope;
-}
-var MEMBER_MARKER = "<!-- members-only -->";
-function splitMemberMarkdown(body) {
-  const text = String(body ?? "");
-  const idx = text.indexOf(MEMBER_MARKER);
-  if (idx === -1) return { publicPart: text, memberPart: null };
-  return {
-    publicPart: text.slice(0, idx).trimEnd(),
-    memberPart: text.slice(idx + MEMBER_MARKER.length).replace(/^\s+/, "")
-  };
-}
-function encAssetFor(type, username, slug, scope = "member") {
-  const assetId = `${type}:${slug}:body`;
-  const folder = scope === "house" ? "house" : `members/${username}`;
-  const path = `${folder}/_enc/${type}-${slug}-body.enc`;
-  return { assetId, path };
 }
 
 // client/src/member-activity-client.mjs
@@ -20685,6 +20685,7 @@ function embedUrl(v) {
 }
 
 // client/src/markdown.mjs
+var EMBED_RELAY = "https://gbti.network/embed/";
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
@@ -20798,7 +20799,7 @@ function renderFence(lang, buf, fn = null) {
   if (info[0] === "embed") {
     const url2 = body.trim();
     const src = embedUrl(url2);
-    if (src) return `<div class="md-embed"><iframe src="${escapeHtml(src)}" loading="lazy" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation" title="Embedded video"></iframe></div>`;
+    if (src) return `<div class="md-embed"><iframe src="${escapeHtml(`${EMBED_RELAY}?u=${encodeURIComponent(url2)}`)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen title="Embedded video"></iframe></div>`;
     return `<p><a href="${escapeHtml(url2)}" target="_blank" rel="noopener">${escapeHtml(url2)}</a></p>`;
   }
   return `${codeOpen(lang)}${escapeHtml(body)}</code></pre>`;

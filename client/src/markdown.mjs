@@ -6,6 +6,10 @@
 // SOW-062 Phase 5d: also renders the ```callout / ```embed body blocks (the shared embedUrl gives a safe iframe src).
 import { embedUrl } from './video-embed.mjs';
 
+// SOW-092: the https video relay. public/_headers gives /embed the one policy on the site whose
+// frame-ancestors admits chrome-extension:, so an extension page may frame it.
+const EMBED_RELAY = 'https://gbti.network/embed/';
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -142,8 +146,13 @@ function renderFence(lang, buf, fn = null) {
   }
   if (info[0] === 'embed') {
     const url = body.trim();
+    // Frame the SOW-092 relay, never the provider directly. This renderer only ever runs off-https (the
+    // extension's chrome-extension:// pages, the npm CMS on localhost), and neither can send YouTube an HTTP
+    // Referer, which YouTube rejects with its error 153. The relay's https origin vouches for the request, the
+    // same way gbti-reader and gbti-shares-feed already do. embedUrl still gates it, so an unrecognized URL
+    // stays a plain link and no ?u= is minted for something the relay would refuse to play anyway.
     const src = embedUrl(url);
-    if (src) return `<div class="md-embed"><iframe src="${escapeHtml(src)}" loading="lazy" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation" title="Embedded video"></iframe></div>`;
+    if (src) return `<div class="md-embed"><iframe src="${escapeHtml(`${EMBED_RELAY}?u=${encodeURIComponent(url)}`)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen title="Embedded video"></iframe></div>`;
     return `<p><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></p>`;
   }
   return `${codeOpen(lang)}${escapeHtml(body)}</code></pre>`;

@@ -19,10 +19,16 @@ test('reader: an unknown or missing callout variant falls back to note', () => {
   assert.match(renderMarkdown('```callout danger\nx\n```'), /md-callout-note/);
 });
 
-test('reader: an embed fence with a YouTube URL renders a sandboxed provider iframe', () => {
+// CHANGED intent (SOW-092): this used to assert a DIRECT provider iframe. That is the bug. This renderer only
+// ever runs off-https (the extension's chrome-extension:// pages, the npm CMS on localhost), so the provider
+// gets no HTTP Referer and YouTube refuses to play (its error 153). The fence now frames the https relay, which
+// is what gbti-reader and gbti-shares-feed already do. The `sandbox` attribute went with it: nested browsing
+// contexts INHERIT sandbox flags, so it would have applied to the inner player rather than the relay.
+test('reader: an embed fence with a YouTube URL frames the https relay, not the provider directly', () => {
   const html = renderMarkdown('```embed\nhttps://youtu.be/dQw4w9WgXcQ\n```');
-  assert.match(html, /<iframe src="https:\/\/www\.youtube\.com\/embed\/dQw4w9WgXcQ"/);
-  assert.match(html, /sandbox=/);
+  assert.match(html, /<iframe src="https:\/\/gbti\.network\/embed\/\?u=https%3A%2F%2Fyoutu\.be%2FdQw4w9WgXcQ"/);
+  assert.doesNotMatch(html, /src="https:\/\/www\.youtube\.com/); // never the provider from an extension page
+  assert.match(html, /allowfullscreen/);
 });
 
 test('reader: an embed fence with a non-video URL degrades to an escaped link, never an iframe', () => {
