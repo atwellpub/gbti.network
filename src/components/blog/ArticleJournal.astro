@@ -17,6 +17,7 @@ import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
 import { breadcrumb, leafLabel } from '../../lib/taxonomy';
 import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
+import { contentRepoPath } from '../../lib/content';
 
 interface Props {
   d: any; // CollectionEntry<'post'>['data']
@@ -29,6 +30,10 @@ interface Props {
 const { d, isStub, postId, postUrl, stack, toc } = Astro.props;
 const category = leafLabel(d.categories);
 const dims = coverDimensions('journal');
+// sow-183: the owner/superadmin Edit affordance, matching the product page's hero pill. The href is public
+// build-time data; only visibility is a runtime decision (this component's own script block, below).
+const editPath = contentRepoPath('post', d.author, d.slug);
+const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(editPath)}` : null;
 ---
 <section class="art-shell band">
   <div class="art-j-grid art-wrap">
@@ -59,6 +64,14 @@ const dims = coverDimensions('journal');
     </aside>
 
     <div class="art-j-col">
+      {editHref && (
+        <div class="art-j-edit-row">
+          <a href={editHref} target="_blank" rel="noopener" class="detail-edit" data-detail-edit data-detail-owner={d.author} hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            Edit
+          </a>
+        </div>
+      )}
       <h1 data-gbti-region="title" class="art-j-title">{d.title}</h1>
 
       {d.video ? (
@@ -85,4 +98,8 @@ const dims = coverDimensions('journal');
 <script>
   import { initToc } from '../../lib/pd-enhance.mjs';
   initToc(document, 'art');
+
+  // sow-183: the owner/superadmin Edit pill. See products/[slug].astro / src/lib/content.ts for the shared pattern.
+  import { wireEditAffordance } from '../../lib/content';
+  wireEditAffordance('[data-detail-edit]', 'data-detail-owner');
 </script>

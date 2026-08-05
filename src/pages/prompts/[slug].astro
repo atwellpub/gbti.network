@@ -12,7 +12,7 @@ import Avatar from '../../components/Avatar.astro';
 import ContentMeta from '../../components/ContentMeta.astro';
 import ContentActions from '../../components/ContentActions.astro';
 import ContentFooter from '../../components/ContentFooter.astro';
-import { hasPublicPage, isPublic, isStub } from '../../lib/content';
+import { hasPublicPage, isPublic, isStub, contentRepoPath } from '../../lib/content';
 import { authorDisplay, authorHref, authorAvatar } from '../../lib/authors';
 import { breadcrumb, categoryLabel } from '../../lib/taxonomy';
 import { favoriteCount } from '../../lib/favorites';
@@ -53,21 +53,34 @@ const linkLabel = (l: { type: string; label?: string }) => l.label ?? LINK_LABEL
 
 // Canonical URL for the unified share control (ContentActions -> ShareRow builds the per-platform links).
 const shareUrl = new URL(`/prompts/${d.slug}/`, Astro.site ?? 'https://gbti.network').href;
+
+// sow-183: the owner/superadmin Edit affordance, matching the product page's hero pill. The href is public
+// build-time data; only visibility is a runtime decision (this page's own script block, below).
+const editPath = contentRepoPath('prompt', d.author, d.slug);
+const editHref = editPath ? `/workbench/#tab=prompt&edit=${encodeURIComponent(editPath)}` : null;
 ---
 <BaseLayout title={d.title} description={d.exampleOutput} ogImage={d.image?.src ?? defaultFeatureImage('prompt')}>
   <section class="band tint">
     <div class="wrap">
       <!-- HEADER (full width): breadcrumb, title, author, then the description above the prompt -->
       <header class="detail-head">
-        <nav class="eyebrow detail-crumbs" aria-label="Breadcrumb">
-          <a href="/prompts/" style="color:var(--green-700)">AI Prompts</a>
-          {d.categories.map((key) => (
-            <>
-              <span aria-hidden="true" style="opacity:.5"> › </span>
-              <a href={`/prompts/?cat=${key}`} style="color:inherit">{categoryLabel(key)}</a>
-            </>
-          ))}
-        </nav>
+        <div class="detail-head-top">
+          <nav class="eyebrow detail-crumbs" aria-label="Breadcrumb">
+            <a href="/prompts/" style="color:var(--green-700)">AI Prompts</a>
+            {d.categories.map((key) => (
+              <>
+                <span aria-hidden="true" style="opacity:.5"> › </span>
+                <a href={`/prompts/?cat=${key}`} style="color:inherit">{categoryLabel(key)}</a>
+              </>
+            ))}
+          </nav>
+          {editHref && (
+            <a href={editHref} target="_blank" rel="noopener" class="detail-edit" data-detail-edit data-detail-owner={d.author} hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              Edit
+            </a>
+          )}
+        </div>
         <h1 data-gbti-region="title" class="h1 mt12">{d.title}</h1>
         <div class="mt16 flex items-center g12 wrap-w">
           <ContentMeta author={d.author} publishedAt={d.publishedAt} />
@@ -254,6 +267,10 @@ const shareUrl = new URL(`/prompts/${d.slug}/`, Astro.site ?? 'https://gbti.netw
   </style>
 
   <script>
+    // sow-183: the owner/superadmin Edit pill. See products/[slug].astro / src/lib/content.ts for the shared pattern.
+    import { wireEditAffordance } from '../../lib/content';
+    wireEditAffordance('[data-detail-edit]', 'data-detail-owner');
+
     // Copy always yields the raw markdown source (the canonical prompt), regardless of the active view.
     const btn = document.querySelector<HTMLButtonElement>('[data-copy]');
     btn?.addEventListener('click', async () => {

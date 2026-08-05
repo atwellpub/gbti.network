@@ -1,4 +1,7 @@
 import type { CollectionEntry } from 'astro:content';
+import { readMemberSignal, onMemberSignal, currentIdentity, type MemberSignal } from './member-signal';
+import { canEditItem } from './content-edit.mjs';
+import { contentItemPath } from './content-index.mjs';
 
 type Gatable = { data: { status: 'draft' | 'published'; visibility: 'public' | 'members'; publicStub?: boolean } };
 
@@ -63,17 +66,39 @@ export function ownerOf(entry: CollectionEntry<'post' | 'product' | 'prompt'>): 
   return parts[0] === 'members' ? parts[1] : 'house';
 }
 
-const SUBDIR: Record<string, string> = { post: 'posts', product: 'products', prompt: 'prompts' };
-
 /**
  * The repo-relative file path for a content item, matching the ACTUAL on-disk layout the SOW-001 migration +
- * validate-content use (members/<owner>/<sub>/<slug>/index.md, profiles at members/<owner>/profile.md). The
- * SOW-006 inline editor reads + publishes this exact path (data-gbti-path). NOTE: the npm client's
- * content-ops currently assumes a flat <slug>.md layout; that is reconciled to this nested layout in P5.
+ * validate-content use (members/<owner>/<sub>/<slug>/index.md, profiles at members/<owner>/profile.md;
+ * house/<sub>/<slug>/index.md for a house owner, no profile). The SOW-006 inline editor reads + publishes
+ * this exact path (data-gbti-path).
+ *
+ * sow-183: the post/product/prompt case now delegates to content-index.mjs's ALREADY node-test-covered
+ * contentItemPath (identical house/member logic, just without the profile case this function alone needs),
+ * instead of duplicating it -- a house owner ('house' or 'gbti') resolves to `house/<sub>/<slug>/index.md`
+ * rather than null. House content publish went through the website's own hosted-authoring endpoint as of
+ * SOW-183 Phase 2-3 (superadmin-gated server-side), so a null here was a stale carry-over from when it could
+ * not. The `!owner` fail-closed guard stays in front of BOTH branches: an empty/missing owner is a broken
+ * item, not silently "house" (contentItemPath alone treats '' as house, which is right for its own build-time
+ * callers but wrong for a page rendering an edit link off possibly-missing data).
  */
 export function contentRepoPath(type: 'post' | 'product' | 'prompt' | 'profile', owner: string, slug?: string): string | null {
-  if (!owner || owner === 'house' || owner === 'gbti') return null;
-  if (type === 'profile') return `members/${owner}/profile.md`;
-  const sub = SUBDIR[type];
-  return sub && slug ? `members/${owner}/${sub}/${slug}/index.md` : null;
+  if (!owner) return null;
+  if (type === 'profile') return (owner === 'house' || owner === 'gbti') ? null : `members/${owner}/profile.md`;
+  return contentItemPath(type, owner, slug);
+}
+
+/**
+ * sow-183: wire a server-rendered-hidden Edit pill to the member signal, client-side. Every detail page's Edit
+ * affordance (product's hero pill, the article/prompt variants) shares this one resolve/toggle instead of each
+ * repeating the same few lines. `ownerAttr` names the data attribute the page stamped the item's owner into.
+ * No-ops off the browser (this module is also imported server-side, e.g. EditHooks.astro's frontmatter).
+ */
+export function wireEditAffordance(selector: string, ownerAttr: string): void {
+  if (typeof document === 'undefined') return;
+  const btn = document.querySelector<HTMLElement>(selector);
+  if (!btn) return;
+  const owner = btn.getAttribute(ownerAttr) || '';
+  const apply = (identity: MemberSignal | null) => { btn.hidden = !canEditItem(identity, owner); };
+  apply(currentIdentity(readMemberSignal()));
+  onMemberSignal(apply);
 }

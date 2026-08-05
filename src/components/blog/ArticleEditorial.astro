@@ -16,6 +16,7 @@ import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
 import { breadcrumb } from '../../lib/taxonomy';
 import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
+import { contentRepoPath } from '../../lib/content';
 
 interface Props {
   d: any; // CollectionEntry<'post'>['data']
@@ -32,11 +33,21 @@ const category = breadcrumb(d.categories).join(' › ');
 // same as every other layout.
 const hasHero = Boolean(d.coverImage) && !d.video;
 const dims = coverDimensions('editorial');
+// sow-183: the owner/superadmin Edit affordance, matching the product page's hero pill. The href is public
+// build-time data; only visibility is a runtime decision (this component's own script block, below).
+const editPath = contentRepoPath('post', d.author, d.slug);
+const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(editPath)}` : null;
 ---
 <section class="art-shell band">
   {hasHero ? (
     <div class="art-e-hero">
       <Image src={d.coverImage} alt={d.coverAlt || d.title} width={dims.width} height={dims.height} />
+      {editHref && (
+        <a href={editHref} target="_blank" rel="noopener" class="pd-hero-edit" data-detail-edit data-detail-owner={d.author} hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          Edit
+        </a>
+      )}
       <div class="art-e-hero-in">
         {category && <div class="art-e-cats"><span class="art-e-cat">{category}</span></div>}
         <h1 data-gbti-region="title" class="art-e-title">{d.title}</h1>
@@ -45,6 +56,12 @@ const dims = coverDimensions('editorial');
     </div>
   ) : (
     <div class="art-e-header-flat">
+      {editHref && (
+        <a href={editHref} target="_blank" rel="noopener" class="detail-edit" data-detail-edit data-detail-owner={d.author} hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          Edit
+        </a>
+      )}
       {category && <div class="art-e-cats"><span class="art-e-cat">{category}</span></div>}
       <h1 data-gbti-region="title" class="art-e-title">{d.title}</h1>
       <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} />
@@ -88,4 +105,9 @@ const dims = coverDimensions('editorial');
 <script>
   import { initToc } from '../../lib/pd-enhance.mjs';
   initToc(document, 'art');
+
+  // sow-183: the owner/superadmin Edit pill (either the hero or the flat-header variant -- exactly one
+  // renders, never both). See products/[slug].astro / src/lib/content.ts for the shared pattern.
+  import { wireEditAffordance } from '../../lib/content';
+  wireEditAffordance('[data-detail-edit]', 'data-detail-owner');
 </script>

@@ -1213,6 +1213,29 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 }
 .pd-hero-edit:hover { background: rgba(37, 35, 43, .68); border-color: rgba(255, 255, 255, .38); }
 .pd-hero-edit svg { width: 15px; height: 15px; flex: none; }
+/* sow-183: the same owner/superadmin Edit affordance, for a header with NO image behind it (article's flat
+   header, card, journal, the prompt page) -- .pd-hero-edit's glass/blur/white-text treatment assumes a photo
+   behind it, so this uses the ordinary token palette instead (same shape/position/behavior, both themes free
+   via the --fg-soft/--line-2/--tint tokens, no [data-theme] override needed). The CONTAINER this sits in must
+   be position:relative; add it per-surface rather than assuming one exists. */
+.detail-edit {
+  position: absolute; top: 0; right: 0; z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--fg-soft); text-decoration: none;
+  padding: 9px 16px; border-radius: 999px;
+  background: var(--tint); border: 1.5px solid var(--line-2);
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.detail-edit:hover { color: var(--fg); border-color: var(--fg-mute); }
+.detail-edit svg { width: 15px; height: 15px; flex: none; }
+/* sow-183: the Card article layout's Edit pill sits inside the card's own padding, matching its clamp(). */
+.art-c-card { position: relative; }
+.art-c-card .detail-edit { top: clamp(28px, 5vw, 56px); right: clamp(28px, 5vw, 56px); }
+/* sow-183: the prompt page's Edit pill sits inline beside the breadcrumb (not absolutely positioned) -- the
+   header has no fixed-width constraint on the title, so an overlay risks colliding with a long one, same
+   reasoning as the Journal article layout's edit row. */
+.detail-head-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.detail-head-top .detail-edit { position: static; }
 .pd-hero-in { position: relative; width: 100%; display: flex; align-items: flex-end; gap: 16px; padding-bottom: 24px; }
 .pd-mark {
   width: 62px; height: 62px; flex: none; border-radius: 8px;
@@ -1520,7 +1543,9 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 }
 .art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; }
 /* No-cover variant: the same header content, flat on the page background instead of over an image. */
-.art-e-header-flat { padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; }
+.art-e-header-flat { position: relative; padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; }
+/* sow-183: the flat header's Edit pill sits inside the padded box, not flush with the section edge. */
+.art-e-header-flat .detail-edit { top: clamp(28px, 5vw, 44px); right: clamp(20px, 4vw, 40px); }
 
 .art-e-cats { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
 .art-e-cat {
@@ -1581,6 +1606,12 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .art-j-rail > * + * { padding-top: 16px; border-top: 1px solid var(--line); }
 
 .art-j-col { min-width: 0; max-width: 660px; }
+/* sow-183: the Edit pill sits in the flow ABOVE the title here (not absolutely positioned like the other
+   layouts) -- .art-j-title can wrap to two lines at this column's narrower max-width, and an overlaid pill
+   would sit on top of the wrapped text. In normal flow it never collides, at the cost of a little vertical
+   space when it shows (superadmin-only; zero space for everyone else, since the pill is hidden by default). */
+.art-j-edit-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.art-j-edit-row .detail-edit { position: static; }
 .art-j-title { margin: 0 0 16px; font-family: var(--f-display); font-weight: 600; font-size: clamp(26px, 3.4vw, 36px); line-height: 1.13; letter-spacing: -.02em; color: var(--fg); text-wrap: pretty; }
 .art-j-cover { margin: 0 0 8px; border: 1.5px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
 .art-j-cover img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }

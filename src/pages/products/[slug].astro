@@ -358,16 +358,10 @@ const lockedHint = (l: { encrypted?: boolean }) =>
   initToc();
   initCarousel();
 
-  // sow-175: the hero Edit button. The href is already baked in server-side; only visibility is decided here,
-  // from the site-wide member signal BaseLayout already hydrates. Presentation only, matching every other use
-  // of this signal: the SOW-005 gate is the real boundary if a non-owner ever reached the editor directly.
-  import { readMemberSignal, onMemberSignal, currentIdentity } from '../../lib/member-signal';
-  import { canEditItem } from '../../lib/product-page.mjs';
-  const editBtn = document.querySelector('[data-pd-hero-edit]');
-  if (editBtn) {
-    const owner = editBtn.dataset.pdOwner || '';
-    const apply = (identity) => { editBtn.hidden = !canEditItem(identity, owner); };
-    apply(currentIdentity(readMemberSignal()));
-    onMemberSignal(apply);
-  }
+  // sow-175/183: the hero Edit button. The href is already baked in server-side; only visibility is decided
+  // here, from the site-wide member signal BaseLayout already hydrates. Presentation only, matching every
+  // other use of this signal: the SOW-005 gate / the Worker's authorizeSuperadmin are the real boundary if a
+  // non-owner ever reached the editor directly. Shared with every other content-detail page's Edit pill.
+  import { wireEditAffordance } from '../../lib/content';
+  wireEditAffordance('[data-pd-hero-edit]', 'data-pd-owner');
 </script>
