@@ -9,7 +9,7 @@ publishedAt: 2025-03-15
 updatedAt: 2025-04-11
 excerpt: "\"Have Space Suit—Will Travel\" is a classic science fiction novel by Robert A. Heinlein that follows a resourceful teenager who, after winning a used spacesuit in a contest, embarks on an unexpected…"
 categories: ["entertainment"]
-layout: card
+layout: editorial
 coverImage: "./images/have-spacesuit-will-travel.webp"
 redirectFrom: ["/entertainment/have-spacesuit-will-travel/"]
 ---

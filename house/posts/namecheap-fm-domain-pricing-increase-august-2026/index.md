@@ -8,7 +8,7 @@ visibility: public
 publishedAt: 2026-08-04
 excerpt: "Namecheap says .fm renewals move from $118.98 to $202.98 per year on August 15, 2026, and transfers from $99.98 to $180.98. What .fm holders should check before the date."
 categories: ["business"]
-layout: card
+layout: editorial
 tags: ["domains", "namecheap", "dotfm", "pricing"]
 coverImage: "./images/fm-pricing-increase.webp"
 ---

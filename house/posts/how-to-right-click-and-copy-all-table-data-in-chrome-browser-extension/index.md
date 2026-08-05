@@ -9,7 +9,7 @@ publishedAt: 2024-01-20
 updatedAt: 2025-07-08
 excerpt: "This Chrome extension provides a quick and efficient way to copy HTML table data directly to your clipboard."
 categories: ["devops", "frameworks", "chrome-extensions"]
-layout: card
+layout: editorial
 coverImage: "./images/frame_142.webp"
 redirectFrom: ["/devops/frameworks/chrome-extensions/how-to-right-click-and-copy-all-table-data-in-chrome-browser-extension/"]
 ---

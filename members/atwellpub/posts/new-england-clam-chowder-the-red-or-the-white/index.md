@@ -9,7 +9,7 @@ publishedAt: 2025-04-13
 updatedAt: 2025-06-01
 excerpt: "In this article we discuss creating our own MCP server, providing tips on how to get started with your own server development."
 categories: ["ai", "mcp"]
-layout: card
+layout: editorial
 coverImage: "./images/woodstock-and-ace-1.webp"
 redirectFrom: ["/ai/mcp/new-england-clam-chowder-the-red-or-the-white/"]
 ---

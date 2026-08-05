@@ -44,9 +44,10 @@ const stack = avatarStack({
   index: avatarIndex,
 });
 
-// sow-179: the ?? fallback means an unrecognized value still renders, never 404s.
+// sow-179: the ?? fallback means an unrecognized value still renders, never 404s. Matches the schema's own
+// default (src/content.config.ts) so an edge case here can never disagree with what a fresh post gets.
 const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard, editorial: ArticleEditorial, journal: ArticleJournal };
-const Layout = LAYOUTS[d.layout] ?? ArticleCard;
+const Layout = LAYOUTS[d.layout] ?? ArticleEditorial;
 // Journal moves FavoritedBy into its rail (a dedicated "rail" slot); every other layout keeps it in "closing"
 // alongside the rest of the shared components. ArticleCard/ArticleEditorial have no "rail" slot, so targeting
 // it there would just be silently dropped -- reslot explicitly rather than rely on that.

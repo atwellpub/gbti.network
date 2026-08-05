@@ -9,7 +9,7 @@ publishedAt: 2024-02-04
 updatedAt: 2025-07-08
 excerpt: "GBTI Member Article: Hudson Atwell shares his wp-cli staging plugin that helps users import a remote database into a local environment."
 categories: ["devops", "frameworks"]
-layout: card
+layout: editorial
 coverImage: "./images/wp-cli-import1800-600-2.webp"
 redirectFrom: ["/devops/frameworks/how-to-use-wp-cli-staging-to-import-a-remote-database/"]
 ---

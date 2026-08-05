@@ -10,7 +10,7 @@ publishedAt: 2023-12-03
 updatedAt: 2024-06-29
 excerpt: "eCourse emerges as a notable self-hosted LMS, offering a course management in a stylish application. It's powered by the Svelte UI framework and PocketBase data storage."
 categories: ["devops", "open-source", "free-open-source"]
-layout: card
+layout: editorial
 coverImage: "./images/eCourse-4.webp"
 redirectFrom: ["/devops/open-source/free-open-source/introducing-ecourse-a-self-hosted-lms-application-foss/"]
 ---

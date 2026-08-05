@@ -9,7 +9,7 @@ publishedAt: 2025-01-11
 updatedAt: 2025-06-27
 excerpt: "Learn how to setup right click image conversions in Windows 10 using ImageMagick and the SendTo context menu shortcuts."
 categories: ["devops"]
-layout: card
+layout: editorial
 coverImage: "./images/right-click-convert-images-imagemagck.webp"
 redirectFrom: ["/devops/how-to-use-imagemagick-to-convert-images-via-right-click-in-windows/"]
 ---

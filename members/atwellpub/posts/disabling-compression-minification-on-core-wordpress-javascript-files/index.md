@@ -9,7 +9,7 @@ publishedAt: 2024-06-29
 updatedAt: 2024-08-18
 excerpt: "Learn how to disable minification of JavaScript files in the WordPress Admin Dashboard to facilitate easier debugging and customization."
 categories: ["devops", "frameworks", "wordpress"]
-layout: card
+layout: editorial
 coverImage: "./images/atwellpub_engineer_stuck_between_hydrolic_press_trying_to_push__4b1ae464-dd1c-4fbe-a670-a7617fdbf3ca.webp"
 redirectFrom: ["/devops/frameworks/wordpress/disabling-compression-minification-on-core-wordpress-javascript-files/"]
 ---

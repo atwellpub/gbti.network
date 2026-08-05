@@ -9,7 +9,7 @@ publishedAt: 2025-10-07
 updatedAt: 2025-11-10
 excerpt: "Enjoy another GBTI Network member article that show cases 15 ready-to-use AI prompts for generating professional headshot photos."
 categories: ["ai"]
-layout: card
+layout: editorial
 coverImage: "./images/Gemini_Generated_Image_149vcx149vcx149v.webp"
 redirectFrom: ["/ai/15-nano-banana-prompts-for-generating-linkedin-headshots/"]
 ---

@@ -9,7 +9,7 @@ publishedAt: 2023-12-29
 updatedAt: 2025-03-08
 excerpt: "Unravel Jeff Bezos' connections with turtles in 'The Turtle King' by GBTI, highlighting both humorous and strategic parallels."
 categories: ["entertainment"]
-layout: card
+layout: editorial
 coverImage: "./images/atwellpub_Jeff_Bezos_on_a_throne_made_of_green_turtle_shell_78ab0eae-0d20-4135-a587-09d5741a21d4.webp"
 redirectFrom: ["/entertainment/the-turtle-king-a-look-into-the-turtly-world-of-jeff-bezos/"]
 ---

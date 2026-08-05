@@ -9,7 +9,7 @@ publishedAt: 2025-11-16
 updatedAt: 2025-11-16
 excerpt: "In this tutorial we show how to use datapacks to edit/override the default messaging of the Flan claims mod for Minecraft Java."
 categories: ["entertainment", "gaming", "minecraft"]
-layout: card
+layout: editorial
 coverImage: "./images/flan-datapack-darken-opt-cleanedimized.webp"
 redirectFrom: []
 ---

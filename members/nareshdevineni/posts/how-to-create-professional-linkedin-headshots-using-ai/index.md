@@ -9,7 +9,7 @@ publishedAt: 2025-10-07
 updatedAt: 2025-10-20
 excerpt: "Enjoy this member article teaching how to create powerful AI prompts for generating professional photos and headshots for your LinkedIn."
 categories: ["ai"]
-layout: card
+layout: editorial
 coverImage: "./images/A-person-wearing-a-dark-gray-textured-suit-with-light-blue-dress-shirt-and-navy-blue-tie-with-small-dot-pattern-1.webp"
 redirectFrom: ["/ai/how-to-create-professional-linkedin-headshots-using-ai/"]
 ---

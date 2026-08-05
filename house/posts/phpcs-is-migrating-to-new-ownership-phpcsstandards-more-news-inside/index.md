@@ -9,7 +9,7 @@ publishedAt: 2023-12-02
 updatedAt: 2024-06-29
 excerpt: "GBTI highlights PHP_CodeSniffer's move to PHPCSStandards, discussing its effect on WordPress, Drupal, and the challenges in repository migration and funding. Key insights into PHP's coding standard…"
 categories: ["devops"]
-layout: card
+layout: editorial
 coverImage: "./images/PHPCS-5.webp"
 redirectFrom: ["/devops/phpcs-is-migrating-to-new-ownership-phpcsstandards-more-news-inside/"]
 ---

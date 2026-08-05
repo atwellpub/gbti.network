@@ -9,7 +9,7 @@ publishedAt: 2025-07-27
 updatedAt: 2025-10-06
 excerpt: "We've release an hue animation tool that will convert any image into a color shifting animation. Create GIFs, WebM, and MP4 videos."
 categories: ["devops", "frameworks", "javascript"]
-layout: card
+layout: editorial
 coverImage: "./images/icon-1.webp"
 redirectFrom: ["/devops/frameworks/javascript/now-make-it-psychedelic-using-hue-to-create-colorful-animations/"]
 ---

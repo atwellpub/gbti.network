@@ -9,7 +9,7 @@ publishedAt: 2024-07-30
 updatedAt: 2024-12-02
 excerpt: "Picture this: You’re a developer, deep in the trenches of a complex project. Your trusty AI assistant, powered by a Large Language Model (LLM), has been by your side, helping you tackle bug after b…"
 categories: ["devops"]
-layout: card
+layout: editorial
 coverImage: "./images/atwellpub_gohan_with_glasses_going_kaioken_while_working_on_a_c_f3ddfd7f-574e-4c07-adf8-05871411146a.webp"
 redirectFrom: ["/devops/snapshots-for-ai-a-rag-like-solution-for-programming-with-llms/"]
 ---
