@@ -90,6 +90,8 @@ const authorsMeta = Object.fromEntries([...new Set(prompts.map((p) => p.data.aut
             <div class="prompts-toolbar">
               <div class="ptb-left">
                 <span class="body-sm muted" id="prompt-count"></span>
+                {/* sow-174: shows when a deep-linked sub-category (leaf) crumb filters the list but has no sidebar button. */}
+                <span id="prompt-catfilter" class="pf-chip" hidden data-cat-labels={JSON.stringify(catLabels)}></span>
                 <label class="pp-select body-sm muted">Show
                   <select id="prompt-pagesize" aria-label="Prompts per page">
                     <option value="25">25</option>
@@ -188,6 +190,10 @@ const authorsMeta = Object.fromEntries([...new Set(prompts.map((p) => p.data.aut
     .ps-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; background: none; border: 0; cursor: pointer; padding: 8px 12px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600; color: var(--fg-soft); transition: background .15s ease, color .15s ease; }
     .ps-item:hover { background: var(--tint); color: var(--fg); }
     .ps-item.on { background: var(--green-tint); color: var(--green-700); }
+    /* sow-174: the deep-linked sub-category filter chip (a leaf crumb with no sidebar button). */
+    .pf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border: 1px solid var(--green); color: var(--green-700); background: var(--green-tint); border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+    .pf-x { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 0 0 2px; }
+    .pf-x:hover { color: var(--ink); }
     /* Checkmark on selected facet values signals these are multi-select (choose any number). */
     .ps-item[data-val]:not([data-val="all"]).on::after { content: "✓"; font-size: 12px; line-height: 1; color: var(--green-700); }
 
@@ -421,7 +427,29 @@ const authorsMeta = Object.fromEntries([...new Set(prompts.map((p) => p.data.aut
       var params = new URLSearchParams(location.search);
       var cat = params.get('cat'), tag = params.get('tag'), author = params.get('author'), target = params.get('target');
       var visParam = params.get('vis');
-      if (cat && catItems.some(function (b) { return b.getAttribute('data-val') === cat; })) cats[cat] = true;
+      // sow-174: a breadcrumb can deep-link a SUB-category (leaf) key like ?cat=skill that has no sidebar
+      // button (the sidebar is top-level only). The filter engine already matches any key in a card's
+      // data-cats, so accept any ?cat= that is PRESENT IN THE DATA, not only keys that have a button. A
+      // buttonless key still filters and shows a "Filtered by" chip so the page reads as deliberately filtered.
+      var allCatKeys = {};
+      cards.forEach(function (c) { (c.getAttribute('data-cats') || '').split(' ').forEach(function (k) { if (k) allCatKeys[k] = true; }); });
+      var chipEl = document.getElementById('prompt-catfilter');
+      var catLabelMap = {}; try { catLabelMap = JSON.parse((chipEl && chipEl.getAttribute('data-cat-labels')) || '{}'); } catch (e) { catLabelMap = {}; }
+      var chipKey = '';
+      function hideCatChip() { chipKey = ''; if (chipEl) { chipEl.hidden = true; chipEl.textContent = ''; } }
+      function showCatChip(key) {
+        if (!chipEl) return;
+        chipKey = key;
+        chipEl.textContent = 'Filtered by ' + (catLabelMap[key] || key) + '  ';
+        var x = document.createElement('button');
+        x.type = 'button'; x.className = 'pf-x'; x.setAttribute('aria-label', 'Clear category filter'); x.textContent = '✕';
+        x.addEventListener('click', function () { if (chipKey) delete cats[chipKey]; hideCatChip(); refresh(catItems, cats); page = 0; apply(); });
+        chipEl.appendChild(x); chipEl.hidden = false;
+      }
+      if (cat && allCatKeys[cat]) {
+        cats[cat] = true;
+        if (!catItems.some(function (b) { return b.getAttribute('data-val') === cat; })) showCatChip(cat);
+      }
       if (target && targetItems.some(function (b) { return b.getAttribute('data-val') === target; })) targets[target] = true;
       // 'all' never enters the store (the All button works by EMPTYING it; a stored 'all' matches no card).
       if (visParam && visParam !== 'all' && visItems.some(function (b) { return b.getAttribute('data-val') === visParam; })) vis[visParam] = true;
