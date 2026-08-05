@@ -172,16 +172,34 @@ export function reassembleMemberBody(frontmatter, indexBody, memberText) {
 // The public URL base per content type; a rename records the OLD url in redirectFrom so the build 301s it.
 export const RENAME_URL_BASE = { post: '/articles', product: '/products', prompt: '/prompts' };
 const OWN_ITEM_PATH_RE = /^members\/([a-z0-9][a-z0-9-]*)\/(posts|products|prompts)\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
+const HOUSE_ITEM_PATH_RE = /^house\/(posts|products|prompts)\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
+const FOLDER_TYPE = { posts: 'post', products: 'product', prompts: 'prompt' };
 
-// Resolve the ORIGIN of an edit: the canonical own-folder item the editor loaded (`path`). Returns
-// { oldSlug, oldPath } when the path is the member's own item of the SAME type, else null. Mirrors
-// operations.mjs renameOriginOf. The slug in the FORM is the (possibly new) value; the path names what it was.
-export function renameOriginOf({ path, username, type }) {
-  const m = OWN_ITEM_PATH_RE.exec(String(path || ''));
+// Resolve the ORIGIN of an edit: the canonical item the editor loaded (`path`). Returns
+// { scope, username, oldSlug, oldPath } when the path is an item of the SAME type, else null. The slug in the
+// FORM is the (possibly new) value; the path names what it was.
+//
+// sow-183: `allowAnyFolder` additionally resolves a house/ path or ANOTHER member's folder (for a superadmin's
+// content authorship reassignment) instead of only the caller's own `members/<username>/`. The CALLER
+// (publish()) sets this ONLY when the request already shape-implies a superadmin surface (an authorTarget was
+// given, or the loaded path is already under house/) -- both of those are themselves only reachable through UI
+// gated to role==='superadmin' (gbti-workspace.mjs _canScope). This function does no authorization of its own;
+// the real fail-closed gate is the Worker's independent authorizeSuperadmin re-check (membership-admin.mjs),
+// exactly like every other client-side convenience in this file.
+export function renameOriginOf({ path, username, type, allowAnyFolder = false } = {}) {
+  const p = String(path || '');
+  const h = HOUSE_ITEM_PATH_RE.exec(p);
+  if (h) {
+    if (!allowAnyFolder) return null;
+    if (FOLDER_TYPE[h[1]] !== type) return null;
+    return { scope: 'house', username: null, oldSlug: h[2], oldPath: p };
+  }
+  const m = OWN_ITEM_PATH_RE.exec(p);
   if (!m) return null;
-  if (m[1] !== String(username ?? '').toLowerCase()) return null;
-  if (m[2].slice(0, -1) !== type) return null;
-  return { oldSlug: m[3], oldPath: String(path) };
+  if (FOLDER_TYPE[m[2]] !== type) return null;
+  const pathUsername = m[1];
+  if (!allowAnyFolder && pathUsername !== String(username ?? '').toLowerCase()) return null;
+  return { scope: 'member', username: pathUsername, oldSlug: m[3], oldPath: p };
 }
 
 // Merge the redirectFrom set for a publish: the old file's entries + any input entries + (when renaming) the old
@@ -196,17 +214,27 @@ export function mergedRedirectFrom({ oldFm, inputRedirectFrom, renaming, type, o
   return merged.length ? merged : undefined;
 }
 
-// The from-the-author intro-comment MOVE files for a rename (product/prompt only): read intro-<old>.md, rewrite its
-// id + targetSlug to the new slug, emit the new file + the old-path delete. `[]` for a post, or when the item has
-// no intro (introText null). Pure given the already-read introText. Mirrors operations.mjs introMoveFiles.
-export function renameIntroMoveFiles({ username, type, oldSlug, newSlug, introText } = {}) {
+/** The comments folder for a { scope, username }: house's is fixed; a member's is their own folder. */
+export function introFolderFor({ scope, username } = {}) {
+  return scope === 'house' ? 'house' : `members/${username}`;
+}
+
+// The from-the-author intro-comment MOVE files for a rename or reassignment (product/prompt only): read
+// intro-<old>.md, rewrite its id + targetSlug to the new slug, emit the new file + the old-path delete. `[]`
+// for a post, or when the item has no intro (introText null). Pure given the already-read introText. Mirrors
+// operations.mjs introMoveFiles.
+//
+// sow-183: `from`/`to` are each { scope, username } -- a plain rename (unchanged folder) passes the SAME
+// value for both; an authorship reassignment passes a DIFFERENT `to`, so the intro moves house<->member or
+// member<->member right alongside the content item, never left behind at the old owner's folder.
+export function renameIntroMoveFiles({ from, to, type, oldSlug, newSlug, introText } = {}) {
   if (!['product', 'prompt'].includes(type)) return [];
   if (introText == null) return [];
-  const oldIntro = `members/${username}/comments/intro-${oldSlug}.md`;
+  const oldIntro = `${introFolderFor(from)}/comments/intro-${oldSlug}.md`;
   const intro = parseContentFile(introText);
   const introFm = { ...(intro.frontmatter ?? {}), id: `intro-${newSlug}`, targetSlug: newSlug };
   return [
-    { path: `members/${username}/comments/intro-${newSlug}.md`, content: serializeContentFile(introFm, intro.body) },
+    { path: `${introFolderFor(to || from)}/comments/intro-${newSlug}.md`, content: serializeContentFile(introFm, intro.body) },
     { path: oldIntro, content: null },
   ];
 }

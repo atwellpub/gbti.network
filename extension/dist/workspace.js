@@ -2400,6 +2400,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const blocked = membership !== "paid" && membership !== "unknown";
       const p = this.preset?.input ?? {};
       const getValPreset = (k) => this.presetStr(p[k]);
+      let authorMembers = null;
+      if (this.itemPath) {
+        try {
+          const t = await this.client.authorTargets?.();
+          if (t && Array.isArray(t.members)) authorMembers = t.members;
+        } catch {
+        }
+      }
+      const curAuthorScope = this.itemScope === "house" ? "house" : "member";
+      const curAuthorUsername = curAuthorScope === "house" ? null : this.presetStr(p.author) || "";
       const headerKeys = /* @__PURE__ */ new Set(["title", "slug"]);
       const docSecKeys = DOC_SECTION_KEYS[this.type] || /* @__PURE__ */ new Set();
       const schema = RAIL_SCHEMA[this.type] || RAIL_SCHEMA.post;
@@ -2448,6 +2458,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
                <gbti-discussion data-gbti-hide-author-notes data-gbti-target-type="${esc(this.type)}" data-gbti-target-slug="${esc(slug)}"${this.aliasSlugs().length ? ` data-gbti-target-aliases="${esc(this.aliasSlugs().join(","))}"` : ""}></gbti-discussion>
              </section>` : "";
       const docSections = videoSection + authorSection + discussionSection;
+      const ownerFieldHtml = authorMembers ? (() => {
+        const opt = (value, label, selected) => `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(label)}</option>`;
+        const options = [opt("house", "House / GBTI Network", curAuthorScope === "house")].concat(authorMembers.map((m) => opt(`member:${m.username}`, m.username, curAuthorScope === "member" && m.username === curAuthorUsername))).join("");
+        return `<details open class="rsec"><summary><span class="st"><span class="si">${USERS}</span>Author</span><span class="chev">${CHEV}</span></summary><div class="rbody"><div class="fld"><select id="ownerSelect" class="selbox">${options}</select><div class="urlprev">Superadmin only. Reassigning moves this item to the new owner's folder when you Publish; the public link stays the same.</div></div></div></details>`;
+      })() : "";
       const showStats = isPub && slug && ["post", "product", "prompt"].includes(this.type);
       const railFootHtml = showStats ? `
              <div class="rail-foot">
@@ -2717,6 +2732,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            </article>
            <aside class="rail">
              <details open class="rsec"><summary><span class="st"><span class="si">${DOC}</span>Type</span><span class="chev">${CHEV}</span></summary><div class="rbody"><div class="fld"><div class="urlprev" style="color:var(--s-fg-soft)">This is a <b>${esc(this.typeLabel())}</b>. Type is set at creation and can't be changed here.</div></div></div></details>
+             ${ownerFieldHtml}
              ${sectionsHtml}
              ${railFootHtml}
            </aside>
@@ -3284,15 +3300,26 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           input.updatedAt = nowIso;
           input.publishedAt = nowIso;
         }
-        const res = await this.client.publish({ type, input, body, authorNote, path: this.itemPath || void 0, scope: this.itemScope === "house" ? "house" : void 0 });
+        const ownerSel = this.$("#ownerSelect")?.value;
+        const authorTarget = ownerSel === "house" ? { scope: "house" } : ownerSel?.startsWith("member:") ? { scope: "member", username: ownerSel.slice(7) } : void 0;
+        const res = await this.client.publish({ type, input, body, authorNote, path: this.itemPath || void 0, scope: this.itemScope === "house" ? "house" : void 0, authorTarget });
         this._setChip(`${CHECK} Published`, "ok");
         this._dirty = false;
         this.$("#publish")?.setAttribute("hidden", "");
         this._banner(`Publishing is not instant. It opens a pull request that auto-merges, then the site rebuilds, so your change reaches the live edge in about 2 to 3 minutes. Track it in your <b>WorkBench</b> under Pull requests.`);
         const renameNote = res?.renamed ? ` The permalink changed from ${esc(res.renamed.from)} to ${esc(res.renamed.to)}; the old link starts redirecting in about 2 to 3 minutes.` : "";
-        this.out(`<span class="tag ok">submitted</span> ${esc(submitAck({ prNumber: res.prNumber, autoMerge: true }))}${renameNote}`);
+        const ownerLabel = (o) => o?.scope === "house" ? "House / GBTI Network" : o?.username || "a member";
+        const reassignNote = res?.reassigned ? ` This item moved from ${esc(ownerLabel(res.reassigned.from))} to ${esc(ownerLabel(res.reassigned.to))}.` : "";
+        this.out(`<span class="tag ok">submitted</span> ${esc(submitAck({ prNumber: res.prNumber, autoMerge: true }))}${renameNote}${reassignNote}`);
         if (res?.renamed && this.preset?.input) {
           this.preset.input.slug = res.renamed.to;
+        }
+        if (res?.reassigned && this.preset?.input) {
+          this.preset.input.author = res.reassigned.to.scope === "house" ? "gbti" : res.reassigned.to.username;
+        }
+        if (res?.path) {
+          this.itemPath = res.path;
+          this.itemScope = res.path.startsWith("house/") ? "house" : "member";
         }
         this.emit("gbti-published", res);
       } catch (err) {

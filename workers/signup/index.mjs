@@ -82,7 +82,7 @@ import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
-import { membershipAuthor } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged)
+import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF
@@ -929,6 +929,17 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
           const r = await membershipAuthor(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+
+      // sow-183: superadmin-only, the Author-reassignment picker source (GET, no CSRF). Same member index the
+      // gate + /membership/author already trust; house is not an entry here, the editor adds it as a fixed option.
+      if (pathname === '/membership/author/targets') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await membershipAuthorTargets(request, env, { allowCookie: true });
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }

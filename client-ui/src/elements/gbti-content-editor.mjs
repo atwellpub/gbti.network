@@ -221,6 +221,20 @@ class GbtiContentEditor extends GbtiElement {
     const blocked = membership !== 'paid' && membership !== 'unknown';
     const p = this.preset?.input ?? {};
     const getValPreset = (k) => this.presetStr(p[k]);
+    // sow-183: the Author-reassignment picker, EXISTING items only. Sourced from an OPTIONAL client capability
+    // (client.authorTargets) that only the website adapter implements so far, and only ever succeeds for a
+    // superadmin -- a plain member, or a host that has not wired the capability yet (the extension, until its
+    // own sow-183 phase), simply gets no options back, and the whole Author section renders nothing. This is
+    // UX gating only; the Worker independently re-verifies the caller on publish either way.
+    let authorMembers = null;
+    if (this.itemPath) {
+      try {
+        const t = await this.client.authorTargets?.();
+        if (t && Array.isArray(t.members)) authorMembers = t.members;
+      } catch { /* not superadmin, or unsupported on this host -- no Author section */ }
+    }
+    const curAuthorScope = this.itemScope === 'house' ? 'house' : 'member';
+    const curAuthorUsername = curAuthorScope === 'house' ? null : (this.presetStr(p.author) || '');
     // SOW-062 Phase 6: header = title + slug ONLY (the description moved into the rail Details per the mockup). The
     // rail renders the per-type RAIL_SCHEMA in order; fields NOT in the schema (nor header, nor publicStub which the
     // visibility switch folds in) are preserved HIDDEN so gather() still submits their existing values.
@@ -279,6 +293,16 @@ class GbtiContentEditor extends GbtiElement {
                <gbti-discussion data-gbti-hide-author-notes data-gbti-target-type="${esc(this.type)}" data-gbti-target-slug="${esc(slug)}"${this.aliasSlugs().length ? ` data-gbti-target-aliases="${esc(this.aliasSlugs().join(','))}"` : ''}></gbti-discussion>
              </section>` : '';
     const docSections = videoSection + authorSection + discussionSection;
+    // sow-183: the Author-reassignment rail section (superadmin-only; null authorMembers hides it entirely).
+    // A plain <select>, read at publish time (doPublish) -- exactly like the Permalink field, a pending change
+    // takes effect only when Publish is pressed, no separate action or dialog.
+    const ownerFieldHtml = authorMembers ? (() => {
+      const opt = (value, label, selected) => `<option value="${esc(value)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
+      const options = [opt('house', 'House / GBTI Network', curAuthorScope === 'house')]
+        .concat(authorMembers.map((m) => opt(`member:${m.username}`, m.username, curAuthorScope === 'member' && m.username === curAuthorUsername)))
+        .join('');
+      return `<details open class="rsec"><summary><span class="st"><span class="si">${USERS}</span>Author</span><span class="chev">${CHEV}</span></summary><div class="rbody"><div class="fld"><select id="ownerSelect" class="selbox">${options}</select><div class="urlprev">Superadmin only. Reassigning moves this item to the new owner's folder when you Publish; the public link stays the same.</div></div></div></details>`;
+    })() : '';
     // SOW-062 P6 rail-2: the stat tiles footer, shown for a published post/product/prompt (in the rail).
     const showStats = isPub && slug && ['post', 'product', 'prompt'].includes(this.type);
     const railFootHtml = showStats ? `
@@ -559,6 +583,7 @@ class GbtiContentEditor extends GbtiElement {
            </article>
            <aside class="rail">
              <details open class="rsec"><summary><span class="st"><span class="si">${DOC}</span>Type</span><span class="chev">${CHEV}</span></summary><div class="rbody"><div class="fld"><div class="urlprev" style="color:var(--s-fg-soft)">This is a <b>${esc(this.typeLabel())}</b>. Type is set at creation and can't be changed here.</div></div></div></details>
+             ${ownerFieldHtml}
              ${sectionsHtml}
              ${railFootHtml}
            </aside>
@@ -1125,14 +1150,29 @@ class GbtiContentEditor extends GbtiElement {
       // network PR FROM that fork branch, so no separate pre-publish saveDraft is needed.
       // SOW-112 v2: `path` names the loaded canonical item; a changed permalink makes this publish a RENAME.
       // SOW-145: a house target publishes to house/ (author stays 'gbti'); the server re-checks superadmin.
-      const res = await this.client.publish({ type, input, body, authorNote, path: this.itemPath || undefined, scope: this.itemScope === 'house' ? 'house' : undefined });
+      // sow-183: the Author picker (superadmin-only, rendered only for an existing item) -> authorTarget. Sent
+      // whenever the field is present, whether or not the pick actually differs from the current owner; the
+      // host resolves that diff itself (a same-owner pick is a correctly-detected no-op, same as a re-publish
+      // with an unchanged permalink).
+      const ownerSel = this.$('#ownerSelect')?.value;
+      const authorTarget = ownerSel === 'house' ? { scope: 'house' }
+        : ownerSel?.startsWith('member:') ? { scope: 'member', username: ownerSel.slice(7) }
+        : undefined;
+      const res = await this.client.publish({ type, input, body, authorNote, path: this.itemPath || undefined, scope: this.itemScope === 'house' ? 'house' : undefined, authorTarget });
       this._setChip(`${CHECK} Published`, 'ok');
       this._dirty = false; this.$('#publish')?.setAttribute('hidden', ''); // now live + matches -> nothing to publish
       // SOW-112 QA (owner-directed): the publish-expectation banner appears only AFTER Publish is pressed.
       this._banner(`Publishing is not instant. It opens a pull request that auto-merges, then the site rebuilds, so your change reaches the live edge in about 2 to 3 minutes. Track it in your <b>WorkBench</b> under Pull requests.`);
       const renameNote = res?.renamed ? ` The permalink changed from ${esc(res.renamed.from)} to ${esc(res.renamed.to)}; the old link starts redirecting in about 2 to 3 minutes.` : '';
-      this.out(`<span class="tag ok">submitted</span> ${esc(submitAck({ prNumber: res.prNumber, autoMerge: true }))}${renameNote}`); // SOW-072 P2: consistent ack (esc: out() writes innerHTML)
+      const ownerLabel = (o) => (o?.scope === 'house' ? 'House / GBTI Network' : (o?.username || 'a member'));
+      const reassignNote = res?.reassigned ? ` This item moved from ${esc(ownerLabel(res.reassigned.from))} to ${esc(ownerLabel(res.reassigned.to))}.` : '';
+      this.out(`<span class="tag ok">submitted</span> ${esc(submitAck({ prNumber: res.prNumber, autoMerge: true }))}${renameNote}${reassignNote}`); // SOW-072 P2: consistent ack (esc: out() writes innerHTML)
       if (res?.renamed && this.preset?.input) { this.preset.input.slug = res.renamed.to; } // the view reflects the accepted rename
+      if (res?.reassigned && this.preset?.input) { this.preset.input.author = res.reassigned.to.scope === 'house' ? 'gbti' : res.reassigned.to.username; }
+      // sow-183: keep itemPath/itemScope live from the Worker's own account of where the item now sits, so a
+      // SECOND publish in the same session (no reload) targets the new location rather than the just-deleted
+      // old one -- true for either a rename or a reassignment, and a harmless no-op for a plain edit.
+      if (res?.path) { this.itemPath = res.path; this.itemScope = res.path.startsWith('house/') ? 'house' : 'member'; }
       this.emit('gbti-published', res);
     } catch (err) {
       this._setChip('');

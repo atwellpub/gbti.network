@@ -150,6 +150,34 @@ export async function membershipAuthor(request, env, deps = {}) {
   return { status: 200, body: { ok: true, branch, number: pr.data.number, html_url: pr.data.html_url } };
 }
 
+// sow-183: GET /membership/author/targets — superadmin-only, the picker source for the shared editor's Author
+// field (content authorship reassignment). Reads the SAME live house/members-index.yml as membershipAuthor
+// (never a directory-filtered or opt-in-only list, unlike the public /members-index.json), so every real member
+// folder is a valid reassignment target regardless of profile visibility. House is not listed here; the editor
+// adds its own fixed "House / GBTI Network" option (it is not a members-index entry).
+export async function membershipAuthorTargets(request, env, deps = {}) {
+  const {
+    fetchImpl = globalThis.fetch, authorizeSuper = authorizeSuperadmin,
+    upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
+  } = deps;
+  if (env?.MEMBERSHIP_AUTHOR_ENABLED !== 'true') {
+    return { status: 403, body: { error: 'author_disabled', message: 'hosted authoring is not enabled' } };
+  }
+  const superadmin = await authorizeSuper(request, env, deps);
+  if (!superadmin.ok) return { status: superadmin.status, body: superadmin.body };
+
+  let instToken;
+  try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
+  const idx = await ghJson(fetchImpl, `${GH}/repos/${upstream}/contents/house/members-index.yml?ref=main`, { headers: GH_HEADERS(instToken) });
+  if (!idx.res.ok) return { status: 502, body: { error: 'index_unavailable', message: 'could not read the member index' } };
+  let indexText = '';
+  try { indexText = atob(String(idx.data?.content || '').replace(/\n/g, '')); } catch { /* fail closed below: an empty map */ }
+  const members = [...parseMembersIndex(indexText).entries()]
+    .map(([githubId, username]) => ({ githubId, username }))
+    .sort((a, b) => a.username.localeCompare(b.username));
+  return { status: 200, body: { ok: true, members } };
+}
+
 /** PUT (or DELETE for content: null) one file on the branch; retries once on a 409 sha race. */
 async function applyFile(fetchImpl, instToken, upstream, branch, f, attempt = 0) {
   const url = `${GH}/repos/${upstream}/contents/${f.path}`;

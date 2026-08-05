@@ -163,11 +163,11 @@ test('the shared tier + target sets are as expected', () => {
 test('renameOriginOf: resolves an own item of the same type, else null', () => {
   assert.deepEqual(
     renameOriginOf({ path: 'members/gwen/posts/old-slug/index.md', username: 'gwen', type: 'post' }),
-    { oldSlug: 'old-slug', oldPath: 'members/gwen/posts/old-slug/index.md' },
+    { scope: 'member', username: 'gwen', oldSlug: 'old-slug', oldPath: 'members/gwen/posts/old-slug/index.md' },
   );
   // Case-insensitive username match (the folder is lowercase).
   assert.ok(renameOriginOf({ path: 'members/gwen/products/x/index.md', username: 'Gwen', type: 'product' }));
-  // Another member's path -> null (you may only rename your own).
+  // Another member's path -> null (you may only rename your own) UNLESS allowAnyFolder (sow-183).
   assert.equal(renameOriginOf({ path: 'members/alice/posts/x/index.md', username: 'gwen', type: 'post' }), null);
   // Wrong type (a product path while publishing a post) -> null.
   assert.equal(renameOriginOf({ path: 'members/gwen/products/x/index.md', username: 'gwen', type: 'post' }), null);
@@ -175,6 +175,23 @@ test('renameOriginOf: resolves an own item of the same type, else null', () => {
   assert.equal(renameOriginOf({ path: 'members/gwen/comments/intro-x.md', username: 'gwen', type: 'post' }), null);
   assert.equal(renameOriginOf({ path: 'house/posts/x/index.md', username: 'gwen', type: 'post' }), null);
   assert.equal(renameOriginOf({ path: undefined, username: 'gwen', type: 'post' }), null);
+});
+
+// sow-183: allowAnyFolder resolves house/ and another member's folder (a superadmin's authorship reassignment).
+// This function does no authorization itself -- it is only reachable in practice via UI already gated to
+// role==='superadmin' (gbti-workspace.mjs), and the Worker independently re-verifies (authorizeSuperadmin).
+test('renameOriginOf: allowAnyFolder resolves house/ and any member folder; still shape + type checked', () => {
+  assert.deepEqual(
+    renameOriginOf({ path: 'house/posts/quarterly-update/index.md', type: 'post', allowAnyFolder: true }),
+    { scope: 'house', username: null, oldSlug: 'quarterly-update', oldPath: 'house/posts/quarterly-update/index.md' },
+  );
+  assert.deepEqual(
+    renameOriginOf({ path: 'members/rfilipo/products/gizmo/index.md', username: 'atwellpub', type: 'product', allowAnyFolder: true }),
+    { scope: 'member', username: 'rfilipo', oldSlug: 'gizmo', oldPath: 'members/rfilipo/products/gizmo/index.md' },
+  );
+  // Still rejects a mismatched type and a non-item path even with allowAnyFolder.
+  assert.equal(renameOriginOf({ path: 'house/products/gizmo/index.md', type: 'post', allowAnyFolder: true }), null);
+  assert.equal(renameOriginOf({ path: 'house/roles.yml', type: 'post', allowAnyFolder: true }), null);
 });
 
 test('mergedRedirectFrom: a rename appends + dedupes the old URL; a plain re-publish KEEPS the old redirects', () => {
@@ -204,7 +221,8 @@ test('mergedRedirectFrom: a rename appends + dedupes the old URL; a plain re-pub
 
 test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or no-intro is empty', () => {
   const introText = serializeContentFile({ id: 'intro-old', targetType: 'product', targetSlug: 'old', authorNote: true, visibility: 'public' }, 'From the author.');
-  const files = renameIntroMoveFiles({ username: 'gwen', type: 'product', oldSlug: 'old', newSlug: 'new', introText });
+  const from = { scope: 'member', username: 'gwen' };
+  const files = renameIntroMoveFiles({ from, type: 'product', oldSlug: 'old', newSlug: 'new', introText });
   assert.equal(files.length, 2);
   assert.equal(files[0].path, 'members/gwen/comments/intro-new.md');
   const movedFm = parseContentFile(files[0].content).frontmatter;
@@ -213,9 +231,21 @@ test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or 
   assert.equal(files[1].path, 'members/gwen/comments/intro-old.md');
   assert.equal(files[1].content, null, 'the old intro is deleted');
   // A post has no intro-comment requirement.
-  assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'post', oldSlug: 'old', newSlug: 'new', introText }), []);
+  assert.deepEqual(renameIntroMoveFiles({ from, type: 'post', oldSlug: 'old', newSlug: 'new', introText }), []);
   // No existing intro (introText null) -> nothing to move.
-  assert.deepEqual(renameIntroMoveFiles({ username: 'gwen', type: 'product', oldSlug: 'old', newSlug: 'new', introText: null }), []);
+  assert.deepEqual(renameIntroMoveFiles({ from, type: 'product', oldSlug: 'old', newSlug: 'new', introText: null }), []);
+});
+
+// sow-183: a `to` different from `from` moves the intro to the NEW owner's folder (house<->member reassignment),
+// not just a same-folder rename.
+test('renameIntroMoveFiles: a different `to` moves the intro to the new owner (house<->member)', () => {
+  const introText = serializeContentFile({ id: 'intro-gizmo', targetType: 'product', targetSlug: 'gizmo', authorNote: true, visibility: 'public' }, 'From the author.');
+  const houseToMember = renameIntroMoveFiles({ from: { scope: 'house' }, to: { scope: 'member', username: 'atwellpub' }, type: 'product', oldSlug: 'gizmo', newSlug: 'gizmo', introText });
+  assert.equal(houseToMember[0].path, 'members/atwellpub/comments/intro-gizmo.md');
+  assert.equal(houseToMember[1].path, 'house/comments/intro-gizmo.md');
+  const memberToHouse = renameIntroMoveFiles({ from: { scope: 'member', username: 'atwellpub' }, to: { scope: 'house' }, type: 'prompt', oldSlug: 'gizmo', newSlug: 'gizmo', introText });
+  assert.equal(memberToHouse[0].path, 'house/comments/intro-gizmo.md');
+  assert.equal(memberToHouse[1].path, 'members/atwellpub/comments/intro-gizmo.md');
 });
 
 // sow-182: house-content selection for the website WorkBench's House content scope, mirroring memberContent's

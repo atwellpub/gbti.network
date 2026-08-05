@@ -15,21 +15,20 @@
 // Now live on the web (earlier phases): members-only PUBLISH (via the cookie /membership/encrypt), IMAGE upload
 // (binary base64 entries), and PERMALINK RENAME (rename-at-publish, SOW-112 v2 — a changed permalink field makes
 // the publish a rename: the new path + the old-path deletes + redirectFrom in ONE hosted PR). SOW-182: house
-// content now LISTS and READS on the web (the public index already carried it; /membership/file already
-// allowed house/ paths for any signed-in member, see reviewFileContent in workers/signup/github-app.mjs). Still
-// refused:
-//   - HOUSE PUBLISH: writing house/ requires a superadmin check this Worker's hosted-authoring endpoint
-//     (/membership/author, workers/signup/membership-author.mjs) does not have yet — it resolves every write to
-//     the CALLER's own member folder and has no house/ or superadmin concept at all today, unlike the
-//     extension's fork-based publish (which re-checks superadmin server-side via requireSuperadminForHouse).
-//     Porting that is real new Worker-side authorization code, not a client-side fix; deliberately not done here.
+// content LISTS and READS on the web (the public index already carried it; /membership/file already allowed
+// house/ paths for any signed-in member, see reviewFileContent in workers/signup/github-app.mjs). SOW-183: house
+// PUBLISH + superadmin content-authorship REASSIGNMENT (house<->member, member<->member) now write too — the
+// Worker's hosted-authoring endpoint independently re-verifies the caller is superadmin (authorizeSuperadmin,
+// membership-admin.mjs) before accepting a write outside the caller's own folder, so this adapter's own
+// house/authorTarget handling below is UX convenience, not the security boundary; a non-superadmin's stray
+// attempt still fails closed server-side.
 
 import { buildContentFile, buildCommentFile, buildShareFile, shareId as makeShareId, flipContentStatus, parseContentFile, commentId } from '../../client/src/content-ops.mjs';
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, houseContent } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, houseContent } from './workbench-client-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
@@ -74,13 +73,18 @@ function readCsrf(): string | null {
 
 /** Seed the from-the-author intro comment (product/prompt) in the SAME publish PR, so the gate's diff-scoped
  *  intro check passes. Deterministic id (intro-<slug>): a re-publish updates the same comment. Mirrors
- *  operations.buildIntroCommentFile. Returns a { path, content } file, or null. */
-function buildIntroFile(username: string, built: any, authorNote: string | undefined): { path: string; content: string } | null {
+ *  operations.buildIntroCommentFile. Returns a { path, content } file, or null.
+ *  sow-183: `target` is the item's TARGET { scope, username } (house or member), not always the acting caller
+ *  -- a superadmin's house item gets a house/comments/ intro, exactly like its content .md. `actingUser` is
+ *  ALWAYS the verified caller's own login (buildCommentFile requires a non-empty username even for scope
+ *  'house', where it is inert actor context only -- resolveTarget's house branch ignores it for the frontmatter
+ *  author, which is always 'gbti'). */
+function buildIntroFile(target: { scope: string; username: string | null }, actingUser: string, built: any, authorNote: string | undefined): { path: string; content: string } | null {
   const note = String(authorNote ?? '').trim();
   if (!note || !built?.slug || !['product', 'prompt'].includes(built.type)) return null;
   const intro = buildCommentFile({
-    username,
-    scope: 'member',
+    username: target.scope === 'house' ? actingUser : target.username,
+    scope: target.scope,
     input: {
       id: `intro-${built.slug}`,
       targetType: built.type,
@@ -177,72 +181,100 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
   // a slug change the old file's redirectFrom is merged in (a plain re-publish used to DROP it). Mirrors the
   // isHostedCtx branch of client/src/operations.mjs publish(); the website is hosted-only, so the fork dance does
   // not apply (the hosted branch is always fresh-based on live main).
-  async function publish({ type, input = {}, body = '', authorNote, path, scope }: any) {
-    if (scope === 'house' || String(path || '').startsWith('house/')) {
-      throw err('bad-request', 'House content is published from the browser extension for now.');
-    }
-    // Resolve the rename origin (the own item the editor loaded) and read its frontmatter for the redirectFrom
-    // merge, the publishedAt preservation, and the old .enc path.
-    const origin = renameOriginOf({ path, username: user, type });
+  //
+  // sow-183: `authorTarget` ({ scope: 'house'|'member', username? }), when given, reassigns an EXISTING item's
+  // author -- the shared editor's Author field only ever sends this for a superadmin and only when it differs
+  // from the loaded item's current home (gbti-content-editor.mjs). It generalizes the rename machinery above: a
+  // MOVE is now "the resolved path changed", for a slug reason, an author reason, or both, in one hosted PR.
+  async function publish({ type, input = {}, body = '', authorNote, path, scope, authorTarget }: any) {
+    // Both triggers below (a house path, or an explicit authorTarget) are only reachable through UI already
+    // gated to role==='superadmin' (gbti-workspace.mjs _canScope, the editor's Author field) -- the Worker
+    // independently re-verifies the caller is superadmin (authorizeSuperadmin) before accepting the write, so
+    // this is UX convenience, not the security boundary; a non-superadmin's stray attempt still fails closed.
+    const allowAnyFolder = String(path || '').startsWith('house/') || authorTarget != null;
+    // Resolve the origin (the item the editor loaded) and read its frontmatter for the redirectFrom merge, the
+    // publishedAt preservation, the old .enc path, and (with authorTarget) the old owner to move away from.
+    const origin = renameOriginOf({ path, username: user, type, allowAnyFolder });
     let oldFm: any = null;
     if (origin) {
       const oldText = await readOwnFile(origin.oldPath);
       if (oldText != null) { try { oldFm = parseContentFile(oldText).frontmatter ?? {}; } catch { oldFm = null; } }
     }
-    const renaming = Boolean(oldFm) && typeof input?.slug === 'string' && input.slug !== origin!.oldSlug;
+    // The TARGET folder for this publish. An explicit authorTarget (an existing item, superadmin) wins; else the
+    // loaded origin's own folder (a plain edit, unchanged); else the workspace's create-time scope (a NEW item),
+    // falling back to the caller's own folder (the pre-sow-183 default, unchanged). buildContentFile/buildCommentFile
+    // each resolve { folder, author } from { scope, username } internally (content-ops.mjs resolveTarget), so this
+    // only needs to settle the two raw inputs.
+    const target: { scope: string; username: string | null } = authorTarget
+      ? { scope: authorTarget.scope === 'house' ? 'house' : 'member', username: authorTarget.scope === 'house' ? null : String(authorTarget.username || '') }
+      : origin ? { scope: origin.scope, username: origin.username }
+      : { scope: scope === 'house' ? 'house' : 'member', username: user };
+    const slugChanged = Boolean(origin) && typeof input?.slug === 'string' && input.slug !== origin!.oldSlug;
+    const authorChanged = Boolean(origin) && (target.scope !== origin!.scope || target.username !== origin!.username);
+    const moved = slugChanged || authorChanged;
     const effInput: any = { ...input };
-    const redirects = mergedRedirectFrom({ oldFm, inputRedirectFrom: input?.redirectFrom, renaming, type, oldSlug: origin?.oldSlug });
+    // The 301 redirect is only meaningful when the public URL actually changed (the slug) -- never for an
+    // author-only reassignment (the public URL is type+slug only, unaffected by which folder the file lives in).
+    const redirects = mergedRedirectFrom({ oldFm, inputRedirectFrom: input?.redirectFrom, renaming: slugChanged, type, oldSlug: origin?.oldSlug });
     if (redirects) effInput.redirectFrom = redirects;
-    // A rename must not re-stamp publishedAt (feeds stay stable; the item is not new). The editor stamps it on
-    // every publish, so restore the original for the rename case only.
-    if (renaming && oldFm?.publishedAt) effInput.publishedAt = oldFm.publishedAt;
+    // A move (rename or reassignment) must not re-stamp publishedAt (feeds stay stable; the item is not new).
+    // The editor stamps it on every publish, so restore the original for the move case only.
+    if (moved && oldFm?.publishedAt) effInput.publishedAt = oldFm.publishedAt;
 
     let built: any;
     try {
-      built = buildContentFile({ type, username: user, input: { ...effInput, status: effInput.status || 'published' }, body, scope: 'member' });
+      built = buildContentFile({ type, username: target.username, input: { ...effInput, status: effInput.status || 'published' }, body, scope: target.scope });
     } catch (e: any) {
       throw new WorkbenchClientError('invalid-content', e?.message || 'the content is invalid');
     }
-    if (renaming) {
+    if (moved) {
       // The new path must not already exist (the CI unique-slug guard is the backstop).
       const collision = await readOwnFile(built.path);
-      if (collision != null) throw err('bad-request', `the permalink "${built.slug}" is already taken`);
+      if (collision != null) throw err('bad-request', `"${built.slug}" already exists at the target location`);
     }
     // SOW-016 / Phase 3c: a whole-item members body OR a `<!-- members-only -->` section is encrypted to a sibling
     // .enc (via the cookie /membership/encrypt), and index.md keeps only the public teaser + the encryptedBody
     // pointer. planMemberFiles overrides any stale encryptedBody with the deterministic path, so a re-publish
-    // overwrites the same .enc (no orphan). On a rename it writes the NEW-slug .enc; the OLD one is deleted below.
+    // overwrites the same .enc (no orphan). On a move it writes the NEW-location .enc; the OLD one is deleted below.
     const plan = await planMemberFiles({ built, body, encrypt: encryptViaCookie });
     const files: Array<{ path: string; content?: string | null; contentBase64?: string }> = plan ? plan.files : [{ path: built.path, content: built.markdown }];
-    const intro = buildIntroFile(user, built, authorNote);
+    const intro = buildIntroFile(target, user, built, authorNote);
     if (intro) files.push(intro);
     // sow-158 image upload: flush the pending images this item references into the same PR (binary base64 entries
     // the Worker commits raw). Only referenced uploads ride along; each is removed from the pending set once queued.
+    // Newly staged uploads always live under the ACTING caller's own folder (stageImage), regardless of target.
     for (const p of referencedImagePaths(built.frontmatter, user)) {
       const b64 = pendingImages.get(p);
       if (b64) { files.push({ path: p, contentBase64: b64 }); pendingImages.delete(p); }
     }
-    // Rename cleanup: delete the old index.md + old .enc, and move the from-the-author intro (product/prompt),
-    // all in the same PR. Fail closed if the original vanished from main (never a half-move).
-    if (renaming) {
+    // Move cleanup: delete the old index.md + old .enc, and move the from-the-author intro (product/prompt), all
+    // in the same PR. Fail closed if the original vanished from main (never a half-move).
+    if (moved) {
       const onMain = (await readOwnFile(origin!.oldPath)) != null;
-      if (!onMain) throw err('bad-request', 'the original item could not be found on the network; refresh and try the rename again');
+      if (!onMain) throw err('bad-request', 'the original item could not be found on the network; refresh and try again');
       files.push({ path: origin!.oldPath, content: null });
       if (typeof oldFm?.encryptedBody === 'string' && oldFm.encryptedBody) files.push({ path: oldFm.encryptedBody, content: null });
+      const fromTarget = { scope: origin!.scope, username: origin!.username };
       if (!intro) {
-        const oldIntroText = await readOwnFile(`members/${user}/comments/intro-${origin!.oldSlug}.md`);
-        files.push(...renameIntroMoveFiles({ username: user, type, oldSlug: origin!.oldSlug, newSlug: built.slug, introText: oldIntroText }));
+        const oldIntroText = await readOwnFile(`${introFolderFor(fromTarget)}/comments/intro-${origin!.oldSlug}.md`);
+        files.push(...renameIntroMoveFiles({ from: fromTarget, to: target, type, oldSlug: origin!.oldSlug, newSlug: built.slug, introText: oldIntroText }));
       } else {
-        const oldIntro = `members/${user}/comments/intro-${origin!.oldSlug}.md`;
+        const oldIntro = `${introFolderFor(fromTarget)}/comments/intro-${origin!.oldSlug}.md`;
         if ((await readOwnFile(oldIntro)) != null) files.push({ path: oldIntro, content: null });
       }
     }
     const title = `Publish ${TYPE_LABEL[built.type] || built.type}: ${built.frontmatter?.title || built.slug || user}`;
-    const itemId = hostedItemId(built.type, renaming ? origin!.oldSlug : built.slug);
+    const itemId = hostedItemId(built.type, moved ? origin!.oldSlug : built.slug);
     const res = await workerPost('/membership/author', { itemId, files, title });
     return {
       prNumber: res.number, prUrl: res.html_url, branch: res.branch, updated: !!res.already, hosted: true,
-      encrypted: Boolean(plan?.encPath), ...(renaming ? { renamed: { from: origin!.oldSlug, to: built.slug } } : {}),
+      encrypted: Boolean(plan?.encPath),
+      // sow-183: the item's CURRENT canonical path after this publish (unchanged for a plain edit; the new
+      // location for a move) -- lets the editor keep itemPath/itemScope live for a second publish in the SAME
+      // session, with no reload, whether this one moved the item or not.
+      path: built.path,
+      ...(slugChanged ? { renamed: { from: origin!.oldSlug, to: built.slug } } : {}),
+      ...(authorChanged ? { reassigned: { from: { scope: origin!.scope, username: origin!.username }, to: { scope: target.scope, username: target.username } } } : {}),
     };
   }
 
@@ -390,6 +422,13 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
 
     // ----- authoring -----
     publish,
+    // sow-183: the Author-reassignment picker source (gbti-content-editor.mjs). Superadmin-only server-side
+    // (authorizeSuperadmin) -- a non-superadmin's call throws (parseJson on a 403), which the editor treats
+    // exactly like an absent/unsupported client method: the Author field simply does not render for them.
+    async authorTargets() {
+      const r = await workerGet('/membership/author/targets');
+      return { members: Array.isArray(r?.members) ? r.members : [] };
+    },
     async saveDraft({ type, input = {}, body = '', path }: any) {
       // A members-only draft is allowed: its plain body stays in the private, erasable KV draft store (SOW-157),
       // never git; publishDraft() encrypts it at publish time. So no members refusal here.

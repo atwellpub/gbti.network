@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { membershipAuthor } from '../workers/signup/membership-author.mjs';
+import { membershipAuthor, membershipAuthorTargets } from '../workers/signup/membership-author.mjs';
 
 const env = {
   GITHUB_APP_ID: '123', GITHUB_APP_INSTALLATION_ID: '999', GITHUB_APP_PRIVATE_KEY: 'PEM',
@@ -298,4 +298,37 @@ test('sow-158 Phase 3a: a website (cookie) caller publishes with NO bearer re-ch
   assert.equal(r.body.ok, true);
   assert.equal(r.body.branch, 'hosted/2002207/my-first-post', 'server-inserted github_id in the hosted branch');
   assert.equal(fetchUserCalled, false, 'the cookie path does NOT re-verify a bearer token');
+});
+
+// ---- sow-183: GET /membership/author/targets -- the Author-reassignment picker source (superadmin-only) ----
+
+test('membershipAuthorTargets: a superadmin gets the live members-index, sorted by username', async () => {
+  const rec = [];
+  const superMirror = freshMirror({ roles: { superadmins: [{ github_id: '2002207' }], admins: [], moderators: [] } });
+  const envSuper = { ...env, SIGNUP_KV: { get: async () => superMirror } };
+  const r = await membershipAuthorTargets(req(null), envSuper, { fetchImpl: ghFetch(rec), fetchUser: userMe, signJwt, kv: fakeKv() });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(r.body.members, [
+    { githubId: '2002207', username: 'atwellpub' },
+    { githubId: '225425', username: 'rfilipo' },
+  ]);
+});
+
+test('membershipAuthorTargets: a non-superadmin is forbidden before any GitHub read', async () => {
+  const rec = [];
+  const r = await membershipAuthorTargets(req(null), { ...env, SIGNUP_KV: { get: async () => freshMirror() } }, { fetchImpl: ghFetch(rec), fetchUser: userMe });
+  assert.equal(r.status, 403);
+  assert.equal(rec.length, 0, 'no GitHub call is made for a non-superadmin');
+});
+
+test('membershipAuthorTargets: flag off is a hard 403 before any authorization check', async () => {
+  const r = await membershipAuthorTargets(req(null), { ...env, MEMBERSHIP_AUTHOR_ENABLED: 'false' }, { fetchUser: userMe });
+  assert.equal(r.status, 403);
+  assert.equal(r.body.error, 'author_disabled');
+});
+
+test('membershipAuthorTargets: no token is 401, before the mirror is ever read', async () => {
+  const r = await membershipAuthorTargets({ headers: { get: () => null } }, env, { fetchUser: userMe });
+  assert.equal(r.status, 401);
 });
