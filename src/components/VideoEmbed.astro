@@ -5,12 +5,15 @@ interface Props {
   video: string;
   title?: string;
 }
-import { embedUrl } from '../../client/src/video-embed.mjs'; // SOW-062 5d: the ONE shared YouTube/Vimeo extractor
+import { embedUrl, isPortraitEmbed } from '../../client/src/video-embed.mjs'; // SOW-062 5d: the ONE shared YouTube/Vimeo extractor
 const { video, title = 'Embedded video' } = Astro.props;
 const src = embedUrl(video);
+// Portrait providers (TikTok) need a 9:16 frame; everything else keeps the 16:9 default. The same
+// isPortraitEmbed the extension share views use, so a given link frames identically in both hosts.
+const portrait = src ? isPortraitEmbed(src) : false;
 ---
 {src && (
-  <div class="aspect-video w-full overflow-hidden" style="border-radius:var(--r-lg);background:var(--ink)">
+  <div class:list={[portrait ? 'aspect-[9/16] mx-auto max-w-[420px]' : 'aspect-video', 'w-full overflow-hidden']} style="border-radius:var(--r-lg);background:var(--ink)">
     <iframe
       src={src}
       title={title}

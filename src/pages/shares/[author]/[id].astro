@@ -11,6 +11,8 @@ import FavoriteButton from '../../../components/FavoriteButton.astro';
 import CollectionButton from '../../../components/CollectionButton.astro';
 import SubscribeButton from '../../../components/SubscribeButton.astro';
 import Comments from '../../../components/blog/Comments.astro';
+import VideoEmbed from '../../../components/VideoEmbed.astro';
+import { embedUrl } from '../../../../client/src/video-embed.mjs';
 import { getCollection } from 'astro:content';
 import { authorDisplay, authorHref, formatDate, authorAvatar } from '../../../lib/authors';
 import { isPublicShare, decodeEntities, utmUrl } from '../../../lib/home-feed.mjs';
@@ -39,6 +41,12 @@ const headline = profile?.data.headline;
 const body = (share.rendered?.html ?? '').trim();
 // sow-145: every outbound click-through carries the UTM attribution for the source publication.
 const outUrl = d.url ? utmUrl(d.url, { campaign: 'shares' }) : undefined;
+// A share pointing at a recognized video (YouTube/Vimeo/TikTok/Rumble) PLAYS INLINE, matching what the
+// extension share views have done since SOW-092: the player replaces the static share image, which for a
+// video link is just that video's thumbnail anyway. Unrecognized links keep the image + read CTA unchanged
+// (embedUrl fails closed to null). No relay needed here: unlike a chrome-extension:// page, this site sends
+// a valid Referer, so it frames the provider directly. CSP frame-src already allows all four providers.
+const videoSrc = d.url ? embedUrl(d.url) : null;
 ---
 <BaseLayout title={title} description={desc ?? `A link ${authorDisplay(d.author)} shared with the GBTI Network.`} ogImage={typeof d.image === 'string' && d.image ? d.image : undefined} ogType="article">
   <div class="wrap detail-page" data-gbti-reader-hash={`tab=share&read=${encodeURIComponent(slug)}`}>
@@ -61,9 +69,11 @@ const outUrl = d.url ? utmUrl(d.url, { campaign: 'shares' }) : undefined;
       <h1 class="h1 share-title">{title}</h1>
       {quotedDesc && <p class="lead share-quote" style="margin-top:14px">{quotedDesc} <span class="sq-credit">- {srcDomain ?? 'the source'}</span></p>}
 
-      {typeof d.image === 'string' && d.image && (
-        <a href={outUrl} target="_blank" rel="noopener nofollow" class="share-hero" aria-hidden="true" tabindex="-1"><img src={d.image} alt="" loading="lazy" decoding="async" /></a>
-      )}
+      {videoSrc
+        ? <div class="share-player"><VideoEmbed video={d.url!} title={title} /></div>
+        : typeof d.image === 'string' && d.image && (
+            <a href={outUrl} target="_blank" rel="noopener nofollow" class="share-hero" aria-hidden="true" tabindex="-1"><img src={d.image} alt="" loading="lazy" decoding="async" /></a>
+          )}
 
       {body && (
         <article class="card share-member-note" style="padding:24px;margin-top:26px">
@@ -79,7 +89,7 @@ const outUrl = d.url ? utmUrl(d.url, { campaign: 'shares' }) : undefined;
       )}
 
       <div class="share-actions">
-        {d.url && <a href={outUrl} target="_blank" rel="noopener nofollow" class="btn btn-primary">Read on {srcDomain ?? 'the source'} <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>}
+        {d.url && <a href={outUrl} target="_blank" rel="noopener nofollow" class="btn btn-primary">{videoSrc ? 'Watch video on' : 'Read on'} {srcDomain ?? 'the source'} <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>}
         <FavoriteButton targetType="share" targetSlug={slug} count={favoriteCount('share', slug)} />
         <CollectionButton targetType="share" targetSlug={slug} />
       </div>
@@ -124,3 +134,10 @@ const outUrl = d.url ? utmUrl(d.url, { campaign: 'shares' }) : undefined;
     </div>
   </div>
 </BaseLayout>
+
+<style>
+  /* Scoped on purpose: the inline player sits where .share-hero would, with the same top gap, but its
+     radius + background come from VideoEmbed itself. Kept off src/styles/gbti-v3.css so this page owns
+     the one rule it needs. */
+  .share-player { margin-top: 26px; }
+</style>
