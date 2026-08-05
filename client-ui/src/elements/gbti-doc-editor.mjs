@@ -301,7 +301,9 @@ class GbtiDocEditor extends GbtiElement {
         // sow-165: a body image is usually a REPO-relative path (`./images/x.webp`). Prefixing the site
         // origin produced `https://gbti.network/./images/x.webp`, a guaranteed 404, which is why every body
         // image rendered broken in the editor. Resolve against the item's folder like the reader does.
-        const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : '';
+        // sow-165: a freshly-staged image previews from its local object URL (jsDelivr 404s pre-merge); an
+        // already-committed image resolves against the item folder over jsDelivr like the reader does.
+        const src = hasUrl ? esc((this._stagedSrc && this._stagedSrc[b.url]) || resolveContentAsset(b.url, this.itemPath)) : '';
         return `<div class="card"><div class="card-h">${svg('img')} Image</div>`
           + `<div class="imgframe">`
           +   (hasUrl ? `<img src="${src}" alt="" />` : `<div class="imgph" data-imgdrop="${b._id}" title="Drop an image here, or click to upload">${svg('img')}<span class="imgph-t">Drop an image here, or click to upload</span></div>`)
@@ -529,8 +531,13 @@ class GbtiDocEditor extends GbtiElement {
         r.onerror = () => rej(new Error('read failed'));
         r.readAsDataURL(file);
       });
-      const out = await this.client.stageImage({ filename: file.name, dataBase64 });
+      // sow-165: pass the item path so the host CO-LOCATES the image in the item's ./images/ folder and returns
+      // the canonical `./images/<file>` reference (native Astro resolution; the old per-user path broke the build).
+      const out = await this.client.stageImage({ filename: file.name, dataBase64, itemPath: this.itemPath });
       b.url = out.path;
+      // A just-staged image is not on main yet, so its jsDelivr URL 404s until the PR merges. Preview it from the
+      // local file via an object URL keyed by the stored path, which the renderer consults before jsDelivr.
+      try { (this._stagedSrc ||= {})[b.url] = URL.createObjectURL(file); } catch { /* no URL in this host */ }
       if (!b.alt) b.alt = file.name.replace(/\.[^.]+$/, '');
       this._render(); this._change();
     } catch {

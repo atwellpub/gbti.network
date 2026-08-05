@@ -9,7 +9,7 @@ import path from 'node:path';
 import { FIELDS, fieldsFor } from '../client/src/form-fields.mjs';
 import { schemaFor } from '../client/src/schemas.mjs';
 import { renderMarkdown } from '../client/src/markdown.mjs';
-import { stageImage } from '../client/src/operations.mjs';
+import { stageImage, itemImagesDir } from '../client/src/operations.mjs';
 import { createStager } from '../client/src/repo-fs.mjs';
 
 const FORCED_OR_SYSTEM = ['type', 'author', 'username', 'contributors', 'tier', 'joinedAt'];
@@ -62,4 +62,40 @@ test('stageImage: writes a scoped image and rejects traversal / bad type', () =>
   assert.throws(() => stageImage(ctx, { filename: '../escape.png', dataBase64: data }), /invalid filename/);
   assert.throws(() => stageImage(ctx, { filename: 'evil.exe', dataBase64: data }), /unsupported image type/);
   assert.throws(() => stageImage(ctx, { filename: 'pic.png' }), /no image data/);
+});
+
+test('sow-165 itemImagesDir: resolves the own/house item folder, null for unsafe or foreign paths', () => {
+  // own member item -> co-located images dir alongside index.md
+  assert.equal(itemImagesDir('members/alice/posts/hello/index.md', 'alice'), 'members/alice/posts/hello/images');
+  assert.equal(itemImagesDir('members/alice/products/tool/index.md', 'alice'), 'members/alice/products/tool/images');
+  // house item -> allowed (house authoring)
+  assert.equal(itemImagesDir('house/posts/news/index.md', 'alice'), 'house/posts/news/images');
+  // a leading slash is tolerated (normalized)
+  assert.equal(itemImagesDir('/members/alice/posts/hello/index.md', 'alice'), 'members/alice/posts/hello/images');
+  // ANOTHER member's folder -> null (never write outside the caller's tree)
+  assert.equal(itemImagesDir('members/bob/posts/hello/index.md', 'alice'), null);
+  // traversal / backslash / empty / no-slash -> null
+  assert.equal(itemImagesDir('members/alice/../bob/posts/x/index.md', 'alice'), null);
+  assert.equal(itemImagesDir('members\\alice\\posts\\x\\index.md', 'alice'), null);
+  assert.equal(itemImagesDir('', 'alice'), null);
+  assert.equal(itemImagesDir(null, 'alice'), null);
+  assert.equal(itemImagesDir('index.md', 'alice'), null);
+});
+
+test('sow-165 stageImage: co-locates into the item folder and returns ./images when itemPath is known', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'gbti-img2-'));
+  const ctx = { identity: () => ({ username: 'alice', login: 'alice', githubId: '1' }), stager: createStager(repoPath), store: { get: (k) => ({ repoPath })[k] } };
+  const data = Buffer.from('PNGDATA').toString('base64');
+
+  const out = stageImage(ctx, { filename: 'shot.webp', dataBase64: data, itemPath: 'members/alice/products/tool/index.md' });
+  // the reference stored in content is the canonical repo-relative ./images path (native Astro resolution)
+  assert.equal(out.path, './images/shot.webp');
+  assert.equal(out.repoPath, 'members/alice/products/tool/images/shot.webp');
+  assert.ok(fs.existsSync(path.join(repoPath, out.repoPath)));
+
+  // a FOREIGN itemPath is rejected by itemImagesDir, so it falls back to the per-user library (never bob's tree)
+  const fallback = stageImage(ctx, { filename: 'shot.webp', dataBase64: data, itemPath: 'members/bob/products/tool/index.md' });
+  assert.equal(fallback.path, 'members/alice/images/shot.webp');
+  assert.ok(fs.existsSync(path.join(repoPath, 'members/alice/images/shot.webp')));
+  assert.ok(!fs.existsSync(path.join(repoPath, 'members/bob/products/tool/images/shot.webp')));
 });

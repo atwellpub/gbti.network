@@ -856,7 +856,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         }
         case "image": {
           const hasUrl = !!b.url;
-          const src = hasUrl ? esc(resolveContentAsset(b.url, this.itemPath)) : "";
+          const src = hasUrl ? esc(this._stagedSrc && this._stagedSrc[b.url] || resolveContentAsset(b.url, this.itemPath)) : "";
           return `<div class="card"><div class="card-h">${svg("img")} Image</div><div class="imgframe">` + (hasUrl ? `<img src="${src}" alt="" />` : `<div class="imgph" data-imgdrop="${b._id}" title="Drop an image here, or click to upload">${svg("img")}<span class="imgph-t">Drop an image here, or click to upload</span></div>`) + `<input type="file" accept="image/*" hidden data-imgfile="${b._id}" /></div><input data-edit="url" data-id="${b._id}" value="${esc(b.url || "")}" placeholder="Image URL or repo path" /><input data-edit="alt" data-id="${b._id}" value="${esc(b.alt || "")}" placeholder="Alt text" /><div class="up"><button type="button" class="up-btn" data-imgpick="${b._id}">${svg("img")} ${hasUrl ? "Replace image" : "Choose image"}</button><span class="up-st" data-imgst="${b._id}"></span></div></div>`;
         }
         case "embed":
@@ -1215,8 +1215,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           r.onerror = () => rej(new Error("read failed"));
           r.readAsDataURL(file);
         });
-        const out = await this.client.stageImage({ filename: file.name, dataBase64 });
+        const out = await this.client.stageImage({ filename: file.name, dataBase64, itemPath: this.itemPath });
         b.url = out.path;
+        try {
+          (this._stagedSrc ||= {})[b.url] = URL.createObjectURL(file);
+        } catch {
+        }
         if (!b.alt) b.alt = file.name.replace(/\.[^.]+$/, "");
         this._render();
         this._change();
@@ -2394,7 +2398,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // via jsDelivr over GitHub (the built site only serves the /_astro/-optimized variant, whose path the editor does
     // not have). This is why resolveAsset alone produced a broken `gbti.network/./images/...` url. Falls back safely.
     resolveCover(value) {
-      return resolveContentAsset(value, this.itemPath);
+      return this._stagedSrc && this._stagedSrc[value] || resolveContentAsset(value, this.itemPath);
     }
     async render() {
       if (!this.client) return;
@@ -3396,7 +3400,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!file) return;
       const dataBase64 = await fileToBase64(file);
       try {
-        const res = await this.client.stageImage({ filename: file.name, dataBase64 });
+        const res = await this.client.stageImage({ filename: file.name, dataBase64, itemPath: this.itemPath });
         const imgField = this.fields.find((f) => f.kind === "image");
         const el = imgField && this.$(`[data-key="${imgField.key}"]`);
         const wrap = imgField && this.$(`.field[data-fkey="${imgField.key}"]`);
@@ -3431,7 +3435,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const pick = control.querySelector("[data-cover-pick]");
       if (pick) pick.textContent = "Replace image";
       try {
-        const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(",")[1] || "" });
+        const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(",")[1] || "", itemPath: this.itemPath });
+        (this._stagedSrc ||= {})[res.path] = dataUrl;
         const el = control.querySelector('[data-key][data-kind="image"]');
         if (el) el.value = res.path;
         this.out(`Cover image staged: <code>${esc(res.path)}</code>`);

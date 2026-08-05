@@ -185,7 +185,9 @@ class GbtiContentEditor extends GbtiElement {
   // via jsDelivr over GitHub (the built site only serves the /_astro/-optimized variant, whose path the editor does
   // not have). This is why resolveAsset alone produced a broken `gbti.network/./images/...` url. Falls back safely.
   resolveCover(value) {
-    return resolveContentAsset(value, this.itemPath);
+    // sow-165: a freshly-staged cover previews from its local data URL (jsDelivr 404s until the PR merges);
+    // an already-committed value resolves against the item folder over jsDelivr.
+    return (this._stagedSrc && this._stagedSrc[value]) || resolveContentAsset(value, this.itemPath);
   }
 
   async render() {
@@ -1207,7 +1209,8 @@ class GbtiContentEditor extends GbtiElement {
     if (!file) return;
     const dataBase64 = await fileToBase64(file);
     try {
-      const res = await this.client.stageImage({ filename: file.name, dataBase64 });
+      // sow-165: co-locate into the item folder so a dropped result image stores as ./images/x (native build).
+      const res = await this.client.stageImage({ filename: file.name, dataBase64, itemPath: this.itemPath });
       // If a visible, empty image field is on the form (e.g. a prompt result image), drop the staged path
       // straight into it; otherwise the path is for the author to reference in their body.
       const imgField = this.fields.find((f) => f.kind === 'image');
@@ -1244,7 +1247,12 @@ class GbtiContentEditor extends GbtiElement {
     const pick = control.querySelector('[data-cover-pick]');
     if (pick) pick.textContent = 'Replace image';
     try {
-      const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(',')[1] || '' });
+      // sow-165: co-locate into the item folder so the cover stores as the canonical ./images/x (the old
+      // per-user path could not be resolved by Astro's image() and broke the site build).
+      const res = await this.client.stageImage({ filename: file.name, dataBase64: dataUrl.split(',')[1] || '', itemPath: this.itemPath });
+      // Preview the just-staged cover from the local data URL keyed by the stored path; a full re-render
+      // otherwise resolves it to a jsDelivr URL that 404s until the PR merges.
+      (this._stagedSrc ||= {})[res.path] = dataUrl;
       // sow-174: scoped to data-kind="image" -- the banner control also holds a second [data-key] (the
       // bannerPreset swatch input), and a bare [data-key] would grab whichever comes first in DOM order.
       const el = control.querySelector('[data-key][data-kind="image"]');

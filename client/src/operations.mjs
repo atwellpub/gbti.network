@@ -1946,15 +1946,49 @@ export async function reviewContribution(ctx, { number, decision, message } = {}
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
 
-/** Stage an image (base64) into the member's own images/ folder via the host Stager. Returns the repo path.
+/**
+ * sow-165 (Option 3, hybrid): derive the co-located `images/` directory for an item from its index.md path,
+ * or null when we cannot SAFELY target one. The item folder is the itemPath minus its last segment (matching
+ * resolveMarkdownAssets / resolveContentAsset in client-ui/src/assets.mjs). Only the caller's OWN member folder
+ * (`members/<username>/...`) or `house/...` is allowed; a traversal, a backslash, an empty path, or another
+ * member's folder returns null, so a bad or unauthorized itemPath falls back to the per-user library copy
+ * rather than writing outside the owner's tree. Pure + node-testable.
+ */
+export function itemImagesDir(itemPath, username) {
+  const p = String(itemPath || '').replace(/^\/+/, '');
+  if (!p || p.includes('..') || p.includes('\\')) return null;
+  const folder = p.replace(/\/[^/]*$/, ''); // strip the trailing index.md (or any filename), like the resolvers
+  if (!folder || folder === p) return null; // no slash means it is not an item path: nothing to co-locate into
+  const inOwn = !!username && folder.startsWith(`members/${username}/`);
+  const inHouse = folder === 'house' || folder.startsWith('house/');
+  if (!inOwn && !inHouse) return null;
+  return `${folder}/images`;
+}
+
+/**
+ * Stage an image (base64) via the host Stager.
+ *
+ * sow-165: when a usable `itemPath` is supplied, the image is CO-LOCATED in that item's `images/` folder and
+ * the returned `path` is the canonical repo-relative `./images/<filename>`. That reference resolves natively in
+ * the Astro build (the earlier per-user `members/<u>/images/x` path could not be resolved by `image()` and broke
+ * the site build) and resolves in the editor preview against the item folder. Without a usable itemPath (for
+ * example a new item that has no slug yet) it falls back to the per-user `members/<username>/images/` path,
+ * exactly as before, so existing callers are unchanged.
+ *
  * Pure: the actual write is delegated to ctx.stager (node = working copy, extension = GitHub Contents API). */
-export function stageImage(ctx, { filename, dataBase64 } = {}) {
+export function stageImage(ctx, { filename, dataBase64, itemPath } = {}) {
   const id = requireIdentity(ctx);
   if (!ctx.stager) throw new OperationError('bad-request', 'no local working copy configured');
   if (!filename || /[\\/]/.test(filename) || filename.includes('..')) throw new OperationError('bad-request', 'invalid filename');
   if (!IMAGE_EXT.test(filename)) throw new OperationError('bad-request', 'unsupported image type (png/jpg/gif/webp/svg)');
   if (!dataBase64) throw new OperationError('bad-request', 'no image data');
+  const dir = itemImagesDir(itemPath, id.username);
+  if (dir) {
+    const rel = `${dir}/${filename}`;
+    ctx.stager.writeImage(rel, dataBase64);
+    return { ok: true, path: `./images/${filename}`, repoPath: rel };
+  }
   const rel = `members/${id.username}/images/${filename}`;
   ctx.stager.writeImage(rel, dataBase64);
-  return { ok: true, path: rel };
+  return { ok: true, path: rel, repoPath: rel };
 }
