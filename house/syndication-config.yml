@@ -104,9 +104,15 @@ syndication:
       prompt: 'New {content-type} by {member-bluesky-handle}: "{title}" {category-hashtag} {tags-hashtags}'
       share: '{member-bluesky-handle} shared: "{title}" {url} {category-hashtag} {tags-hashtags}'
     linkedin:
-      post: 'New {content-type} by {fullName}: "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}'
-      product: 'New {content-type} by {fullName}: "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}'
-      prompt: 'New {content-type} by {fullName}: "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}'
+      post: >-
+        New {content-type} by {fullName}:
+        "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}
+      product: >-
+        New {content-type} by {fullName}:
+        "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}
+      prompt: >-
+        New {content-type} by {fullName}:
+        "{title}"\n\n{short-description}\n\n{url}{author-note-block}\n\n{hashtags}
       share: '{fullName} shared: "{title}"\n\n{short-description}\n\n{url}\n\n{hashtags}'
     reddit:
       reddit-comment: >-
@@ -126,3 +132,5 @@ syndication:
 
         To follow {fullName}'s work more closely, consider joining our network and subscribing to
         them directly: {member-url}
+    hashnode:
+      share: '"{title}" {shareurl}'
