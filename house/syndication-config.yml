@@ -56,10 +56,10 @@ syndication:
       discord-category: 'on'
       reddit: 'off'
       devto: 'off'
-      bluesky: 'off'
-      x: 'off'
-      linkedin: 'off'
-      hashnode: on-manual
+      bluesky: on-manual
+      x: on-manual
+      linkedin: on-manual
+      hashnode: 'off'
       dailydev: on-manual
     post:
       x: on-manual
