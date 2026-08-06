@@ -1147,6 +1147,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           if (f && f.type.startsWith("image/")) this._uploadImage(f, id);
         });
       });
+      this.$$('.ce[data-edit="text"] a[href]').forEach((a) => a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const ce = this._ceOf(a);
+        if (!ce) return;
+        const range = document.createRange();
+        range.selectNodeContents(a);
+        this._hideTb();
+        this._openLinkPanel({ getRangeAt: () => range }, ce);
+      }));
       this.$$('.ce[data-edit="text"]').forEach((el) => el.addEventListener("keydown", (e) => {
         if (this._slash && this._slash.el === el) {
           if (e.key === "ArrowDown") {

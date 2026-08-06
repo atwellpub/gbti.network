@@ -478,6 +478,21 @@ class GbtiDocEditor extends GbtiElement {
         if (f && f.type.startsWith('image/')) this._uploadImage(f, id);
       });
     });
+    // A single click on a link opens its editor directly, matching what every other WYSIWYG (Docs, Notion)
+    // does -- without this, a plain click inside contenteditable neither navigates (Chrome/Firefox both
+    // suppress that) nor shows anything: it just silently places a text caret, so a link looked "dead" to
+    // click on. Uses a manually-built Range rather than the real Selection object, so this never touches
+    // document.getSelection() -- avoiding any risk of the selectionchange listener's own small B/I/Link
+    // toolbar (_updateSelToolbar) flashing in behind the link panel this opens instead.
+    this.$$('.ce[data-edit="text"] a[href]').forEach((a) => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const ce = this._ceOf(a);
+      if (!ce) return;
+      const range = document.createRange();
+      range.selectNodeContents(a);
+      this._hideTb();
+      this._openLinkPanel({ getRangeAt: () => range }, ce);
+    }));
     // Enter at the end of a text block inserts a new paragraph after it.
     this.$$('.ce[data-edit="text"]').forEach((el) => el.addEventListener('keydown', (e) => {
       if (this._slash && this._slash.el === el) { // SOW-062 5c-2: slash-menu keyboard nav
