@@ -54,7 +54,7 @@ syndication:
     share:
       discord: 'on'
       discord-category: 'on'
-      reddit: 'off'
+      reddit: on-manual
       devto: 'off'
       bluesky: on-manual
       x: on-manual
