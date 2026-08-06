@@ -2573,7 +2573,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .ebtn-primary { background:var(--s-green); border-color:var(--s-green); color:#fff; box-shadow:0 8px 20px rgba(31,158,95,.26); }
         .ebtn-primary:hover { filter:brightness(.96); border-color:var(--s-green); }
         .edgrid { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:34px; align-items:start; margin-top:18px; }
-        @container (max-width:1140px) { .edgrid { grid-template-columns:1fr; } .edhead { position:static; } }
+        /* sow-184's own mockup pins this at "under 1100px"; the WorkBench page shell (.wb-wrap max-width:1200px
+           plus its 40px gutter) only ever hands this host ~1120px of inline-size, so a 1140px threshold matched
+           unconditionally and the two-column rail could never appear on the real page at any viewport width. */
+        @container (max-width:1100px) { .edgrid { grid-template-columns:1fr; } .edhead { position:static; } }
         .doc { min-width:0; background:var(--s-canvas); border:1.5px solid var(--s-line); border-radius:12px; box-shadow:var(--s-shadow-md); padding:40px 46px 52px; color:var(--s-fg); }
         .doc-title { font-family:var(--font-display); font-weight:800; font-size:34px; line-height:1.14; letter-spacing:-.015em; color:var(--s-fg); outline:none; margin-bottom:6px; }
         .doc-title:empty::before { content:attr(data-ph); color:var(--s-fg-mute); opacity:.55; }
@@ -2621,7 +2624,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            its content mid-line (the Type card cut its own one-liner). Cards keep their natural height; the
            rail scrolls. */
         .rail > * { flex-shrink:0; }
-        @container (max-width:1140px) { .rail { position:static; max-height:none; } }
+        @container (max-width:1100px) { .rail { position:static; max-height:none; } }
         .rsec { background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:var(--s-shadow); overflow:hidden; }
         .rsec > summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; padding:13px 15px; font-weight:700; font-size:14px; color:var(--s-fg); }
         .rsec > summary::-webkit-details-marker { display:none; }
