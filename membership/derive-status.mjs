@@ -4,6 +4,8 @@
 // the two can never diverge. No Stripe SDK is imported here; callers inject a thin client, which
 // keeps every branch testable against fixtures.
 
+import { TIER, tierForSubscription } from './tiers.mjs';
+
 export const TRIAL_DAYS = 90;
 const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
 
@@ -77,4 +79,44 @@ export async function deriveStatus(githubId, client, now = new Date()) {
   }
   if (!customer) return STATUS.none;
   return deriveStatusFromCustomer(customer, now);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// sow-185 phase 1: the TIER axis, added ALONGSIDE the status axis rather than folded into it.
+//
+// deriveStatus keeps its exact signature and string return, so all fourteen authorizePaid routes, classify-pr,
+// reconcile and every existing test are untouched. Tier-aware callers opt in by calling deriveMembership
+// instead. That is what lets phase 1 ship inert: nothing GATES on tier yet, so a tier that resolves wrongly
+// cannot deny anyone. Phase 2 turns the gates on, after the resolution has been checked against real Stripe
+// data (the repo's fixtures carry no price id, so tier extraction is unverified against production shapes).
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Derive BOTH axes from a customer: `{ status, tier }`.
+ *
+ * The tier is read from the same subscription that decided the status, so the two can never disagree about
+ * which subscription is authoritative. A non-paid status forces tier `none`: a lapsed or trialing customer
+ * holds no tier privileges regardless of what they once bought, which keeps "what did they buy" from leaking
+ * past "are they currently paying".
+ */
+export function deriveMembershipFromCustomer(customer, { priceTierMap = null, now = new Date() } = {}) {
+  const status = deriveStatusFromCustomer(customer, now);
+  if (status !== STATUS.paid) return { status, tier: TIER.none };
+  const sub = mostRelevantSubscription(subscriptionsOf(customer));
+  return { status, tier: tierForSubscription(sub, priceTierMap) };
+}
+
+/**
+ * Look up a customer and derive `{ status, tier }`. Fails closed to `{ status: 'none', tier: 'none' }` on a
+ * missing customer or any lookup error, mirroring deriveStatus exactly.
+ */
+export async function deriveMembership(githubId, client, { priceTierMap = null, now = new Date() } = {}) {
+  let customer;
+  try {
+    customer = await client.findCustomerByGithubId(String(githubId));
+  } catch {
+    return { status: STATUS.none, tier: TIER.none }; // fail closed
+  }
+  if (!customer) return { status: STATUS.none, tier: TIER.none };
+  return deriveMembershipFromCustomer(customer, { priceTierMap, now });
 }
