@@ -18,7 +18,9 @@ quotes:
   - text: What you seek is seeking you.
     author: Rumi
     enabled: true
-  - text: You will never be able to escape from your heart. So it is better to listen to what it has to say.
+  - text: >-
+      You will never be able to escape from your heart. So it is better to listen to what it has to
+      say.
     author: Paulo Coelho
     enabled: true
   - text: In matters of style, swim with the current; in matters of principle, stand like a rock.
@@ -44,4 +46,7 @@ quotes:
     enabled: true
   - text: Build your opponent a golden bridge to retreat across.
     author: Sun Tzu
+    enabled: true
+  - text: Life really does begin at forty. Up until then, you are just doing research.
+    author: Carl Jung
     enabled: true
