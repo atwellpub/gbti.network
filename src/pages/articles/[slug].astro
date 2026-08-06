@@ -49,7 +49,11 @@ const stack = avatarStack({
 // post gets. Journal is the default (sow-183: "Journal rail should be the default of all articles too").
 const LAYOUTS: Record<string, typeof ArticleCard> = { card: ArticleCard, editorial: ArticleEditorial, journal: ArticleJournal };
 const Layout = LAYOUTS[d.layout] ?? ArticleJournal;
-const isJournal = d.layout === 'journal';
+// Derived from the RESOLVED Layout, not re-checked against d.layout independently -- two separate
+// derivations of the same value can silently disagree (e.g. an unrecognized d.layout falls back to
+// ArticleJournal here but would stay false on a literal d.layout === 'journal' check), misrouting
+// FavoritedBy into the wrong slot on whatever layout actually rendered.
+const isJournal = Layout === ArticleJournal;
 ---
 <BaseLayout title={d.title} description={d.excerpt} ogImage={d.coverImage?.src ?? defaultFeatureImage('post')} ogType="article">
   <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack} toc={toc}>
@@ -58,12 +62,14 @@ const isJournal = d.layout === 'journal';
     <OpenHistory slot="closing" filePath={post.filePath} author={d.author} contributors={d.contributors} />
     <RelatedPosts slot="closing" post={post} />
     <ContributionCredits slot="closing" contributors={d.contributors} />
-    {/* sow-183 QA fix: FavoritedBy must NEVER be a ternary's two JSX branches (`cond ? <A/> : <B/>`), even
-        with a fully literal slot="..." in each branch -- that shape (confirmed by bisection against a
-        stripped-down layout component, not assumed) silently dropped every OTHER "closing" child on the
-        page: ContentFooter, OpenHistory, RelatedPosts and ContributionCredits all rendered empty. Two
-        separate `{cond && <X/>}` expressions render correctly. Journal moves FavoritedBy into its own
-        "rail" slot; every other layout keeps it in "closing" alongside the rest. */}
+    {/* sow-183 QA fix: a slotted child's slot attribute must be a STATIC STRING, never any non-literal
+        expression (`slot={expr}`, including a ternary's branches even when each branch is itself a literal
+        string) -- a non-literal slot on ANY ONE child (confirmed by bisection against a stripped-down layout
+        component, not assumed) silently dropped every OTHER statically-slotted sibling passed into the same
+        parent: ContentFooter, OpenHistory, RelatedPosts and ContributionCredits all rendered empty. Two
+        separate `{cond && <X slot="literal"/>}` expressions, each with its own literal slot, render correctly.
+        Journal moves FavoritedBy into its own "rail" slot; every other layout keeps it in "closing" alongside
+        the rest. */}
     {isJournal && <FavoritedBy slot="rail" type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />}
     {!isJournal && <FavoritedBy slot="closing" type="post" slug={d.slug} aliases={aliasSlugsOf(d)} />}
   </Layout>

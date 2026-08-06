@@ -32,7 +32,7 @@ const railSize = variant === 'rail' ? 'rail' : 'md';
   <span class="act-div" aria-hidden="true"></span>
   <ShareRow type={type} title={title} url={url} categories={categories} variant={variant} />
   {itemPath && (
-    <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension" aria-label="Open this item in the GBTI extension">
+    <button type="button" class="ext-open" data-ext-open hidden title="Open this item in the GBTI extension">
       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-puzzle"/></svg>
       <span class="ext-open-label">Open in extension</span>
     </button>
@@ -75,7 +75,10 @@ const railSize = variant === 'rail' ? 'rail' : 'md';
   })();
 </script>
 
-<style>
+<style is:global>
+  /* sow-183 QA fix: [data-theme="dark"] is only ever set on <html>, which never carries this component's
+     Astro scope id -- a scoped selector here would compile to an unmatchable compound and never fire (the
+     same is:global idiom FavoriteButton.astro/CollectionButton.astro/UpvoteButton.astro already use). */
   .content-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .act-div { width: 1px; height: 22px; background: var(--line-2); flex: none; }
   /* sow-179: the sticky rail stacks everything in one narrow column; the divider follows, becoming horizontal. */

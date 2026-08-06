@@ -1537,24 +1537,29 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 /* ==================== Editorial layout (sow-179 Phase 3) ==================== */
 /* Cover becomes a full-width hero; the title and byline sit on it. Only Editorial uses these -e- classes;
    Journal keeps its cover inset in the reading column instead, per the design mock. */
-/* sow-183 responsive audit: was aspect-ratio: 16/7, which has no ceiling -- at a 2560px desktop that is a
-   ~1120px-tall hero, most of it empty gradient around whatever the source cover image's own artwork happens
-   to compose. A clamped height keeps the SAME proportions the design was tuned at (490-630px, matching the
-   old aspect-ratio's own output between the site's 1180px content width and a common 1440px laptop) but
-   stops it growing past a sensible ceiling on genuinely wide desktops -- compression, not restructuring: the
-   hero is still full-bleed and still the same shape, just capped like every other clamp() in this file. */
-/* sow-183 QA fix: the hero used to run edge-to-edge at any viewport width; it now keeps the SAME 1140px shape
-   as the reading grid below (.art-wrap), so the banner never balloons wider than the column it illustrates. */
-.art-e-hero { position: relative; height: clamp(320px, 42vw, 640px); max-width: 1140px; margin: 0 auto; overflow: hidden; background: var(--ink); border-radius: var(--r-lg); }
+/* sow-183 QA fix: the hero used to run edge-to-edge at any viewport width, and a since-reverted intermediate
+   fix (height: clamp()) tried to cap its unbounded growth on wide desktops but decoupled height from width,
+   floored the mobile hero at a near-square 320px, and dropped the flex/align-items that bottom-anchor the
+   title over the gradient's darkest region. Capping WIDTH (max-width: 1140px, the same shape as the reading
+   grid below via .art-wrap) is the actual fix for "balloons wider than the column it illustrates": with
+   aspect-ratio doing the sizing, height is now simply proportional at every viewport, and above the width cap
+   height stops growing too (1140 * 7/16 ~= 499px), so the desktop-ceiling problem the clamp() was chasing is
+   solved by the width cap alone, with no separate height rule needed. */
+.art-e-hero { position: relative; aspect-ratio: 16 / 7; max-width: 1140px; margin: 0 auto; display: flex; align-items: flex-end; overflow: hidden; background: var(--ink); }
+/* Rounded corners only read as a "card" once the hero is actually inset from the viewport edge (above the
+   1140px width cap, where margin:auto creates visible space on both sides) -- below that it is genuinely
+   full-bleed against zero-padding ancestors (.art-shell/.band/main/body), so a radius there notches the image
+   at the physical screen edge instead. */
+@media (min-width: 1141px) { .art-e-hero { border-radius: var(--r-lg); } }
 .art-e-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .art-e-hero::after {
   content: ''; position: absolute; inset: 0;
   background: linear-gradient(to top, rgba(10,9,13,.94) 4%, rgba(10,9,13,.55) 48%, rgba(10,9,13,.1) 100%);
 }
-.art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; box-sizing: border-box; }
+.art-e-hero-in { position: relative; z-index: 1; width: 100%; padding: 0 clamp(20px, 4vw, 40px) 30px; }
 /* No-cover variant: the same header content, flat on the page background instead of over an image. Same
    sow-183 width cap as the hero, for the same reason (was full-bleed with no ceiling). */
-.art-e-header-flat { position: relative; max-width: 1140px; margin: 0 auto; padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; box-sizing: border-box; }
+.art-e-header-flat { position: relative; max-width: 1140px; margin: 0 auto; padding: clamp(28px, 5vw, 44px) clamp(20px, 4vw, 40px) 0; }
 /* sow-183: the flat header's Edit pill sits inside the padded box, not flush with the section edge. */
 .art-e-header-flat .detail-edit { top: clamp(28px, 5vw, 44px); right: clamp(20px, 4vw, 40px); }
 
@@ -1570,7 +1575,7 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .art-e-header-flat .art-e-title { font-size: clamp(26px, 3.6vw, 38px); line-height: 1.12; color: var(--fg); max-width: 22ch; }
 .art-e-header-flat .art-e-cat { color: #0f1a13; }
 
-.art-e-cap { max-width: 1140px; margin: 0 auto; padding: 10px clamp(20px, 4vw, 40px) 0; font-size: 12.5px; color: var(--fg-mute); box-sizing: border-box; }
+.art-e-cap { max-width: 1140px; margin: 0 auto; padding: 10px clamp(20px, 4vw, 40px) 0; font-size: 12.5px; color: var(--fg-mute); }
 
 /* sow-183 responsive audit: rail/aside widths are now clamp()-driven (were fixed 60px/190px), so a narrowing
    DESKTOP browser compresses this 3-column shape continuously all the way toward the ~650px floor instead of
@@ -1598,11 +1603,9 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    matches -- this bit twice during Phase 3's own build (the aside not hiding, the rail not un-stacking) before
    landing here.
 
-   The .ca-rail override below needs a THIRD class on top of that: ContentActions.astro's own scoped .ca-rail
-   rule (flex-direction: column) compiles to a one-class-plus-Astro-scope-attribute selector, equal specificity
-   to a plain two-class selector, and its chunk happens to load in a later <link> than this file's, so an
-   equal-specificity tie goes to Astro's rule regardless of source order inside THIS file. Confirmed directly
-   against the built dist/ output, not assumed. */
+   The .ca-rail override below needs a THIRD class on top of that: ContentActions.astro's own .ca-rail rule
+   (flex-direction: column, now in an is:global style block per the sow-183 dark-mode fix) is a plain one-class
+   selector, so this file's three-class chain wins outright on specificity, no load-order coincidence needed. */
 /* sow-183: mobile-native RESTRUCTURING, gated on touch (mirrors pd-grid's own gate, sow-173) -- a narrowed
    desktop browser window never matches (hover:none)+(pointer:coarse) no matter how far it shrinks, so it
    stays on the clamp()-compressed 3-column shape above all the way to this same 640px floor Editorial has

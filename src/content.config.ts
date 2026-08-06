@@ -126,10 +126,11 @@ const post = defineCollection({
     excerpt: z.string().max(200).optional(),
     categories: z.array(z.string()).default([]),
     tags: z.array(z.string()).default([]),
-    // sow-179: which of the three article layouts renders this post (editorial/journal/card, see
-    // src/components/blog/Article*.astro). Every already-published post was backfilled to an explicit
-    // layout: 'card' when this default flipped, so this default only ever governs a NEW post going forward,
-    // never a silent shape change to something already live. journal still resolves to Card until Phase 4.
+    // sow-179/sow-183: which of the three article layouts renders this post (editorial/journal/card, see
+    // src/components/blog/Article*.astro), all three fully built. Journal is the default (sow-183: "Journal
+    // rail should be the default of all articles too"); every already-published post was backfilled to an
+    // explicit layout: 'journal' when this default flipped, so this default only ever governs a NEW post
+    // going forward, never a silent shape change to something already live.
     layout: z.enum(['editorial', 'journal', 'card']).default('journal'),
     coverImage: image().optional(),
     coverAlt: z.string().max(250).optional(), // SOW-062 P3: cover-image alt text (accessibility)
