@@ -17104,7 +17104,7 @@ var postSchema = external_exports.object({
   tags: tagsSchema,
   // sow-179: mirrors src/content.config.ts's layout field exactly, including the 'editorial' default (see
   // that file's comment; every already-published post carries its own explicit layout: 'card').
-  layout: external_exports.enum(["editorial", "journal", "card"]).default("editorial"),
+  layout: external_exports.enum(["editorial", "journal", "card"]).default("journal"),
   coverImage: external_exports.string().optional(),
   coverAlt: external_exports.string().max(250).optional(),
   // SOW-062 P3: cover-image alt text (accessibility)

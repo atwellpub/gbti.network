@@ -6,6 +6,7 @@
 
 import { GbtiElement, define, esc } from '../base.mjs';
 import { submitAck, failHint } from '../workspace-core.mjs'; // SOW-072 P2: the one consistent submit acknowledgement
+import { editorStatus, mediaSummary } from '../editor-core.mjs'; // SOW-184: pure Status-card + Media-summary helpers (design 3a)
 import { gatherInput } from '../form.mjs';
 import { resolveContentAsset } from '../assets.mjs'; // SOW-062 P3 + sow-165: resolve a cover/body image path to a loadable preview URL
 import './gbti-doc-editor.mjs'; // SOW-062 P5: the cohesive WYSIWYG body editor (same #body.value Markdown contract)
@@ -258,12 +259,19 @@ class GbtiContentEditor extends GbtiElement {
         return html;
       }).join('');
       if (!inner) return '';
-      return `<details ${sec.open ? 'open' : ''} class="rsec"><summary><span class="st"><span class="si">${SECTION_ICON[sec.title] || DOC}</span>${esc(sec.title)}</span><span class="chev">${CHEV}</span></summary><div class="rbody">${inner}</div></details>`;
+      // sow-184 (design 3a): an at-a-glance hint on a section header, so a collapsed section still tells you what
+      // it holds. Media only for now ("1 cover" / "2 images"); every other section carries no hint.
+      const hint = sec.title === 'Media' ? mediaSummary(this.type, p) : '';
+      const hintHtml = hint ? `<span class="rsec-sum">${esc(hint)}</span>` : '';
+      return `<details ${sec.open ? 'open' : ''} class="rsec"><summary><span class="st"><span class="si">${SECTION_ICON[sec.title] || DOC}</span>${esc(sec.title)}</span>${hintHtml}<span class="chev">${CHEV}</span></summary><div class="rbody">${inner}</div></details>`;
     }).join('');
     const hiddenHtml = hiddenFields.map((f) => this.fieldHtml(f, p[f.key], false)).join('');
     const typePath = ({ post: 'articles', product: 'products', prompt: 'prompts' })[this.type] || this.type;
     const isPub = String(p.status || '').toLowerCase() === 'published';
     const statusLabel = isPub ? (p.publishedAt ? String(p.publishedAt).slice(0, 10) : 'published') : 'draft';
+    // sow-184 (design 3a): the Status-card descriptor (pill label + tone + published date). `staged` wins over the
+    // status field, since a fork-staged draft carries status: published by design.
+    const status = editorStatus({ staged: this.staged, status: p.status, publishedAt: p.publishedAt });
     // SOW-062 P6: the slug-meta shows when the item was last updated on LIVE (publishedAt) and LOCALLY (updatedAt,
     // stamped client-side on each save/publish). A published item edited locally shows Live older than Local.
     const fmtD = (d) => { if (!d) return ''; const t = new Date(d); return Number.isNaN(t.getTime()) ? '' : t.toISOString().slice(0, 10); };
@@ -305,21 +313,29 @@ class GbtiContentEditor extends GbtiElement {
     })() : '';
     // SOW-062 P6 rail-2: the stat tiles footer, shown for a published post/product/prompt (in the rail).
     const showStats = isPub && slug && ['post', 'product', 'prompt'].includes(this.type);
+    // sow-184 (design 3a): the stat tiles now live in an "Activity" rail card (was a borderless footer), matching
+    // the mockup. Same STAT_DEFS + live Discussions count + jump-to-discussion button.
     const railFootHtml = showStats ? `
-             <div class="rail-foot">
-               <div class="rail-stats">${STAT_DEFS.map((s) => {
-                 const inner = `<span class="rs-n" data-statn="${s.key}">${s.key === 'discussions' ? '…' : '—'}</span><span class="rs-l">${esc(s.label)}</span>`;
-                 // SOW-112 QA: the Discussions tile links to the discussion section below the content.
-                 return s.key === 'discussions' && discussionSection
-                   ? `<button class="rstat rstat-link" id="statdiscuss" type="button" title="Jump to the discussion">${inner}</button>`
-                   : `<div class="rstat">${inner}</div>`;
-               }).join('')}</div>
-               <p class="rail-foot-note">Live once published. Revisions, contributions, and referrals arrive with the stats backend.</p>
-             </div>` : '';
+             <section class="rcard rcard-activity">
+               <div class="rcard-h"><span class="rcard-t">Activity</span></div>
+               <div class="rcard-b">
+                 <div class="rail-stats">${STAT_DEFS.map((s) => {
+                   const inner = `<span class="rs-n" data-statn="${s.key}">${s.key === 'discussions' ? '…' : '—'}</span><span class="rs-l">${esc(s.label)}</span>`;
+                   // SOW-112 QA: the Discussions tile links to the discussion section below the content.
+                   return s.key === 'discussions' && discussionSection
+                     ? `<button class="rstat rstat-link" id="statdiscuss" type="button" title="Jump to the discussion">${inner}</button>`
+                     : `<div class="rstat">${inner}</div>`;
+                 }).join('')}</div>
+                 <p class="rail-foot-note">Live once published. Revisions, contributions, and referrals arrive with the stats backend.</p>
+               </div>
+             </section>` : '';
     this.set(
       this.css(EDITOR_SURFACE + `
         :host { display:block; background:var(--s-app); color:var(--s-fg); font-family:var(--font-body); container-type:inline-size; }
-        .edhead { display:flex; align-items:center; gap:12px; padding:4px 2px 16px; flex-wrap:wrap; }
+        /* sow-184 (design 3a): pin the action toolbar so Publish / Save draft / Preview never scroll off. It pins
+           to the editor's scroll container; a solid --s-app background + a hairline let the document scroll under it.
+           Under the single-column breakpoint below, it collapses back to static. */
+        .edhead { display:flex; align-items:center; gap:12px; padding:12px 2px; flex-wrap:wrap; position:sticky; top:0; z-index:20; background:var(--s-app); border-bottom:1.5px solid var(--s-line); }
         .etype { font-family:var(--font-mono,monospace); font-size:10.5px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--s-green-fg); background:var(--s-tint); border:1.5px solid var(--s-tint-2); border-radius:999px; padding:5px 12px; }
         .edhead-sp { flex:1; }
         .savechip { font-size:13px; color:var(--s-fg-mute); font-weight:500; display:inline-flex; align-items:center; gap:3px; }
@@ -334,8 +350,8 @@ class GbtiContentEditor extends GbtiElement {
         .ebtn svg { width:16px; height:16px; }
         .ebtn-primary { background:var(--s-green); border-color:var(--s-green); color:#fff; box-shadow:0 8px 20px rgba(31,158,95,.26); }
         .ebtn-primary:hover { filter:brightness(.96); border-color:var(--s-green); }
-        .edgrid { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:34px; align-items:start; }
-        @container (max-width:1140px) { .edgrid { grid-template-columns:1fr; } }
+        .edgrid { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:34px; align-items:start; margin-top:18px; }
+        @container (max-width:1140px) { .edgrid { grid-template-columns:1fr; } .edhead { position:static; } }
         .doc { min-width:0; background:var(--s-canvas); border:1.5px solid var(--s-line); border-radius:12px; box-shadow:var(--s-shadow-md); padding:40px 46px 52px; color:var(--s-fg); }
         .doc-title { font-family:var(--font-display); font-weight:800; font-size:34px; line-height:1.14; letter-spacing:-.015em; color:var(--s-fg); outline:none; margin-bottom:6px; }
         .doc-title:empty::before { content:attr(data-ph); color:var(--s-fg-mute); opacity:.55; }
@@ -375,7 +391,9 @@ class GbtiContentEditor extends GbtiElement {
         .preview table { display:block; overflow-x:auto; max-width:100%; border-collapse:collapse; margin:0 0 1.1em; font-size:14px; }
         .preview table th, .preview table td { border:1px solid var(--s-line); padding:6px 10px; text-align:left; vertical-align:top; }
         .preview table th { background:var(--s-surface); font-weight:700; white-space:nowrap; }
-        .rail { display:flex; flex-direction:column; gap:14px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow-y:auto; }
+        /* sow-184: the rail pins BELOW the sticky toolbar (top:64px clears it), so the top Status card is never
+           hidden under the pinned bar. Collapses to static under the breakpoint below. */
+        .rail { display:flex; flex-direction:column; gap:14px; position:sticky; top:64px; max-height:calc(100vh - 72px); overflow-y:auto; }
         /* The rail is a height-capped flex column and .rsec has overflow:hidden (zero min size), so without
            this the flex algorithm SHRINKS the section cards to fit instead of scrolling: every card clipped
            its content mid-line (the Type card cut its own one-liner). Cards keep their natural height; the
@@ -396,6 +414,26 @@ class GbtiContentEditor extends GbtiElement {
         .rsec > summary .st .si { width:17px; height:17px; color:var(--s-fg-mute); display:inline-flex; }
         .rsec > summary .chev { width:17px; height:17px; color:var(--s-fg-mute); transition:transform .18s ease; display:inline-flex; }
         .rsec[open] > summary .chev { transform:rotate(180deg); }
+        /* sow-184 (design 3a): a section-header hint (Media "1 cover"), right-aligned before the chevron. */
+        .rsec > summary .rsec-sum { margin-left:auto; margin-right:10px; font-family:var(--font-mono,monospace); font-size:10.5px; font-weight:500; color:var(--s-fg-mute); }
+        /* sow-184 (design 3a): rail info cards. Status folds the old Type panel into a compact card; Activity holds
+           the stat tiles. Same surface tokens as .rsec so the rail reads as one system. */
+        .rcard { background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:var(--s-shadow); overflow:hidden; }
+        .rcard-h { display:flex; align-items:center; gap:9px; padding:13px 16px; border-bottom:1px solid var(--s-line); }
+        .rcard-t { font-family:var(--font-mono,monospace); font-size:10px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--s-fg-mute); }
+        .rcard-b { padding:14px 16px; display:flex; flex-direction:column; gap:11px; }
+        .rcard-note { font-size:12px; line-height:1.5; color:var(--s-fg-mute); margin:2px 0 0; }
+        .statpill { display:inline-flex; align-items:center; gap:6px; margin-left:auto; font-family:var(--font-mono,monospace); font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:3px 9px; border-radius:999px; }
+        .statpill .d { width:7px; height:7px; border-radius:50%; background:currentColor; }
+        .statpill-live { color:var(--s-green-fg); background:var(--s-tint); border:1.5px solid var(--s-tint-2); }
+        /* sow-184: the golden #d9a13c drives the tint + border, but the TEXT uses the theme-aware --s-amber-fg so the
+           small 10px label clears WCAG AA on the light card (the flat golden fails at ~2.1:1). */
+        .statpill-staged { color:var(--s-amber-fg,#8a5500); background:color-mix(in srgb, var(--s-amber,#d9a13c) 14%, transparent); border:1.5px solid color-mix(in srgb, var(--s-amber,#d9a13c) 34%, transparent); }
+        .statpill-draft { color:var(--s-fg-mute); background:var(--s-surface-2); border:1.5px solid var(--s-line-2); }
+        .strow { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; }
+        .strow .sk { color:var(--s-fg-mute); }
+        .strow .sv { font-weight:600; color:var(--s-fg); text-transform:capitalize; }
+        .strow .sv.mono { font-family:var(--font-mono,monospace); font-weight:500; text-transform:none; }
         .rbody { padding:4px 16px 16px; display:flex; flex-direction:column; gap:15px; }
         .fld { display:flex; flex-direction:column; gap:6px; }
         .fld > label { font-size:12.5px; font-weight:600; color:var(--s-fg-soft); display:flex; align-items:center; gap:6px; }
@@ -476,9 +514,8 @@ class GbtiContentEditor extends GbtiElement {
         .lr-vis button { font:inherit; font-size:10.5px; font-weight:600; padding:5px 9px; border:0; background:transparent; color:var(--s-fg-soft); border-radius:6px; cursor:pointer; }
         .lr-vis button.on { background:var(--s-fg); color:var(--s-canvas); }
         .addrow { font-size:13px; padding:8px 12px; align-self:flex-start; }
-        /* SOW-062 P6 rail-2: the stat tiles footer (Discussions live; the rest pending their backend) */
-        .rail-foot { margin-top:6px; padding:16px 2px 4px; border-top:1.5px solid var(--s-line); }
-        .rail-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+        /* SOW-062 P6 rail-2 + sow-184: the stat tiles, now inside the Activity card (design 3a), 2-up per the mockup. */
+        .rail-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
         .rstat { display:flex; flex-direction:column; align-items:center; gap:3px; padding:12px 6px; border:1.5px solid var(--s-line); border-radius:8px; background:var(--s-surface); }
         .rstat .rs-n { font-family:var(--font-display); font-weight:800; font-size:22px; line-height:1; color:var(--s-fg); }
         .rstat .rs-l { font-size:10.5px; font-weight:600; color:var(--s-fg-mute); text-align:center; line-height:1.25; }
@@ -582,7 +619,14 @@ class GbtiContentEditor extends GbtiElement {
              <div hidden>${hiddenHtml}</div>
            </article>
            <aside class="rail">
-             <details open class="rsec"><summary><span class="st"><span class="si">${DOC}</span>Type</span><span class="chev">${CHEV}</span></summary><div class="rbody"><div class="fld"><div class="urlprev" style="color:var(--s-fg-soft)">This is a <b>${esc(this.typeLabel())}</b>. Type is set at creation and can't be changed here.</div></div></div></details>
+             <section class="rcard rcard-status">
+               <div class="rcard-h"><span class="rcard-t">Status</span><span class="statpill statpill-${status.tone}"><span class="d"></span>${esc(status.label)}</span></div>
+               <div class="rcard-b">
+                 <div class="strow"><span class="sk">Type</span><span class="sv">${esc(this.typeLabel())}</span></div>
+                 ${status.publishedLabel ? `<div class="strow"><span class="sk">Published</span><span class="sv mono">${esc(status.publishedLabel)}</span></div>` : ''}
+                 <p class="rcard-note">Type is set at creation and can't be changed here.</p>
+               </div>
+             </section>
              ${ownerFieldHtml}
              ${sectionsHtml}
              ${railFootHtml}
