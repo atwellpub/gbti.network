@@ -19,7 +19,7 @@ const { targetType, targetSlug, size = 'md' } = Astro.props;
   data-gbti-region="collection"
   class:list={['gbti-collection', size === 'sm' && 'col-sm', size === 'rail' && 'col-rail']}
 >
-  <button type="button" class="col-pill" data-signin aria-label={`Save this ${targetType} to a collection`}>
+  <button type="button" class="col-pill" data-signin data-tooltip="Save to a collection" aria-label={`Save this ${targetType} to a collection`}>
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-folder" /></svg>
     <span class="col-label">Save</span>
   </button>

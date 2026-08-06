@@ -39,7 +39,7 @@ class GbtiCollection extends GbtiElement {
   render() {
     const open = this._open ? this._renderPop() : '';
     const label = !this.client ? 'Sign in to save to a collection' : 'Save to a collection';
-    this.set(this.css(CSS) + `<button class="pill ${this._inAny() ? 'on' : ''}" type="button" aria-haspopup="true" aria-expanded="${!!this._open}" aria-label="${label}">${folder}<span>Save</span></button>${open}`);
+    this.set(this.css(CSS) + `<button class="pill ${this._inAny() ? 'on' : ''}" type="button" aria-haspopup="true" aria-expanded="${!!this._open}" aria-label="${label}" data-tooltip="${label}">${folder}<span>Save</span></button>${open}`);
     this.on('.pill', 'click', (e) => { e.stopPropagation(); this._toggleOpen(); });
     if (this._open) this._wirePop();
   }

@@ -37,9 +37,10 @@ class GbtiFavorite extends GbtiElement {
     if (this._faved === undefined) this._faved = false;
     const c = Math.max(0, this._count);
     const label = !this.client ? 'Sign in to favorite' : this._faved ? 'Remove favorite' : 'Add favorite';
+    const full = `${label}${c > 0 ? `, ${c} so far` : ''}`;
     this.set(
       this.css(CSS) +
-        `<button class="pill ${rail ? 'rail' : ''} ${this._faved ? 'on' : ''}" type="button" aria-pressed="${this._faved}" aria-label="${label}${c > 0 ? `, ${c} so far` : ''}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ''}</button>`,
+        `<button class="pill ${rail ? 'rail' : ''} ${this._faved ? 'on' : ''}" type="button" aria-pressed="${this._faved}" aria-label="${full}" data-tooltip="${label}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ''}</button>`,
     );
     this.on('.pill', 'click', () => this._onClick(targetType, targetSlug));
   }

@@ -11,12 +11,16 @@
   --glass-blur: none; /* SOW-070: flat (default) = no frost; the glass layout layer below sets a real backdrop blur */
   --font-body: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
   --font-display: "Baloo Da 2", "Hanken Grotesk", system-ui, sans-serif;
+  /* tooltips (mirrors src/styles/gbti-v3.css's own [data-tooltip] tokens) -- a dark bubble on the light surface */
+  --tooltip-bg: #1c1a21; --tooltip-fg: #f5f4f2; --tooltip-border: rgba(255,255,255,.10);
 }
 :host-context([data-theme="dark"]) {
   --bg: #1c1a21; --panel: #2d2a34;
   --brand: #1f9e5f; --brand-dark: #46c089; --accent: #5fd49a;
   --text: #f3f2f0; --fg: #f3f2f0; --muted: rgba(243,242,240,.72);
   --line: rgba(255,255,255,.12); --hover: #34313c; --danger: #e06c6c;
+  /* tooltip flips to a light bubble on dark surfaces, same inversion as the site's own CSS */
+  --tooltip-bg: #f3f2f0; --tooltip-fg: #24222a; --tooltip-border: rgba(0,0,0,.12);
 }
 /* SOW-070: the GLASS layout skin (opt-in: data-layout="glass" on an ancestor). Re-points the surface tokens to
    translucent values + defines --glass-blur, so any surface class that reads backdrop-filter: var(--glass-blur)
@@ -79,6 +83,33 @@ button[disabled] { opacity: .5; cursor: default; }
 .tag.bad { background: rgba(224,108,108,.16); color: var(--danger); }
 ul.list { list-style: none; margin: 0; padding: 0; }
 ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+
+/* Tooltips (mirrors src/styles/gbti-v3.css's [data-tooltip] block verbatim) -- a shadow root cannot see the
+   page's global CSS, so any component wanting the site's hover-label treatment needs this rule INSIDE its own
+   tree; defined once here (BASE_CSS is included via this.css() in every component) rather than per-component.
+   Usage: add data-tooltip="..." to a focusable control AND keep an aria-label (data-tooltip is presentational,
+   not announced to assistive tech). */
+[data-tooltip] { position: relative; }
+[data-tooltip]::after, [data-tooltip]::before {
+  position: absolute; left: 50%; opacity: 0; pointer-events: none;
+  transition: opacity .14s ease, transform .14s ease; z-index: 60;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip); bottom: calc(100% + 8px); transform: translateX(-50%) translateY(4px);
+  background: var(--tooltip-bg); color: var(--tooltip-fg); border: 1px solid var(--tooltip-border);
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 500; line-height: 1.3; letter-spacing: .1px;
+  text-align: center; white-space: normal; width: max-content; max-width: 220px; padding: 5px 9px;
+  border-radius: 6px; box-shadow: 0 12px 30px rgba(37,35,43,.10), 0 3px 8px rgba(37,35,43,.06);
+}
+[data-tooltip]::before {
+  content: ""; bottom: calc(100% + 3px); transform: translateX(-50%) translateY(4px);
+  border: 5px solid transparent; border-top-color: var(--tooltip-bg);
+}
+[data-tooltip]:hover::after, [data-tooltip]:focus-visible::after,
+[data-tooltip]:hover::before, [data-tooltip]:focus-visible::before { opacity: 1; transform: translateX(-50%) translateY(0); }
+[data-tooltip-pos="below"]::after { bottom: auto; top: calc(100% + 8px); }
+[data-tooltip-pos="below"]::before { bottom: auto; top: calc(100% + 3px); border-top-color: transparent; border-bottom-color: var(--tooltip-bg); }
+@media (hover: none) { [data-tooltip]::after, [data-tooltip]::before { display: none; } }
 `;
 
   // client-ui/src/base.mjs
@@ -8259,8 +8290,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (this._faved === void 0) this._faved = false;
       const c = Math.max(0, this._count);
       const label = !this.client ? "Sign in to favorite" : this._faved ? "Remove favorite" : "Add favorite";
+      const full = `${label}${c > 0 ? `, ${c} so far` : ""}`;
       this.set(
-        this.css(CSS18) + `<button class="pill ${rail ? "rail" : ""} ${this._faved ? "on" : ""}" type="button" aria-pressed="${this._faved}" aria-label="${label}${c > 0 ? `, ${c} so far` : ""}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ""}</button>`
+        this.css(CSS18) + `<button class="pill ${rail ? "rail" : ""} ${this._faved ? "on" : ""}" type="button" aria-pressed="${this._faved}" aria-label="${full}" data-tooltip="${label}">${heart(this._faved)}${c > 0 ? `<span class="c">${c}</span>` : ""}</button>`
       );
       this.on(".pill", "click", () => this._onClick(targetType, targetSlug));
     }
@@ -8324,7 +8356,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     render() {
       const open = this._open ? this._renderPop() : "";
       const label = !this.client ? "Sign in to save to a collection" : "Save to a collection";
-      this.set(this.css(CSS19) + `<button class="pill ${this._inAny() ? "on" : ""}" type="button" aria-haspopup="true" aria-expanded="${!!this._open}" aria-label="${label}">${folder}<span>Save</span></button>${open}`);
+      this.set(this.css(CSS19) + `<button class="pill ${this._inAny() ? "on" : ""}" type="button" aria-haspopup="true" aria-expanded="${!!this._open}" aria-label="${label}" data-tooltip="${label}">${folder}<span>Save</span></button>${open}`);
       this.on(".pill", "click", (e) => {
         e.stopPropagation();
         this._toggleOpen();

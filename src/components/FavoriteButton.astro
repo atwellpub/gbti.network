@@ -22,7 +22,7 @@ const { targetType, targetSlug, count = 0, size = 'md' } = Astro.props;
   data-gbti-region="favorite"
   class:list={['gbti-favorite', size === 'sm' && 'fav-sm', size === 'rail' && 'fav-rail']}
 >
-  <button type="button" class="fav-pill" data-signin aria-label={`Favorite this ${targetType}${count > 0 ? `, ${count} so far` : ''}`}>
+  <button type="button" class="fav-pill" data-signin data-tooltip="Favorite" aria-label={`Favorite this ${targetType}${count > 0 ? `, ${count} so far` : ''}`}>
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#ico-heart" /></svg>
     {count > 0 && <span class="fav-count">{count}</span>}
   </button>
