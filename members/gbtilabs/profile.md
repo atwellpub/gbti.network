@@ -6,6 +6,7 @@ skills: []
 roles: []
 visibility: public
 headline: Creative. Curative. Community. Cooperative.
+avatar: https://secure.gravatar.com/avatar/061a44e977c1338f8b6d2e0e36b36f1a?s=512&d=mm
 links:
   github: https://github.com/gbti-network
   website: https://gbtil.network
