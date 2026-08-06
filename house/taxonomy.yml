@@ -45,6 +45,8 @@ tree:
         label: Utilities
       tooling:
         label: Tooling
+      security:
+        label: Security
   ai:
     label: AI
     children:

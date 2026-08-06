@@ -52,6 +52,7 @@ topics:
   react: { label: React }
   rust: { label: Rust }
   saas: { label: SaaS }
+  security: { label: Security }
   threejs: { label: Three.js }
   wordpress: { label: WordPress }
   # Tech & Building: the Blockchain Discord section subchannels

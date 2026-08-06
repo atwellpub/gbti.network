@@ -19,6 +19,8 @@ topics:
     newsCategories: ["Open Source"]
   devops:
     newsCategories: ["DevOps/Cloud", "Frameworks/Libraries", "Programming Languages", "Open Source"]
+  security:
+    newsCategories: ["Security"]
   # Hardware + physical building
   hardware:
     newsCategories: ["Hardware"]
