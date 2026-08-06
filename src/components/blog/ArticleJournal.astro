@@ -15,7 +15,7 @@ import ContentActions from '../ContentActions.astro';
 import ArticleContents from './ArticleContents.astro';
 import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
-import { breadcrumb, leafLabel } from '../../lib/taxonomy';
+import { breadcrumb, leafLabel, topKey } from '../../lib/taxonomy';
 import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
 import { contentRepoPath } from '../../lib/content';
 
@@ -39,7 +39,6 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
   <div class="art-j-grid art-wrap">
     <aside class="art-j-rail art-rail">
       <div>
-        {category && <span class="art-rail-lab" style="color:var(--green-700)">{category}</span>}
         <div class="mt-12">
           <ContentMeta author={d.author} publishedAt={d.publishedAt} stack={stack} />
         </div>
@@ -50,6 +49,15 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
       </div>
 
       <ArticleContents toc={toc} label="Contents" />
+
+      {category && (
+        <div>
+          <span class="art-rail-lab">Category</span>
+          <div class="art-tags">
+            <a class="art-tag" href={`/articles/?cat=${encodeURIComponent(topKey(d.categories))}`}>{category}</a>
+          </div>
+        </div>
+      )}
 
       {d.tags.length > 0 && (
         <div>

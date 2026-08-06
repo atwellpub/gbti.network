@@ -16,7 +16,8 @@ const { post } = Astro.props;
 const d = post.data;
 // sow-179: categoryLabel maps the taxonomy key to its real label (categories[0] is still the top-level
 // segment, same choice as before, just no longer the raw key text-transform:capitalize was approximating).
-const category = d.categories?.[0] ? categoryLabel(d.categories[0]) : undefined;
+const categoryKey = d.categories?.[0];
+const category = categoryKey ? categoryLabel(categoryKey) : undefined;
 const stub = isStub(post); // SOW-016: a listed members post is a Mode B stub (the body is gated)
 
 // Stacked avatars: the author plus accepted contributors plus commenters (getCollection is cached
@@ -26,7 +27,7 @@ const comments = await getCollection('comment');
 const stack = avatarStack({ author: d.author, contributors: d.contributors, comments, targetType: 'post', targetSlug: d.slug, index });
 ---
 <article
-  data-category={category}
+  data-category={categoryKey}
   class="archive-card card card-hover group flex h-full flex-col overflow-hidden"
 >
   <a href={`/articles/${d.slug}/`} class="relative block overflow-hidden pb-[56.25%]" style="background:var(--tint)">

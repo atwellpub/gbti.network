@@ -14,7 +14,7 @@ import ContentActions from '../ContentActions.astro';
 import ArticleContents from './ArticleContents.astro';
 import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
-import { breadcrumb } from '../../lib/taxonomy';
+import { breadcrumb, topKey } from '../../lib/taxonomy';
 import { ART_OVERVIEW_ID, coverDimensions } from '../../lib/article-page.mjs';
 import { contentRepoPath } from '../../lib/content';
 
@@ -86,6 +86,14 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
 
     <aside class="art-e-aside">
       <ArticleContents toc={toc} label="In this article" />
+      {category && (
+        <div>
+          <span class="art-rail-lab">Category</span>
+          <div class="art-tags">
+            <a class="art-tag" href={`/articles/?cat=${encodeURIComponent(topKey(d.categories))}`}>{category}</a>
+          </div>
+        </div>
+      )}
       {d.tags.length > 0 && (
         <div>
           <span class="art-rail-lab">Tagged</span>

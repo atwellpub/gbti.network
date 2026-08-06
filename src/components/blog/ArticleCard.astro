@@ -13,7 +13,7 @@ import ContentMeta from '../ContentMeta.astro';
 import ContentActions from '../ContentActions.astro';
 import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
-import { breadcrumb } from '../../lib/taxonomy';
+import { breadcrumb, topKey } from '../../lib/taxonomy';
 import { contentRepoPath } from '../../lib/content';
 
 interface Props {
@@ -45,7 +45,7 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
         </a>
       )}
       <header class="tcenter">
-        {category && <p class="eyebrow">{category}</p>}
+        {category && <p class="eyebrow"><a href={`/articles/?cat=${encodeURIComponent(topKey(d.categories))}`}>{category}</a></p>}
         <h1 data-gbti-region="title" class="h1 mt-8">{d.title}</h1>
 
         <div class="mt-20 flex col items-center g12">
@@ -56,7 +56,7 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
         {d.tags.length > 0 && (
           <ul class="mt-20 flex wrap-w justify-center g8" style="list-style:none;padding:0;margin-top:20px">
             {d.tags.map((t: string) => (
-              <li class="chip">{t}</li>
+              <li><a class="chip" href={`/feeds/?tag=${encodeURIComponent(t)}`}>{t}</a></li>
             ))}
           </ul>
         )}

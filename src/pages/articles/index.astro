@@ -38,16 +38,22 @@ const categories = [...new Set(posts.map((p) => p.data.categories?.[0]).filter(B
   <script>
     const pills = document.querySelectorAll<HTMLButtonElement>('.cat-pill');
     const cards = document.querySelectorAll<HTMLElement>('#post-grid .archive-card');
-    pills.forEach((pill) => {
-      pill.addEventListener('click', () => {
-        const cat = pill.dataset.cat;
-        pills.forEach((p) => { p.classList.remove('on'); p.setAttribute('aria-selected', 'false'); });
-        pill.classList.add('on');
-        pill.setAttribute('aria-selected', 'true');
-        cards.forEach((card) => {
-          card.style.display = cat === 'all' || card.dataset.category === cat ? '' : 'none';
-        });
+    function applyFilter(cat: string) {
+      pills.forEach((p) => {
+        const on = p.dataset.cat === cat;
+        p.classList.toggle('on', on);
+        p.setAttribute('aria-selected', String(on));
       });
+      cards.forEach((card) => {
+        card.style.display = cat === 'all' || card.dataset.category === cat ? '' : 'none';
+      });
+    }
+    pills.forEach((pill) => {
+      pill.addEventListener('click', () => applyFilter(pill.dataset.cat || 'all'));
     });
+    // Deep link: /articles/?cat=<key> (from an article's category link) preselects that pill on load.
+    const params = new URLSearchParams(location.search);
+    const catParam = params.get('cat');
+    if (catParam && Array.from(pills).some((p) => p.dataset.cat === catParam)) applyFilter(catParam);
   </script>
 </BaseLayout>
