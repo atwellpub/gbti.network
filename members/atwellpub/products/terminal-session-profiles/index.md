@@ -25,6 +25,7 @@ platforms:
 icon: ./images/terminal-session-profiles-icon-128x128-1.webp
 iconLarge: ./images/terminal-session-profiles-icon-256x256.webp
 featuredImage: ../../images/banner-c-columns.webp
+bannerPreset: ide-plugins
 video: https://youtu.be/eaAsh42seho
 links:
   - type: download
@@ -34,8 +35,8 @@ links:
   - type: repository
     url: https://github.com/gbti-network/vscode-terminal-sessions
     label: Source on GitHub
-updatedAt: '2026-08-04T15:14:02.680Z'
-publishedAt: '2026-08-04T15:14:02.680Z'
+publishedAt: '2026-08-06T16:22:39.405Z'
+updatedAt: '2026-08-06T16:22:39.405Z'
 type: product
 author: atwellpub
 ---

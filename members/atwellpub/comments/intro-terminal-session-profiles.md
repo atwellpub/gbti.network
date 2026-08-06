@@ -2,7 +2,7 @@
 id: intro-terminal-session-profiles
 targetType: product
 targetSlug: terminal-session-profiles
-createdAt: '2026-08-04T15:14:02.985Z'
+createdAt: '2026-08-06T16:22:39.810Z'
 status: published
 visibility: public
 authorNote: true
