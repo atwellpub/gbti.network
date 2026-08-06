@@ -4,9 +4,11 @@
 // AuthorBox, then the Comments thread (same centered reading width on all three — the prompt page drops its old
 // `wide`). Post-only extras (OpenHistory / RelatedPosts / ContributionCredits) stay on the article page, after
 // this block.
+import { getCollection } from 'astro:content';
 import CommunityInvite from './CommunityInvite.astro';
 import Comments from './blog/Comments.astro';
 import AuthorBox from './blog/AuthorBox.astro';
+import { hasAuthorNote } from '../lib/comments';
 import type { ShareType } from '../lib/share';
 
 interface Props {
@@ -17,10 +19,16 @@ interface Props {
   via?: string; // referral attribution tag; defaults to "<type>:<slug>"
   wide?: boolean; // span the full content-column width (e.g. inside the prompt main column) instead of the centered reading column
   hideAuthor?: boolean; // skip the "Written by" box when the page already shows the author elsewhere (e.g. the prompt sidebar Author card)
+  aliases?: string[]; // SOW-112: pre-rename slugs, unioned into comment lookups so a renamed item still finds its thread + intro
 }
 const { type, slug, author, publishedAt, via, wide = false, hideAuthor = false, aliases = [] } = Astro.props;
 const viaTag = via ?? `${type}:${slug}`;
+// The "From the author" intro (SOW-014, rendered by Comments.astro) already carries the author's name and
+// avatar right above the thread, so a plain "Written by" box is redundant whenever one exists -- skip it
+// there too. The explicit hideAuthor prop still wins for pages (the prompt sidebar) that show the author
+// somewhere else entirely, regardless of whether an intro exists.
+const skipAuthorBox = hideAuthor || hasAuthorNote(await getCollection('comment'), type, slug, author, aliases);
 ---
 <CommunityInvite author={author} via={viaTag} />
-{!hideAuthor && <AuthorBox author={author} publishedAt={publishedAt} />}
+{!skipAuthorBox && <AuthorBox author={author} publishedAt={publishedAt} />}
 <Comments targetType={type} targetSlug={slug} author={author} wide={wide} aliases={aliases} />
