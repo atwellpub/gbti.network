@@ -14,11 +14,11 @@ tags:
   - namecheap
   - dotfm
   - pricing
-layout: editorial
+layout: journal
 coverImage: ./images/fm-pricing-increase.webp
 featured: false
-publishedAt: '2026-08-06T02:03:59.196Z'
-updatedAt: '2026-08-06T02:03:59.196Z'
+publishedAt: '2026-08-06T02:05:27.798Z'
+updatedAt: '2026-08-06T02:05:27.798Z'
 type: post
 author: gbti
 ---
