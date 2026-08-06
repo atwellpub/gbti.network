@@ -9,6 +9,13 @@ name: Deploy to Cloudflare Pages
 #   "Account > Cloudflare Pages > Edit" on the Gbti.labs account. The account id below is not a secret (it is in
 #   every dashboard URL). Optionally add MEMBER_CONTENT_KEY so the dist key-scan can assert that value never
 #   leaked into the build (the build does not require it).
+#
+# sow-185: also marks/clears the "still deploying" public-page notice (scripts/deploy-status.mjs), reusing the
+# same CF_ACCOUNT_ID / CF_KV_NAMESPACE_ID / CF_API_TOKEN wiring sync-overrides-mirror.yml already has (a token
+# scoped to Workers KV Storage Edit). Both steps are informational and can never fail this job. The full-history
+# checkout this needs (see fetch-depth below) grows with the repo over time (committed images are never pruned
+# per this project's media-handling policy); revisit if checkout time ever competes with this job's 20-minute
+# budget.
 
 on:
   push:
@@ -26,11 +33,32 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # sow-185: the watermark diff may span further back than the last single push, so a shallow clone
+          # is not enough. This ALSO fixes a pre-existing, previously-accepted gap: src/lib/git-history.ts
+          # (OpenHistory.astro's "who built this" commit list) reads `git log` at build time and its own
+          # comment already documented that it "degrades to an empty list when git is unavailable (e.g. a
+          # shallow CI clone)" -- every production deploy before this change built with the default shallow
+          # checkout, so that feature was silently rendering empty on every live page. Do not shrink this
+          # back down thinking only the watermark diff needs it.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       # Full install (not --ignore-scripts): the astro build needs sharp's native binary for image optimization.
       - run: npm ci
+      # sow-185: mark whichever content items changed as "still deploying" BEFORE the build starts, so a
+      # visitor who lands on the public page during the build/deploy window sees a notice instead of silent
+      # stale content. Informational only -- always exits 0 (see scripts/deploy-status.mjs's own header), and
+      # continue-on-error here is belt-and-suspenders on top of that.
+      - name: Mark changed content as still deploying
+        continue-on-error: true
+        run: node scripts/deploy-status.mjs mark
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          CF_ACCOUNT_ID: "d42b12e969229c5187ad0f7289536487"
+          CF_KV_NAMESPACE_ID: "49432379e11844ac81b6fdaf22d3937a"
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       # build:pages = repackage the extension zip, astro build (emits the index JSONs + optimized images), then
       # verify:dist (key-scan + redirects + extension-distribution guards). A guard failure fails the deploy.
       - name: Build the site
@@ -39,8 +67,21 @@ jobs:
           # Opt-in defense in depth: when set, check-build-secrets scans dist for this value. Not required to build.
           MEMBER_CONTENT_KEY: ${{ secrets.MEMBER_CONTENT_KEY }}
       - name: Deploy dist to Cloudflare Pages (production)
+        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: d42b12e969229c5187ad0f7289536487
           command: pages deploy dist --project-name=gbti-network --branch=main
+      # sow-185: clear the markers this run set above -- the deploy that just succeeded now reflects them live.
+      # Only when the deploy step itself actually succeeded (steps.deploy.outcome is undefined/'skipped' if an
+      # earlier step failed first, and 'failure' if wrangler itself failed -- neither should clear a marker for
+      # content that never actually went live). The 10-minute TTL is the backstop either way.
+      - name: Clear the still-deploying markers
+        if: always() && steps.deploy.outcome == 'success'
+        continue-on-error: true
+        run: node scripts/deploy-status.mjs clear
+        env:
+          CF_ACCOUNT_ID: "d42b12e969229c5187ad0f7289536487"
+          CF_KV_NAMESPACE_ID: "49432379e11844ac81b6fdaf22d3937a"
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

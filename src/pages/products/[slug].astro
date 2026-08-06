@@ -21,6 +21,7 @@ import VideoEmbed from '../../components/VideoEmbed.astro';
 import ContentMeta from '../../components/ContentMeta.astro';
 import ContentActions from '../../components/ContentActions.astro';
 import ContentFooter from '../../components/ContentFooter.astro';
+import DeployStatusNotice from '../../components/DeployStatusNotice.astro';
 import EditHooks from '../../components/EditHooks.astro';
 import TouchSignal from '../../components/TouchSignal.astro';
 import { refCodeForAuthor } from '../../lib/referral';
@@ -117,6 +118,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
     : 'Members only. Open in the GBTI client to unlock.';
 ---
 <BaseLayout title={d.title} description={d.shortDescription} ogImage={(d.featuredImage ?? d.banner ?? d.icon)?.src ?? defaultFeatureImage('product')}>
+  <DeployStatusNotice type="product" slug={d.slug} updatedAt={d.updatedAt} />
   <div class="pd-shell">
     <!-- Hero: the banner, scrimmed, with the product mark and the one-line pitch sitting on it. -->
     <section class="pd-hero" data-preset={hero.preset}>

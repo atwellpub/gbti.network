@@ -1,0 +1,113 @@
+---
+// sow-185: an inert "still deploying" notice for public content pages. The static site has no per-request
+// rendering, so this is a client-side check: on load, if this item's OWN updatedAt is recent, fetch
+// GET /membership/deploy-status?type=...&slug=... (public, no auth) and reveal a notice if the deploy
+// pipeline (.github/workflows/deploy.yml via scripts/deploy-status-kv.mjs) marked it as still mid-deploy.
+// The recency gate keeps this near-zero cost for the overwhelming majority of page views -- old, settled
+// content never makes the call at all. `updatedAt` is read from the PROP, not from ContentMeta.astro's own
+// "Updated" byline (that one is conditionally hidden for a same-day edit, so it cannot be relied on here).
+import { SIGNUP_BASE } from '../lib/membership';
+
+interface Props {
+  type: 'post' | 'product' | 'prompt';
+  slug: string;
+  updatedAt?: Date;
+}
+const { type, slug, updatedAt } = Astro.props;
+---
+<div
+  class="deploy-status-notice"
+  data-deploy-status
+  hidden
+  data-type={type}
+  data-slug={slug}
+  data-signup-base={SIGNUP_BASE}
+  data-updated-at={updatedAt?.toISOString() ?? ''}
+>
+  <svg class="ds-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><use href="#ico-merge" /></svg>
+  <span class="ds-text" data-ds-text></span>
+  <button type="button" class="ds-refresh" data-ds-refresh hidden>Refresh</button>
+</div>
+
+<style>
+  .deploy-status-notice {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    max-width: 1140px; margin: 0 auto 20px; padding: 11px 18px;
+    background: var(--green-tint); border: 1.5px solid var(--green-tint-2); border-radius: var(--r);
+    font-size: 13.5px; color: var(--green-700);
+  }
+  .deploy-status-notice[hidden] { display: none; }
+  .ds-icon { flex: none; }
+  .ds-text { flex: 1 1 auto; min-width: 200px; }
+  .ds-refresh {
+    flex: none; font: inherit; font-weight: 600; font-size: 12.5px; cursor: pointer;
+    color: var(--green-700); background: var(--paper); border: 1.5px solid var(--green-tint-2);
+    border-radius: var(--r-pill); padding: 5px 13px; transition: border-color .15s, background .15s;
+  }
+  .ds-refresh:hover { background: var(--green-tint); border-color: var(--green); }
+  .ds-refresh[hidden] { display: none; }
+</style>
+
+<script>
+  (() => {
+    // Only ever check items whose own updatedAt is recent -- see the header comment for why this matters at
+    // scale (this fetch runs on every visitor page view of a matching item, not just the editor's own).
+    const RECENT_WINDOW_MS = 15 * 60 * 1000;
+    const POLL_MS = 15 * 1000;
+
+    document.querySelectorAll<HTMLElement>('[data-deploy-status]').forEach((root) => {
+      const updatedAtRaw = root.dataset.updatedAt || '';
+      const updatedAt = updatedAtRaw ? new Date(updatedAtRaw) : null;
+      if (!updatedAt || Number.isNaN(updatedAt.valueOf())) return;
+      if (Date.now() - updatedAt.getTime() > RECENT_WINDOW_MS) return;
+
+      const base = root.dataset.signupBase || '';
+      const type = root.dataset.type || '';
+      const slug = root.dataset.slug || '';
+      if (!base || !type || !slug) return;
+      const textEl = root.querySelector<HTMLElement>('[data-ds-text]');
+      const refreshBtn = root.querySelector<HTMLButtonElement>('[data-ds-refresh]');
+
+      const say = (s: string) => { if (textEl) textEl.textContent = s; };
+      const humanElapsed = (seconds: number): string => {
+        if (seconds < 90) return `${Math.max(1, Math.round(seconds))} seconds`;
+        const minutes = Math.round(seconds / 60);
+        return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+      };
+
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const showReady = () => {
+        if (timer) clearInterval(timer);
+        say('This page has an updated version ready.');
+        if (refreshBtn) {
+          refreshBtn.hidden = false;
+          refreshBtn.addEventListener('click', () => location.reload());
+        }
+      };
+
+      // A slow/out-of-order response must never overwrite a NEWER one's result -- on a flaky connection a
+      // round trip can exceed POLL_MS, leaving two checks outstanding at once. `seq` tags each request; a
+      // response is applied only if it is still the most recently ISSUED one by the time it resolves.
+      let seq = 0;
+      const check = async () => {
+        const mySeq = ++seq;
+        let data: { pending?: boolean; elapsedSeconds?: number } = {};
+        try {
+          const res = await fetch(`${base}/membership/deploy-status?type=${encodeURIComponent(type)}&slug=${encodeURIComponent(slug)}`);
+          data = await res.json();
+        } catch { return; } // a network hiccup just means no notice this check; the next poll tries again
+        if (mySeq !== seq) return; // superseded by a check() issued after this one started
+        if (data.pending) {
+          root.hidden = false;
+          say(`This page was recently updated. The new version is still deploying and usually appears within about 2 to 3 minutes (started ${humanElapsed(data.elapsedSeconds ?? 0)} ago).`);
+        } else if (!root.hidden) {
+          // Was pending, now is not: the deploy landed while the visitor was reading.
+          showReady();
+        }
+      };
+
+      check();
+      timer = setInterval(check, POLL_MS);
+    });
+  })();
+</script>

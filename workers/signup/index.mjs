@@ -78,6 +78,7 @@ import { membershipNewsPublish } from './membership-news-publish.mjs'; // SOW-04
 import { membershipNewsDiscussed } from './membership-news-discussed.mjs'; // SOW-046 D: reflect news discussion onto Discord
 import { membershipNewsOpened } from './membership-news-opened.mjs'; // SOW-111: the detail-open engagement beacon
 import { membershipContentOpened } from './membership-content-opened.mjs'; // SOW-126: the content-open engagement beacon
+import { membershipDeployStatus } from './membership-deploy-status.mjs'; // sow-185: public "still deploying" status check
 import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
@@ -834,6 +835,18 @@ export default {
         if (method === 'GET') {
           const r = await publicNews(request, env);
           return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'public, max-age=300' });
+        }
+      }
+
+      // sow-185: PUBLIC "still deploying" status check for a content item. Anonymous, cheap, briefly
+      // edge-cacheable (short max-age so a visitor's own poll loop still sees a fresh read within a few
+      // seconds of the real state changing, while many simultaneous visitors on the same slug share one edge
+      // read instead of each hitting KV directly).
+      if (pathname === '/membership/deploy-status') {
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        if (method === 'GET') {
+          const r = await membershipDeployStatus(request, env);
+          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'public, max-age=15' });
         }
       }
 

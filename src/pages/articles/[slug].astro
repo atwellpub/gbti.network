@@ -12,6 +12,7 @@ import RelatedPosts from '../../components/blog/RelatedPosts.astro';
 import ContributionCredits from '../../components/blog/ContributionCredits.astro';
 import OpenHistory from '../../components/blog/OpenHistory.astro';
 import ContentFooter from '../../components/ContentFooter.astro';
+import DeployStatusNotice from '../../components/DeployStatusNotice.astro';
 import EditHooks from '../../components/EditHooks.astro';
 import TouchSignal from '../../components/TouchSignal.astro';
 import { refCodeForAuthor } from '../../lib/referral';
@@ -56,6 +57,7 @@ const Layout = LAYOUTS[d.layout] ?? ArticleJournal;
 const isJournal = Layout === ArticleJournal;
 ---
 <BaseLayout title={d.title} description={d.excerpt} ogImage={d.coverImage?.src ?? defaultFeatureImage('post')} ogType="article">
+  <DeployStatusNotice type="post" slug={d.slug} updatedAt={d.updatedAt} />
   <Layout d={d} isStub={stub} postId={post.id} postUrl={postUrl} stack={stack} toc={toc}>
     <Content slot="body" />
     <ContentFooter slot="closing" type="post" slug={d.slug} author={d.author} publishedAt={d.publishedAt} aliases={aliasSlugsOf(d)} />
