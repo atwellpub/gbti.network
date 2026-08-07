@@ -17154,6 +17154,8 @@ var productSchema = external_exports.object({
   // sow-172: unset resolves by shot count
   video: external_exports.string().optional(),
   links: contentLinks,
+  // Mirrors src/content.config.ts. Which side the Contents rail renders on for this product's detail page.
+  sidebarPosition: external_exports.enum(["left", "right"]).default("left"),
   publishedAt: external_exports.coerce.date().optional(),
   redirectFrom: external_exports.array(external_exports.string()).default([])
 });

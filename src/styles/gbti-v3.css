@@ -1314,6 +1314,12 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 
 /* ---------- grid ---------- */
 .pd-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 30px; align-items: start; padding: 30px 0 40px; }
+/* sidebarPosition: right -- mirror the grid so the 190px rail track sits second; CSS order flips which
+   child renders in which track without touching DOM order (main content stays reachable first regardless
+   of visual side). */
+.pd-grid[data-side="right"] { grid-template-columns: minmax(0, 1fr) 190px; }
+.pd-grid[data-side="right"] .pd-rail { order: 2; }
+.pd-grid[data-side="right"] .pd-col { order: 1; }
 /* sow-173 responsive audit: below the design's own 1024px reference width, COMPRESS the two-column shape
    (a smaller rail, a smaller gap) rather than stacking it. `vw`-driven clamp()s track the viewport
    continuously, so this holds for a plain desktop browser narrowed with the mouse AND for a touch tablet in
@@ -1324,6 +1330,7 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    restructures the rail into a horizontal strip; everything in this range stays a two-column doc shell. */
 @media (max-width: 1023px) {
   .pd-grid { grid-template-columns: clamp(130px, 20vw, 185px) minmax(0, 1fr); gap: clamp(18px, 3vw, 28px); padding: 24px 0 36px; }
+  .pd-grid[data-side="right"] { grid-template-columns: minmax(0, 1fr) clamp(130px, 20vw, 185px); }
 }
 
 /* ---------- left rail ---------- */
@@ -1478,6 +1485,7 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    real reading column, so it applies even on the (unlikely) narrowed mouse-driven browser. */
 @media (hover: none) and (pointer: coarse) and (max-width: 560px), (max-width: 479px) {
   .pd-grid { grid-template-columns: 1fr; gap: 20px; padding: 22px 0 36px; }
+  .pd-grid[data-side="right"] .pd-rail, .pd-grid[data-side="right"] .pd-col { order: 0; }
   .pd-col { max-width: none; }
   /* The rail becomes a horizontal strip above the body. The contents list goes with it: a table of contents
      earns its keep by staying in view, and nothing stays in view here. */

@@ -17097,6 +17097,8 @@ var productSchema = external_exports.object({
   // sow-172: unset resolves by shot count
   video: external_exports.string().optional(),
   links: contentLinks,
+  // Mirrors src/content.config.ts. Which side the Contents rail renders on for this product's detail page.
+  sidebarPosition: external_exports.enum(["left", "right"]).default("left"),
   publishedAt: external_exports.coerce.date().optional(),
   redirectFrom: external_exports.array(external_exports.string()).default([])
 });
@@ -20669,6 +20671,7 @@ var FIELDS = Object.freeze({
     // the first time an author re-saved a captioned product.
     f("gallery", 'Gallery (JSON array of "image.png" or {src,caption})', "json", { placeholder: '["./images/shot-1.webp", {"src": "./images/shot-2.webp", "caption": "The settings panel"}]' }),
     f("galleryStyle", "Gallery style", "enum", { options: ["grid", "carousel"], hint: "Leave unset to pick by count: 6 or more screenshots use the carousel, fewer use the captioned grid." }),
+    f("sidebarPosition", "Sidebar position", "enum", { options: ["left", "right"], hint: "Which side the Contents rail renders on for this product page." }),
     f("video", "Video (YouTube/Vimeo URL)", "text"),
     f("links", "Links (JSON array: {type,url,visibility:public|members,primary,label})", "json"),
     f("publishedAt", "Published at", "date")

@@ -177,7 +177,7 @@ const lockedHint = (l: { encrypted?: boolean }) =>
     </div>
 
     <div class="pd-wrap">
-      <div class="pd-grid">
+      <div class="pd-grid" data-side={d.sidebarPosition === 'right' ? 'right' : 'left'}>
         <aside class="pd-rail">
           {toc.length > 0 && (
             <nav class="pd-toc" aria-label="Contents" data-pd-toc>

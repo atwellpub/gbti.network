@@ -188,6 +188,9 @@ const productShape = ({ image }: { image: any }) => ({
   galleryStyle: z.enum(['grid', 'carousel']).optional(),
   video: z.string().optional(), // YouTube/Vimeo URL or id (embed-only); a product demo rendered by VideoEmbed
   links: contentLinks, // SOW-014: array of typed, visibility-tagged links (was a flat object)
+  // Which side the .pd-rail Contents sidebar renders on for this product's detail page. Defaults to 'left',
+  // the only behavior that existed before this field -- every product predating it renders identically.
+  sidebarPosition: z.enum(['left', 'right']).default('left'),
   publishedAt: z.coerce.date().optional(),
   updatedAt: z.coerce.date().optional(), // sow-172: last meaningful revision; shown in the byline + rail spec block
   redirectFrom: z.array(z.string()).default([]),

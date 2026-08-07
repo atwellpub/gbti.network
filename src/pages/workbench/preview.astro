@@ -193,6 +193,8 @@ const labelOf = CATEGORY_LABELS;
         if (hero.preset) heroSection.setAttribute('data-preset', hero.preset);
         else heroSection.removeAttribute('data-preset');
       }
+      const grid = document.querySelector('.pd-grid');
+      if (grid) grid.setAttribute('data-side', fm.sidebarPosition === 'right' ? 'right' : 'left');
       setImg('[data-pv-hero]', hero.image);
       setImg('[data-pv-mark]', fm.iconLarge || fm.icon);
       setImg('[data-pv-barmark]', fm.icon);

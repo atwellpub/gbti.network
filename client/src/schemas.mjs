@@ -164,6 +164,8 @@ export const productSchema = z.object({
   galleryStyle: z.enum(['grid', 'carousel']).optional(), // sow-172: unset resolves by shot count
   video: z.string().optional(),
   links: contentLinks,
+  // Mirrors src/content.config.ts. Which side the Contents rail renders on for this product's detail page.
+  sidebarPosition: z.enum(['left', 'right']).default('left'),
   publishedAt: z.coerce.date().optional(),
   redirectFrom: z.array(z.string()).default([]),
 });

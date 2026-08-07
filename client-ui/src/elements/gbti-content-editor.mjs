@@ -78,6 +78,7 @@ const RAIL_SCHEMA = {
   ],
   product: [
     { title: 'Details', open: true, keys: ['visibility', 'shortDescription', 'categories', 'tags'] },
+    { title: 'Layout', open: true, keys: ['sidebarPosition'] },
     { title: 'Pricing', open: true, keys: ['pricing', 'pricingUrl'] },
     { title: 'Links', open: true, keys: ['links'] },
     { title: 'Media', open: true, keys: ['icon', 'featuredImage', 'banner'] },
@@ -804,6 +805,18 @@ class GbtiContentEditor extends GbtiElement {
         { key: 'card', name: 'Card', desc: 'Centered card, no rail', shape: '<span class="gs-tile" style="flex:0 0 62%;margin:0 auto"></span>' },
       ];
       const cur = v || 'editorial';
+      const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? ' on' : ''}" data-gs="${c.key}">
+        <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join('');
+      return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
+    }
+    // Product sidebar position -> two illustrated cards (Left / Right), same pattern as the article-layout
+    // picker above (reuses its .gs-* CSS and the generic [data-gscards] click handler as-is).
+    if (f.kind === 'enum' && f.key === 'sidebarPosition') {
+      const cards = [
+        { key: 'left', name: 'Left', desc: 'Contents rail beside the left edge', shape: '<span class="gs-tile" style="flex:0 0 26%"></span><span class="gs-tile"></span>' },
+        { key: 'right', name: 'Right', desc: 'Contents rail beside the right edge', shape: '<span class="gs-tile"></span><span class="gs-tile" style="flex:0 0 26%"></span>' },
+      ];
+      const cur = v || 'left';
       const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? ' on' : ''}" data-gs="${c.key}">
         <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join('');
       return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
