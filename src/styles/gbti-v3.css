@@ -971,6 +971,17 @@ a.who:hover { color: var(--fg); }
 .pop-meta { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
 .pop-by { font-family: var(--f-mono); font-size: 10.5px; color: var(--fg-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* sow-192 Phase C: signed-in homepage surfaces (composer bar + the "Your workbench" quick links). */
+.home-composer { padding: 18px 20px; margin-bottom: 22px; }
+.home-composer .hc-eyebrow { font-family: var(--f-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 12px; }
+.wb-links { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.wb-links a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--r); font-size: 13.5px; color: var(--fg-soft); text-decoration: none; transition: background .12s ease, color .12s ease; }
+.wb-links a:hover { background: var(--tint); color: var(--fg); }
+.wb-links a svg { width: 16px; height: 16px; flex: none; color: var(--fg-mute); }
+.wb-links a:hover svg { color: var(--green-700); }
+.wb-links .wb-open { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 13px; color: var(--green-700); font-weight: 600; }
+.wb-links .wb-open svg { color: var(--green-700); }
+
 /* toolbar: visibility chips + density toggle */
 /* breathing room below the toolbar: in cards mode the grid otherwise touches the density toggle */
 .feed-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 20px; }

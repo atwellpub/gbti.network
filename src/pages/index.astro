@@ -110,6 +110,14 @@ const SHOPTALK = {
 
 <div class="wrap feedwrap">
 
+  <!-- sow-192 Phase C: the signed-in creator composer bar. Hidden for signed-out / no-JS; revealed on the
+       sow-158 member signal, which also lazy-mounts the client-ui composer (see the script below). -->
+  <div class="home-composer card" data-home-signedin hidden>
+    <div class="hc-eyebrow">Share with the network</div>
+    <p class="hub-load" data-home-composer-load>Loading the composer&hellip;</p>
+    <gbti-share-composer></gbti-share-composer>
+  </div>
+
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
     <main class="feed-page home-feed" data-view="detailed" data-hometabs aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
@@ -136,8 +144,23 @@ const SHOPTALK = {
     </main>
 
     <aside class="side">
-      <!-- join promo -->
-      <div class="card side-card join-card" id="join">
+      <!-- sow-192 Phase C: the signed-in "Your workbench" rail card (quick-create deep links into the
+           WorkBench). Hidden for signed-out; revealed on the member signal. Live counts are a follow-up. -->
+      <div class="card side-card" data-home-signedin hidden>
+        <div class="side-h">Your workbench</div>
+        <p class="side-sub" style="margin-top:6px">Publish and manage your work.</p>
+        <div class="wb-links">
+          <a href="/workbench/#tab=post"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-pencil"/></svg>New article</a>
+          <a href="/workbench/#tab=product"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-box"/></svg>New product</a>
+          <a href="/workbench/#tab=prompt"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-terminal"/></svg>New prompt</a>
+          <a href="/workbench/#tab=prs"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-merge"/></svg>My pull requests</a>
+          <a href="/workbench/#tab=saved"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-heart"/></svg>Saved</a>
+          <a href="/workbench/" class="wb-open">Open WorkBench <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-arrow"/></svg></a>
+        </div>
+      </div>
+
+      <!-- join promo (signed-out; hidden for a signed-in member, who sees Your workbench instead) -->
+      <div class="card side-card join-card" id="join" data-home-joincard>
         <div class="ttl"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-spark"/></svg> Join the co-op</div>
         <p class="side-sub" style="margin-top:8px">Publish your work, build with peers, and earn from what you make.</p>
         <ul class="join-list">
@@ -518,5 +541,43 @@ const SHOPTALK = {
         document.dispatchEvent(new Event('gbti:feed-updated'));
       })
       .catch(() => { dropLatestNews(); /* news is optional garnish; the built feed stands alone */ });
+  })();
+</script>
+
+<script>
+  // sow-192 Phase C: the signed-in homepage surfaces. Gated by the sow-158 member signal (member-signal.ts,
+  // hydrated by BaseLayout from the httpOnly session cookie; the token never reaches page JS). Signed-out /
+  // no-JS visitors never see these (the containers ship [hidden] and client-ui is imported LAZILY only after
+  // the first signed-in signal). Mirrors the proven /account mount (account.astro). The composer self-gates
+  // by membership; the header nav swap is sow-187, not here.
+  import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
+  (() => {
+    const signedInEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-signedin]'));
+    const joinCard = document.querySelector<HTMLElement>('[data-home-joincard]');
+    if (!signedInEls.length) return;
+    let mounted = false;
+
+    async function mountComposer(s: any) {
+      if (mounted) return;
+      mounted = true;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const { createWorkbenchClient } = await import('../lib/workbench-client');
+      const { setClient } = await import('../../client-ui/src/base.mjs');
+      const adapter = createWorkbenchClient({ signupBase, login: String(s.login), githubId: s.githubId != null ? String(s.githubId) : null });
+      setClient(adapter);
+      document.querySelectorAll('[data-home-composer-load]').forEach((el) => el.setAttribute('hidden', ''));
+      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
+      await import('../../client-ui/src/elements/gbti-share-composer.mjs');
+    }
+
+    function render(s: any) {
+      const signedIn = !!(s && s.login);
+      signedInEls.forEach((el) => { el.hidden = !signedIn; });
+      if (joinCard) joinCard.hidden = signedIn;
+      if (signedIn) mountComposer(s);
+    }
+
+    render(currentIdentity(readMemberSignal()));
+    onMemberSignal(render); // BaseLayout invokes hydrateMemberSignal(); the cookie member arrives here
   })();
 </script>
