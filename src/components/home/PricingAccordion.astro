@@ -1,0 +1,59 @@
+---
+// sow-192 Phase F: the homepage pricing accordion. PRESENTATION only, bound to the single source of truth
+// UnifiedWorker ships for sow-185: src/lib/tiers.ts (TIER_DISPLAY, from house/membership-tiers.yml). No prices
+// or tiers are hardcoded here; add/edit a tier or a benefit in the yml and it appears automatically. A native
+// <details> so it works with no JS and stays accessible. Hidden for a signed-in member via the shared
+// [data-home-joincard] hook (the Phase C mount script hides it, like the join card). CTAs: Free -> create a
+// free account (/login/); paid tiers -> the membership page. "by application" is intentionally absent (not in
+// the vetted data; an open owner question in sow-185).
+import { TIER_DISPLAY } from '../../lib/tiers';
+
+const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMonthly === 0 && t.priceAnnual === 0;
+function priceLabel(t: { priceMonthly: number; priceAnnual: number }): string {
+  if (isFree(t)) return '$0';
+  const parts: string[] = [];
+  if (t.priceMonthly) parts.push(`$${t.priceMonthly}/mo`);
+  if (t.priceAnnual) parts.push(`$${t.priceAnnual}/yr`);
+  return parts.join(' · ');
+}
+function cta(t: { key: string; priceMonthly: number; priceAnnual: number }) {
+  if (isFree(t)) return { href: '/login/', label: 'Create a free account', primary: true };
+  return { href: '/membership/', label: t.key === 'creator' ? 'Become a creator' : 'Become a member', primary: false };
+}
+---
+<details class="price-acc" data-home-joincard>
+  <summary class="price-sum">
+    <svg class="price-sum-i" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-spark"/></svg>
+    <span class="price-sum-t">Reading is free and always will be. Membership adds comments, <b>Discord</b>, and publishing.</span>
+    <span class="price-sum-cta">Membership options
+      <svg class="price-chev" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </span>
+  </summary>
+
+  <div class="price-grid">
+    {TIER_DISPLAY.map((t) => {
+      const c = cta(t);
+      return (
+        <div class:list={['price-card', t.key === 'member' && 'price-card-hl']}>
+          <div class="price-head">
+            <div class="price-label">{t.label}</div>
+            <div class="price-amt">{priceLabel(t)}</div>
+            <div class="price-tag">{t.tagline}</div>
+          </div>
+          <ul class="price-benefits">
+            {t.benefits.map((b) => (
+              <li>
+                <svg class="price-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+          {t.revenue && (
+            <div class="price-rev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg><span>{t.revenue}</span></div>
+          )}
+          <a href={c.href} class:list={['btn', c.primary ? 'btn-primary' : 'btn-ghost', 'price-cta']}>{c.label}</a>
+        </div>
+      );
+    })}
+  </div>
+</details>

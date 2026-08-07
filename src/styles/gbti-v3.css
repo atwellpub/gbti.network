@@ -1013,6 +1013,30 @@ a.hp-model:hover, a.hp-kind:hover { filter: brightness(.97); }
 .hp-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 @media (max-width: 560px) { .hp-row { flex-direction: column; gap: 14px; } .hp-bot { width: 100%; height: 76px; align-self: auto; } }
 
+/* sow-192 Phase F: the homepage pricing accordion (bound to TIER_DISPLAY). */
+.price-acc { margin: 0 0 22px; border: 1.5px solid var(--line); border-radius: var(--r-lg, 12px); background: var(--paper); overflow: hidden; }
+.price-sum { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; list-style: none; }
+.price-sum::-webkit-details-marker { display: none; }
+.price-sum-i { width: 17px; height: 17px; color: var(--green-700); flex: none; }
+.price-sum-t { flex: 1; min-width: 0; font-size: 13.5px; color: var(--fg-soft); }
+.price-sum-t b { color: var(--fg); font-weight: 600; }
+.price-sum-cta { display: flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 11.5px; color: var(--green-700); flex: none; white-space: nowrap; }
+.price-chev { transition: transform .18s ease; }
+.price-acc[open] .price-chev { transform: rotate(180deg); }
+.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 16px 16px; align-items: stretch; }
+.price-card { display: flex; flex-direction: column; border: 1.5px solid var(--line); border-radius: var(--r); padding: 18px; }
+.price-card-hl { border-color: var(--green); background: var(--green-tint); }
+.price-label { font-family: var(--f-display); font-weight: 700; font-size: 17px; color: var(--fg); }
+.price-amt { font-family: var(--f-mono); font-weight: 600; font-size: 16px; color: var(--green-700); margin-top: 3px; }
+.price-tag { font-size: 12.5px; color: var(--fg-mute); margin: 6px 0 12px; line-height: 1.4; }
+.price-benefits { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.price-benefits li { display: flex; gap: 9px; font-size: 12.5px; line-height: 1.4; color: var(--fg-soft); }
+.price-check { width: 15px; height: 15px; color: var(--green-700); flex: none; margin-top: 1px; }
+.price-rev { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.4; color: var(--fg-soft); background: var(--tint); border-radius: var(--r); padding: 9px 11px; margin-bottom: 14px; }
+.price-rev svg { width: 15px; height: 15px; color: var(--green-700); flex: none; margin-top: 1px; }
+.price-cta { width: 100%; justify-content: center; margin-top: auto; }
+@media (max-width: 860px) { .price-grid { grid-template-columns: 1fr; } }
+
 /* toolbar: visibility chips + density toggle */
 /* breathing room below the toolbar: in cards mode the grid otherwise touches the density toggle */
 .feed-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 14px 0 20px; }

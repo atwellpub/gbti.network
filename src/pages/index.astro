@@ -13,6 +13,7 @@ import FeedList from '../components/feeds/FeedList.astro';
 import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
 import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
+import PricingAccordion from '../components/home/PricingAccordion.astro';
 import { authorItem } from '../lib/avatars';
 import { contentIcon } from '../lib/content-icons';
 import { getCollection } from 'astro:content';
@@ -21,7 +22,7 @@ import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
 import { sortByNewest, rankNewAndPopular, aggregateTags, feedCounts, heatCells } from '../lib/home-feed.mjs';
 import { commitsByDate, commitCount } from '../lib/git-history';
-import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
+import { FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
 const { contentItems, shareItems, profiles, avatarIndex } = await loadFeedItems();
 
@@ -111,9 +112,13 @@ const SHOPTALK = {
 };
 
 ---
-<BaseLayout title="Publish your work. Build with peers. Share the revenue." description={`A creator network powered by Git. Publish articles, products, and prompts, build with peers, and earn from the members your work brings in. Start a ${TRIAL_DAYS_SITE}-day limited-access trial, no card required.`}>
+<BaseLayout title="Publish your work. Build with peers. Share the revenue." description="A creator network powered by Git. Publish articles, products, and prompts, build with peers, and earn from the members your work brings in. Free to read; become a member to comment, join the Discord, and publish.">
 
 <div class="wrap feedwrap">
+
+  <!-- sow-192 Phase F: the pricing accordion (signed-out). Bound to src/lib/tiers.ts (TIER_DISPLAY); hidden
+       for a signed-in member via the shared [data-home-joincard] hook. -->
+  <PricingAccordion />
 
   <!-- sow-192 Phase C: the signed-in creator composer bar. Hidden for signed-out / no-JS; revealed on the
        sow-158 member signal, which also lazy-mounts the client-ui composer (see the script below). -->
@@ -173,8 +178,8 @@ const SHOPTALK = {
           <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-chat"/></svg> Private Discord &amp; weekly build calls</li>
           <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg> Earn up to {FIRST_TOUCH_PCT} from members your work brings in</li>
         </ul>
-        <a href="/membership/" class="btn btn-primary" style="width:100%;justify-content:center">Start your free trial</a>
-        <p class="note">{TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
+        <a href="/login/" class="btn btn-primary" style="width:100%;justify-content:center">Create a free account</a>
+        <p class="note">Free to read · no card required</p>
       </div>
 
       <!-- popular (sow-192: moved from the top New & Popular grid into the rail) -->
@@ -327,8 +332,8 @@ const SHOPTALK = {
     <div class="sec-head center" style="margin-bottom:0">
       <h2 class="h2">Join the GBTI Network</h2>
       <p class="lead">Publish your work, build with peers, and earn from what you make.</p>
-      <div class="mt24"><a href="/membership/" class="btn btn-primary btn-lg">Start your free trial <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a></div>
-      <p class="mono muted" style="font-size:13px;margin-top:14px">{TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
+      <div class="mt24"><a href="/login/" class="btn btn-primary btn-lg">Create a free account <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a></div>
+      <p class="mono muted" style="font-size:13px;margin-top:14px">Free to read · membership adds comments, Discord, and publishing</p>
     </div>
   </div>
 </section>
