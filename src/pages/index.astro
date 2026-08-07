@@ -12,7 +12,7 @@ import FavoriteButton from '../components/FavoriteButton.astro';
 import FeedList from '../components/feeds/FeedList.astro';
 import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
-import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime } from '../lib/home-feed.mjs';
+import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime, feedCounts } from '../lib/home-feed.mjs';
 import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
 const { contentItems, shareItems, profiles, avatarIndex } = await loadFeedItems();
@@ -37,6 +37,21 @@ function roleLine(p: any): string {
 
 // Trending tags drill into the feed tag view (sow-131): /feeds/?tag=<tag>.
 const tags = aggregateTags([...contentItems, ...shareItems], 9);
+
+// sow-192 (homepage v2): the tabbed feed. One blended feed (Everything) is server-rendered; the content
+// tabs FILTER it in-page by kind, and every tab keeps its /feeds/<narrow>/ href for no-JS + SEO. Counts
+// are the build-time totals (feedCounts); the News tab has no static count (runtime worker data) and its
+// tab navigates to /feeds/news/ rather than filtering. Label "Prompts & Skills" per the mockup; the kind
+// stays `prompt` until a Skill content type is decided (sow-192 Q4).
+const counts = feedCounts(contentItems, shareItems);
+const feedTabs: { key: string; label: string; href: string; count: number | null }[] = [
+  { key: 'all', label: 'Everything', href: '/feeds/', count: counts.all },
+  { key: 'news', label: 'News', href: '/feeds/news/', count: null },
+  { key: 'articles', label: 'Articles', href: '/feeds/articles/', count: counts.articles },
+  { key: 'products', label: 'Products', href: '/feeds/products/', count: counts.products },
+  { key: 'prompts', label: 'Prompts & Skills', href: '/feeds/prompts/', count: counts.prompts },
+  { key: 'shares', label: 'Shares', href: '/feeds/shares/', count: counts.shares },
+];
 
 // The v1 contribution heatmap, back above the footer (sow-136 QA, owner request): bucket every
 // content publish date across the project's history into level-0..4 cells, the v1 algorithm. The
@@ -117,8 +132,26 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
 
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
-    <main aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
+    <main class="feed-page home-feed" data-view="detailed" data-hometabs aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
       <div class="feed-lab" id="feed"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><a class="more" href="/feeds/">Everything, including member shares</a></div>
+
+      <nav class="feed-tabs" aria-label="Feed views">
+        {feedTabs.map((t) => (
+          <a href={t.href} data-hometab={t.key} class:list={['feed-tab', t.key === 'all' && 'on']} aria-current={t.key === 'all' ? 'true' : undefined}>
+            {t.label}{t.count !== null && <b class="tc">{t.count}</b>}
+          </a>
+        ))}
+      </nav>
+
+      <div class="feed-toolbar">
+        <span class="feed-tb-sp"></span>
+        <div class="view-toggle" role="group" aria-label="Density">
+          <button type="button" class="vt-btn" data-feedview-density="card" aria-pressed="false" aria-label="Cards" data-tooltip="Cards" data-tooltip-pos="below"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><use href="#ico-grid"/></svg></button>
+          <button type="button" class="vt-btn on" data-feedview-density="detailed" aria-pressed="true" aria-label="Detailed" data-tooltip="Detailed" data-tooltip-pos="below"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><use href="#ico-list"/></svg></button>
+          <button type="button" class="vt-btn" data-feedview-density="compact" aria-pressed="false" aria-label="Compact" data-tooltip="Compact" data-tooltip-pos="below"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+
       <FeedList items={feed} avatarIndex={avatarIndex} />
     </main>
 
@@ -255,6 +288,82 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
 </BaseLayout>
 
 <script>
+  // sow-192 (homepage v2): the tabbed feed. Everything shows the full blended feed (member content plus
+  // public shares, seeded inline as before); the Articles / Products / Prompts / Shares tabs FILTER the
+  // already-rendered rows in-page by data-kind, reusing the /feeds/ flatten-ladder pattern. The News tab
+  // is a real link to /feeds/news/ (news is runtime worker data, not part of the static feed), so it
+  // navigates rather than filtering; every tab keeps its /feeds/<narrow>/ href for no-JS and SEO. The
+  // 3-state density toggle shares the 'gbti-feed-view' key with /feeds/ so the choice stays consistent.
+  (() => {
+    const view = document.querySelector<HTMLElement>('[data-hometabs]');
+    if (!view) return;
+    const list = view.querySelector<HTMLElement>('[data-feedlist]');
+    const tabs = Array.from(view.querySelectorAll<HTMLElement>('[data-hometab]'));
+    // The tab key is a plural narrow (articles/products/prompts/shares); a feed row's data-kind is the
+    // singular item kind (article/product/prompt/share). Map the active narrow to the kind it selects.
+    const NARROW_KIND: Record<string, string> = { articles: 'article', products: 'product', prompts: 'prompt', shares: 'share' };
+    let active = 'all';
+
+    function applyFilter() {
+      const filtered = active !== 'all';
+      const wantKind = NARROW_KIND[active] || '';
+      view!.classList.toggle('feed-flat', filtered);
+      // Flatten the ladder while a kind filter is active: lift the chunks' hidden attribute (Tailwind's
+      // layered [hidden]{display:none!important} outranks author CSS, so this must be done in JS), and
+      // restore it on return to Everything.
+      list?.querySelectorAll<HTMLElement>('.feed-chunk').forEach((c) => {
+        if (filtered) {
+          if (c.hidden) { c.setAttribute('data-rehide', '1'); c.hidden = false; }
+        } else if (c.hasAttribute('data-rehide')) {
+          c.hidden = true;
+          c.removeAttribute('data-rehide');
+        }
+      });
+      const rows = list ? Array.from(list.querySelectorAll<HTMLElement>('[data-fi]')) : [];
+      rows.forEach((r) => { r.hidden = filtered && r.getAttribute('data-kind') !== wantKind; });
+    }
+
+    function setActive(key: string) {
+      active = key;
+      tabs.forEach((t) => {
+        const on = t.getAttribute('data-hometab') === key;
+        t.classList.toggle('on', on);
+        if (on) t.setAttribute('aria-current', 'true'); else t.removeAttribute('aria-current');
+      });
+      applyFilter();
+    }
+
+    tabs.forEach((t) => {
+      t.addEventListener('click', (e) => {
+        const key = t.getAttribute('data-hometab') || 'all';
+        if (key === 'news') return; // the News tab navigates to /feeds/news/ (runtime news lives there)
+        e.preventDefault();
+        setActive(key);
+      });
+    });
+
+    // Late-arriving news rows (peppered in after the async fetch) must respect the active tab, so a user
+    // who switched to a content tab before news loaded does not suddenly see news rows appear.
+    document.addEventListener('gbti:feed-updated', applyFilter);
+
+    // Density: card / detailed / compact, sharing the '/feeds/' persisted key. Default is detailed (the
+    // mockup's "list"); a stored choice overrides it.
+    const KEY = 'gbti-feed-view';
+    const dBtns = Array.from(view.querySelectorAll<HTMLButtonElement>('[data-feedview-density]'));
+    function setDensity(v: string) {
+      view!.setAttribute('data-view', v);
+      dBtns.forEach((x) => { const on = x.getAttribute('data-feedview-density') === v; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
+      try { localStorage.setItem(KEY, v); } catch { /* private mode */ }
+    }
+    dBtns.forEach((b) => b.addEventListener('click', () => setDensity(b.getAttribute('data-feedview-density') || 'detailed')));
+    try {
+      const stored = localStorage.getItem(KEY);
+      if (stored === 'compact' || stored === 'detailed' || stored === 'card') setDensity(stored);
+    } catch { /* private mode */ }
+  })();
+</script>
+
+<script>
   // sow-141 QA (2026-07-24): pepper the public worker news into the homepage feed, client-side. The
   // static build carries only member content (SEO); news is runtime data from the anonymous
   // signup-Worker endpoint, spliced in on a 2-members : 1-news rhythm so news never exceeds one third
@@ -284,6 +393,7 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
     const newsRow = (it: any) => {
       const art = el('article', 'feed-item news-row' + (it.image ? '' : ' nocover'));
       art.setAttribute('data-fi', '');
+      art.setAttribute('data-kind', 'news'); // sow-192: so a content tab filter hides peppered news rows
       const main2 = el('div', 'feed-main');
       const meta = el('div', 'feed-meta');
       meta.append(
@@ -330,6 +440,8 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
         const rows = Array.from(list.querySelectorAll('.feed-chunk [data-fi]'));
         const plan = newsInsertionPlan(rows.length, items.length);
         plan.forEach((pos, i) => rows[pos]?.after(newsRow(items[i])));
+        // sow-192: let the tabbed-feed filter re-apply so late news rows respect the active content tab.
+        document.dispatchEvent(new Event('gbti:feed-updated'));
       })
       .catch(() => { /* news is optional garnish; the built feed stands alone */ });
   })();

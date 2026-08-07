@@ -2,13 +2,40 @@
 // SOW-018 reversal), the New & Popular ranking, tag aggregation, and relative time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl } from '../src/lib/home-feed.mjs';
+import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts } from '../src/lib/home-feed.mjs';
 
 test('decodeEntities resolves numeric + common named entities in scraped share metadata', () => {
   assert.equal(decodeEntities('WordPress Down &#8211; SQL Injection'), 'WordPress Down – SQL Injection');
   assert.equal(decodeEntities('Q&amp;A &#x2014; part &quot;two&quot;'), 'Q&A — part "two"');
   assert.equal(decodeEntities('no entities'), 'no entities');
   assert.equal(decodeEntities(undefined), '');
+});
+
+test('feedCounts (sow-192): per-tab counts from the build arrays, news is null, members-only excluded', () => {
+  const content = [
+    { kind: 'article' }, { kind: 'article' }, { kind: 'article' },
+    { kind: 'product' }, { kind: 'product' },
+    { kind: 'prompt' },
+  ];
+  const shares = [{ kind: 'share' }, { kind: 'share' }]; // loadFeedItems() only ever puts PUBLIC shares here
+  const c = feedCounts(content, shares);
+  assert.equal(c.articles, 3);
+  assert.equal(c.products, 2);
+  assert.equal(c.prompts, 1);
+  assert.equal(c.shares, 2);
+  assert.equal(c.network, 6); // publications only, no shares
+  assert.equal(c.all, 8); // network + shares
+  assert.equal(c.news, null); // runtime worker data has no build-time count
+});
+
+test('feedCounts tolerates empty/absent inputs and ignores unknown kinds', () => {
+  const c = feedCounts();
+  assert.equal(c.all, 0);
+  assert.equal(c.shares, 0);
+  assert.equal(c.news, null);
+  const c2 = feedCounts([{ kind: 'share' }, { kind: 'weird' }, null], undefined);
+  assert.equal(c2.all, 0); // a stray share/unknown in the content array is not counted as a publication
+  assert.equal(c2.network, 0);
 });
 
 test('readMinutes estimates whole minutes at 220 wpm, floors at 1, 0 when empty', () => {

@@ -106,6 +106,24 @@ export function matchesNarrow(item, narrow) {
   }
 }
 
+/**
+ * sow-192 (homepage v2): the per-tab counts the tabbed feed shows beside each label. Derived purely from
+ * the build-time arrays, so counts reflect only what a visitor can open: `contentItems` are the listed
+ * articles/products/prompts, `shareItems` are the PUBLIC shares only (members-only shares are aggregated
+ * elsewhere and never reach this array), so members-only content is excluded by construction. `news` is
+ * deliberately null: the news tab is runtime worker data (sow-139) with no build-time count. `network` is
+ * the publications total (no shares), matching matchesNarrow('network').
+ */
+export function feedCounts(contentItems = [], shareItems = []) {
+  const c = { article: 0, product: 0, prompt: 0 };
+  for (const it of contentItems) {
+    if (it && (it.kind === 'article' || it.kind === 'product' || it.kind === 'prompt')) c[it.kind]++;
+  }
+  const shares = Array.isArray(shareItems) ? shareItems.length : 0;
+  const network = c.article + c.product + c.prompt;
+  return { all: network + shares, news: null, network, articles: c.article, products: c.product, prompts: c.prompt, shares };
+}
+
 /** Split items into page chunks of `size` (the ladder pager renders one pager row per chunk). */
 export function chunkPages(items, size = 10) {
   const chunks = [];

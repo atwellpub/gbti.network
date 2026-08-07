@@ -948,6 +948,15 @@ a.who:hover { color: var(--fg); }
   border: 1.5px solid var(--line-2); border-radius: 999px; padding: 6px 14px; background: var(--paper); }
 .feed-tab:hover { border-color: var(--fg); color: var(--fg); }
 .feed-tab.on { border-color: var(--green); color: var(--green-700); background: var(--green-tint); }
+/* sow-192: the per-tab count pill on the homepage tabbed feed. */
+.feed-tab .tc { margin-left: 6px; font-weight: 700; color: var(--fg-mute); }
+.feed-tab.on .tc { color: var(--green-700); }
+
+/* sow-192: on the homepage the feed sits beside the 338px sidebar, so the card grid caps at 3 columns
+   (the /feeds/ page is full-width and uses 5). Two classes outrank the .feed-page[data-view] base rule. */
+.feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1080px) { .feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px)  { .feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: 1fr; } }
 
 /* toolbar: visibility chips + density toggle */
 /* breathing room below the toolbar: in cards mode the grid otherwise touches the density toggle */
