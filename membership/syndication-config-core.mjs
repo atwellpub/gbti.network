@@ -117,6 +117,9 @@ export const DEFAULT_CONTENT_ENGAGEMENT = Object.freeze({
 export const TEMPLATE_TYPES = Object.freeze(['share', 'post', 'product', 'prompt', 'reddit-body', 'reddit-comment', 'devto-intro', 'devto-body', 'devto-footer', 'devto-stub', 'hashnode-intro', 'hashnode-body', 'hashnode-footer', 'hashnode-stub']);
 // SOW-088 (owner-directed): ONE default Discord format for every type.
 const DEFAULT_FORMAT = 'New {content-type} published by {member-discord-username}: "{title}" {url}';
+// sow-180: a SHARE is somebody else's link, so its default is CONTENT-first with NO member credit (unlike the
+// post/product/prompt DEFAULT_FORMAT, which correctly credits the author of their own work).
+const DEFAULT_SHARE_FORMAT = 'Shared on the GBTI Network: "{title}" {url}';
 // SOW-088: the Reddit BODY template = the DESCRIPTION under the title on the link post (the embed card
 // comes from the item URL automatically); the COMMENT template = the separately-controlled first comment
 // (owner-directed 2026-07-10: keep both, templated independently). Editable in the admin templates card.
@@ -144,7 +147,7 @@ const DEFAULT_DEVTO_FOOTER = '---\n\nAre you a writer, musician, or product deve
 // renders u/name, which Reddit links natively), falling back to the full name, matching X/Bluesky/Mastodon.
 const DEFAULT_REDDIT_COMMENT = 'Shared to the community by GBTI Network member {member-reddit-handle}. {short-description}\n\n---\n\nAre you a writer, musician, or product developer? We would love to support your work on the GBTI Network. For more information about how to join our community visit https://gbti.network\n\nTo follow {fullName}\'s work more closely, consider joining our network and subscribing to them directly: {member-url}';
 export const DEFAULT_TEMPLATES = Object.freeze({
-  share: DEFAULT_FORMAT,
+  share: DEFAULT_SHARE_FORMAT, // sow-180: content-first, no member credit
   post: DEFAULT_FORMAT,
   product: DEFAULT_FORMAT,
   prompt: DEFAULT_FORMAT,
@@ -166,8 +169,12 @@ export const DEFAULT_TEMPLATES = Object.freeze({
 // rider): each channel's default stub reads native to that channel with no configuration. Keys with no
 // stub built-in (reddit-comment, devto-intro, devto-footer) inherit the public chain.
 const STUB_FORMAT = 'Members-only on the GBTI Network: "{title}" by {fullName}. {short-description} {url}';
+// sow-180: the members-only SHARE stub keeps the join CTA but drops the member name (a share is not the
+// member's own work). Members-only shares do not syndicate today (only PUBLIC shares do), so this is
+// defense-in-depth, kept consistent with the public share family and guarded by a test.
+const SHARE_STUB_FORMAT = 'A members-only link on the GBTI Network: "{title}". {short-description} Join to open it: {url}';
 export const DEFAULT_STUB_TEMPLATES = Object.freeze({
-  share: STUB_FORMAT,
+  share: SHARE_STUB_FORMAT, // sow-180: content-first, no member credit
   post: STUB_FORMAT,
   product: STUB_FORMAT,
   prompt: STUB_FORMAT,
@@ -178,26 +185,26 @@ export const DEFAULT_STUB_TEMPLATES = Object.freeze({
 const DISCORD_STUB = '{member-discord-username} published a members-only {content-type}: "{title}". Members can read it on gbti.network. {url}';
 // A members SHARE is just an external link, so it posts the destination directly (no "read it on
 // gbti.network", which points off-site): owner-directed 2026-07-13.
-const DISCORD_SHARE_STUB = '{member-discord-username} shared the following link: "{title}" {url}';
+const DISCORD_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}" {url}'; // sow-180: no member credit
 const DISCORD_CAT_STUB = 'A members-only {content-type} landed in {category}: "{title}" by {member-discord-username}. {url}';
-const DISCORD_CAT_SHARE_STUB = '{member-discord-username} shared a link in {category}: "{title}" {url}';
+const DISCORD_CAT_SHARE_STUB = 'A members-only link in {category}: "{title}" {url}'; // sow-180: no member credit
 const REDDIT_TITLE_STUB = '{title} (a members-only {content-type} from the GBTI Network)';
 // SOW-120: X is 280 chars, so the stub is a tight hook plus the link (X auto-cards the URL). A members
 // share posts the destination directly; a members post/product/prompt invites the reader to unlock it.
 const X_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-const X_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+const X_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}'; // sow-180: no member credit
 // SOW-127: LinkedIn is long-form (a 3000-char cap), so its stub reads as a full sentence.
 const LINKEDIN_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Join the co-op to unlock it. {url}';
-const LINKEDIN_SHARE_STUB = '{fullName} shared a members-only find on the GBTI Network: "{title}". Join to open it. {url}';
+const LINKEDIN_SHARE_STUB = 'A members-only find on the GBTI Network: "{title}". Join the co-op to open it. {url}'; // sow-180: no member credit
 // SOW-122: Bluesky stubs omit {url} because the adapter attaches an external embed card for the link.
 const BLUESKY_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it.';
-const BLUESKY_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it.';
+const BLUESKY_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it.'; // sow-180: no member credit
 // SOW-123: Mastodon includes {url} (Mastodon auto-links + builds a preview card from it).
 const MASTODON_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-const MASTODON_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+const MASTODON_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}'; // sow-180: no member credit
 // SOW-135: daily.dev is a link-share squad, so the members stub is a tight hook plus the link (mirrors X).
 const DAILYDEV_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-const DAILYDEV_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+const DAILYDEV_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}'; // sow-180: no member credit
 export const DEFAULT_CHANNEL_STUB_TEMPLATES = Object.freeze({
   discord: Object.freeze({ share: DISCORD_SHARE_STUB, post: DISCORD_STUB, product: DISCORD_STUB, prompt: DISCORD_STUB }),
   'discord-category': Object.freeze({ share: DISCORD_CAT_SHARE_STUB, post: DISCORD_CAT_STUB, product: DISCORD_CAT_STUB, prompt: DISCORD_CAT_STUB }),

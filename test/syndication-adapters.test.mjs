@@ -22,7 +22,8 @@ test('discord adapter posts to the per-source channel with a ping-safe author me
   assert.equal(calls[0].channelId, 'chan-share');
   assert.deepEqual(calls[0].opts.allowedMentions, { parse: [], users: ['123'] }); // only the author may be pinged
   // SOW-088: EVERY type now has the one owner-directed default template, mention-first.
-  assert.equal(calls[0].content, 'New link published by <@123>: "Read this" https://ex.com/a');
+  // sow-180: a SHARE is content-first and drops the member mention (post below keeps its author credit).
+  assert.equal(calls[0].content, 'Shared on the GBTI Network: "Read this" https://ex.com/a');
   const postCalls = [];
   const clientB = { postChannelMessage: async (channelId, content, opts) => { postCalls.push({ content }); return { id: 'm2' }; } };
   const b = createDiscordAdapter({ env: { DISCORD_BOT_TOKEN: 't', DISCORD_CHANNEL_POSTS: 'chan-posts' }, client: clientB });
@@ -297,11 +298,28 @@ test('reddit: the auto rail renders the stored reddit-comment template when the 
   const cfg = { channel_templates: { reddit: { 'reddit-comment': 'Shared by {member-reddit-handle}: "{author-note-italic}"' } } };
   const { createRedditAdapter } = await import('../clients/syndication/reddit.mjs');
   const rd = createRedditAdapter({ env, fetchImpl, cfg });
-  const r = await rd.post({ ...item, redditKind: 'link', authorReddit: 'https://www.reddit.com/u/atwellpub/', authorNote: 'why I built it' });
+  const r = await rd.post({ ...item, source: 'post', redditKind: 'link', authorReddit: 'https://www.reddit.com/u/atwellpub/', authorNote: 'why I built it' });
   const comment = calls.find((c) => String(c.url).includes('/api/comment'));
   assert.ok(comment, 'the auto rail posts a first comment with no commentText on the item');
   assert.match(new URLSearchParams(comment.opts.body).get('text'), /why I built it/);
   assert.equal(r.comment.id, 'c7');
+});
+
+// sow-180: a SHARE is someone else's link, so it never AUTO-renders the member-crediting reddit-comment.
+test('reddit: a share does not auto-post the crediting first comment (sow-180)', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push({ url });
+    if (url.includes('/api/v1/access_token')) return { ok: true, status: 200, json: async () => ({ access_token: 'at1' }) };
+    return { ok: true, status: 200, json: async () => ({ json: { errors: [], data: { id: 'x9', name: 't3_x9', url: 'https://r/x9' } } }) };
+  };
+  const env = { REDDIT_CLIENT_ID: 'id', REDDIT_CLIENT_SECRET: 'sec', REDDIT_REFRESH_TOKEN: 'rt', REDDIT_SUBREDDIT: 'GBTI_network' };
+  const cfg = { channel_templates: { reddit: { 'reddit-comment': 'Shared by {member-reddit-handle}: "{author-note-italic}"' } } };
+  const { createRedditAdapter } = await import('../clients/syndication/reddit.mjs');
+  const rd = createRedditAdapter({ env, fetchImpl, cfg });
+  const r = await rd.post({ ...item, source: 'share', redditKind: 'link', authorNote: 'x' });
+  assert.equal(calls.filter((c) => String(c.url).includes('/api/comment')).length, 0, 'no auto crediting comment for a share');
+  assert.equal(r.comment, undefined);
 });
 
 // The MANUAL rail passes no cfg, so an item with no pre-rendered commentText posts no comment. (With a cfg
@@ -375,7 +393,7 @@ test('discord share stub shares the link directly, not a read-on-site line', asy
   const client = { async postChannelMessage(id, content) { sent.push(content); return { id: '1', channel_id: id }; } };
   const env = { DISCORD_BOT_TOKEN: 'b', DISCORD_CHANNEL_SHARES: '111' };
   await createDiscordAdapter({ env, client, cfg }).post({ source: 'share', title: 'A Video', author: 'a', url: 'https://youtu.be/x', membersOnly: true, visibility: 'members' });
-  assert.match(sent[0], /shared the following link/);
+  assert.match(sent[0], /members-only link on the GBTI Network/i); // sow-180: content-first, no member credit
   assert.ok(!sent[0].includes('read it on gbti.network'), 'no read-on-site line for a share');
   assert.match(sent[0], /https:\/\/youtu\.be\/x/);
 });

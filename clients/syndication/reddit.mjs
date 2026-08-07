@@ -76,7 +76,11 @@ export function createRedditAdapter({ env = {}, fetchImpl = globalThis.fetch, cf
       // and body (line 53) do; only the MANUAL rail pre-renders item.commentText. Without this fallback the
       // auto rail could never post a first comment at all, because nothing but membership-syndicate-now.mjs
       // ever sets commentText.
-      const autoComment = (!item.commentText && cfg)
+      // sow-180: a SHARE is someone else's link, so it never AUTO-renders the member-crediting reddit-comment
+      // (that first comment credits the poster and pitches following them, which is member credit on a share).
+      // A superadmin-provided item.commentText still posts (a deliberate manual choice); only the automatic
+      // default is suppressed for shares. This closes the drain + Social-Queue + manual-without-template paths.
+      const autoComment = (!item.commentText && cfg && item.source !== 'share')
         ? renderTemplate(templateFor(cfg, 'reddit-comment', 'reddit', { stub: stubish }) || '', item, { limit: 9500 })
         : '';
       const commentText = String(item.commentText || autoComment || '').trim();

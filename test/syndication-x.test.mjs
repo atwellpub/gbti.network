@@ -53,7 +53,8 @@ test('a members-only SHARE renders the share-specific stub', async () => {
   const { calls, fetchImpl } = capture(OK);
   await createXAdapter({ env: ENV, fetchImpl, cfg: CFG }).post({ ...ITEM, source: 'share', membersOnly: true }, SIGN);
   const text = bodyOf(calls).text;
-  assert.ok(text.includes('shared a members-only link'), 'the share stub, not the post stub');
+  assert.ok(text.includes('A members-only link on the GBTI Network'), 'the share stub, not the post stub'); // sow-180: content-first
+  assert.ok(!text.includes('Hudson Atwell'), 'sow-180: a share credits no member');
 });
 
 test('the manual textOverride wins over the template', async () => {

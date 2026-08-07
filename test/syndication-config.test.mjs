@@ -214,8 +214,9 @@ test('templateFor: configured template wins, blank/missing falls back to the typ
   assert.equal(templateFor(cfg, 'share'), '{title} by {author}');
   // SOW-088: every type now has the one owner-directed default, so a blank config falls back to it.
   assert.equal(templateFor(cfg, 'post'), 'New {content-type} published by {member-discord-username}: "{title}" {url}');
-  assert.equal(templateFor(syndicationConfigFromParsed({}), 'share'), 'New {content-type} published by {member-discord-username}: "{title}" {url}');
-  assert.equal(templateFor(undefined, 'share'), 'New {content-type} published by {member-discord-username}: "{title}" {url}');
+  // sow-180: the SHARE default is content-first with no member credit (post/product below keep DEFAULT_FORMAT).
+  assert.equal(templateFor(syndicationConfigFromParsed({}), 'share'), 'Shared on the GBTI Network: "{title}" {url}');
+  assert.equal(templateFor(undefined, 'share'), 'Shared on the GBTI Network: "{title}" {url}');
   assert.equal(templateFor(undefined, 'product'), 'New {content-type} published by {member-discord-username}: "{title}" {url}');
 });
 

@@ -7044,6 +7044,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   });
   var TEMPLATE_TYPES = Object.freeze(["share", "post", "product", "prompt", "reddit-body", "reddit-comment", "devto-intro", "devto-body", "devto-footer", "devto-stub", "hashnode-intro", "hashnode-body", "hashnode-footer", "hashnode-stub"]);
   var DEFAULT_FORMAT = 'New {content-type} published by {member-discord-username}: "{title}" {url}';
+  var DEFAULT_SHARE_FORMAT = 'Shared on the GBTI Network: "{title}" {url}';
   var DEFAULT_REDDIT_BODY = "{short-description}";
   var DEFAULT_DEVTO_INTRO = "**By {member-devto-handle}, [GBTI Network Member]({member-url}).** Originally published on [gbti.network]({url}).";
   var DEFAULT_HASHNODE_INTRO = "**By [{fullName}]({member-url}), GBTI Network Member.** Originally published on [gbti.network]({url}).";
@@ -7051,7 +7052,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   var DEFAULT_DEVTO_FOOTER = "---\n\nAre you a writer, musician, or product developer? We would love to support your work on the GBTI Network. For more information about how to join our community visit https://gbti.network\n\nTo follow {fullName}'s work more closely, consider joining our network and subscribing to them directly: {member-url}";
   var DEFAULT_REDDIT_COMMENT = "Shared to the community by GBTI Network member {member-reddit-handle}. {short-description}\n\n---\n\nAre you a writer, musician, or product developer? We would love to support your work on the GBTI Network. For more information about how to join our community visit https://gbti.network\n\nTo follow {fullName}'s work more closely, consider joining our network and subscribing to them directly: {member-url}";
   var DEFAULT_TEMPLATES = Object.freeze({
-    share: DEFAULT_FORMAT,
+    share: DEFAULT_SHARE_FORMAT,
+    // sow-180: content-first, no member credit
     post: DEFAULT_FORMAT,
     product: DEFAULT_FORMAT,
     prompt: DEFAULT_FORMAT,
@@ -7070,8 +7072,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     "hashnode-footer": DEFAULT_DEVTO_FOOTER
   });
   var STUB_FORMAT = 'Members-only on the GBTI Network: "{title}" by {fullName}. {short-description} {url}';
+  var SHARE_STUB_FORMAT = 'A members-only link on the GBTI Network: "{title}". {short-description} Join to open it: {url}';
   var DEFAULT_STUB_TEMPLATES = Object.freeze({
-    share: STUB_FORMAT,
+    share: SHARE_STUB_FORMAT,
+    // sow-180: content-first, no member credit
     post: STUB_FORMAT,
     product: STUB_FORMAT,
     prompt: STUB_FORMAT,
@@ -7081,20 +7085,20 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // SOW-134
   });
   var DISCORD_STUB = '{member-discord-username} published a members-only {content-type}: "{title}". Members can read it on gbti.network. {url}';
-  var DISCORD_SHARE_STUB = '{member-discord-username} shared the following link: "{title}" {url}';
+  var DISCORD_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}" {url}';
   var DISCORD_CAT_STUB = 'A members-only {content-type} landed in {category}: "{title}" by {member-discord-username}. {url}';
-  var DISCORD_CAT_SHARE_STUB = '{member-discord-username} shared a link in {category}: "{title}" {url}';
+  var DISCORD_CAT_SHARE_STUB = 'A members-only link in {category}: "{title}" {url}';
   var REDDIT_TITLE_STUB = "{title} (a members-only {content-type} from the GBTI Network)";
   var X_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-  var X_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+  var X_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}';
   var LINKEDIN_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Join the co-op to unlock it. {url}';
-  var LINKEDIN_SHARE_STUB = '{fullName} shared a members-only find on the GBTI Network: "{title}". Join to open it. {url}';
+  var LINKEDIN_SHARE_STUB = 'A members-only find on the GBTI Network: "{title}". Join the co-op to open it. {url}';
   var BLUESKY_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it.';
-  var BLUESKY_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it.';
+  var BLUESKY_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it.';
   var MASTODON_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-  var MASTODON_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+  var MASTODON_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}';
   var DAILYDEV_STUB = 'Members-only on the GBTI Network: "{title}" by {fullName}. Membership unlocks it. {url}';
-  var DAILYDEV_SHARE_STUB = '{fullName} shared a members-only link: "{title}". Join the GBTI Network to open it. {url}';
+  var DAILYDEV_SHARE_STUB = 'A members-only link on the GBTI Network: "{title}". Join to open it. {url}';
   var DEFAULT_CHANNEL_STUB_TEMPLATES = Object.freeze({
     discord: Object.freeze({ share: DISCORD_SHARE_STUB, post: DISCORD_STUB, product: DISCORD_STUB, prompt: DISCORD_STUB }),
     "discord-category": Object.freeze({ share: DISCORD_CAT_SHARE_STUB, post: DISCORD_CAT_STUB, product: DISCORD_CAT_STUB, prompt: DISCORD_CAT_STUB }),
