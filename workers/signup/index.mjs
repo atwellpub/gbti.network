@@ -48,6 +48,7 @@ import {
 import { verifyTurnstile, rateLimit } from './abuse.mjs';
 import { runSignup } from './signup.mjs';
 import { resolveCustomerId, createCheckout } from './checkout.mjs';
+import { buildCheckoutPriceMap, resolveCheckoutPrice } from '../../membership/checkout-prices.mjs'; // sow-185 3b: multi-price allowlist
 import { validateCouponParam } from './coupons.mjs'; // SOW-119
 import { startOnboarding } from './connect.mjs';
 import { verifyStripeSignature, isDuplicateEvent, markEventSeen, handleStripeEvent } from './webhook.mjs';
@@ -426,10 +427,23 @@ async function handleCheckout(request, env) {
   const customerId = await resolveCustomerId({ githubId: session.github_id, kv: env.SIGNUP_KV, stripe });
   if (!customerId) return json({ error: 'no_customer' }, 409); // fail closed
 
+  // sow-185 phase 3b: a requested `?tier=&period=` selects a CONFIGURED price from the allowlist, FAIL CLOSED (an
+  // unknown or un-provisioned plan is a 400, never a silent charge at the wrong price). With NEITHER param sent,
+  // the default stays the legacy Content Creator annual (env.STRIPE_PRICE_ID), so today's single-price checkout
+  // is unchanged until the client CTAs begin sending a tier + period.
+  const params = new URL(request.url).searchParams;
+  const reqTier = params.get('tier');
+  const reqPeriod = params.get('period');
+  let priceId = env.STRIPE_PRICE_ID;
+  if (reqTier || reqPeriod) {
+    priceId = resolveCheckoutPrice({ tier: reqTier, period: reqPeriod }, buildCheckoutPriceMap(env));
+    if (!priceId) return json({ error: 'invalid_plan', message: 'that membership plan is not available' }, 400);
+  }
+
   const checkout = await createCheckout({
     stripe,
     customerId,
-    priceId: env.STRIPE_PRICE_ID,
+    priceId,
     githubId: session.github_id,
     baseUrl: env.PUBLIC_BASE_URL,
   });
