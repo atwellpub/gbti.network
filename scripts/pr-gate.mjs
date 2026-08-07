@@ -24,19 +24,22 @@
 import path from 'node:path';
 import fs from 'node:fs';
 
-import { deriveStatus } from '../membership/derive-status.mjs';
+import { deriveMembership } from '../membership/derive-status.mjs';
 import { loadOverrides, roleOf, effectiveStatus } from '../membership/overrides.mjs';
 import { ownedFolderFor, decide, contributionTarget } from '../membership/classify-pr.mjs';
 import { parseHostedRef, parseAdminHostedRef } from '../membership/hosted-author.mjs'; // SOW-156 hosted content + sow-161 hosted-admin canonical-head identity
+import { buildEnvPriceTierMap, resolveEffectiveTier } from '../membership/tier-gate.mjs'; // sow-185: price -> tier + override-aware tier
+import { TIER, isTier } from '../membership/tiers.mjs';
 
 import { createStripeClient } from '../clients/stripe.mjs';
 import { createGitHubClient } from '../clients/github.mjs';
 
 export const STATUS_CONTEXT = 'membership-gate';
 
-/** Labels the gate auto-closes (a content PR that may never merge as-is): a non-member, or a non-paid
- * (trial) member whose content or contribution is paid-only. Both carry a sign-up / upgrade nudge. */
-export const CLOSE_LABELS = Object.freeze(['rejected-not-a-member', 'rejected-not-paid']);
+/** Labels the gate auto-closes (a content PR that may never merge as-is): a non-member, a non-paid
+ * (trial) member whose content or contribution is paid-only, or a paid Network Member trying to publish
+ * Content-Creator content (sow-185). Each carries a sign-up / upgrade nudge. */
+export const CLOSE_LABELS = Object.freeze(['rejected-not-a-member', 'rejected-not-paid', 'rejected-not-creator']);
 
 /** The close comment per auto-close label. A non-member is nudged to sign up; a trial member is nudged
  * to upgrade and reassured their work is safe on their own fork (nothing is lost by the close). */
@@ -52,6 +55,11 @@ export const CLOSE_NUDGE = Object.freeze({
     'cannot merge during your trial. Nothing is lost: your draft stays on your own fork. Upgrade to a ' +
     'paid membership at https://gbti.network, then your client will publish your staged drafts. See ' +
     'CONTRIBUTING.md for how trial authoring works.',
+  'rejected-not-creator':
+    'Thanks for your work. Publishing articles, products and prompts on gbti.network is a Content Creator ' +
+    'feature, so this pull request cannot merge on the Network Member plan. Nothing is lost: your draft ' +
+    'stays where you staged it. Upgrade to Content Creator at https://gbti.network, then your client will ' +
+    'publish your staged drafts. See CONTRIBUTING.md for how content authoring works.',
 });
 
 /**
@@ -96,7 +104,7 @@ export function shouldAutoMerge(decision, paths) {
  * @param {Date}          [a.now]     clock injection for trial/grandfather windows.
  * @returns {Promise<{check:'pass'|'fail', autoMerge:boolean, label:string, reasons:string[], status:string, role:string, ownedFolder:(string|null)}>}
  */
-export async function evaluatePR({ author, paths, overrides, stripe, botId = null, now = new Date(), resolveOwner = null }) {
+export async function evaluatePR({ author, paths, overrides, stripe, botId = null, now = new Date(), resolveOwner = null, priceTierMap = null }) {
   const { roles, bans, grandfathers, membersIndex } = overrides;
   const authorId = String(author);
 
@@ -104,25 +112,31 @@ export async function evaluatePR({ author, paths, overrides, stripe, botId = nul
   const ownedFolder = ownedFolderFor(authorId, membersIndex);
   const isBot = botId != null && authorId === String(botId);
 
-  // deriveStatus already fails closed to 'none' on any lookup error, so the gate never throws
-  // on a Stripe outage: an unresolvable author is simply treated as unpaid.
-  const derived = await deriveStatus(authorId, stripe, now);
-  const effective = effectiveStatus(authorId, derived, { bans, grandfathers }, now);
+  // deriveMembership fails closed to { status:'none', tier:'none' } on any lookup error, so the gate never
+  // throws on a Stripe outage: an unresolvable author is simply treated as unpaid. The STATUS still flows
+  // through effectiveStatus (ban > grandfather > Stripe; staff is applied by role in decide()), so overrides
+  // are preserved; the TIER is resolved additionally (sow-185) from that SAME effectiveStatus source, so a
+  // grandfathered or staff account paid WITHOUT a Stripe subscription is not wrongly denied.
+  const { status: stripeStatus, tier: stripeTier } = await deriveMembership(authorId, stripe, { priceTierMap, now });
+  const effective = effectiveStatus(authorId, stripeStatus, { bans, grandfathers }, now);
+  const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, stripeTier, grant: grandfathers.get(authorId) });
 
   // If this is a contribution to exactly one other member's folder, resolve that owner's acceptance
-  // (an APPROVED review on the head SHA) and paid status. resolveOwner is injected so the core stays
-  // testable with a fake. Fail closed: no resolver or unknown owner -> not approved, not paid.
+  // (an APPROVED review on the head SHA), paid status, and TIER. resolveOwner is injected so the core stays
+  // testable with a fake. Fail closed: no resolver or unknown owner -> not approved, not paid, tier none.
   let ownerApproved = false;
   let ownerPaid = false;
+  let ownerTier = TIER.none;
   const target = contributionTarget(paths, ownedFolder);
   if (target && resolveOwner) {
     const r = await resolveOwner(target);
     ownerApproved = !!r?.ownerApproved;
     ownerPaid = !!r?.ownerPaid;
+    ownerTier = isTier(r?.ownerTier) ? r.ownerTier : TIER.none;
   }
 
-  const d = decide({ paths, role, effective, ownedFolder, isBot, ownerApproved, ownerPaid });
-  return { ...d, status: effective.status, role, ownedFolder, contributionTarget: target };
+  const d = decide({ paths, role, effective, ownedFolder, isBot, ownerApproved, ownerPaid, tier, ownerTier });
+  return { ...d, status: effective.status, tier, role, ownedFolder, contributionTarget: target };
 }
 
 /** Read and parse the GitHub event payload (the pull_request_target event). */
@@ -201,6 +215,10 @@ async function main() {
 
     const stripe = createStripeClient({ apiKey: stripeKey });
     const overrides = loadOverrides(repoRoot);
+    // sow-185: the price-id -> tier map from the provisioned env (STRIPE_PRICE_MEMBER/CREATOR_* + legacy
+    // STRIPE_PRICE_ID). Non-empty in production (the legacy $150 seeds creator), so an unmapped price fails
+    // closed to `none`; empty only in a bare env, where tierForPrice's legacy single-price mode grants creator.
+    const priceTierMap = buildEnvPriceTierMap(process.env);
 
     // METADATA ONLY: changed file paths via the API. We never check out or run PR code.
     const paths = await gh.listPullFilePaths(number);
@@ -212,12 +230,19 @@ async function main() {
     const usernameToGithubId = new Map([...overrides.membersIndex].map(([id, name]) => [name, id]));
     const resolveOwner = async (ownerUsername) => {
       const ownerId = usernameToGithubId.get(ownerUsername);
-      if (!ownerId) return { ownerApproved: false, ownerPaid: false }; // unknown owner -> fail closed
-      const ownerDerived = await deriveStatus(ownerId, stripe);
-      const ownerEff = effectiveStatus(ownerId, ownerDerived, {
+      if (!ownerId) return { ownerApproved: false, ownerPaid: false, ownerTier: TIER.none }; // unknown owner -> fail closed
+      const ownerMembership = await deriveMembership(ownerId, stripe, { priceTierMap });
+      const ownerEff = effectiveStatus(ownerId, ownerMembership.status, {
         bans: overrides.bans,
         grandfathers: overrides.grandfathers,
         roles: overrides.roles, // staff owners are paid-equivalent: a contribution to their folder must not hold on Stripe
+      });
+      // The owner's TIER, override-aware like the author's (staff owner -> creator via the folded roles).
+      const ownerTier = resolveEffectiveTier({
+        source: ownerEff.source,
+        status: ownerEff.status,
+        stripeTier: ownerMembership.tier,
+        grant: overrides.grandfathers.get(String(ownerId)),
       });
       let ownerApproved = false;
       try {
@@ -228,10 +253,10 @@ async function main() {
       } catch {
         ownerApproved = false; // cannot read reviews -> not approved (fail closed)
       }
-      return { ownerApproved, ownerPaid: ownerEff.status === 'paid' };
+      return { ownerApproved, ownerPaid: ownerEff.status === 'paid', ownerTier };
     };
 
-    const d = await evaluatePR({ author, paths, overrides, stripe, botId, resolveOwner });
+    const d = await evaluatePR({ author, paths, overrides, stripe, botId, resolveOwner, priceTierMap });
 
     await gh.setStatus(headSha, {
       state: d.check === 'pass' ? 'success' : 'failure',

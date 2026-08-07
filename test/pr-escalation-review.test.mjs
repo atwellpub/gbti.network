@@ -8,10 +8,14 @@ import assert from 'node:assert/strict';
 
 import { classifyPaths, decide, isCleanPath } from '../membership/classify-pr.mjs';
 import { ROLE } from '../membership/overrides.mjs';
+import { TIER } from '../membership/tiers.mjs';
 
 const OWNED = 'octocat';
+// A paid Content Creator (sow-185: today's legacy paid = creator). The tier is irrelevant to these
+// escalation cases (a non-canonical / protected path fails before the tier gate), but passing it keeps a
+// legitimate own-folder or contribution path from tripping the creator gate for the wrong reason.
 const paidMember = (paths) =>
-  decide({ paths, role: ROLE.member, effective: { status: 'paid' }, ownedFolder: OWNED });
+  decide({ paths, role: ROLE.member, effective: { status: 'paid' }, ownedFolder: OWNED, tier: TIER.creator });
 
 const EXPLOITS = [
   'members/octocat/../../house/roles.yml', // self-promote to superadmin

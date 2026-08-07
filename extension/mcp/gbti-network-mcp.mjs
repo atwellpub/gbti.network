@@ -18657,6 +18657,17 @@ function roleOf2(githubId, roles) {
   return roles.get(String(githubId)) ?? ROLE2.member;
 }
 
+// membership/tiers.mjs
+var TIER = Object.freeze({
+  none: "none",
+  // not paid, or paid for something we cannot identify (see tierForPrice)
+  member: "member",
+  // Network Member: $5 monthly / $50 annual
+  creator: "creator"
+  // Content Creator: $15 monthly / $150 annual
+});
+var RANK2 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
+
 // membership/classify-pr.mjs
 var CONTENT_DIRS = ["posts", "products", "prompts", "comments"];
 var ROLE_RANK = { [ROLE2.member]: 0, [ROLE2.moderator]: 1, [ROLE2.admin]: 2, [ROLE2.superadmin]: 3 };

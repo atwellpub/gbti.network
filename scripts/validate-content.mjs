@@ -16,6 +16,7 @@ import { validateCoupons } from '../membership/coupons.mjs'; // SOW-119: the cou
 import { validateTopicMap } from '../membership/topic-map.mjs'; // SOW-054: the followed-topic -> news-category map
 import { topicVocabKeys } from '../membership/topics-vocab.mjs'; // SOW-080: the flat house/topics.yml topic vocabulary
 import { validateTierDisplay } from '../membership/tiers-display.mjs'; // sow-185: the membership tier display data
+import { PAID_GRANT_TIERS } from '../membership/tier-gate.mjs'; // sow-185: the paid tiers a grandfather grant may name
 import { CATEGORY_NAMES } from '../workers/signup/news/config/categories.mjs'; // SOW-054: the canonical news category labels
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
@@ -415,6 +416,26 @@ function validateOverrideConsistency() {
   for (const err of overrideConsistencyErrors(idx, entries)) errors.push(err);
 }
 validateOverrideConsistency();
+
+// sow-185: a grandfather grant may carry an optional `tier` naming the membership tier it confers. When
+// present it MUST be one of the paid tiers (member / creator); anything else (a typo, or `none`) is rejected,
+// because a bad value would silently fall back to the creator default in tier-gate.grantTier and over-grant.
+function validateGrandfatherTiers() {
+  const rel = 'house/grandfathered.yml';
+  if (!has(path.join(ROOT, rel))) return; // optional file
+  let parsed;
+  try { parsed = yaml.load(fs.readFileSync(path.join(ROOT, rel), 'utf8')); }
+  catch { errors.push(`${rel}: not valid YAML`); return; }
+  // Guard the shape: a `grandfathered:` mapping (missing the list dashes) parses to a non-array, which `?? []`
+  // does not catch, so iterating it would throw an uncaught TypeError and crash the validator. Coerce cleanly.
+  for (const e of Array.isArray(parsed?.grandfathered) ? parsed.grandfathered : []) {
+    if (e?.tier === undefined || e?.tier === null) continue; // no tier -> defaults to creator, allowed
+    if (!PAID_GRANT_TIERS.includes(e.tier)) {
+      errors.push(`${rel}: grant for github_id ${e.github_id ?? '(unknown)'} has tier "${e.tier}"; allowed: ${PAID_GRANT_TIERS.join(', ')}`);
+    }
+  }
+}
+validateGrandfatherTiers();
 
 // SOW-043: the news-category -> Discord channel map (house/news-channels.yml). Absent is fine; when present, it
 // must be a list of { category, numeric channelId } with no duplicate category (a bad map would silently misroute

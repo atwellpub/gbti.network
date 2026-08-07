@@ -3,6 +3,12 @@
 # grant. Precedence: ban > staff > grandfather > Stripe.
 # Complimentary, permanent access for the existing co-op members (predate the paid system). The two
 # superadmins (atwellpub, gbtilabs) are NOT listed: staff already outranks Stripe (ban > staff > grandfather).
+#
+# sow-185: an optional `tier:` field sets the membership TIER a grant confers, so a superadmin (admin+) can
+# comp any account at a specific level by editing this file (superadmin edits auto-merge per SOW-108). Allowed
+# values: `member` (Network Member) or `creator` (Content Creator). A grant with NO `tier` defaults to
+# `creator`, which preserves the full complimentary access every existing grant below was issued under. Free
+# access is the absence of a grant; deplatforming is a ban (house/bans.yml), never a tier here.
 grandfathered:
   - github_id: "132623795"   # github.com/Aliayashi517
     login: aliayashi517

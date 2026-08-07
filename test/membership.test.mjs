@@ -23,7 +23,8 @@ import {
   effectiveStatus,
   ROLE,
 } from '../membership/overrides.mjs';
-import { decide, classifyPaths, ownedFolderFor, contentTypesTouched, contributionTarget, isContributionToFolder } from '../membership/classify-pr.mjs';
+import { decide, classifyPaths, ownedFolderFor, contentTypesTouched, contributionTarget, isContributionToFolder, requiredTierFor } from '../membership/classify-pr.mjs';
+import { TIER } from '../membership/tiers.mjs';
 
 const NOW = new Date('2026-06-02T00:00:00Z');
 const daysAgo = (n) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
@@ -167,8 +168,8 @@ const PAID = { status: 'paid' };
 const TRIAL = { status: 'trialing' };
 const BANNED = { status: 'banned' };
 
-test('paid member, own-folder content => pass + auto-merge', () => {
-  const d = decide({ paths: ['members/octocat/posts/hello/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat' });
+test('paid Content Creator, own-folder content => pass + auto-merge', () => {
+  const d = decide({ paths: ['members/octocat/posts/hello/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.creator });
   assert.equal(d.check, 'pass');
   assert.equal(d.autoMerge, true);
   assert.equal(d.label, 'paid');
@@ -199,7 +200,7 @@ test('favorites.yml PR is no longer a carve-out: trial => rejected-not-paid, pai
   assert.equal(trial.label, 'rejected-not-paid');
   assert.notEqual(trial.autoMerge, true);
 
-  const paid = decide({ paths: ['members/octocat/favorites.yml'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat' });
+  const paid = decide({ paths: ['members/octocat/favorites.yml'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.creator });
   assert.equal(paid.check, 'pass');
   assert.equal(paid.label, 'paid');
 });
@@ -217,20 +218,20 @@ test('a non-member still fails on a favorites.yml PR (members-only)', () => {
 });
 
 test('member editing ANOTHER members folder without owner approval => held contribution', () => {
-  const d = decide({ paths: ['members/someone-else/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat' });
+  const d = decide({ paths: ['members/someone-else/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.creator });
   assert.equal(d.check, 'fail');
   assert.equal(d.label, 'contribution-pending-owner');
 });
 
 test('contribution: owner approved + owner paid => accepted, no auto-merge', () => {
-  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', ownerApproved: true, ownerPaid: true });
+  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', ownerApproved: true, ownerPaid: true, tier: TIER.creator, ownerTier: TIER.creator });
   assert.equal(d.check, 'pass');
   assert.equal(d.label, 'contribution-accepted');
   assert.equal(d.autoMerge, false);
 });
 
 test('contribution: owner approved but NOT paid => held', () => {
-  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', ownerApproved: true, ownerPaid: false });
+  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', ownerApproved: true, ownerPaid: false, tier: TIER.creator });
   assert.equal(d.label, 'contribution-pending-owner');
 });
 
@@ -269,6 +270,63 @@ test('members-only: a non-member cannot contribute either (rejected before the c
 test('members-only: a trial member is a member but cannot publish (rejected-not-paid, distinct from non-member)', () => {
   const d = decide({ paths: ['members/octocat/posts/x/index.md'], role: ROLE.member, effective: TRIAL, ownedFolder: 'octocat' });
   assert.equal(d.label, 'rejected-not-paid'); // not 'rejected-not-a-member' (trial IS a member) and not held
+});
+
+// sow-185: the TIER gate. Public presence (post/product/prompt/profile) needs Content Creator; comments need
+// only Network Member. A paid member below the required tier is rejected-not-creator (auto-closed with a nudge).
+test('sow-185: a Network Member publishing own-folder public content => rejected-not-creator', () => {
+  for (const p of ['members/octocat/posts/x/index.md', 'members/octocat/products/y/index.md', 'members/octocat/prompts/z/index.md', 'members/octocat/profile.md']) {
+    const d = decide({ paths: [p], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.member });
+    assert.equal(d.check, 'fail', p);
+    assert.equal(d.label, 'rejected-not-creator', p);
+    assert.equal(d.autoMerge, false, p);
+  }
+});
+
+test('sow-185: a Network Member publishing an own-folder comment => pass (member suffices)', () => {
+  const d = decide({ paths: ['members/octocat/comments/hello.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.member });
+  assert.equal(d.check, 'pass');
+  assert.equal(d.label, 'paid');
+});
+
+test('sow-185: a Content Creator publishes every own-folder content type', () => {
+  for (const p of ['members/octocat/posts/x/index.md', 'members/octocat/products/y/index.md', 'members/octocat/prompts/z/index.md', 'members/octocat/profile.md', 'members/octocat/comments/c.md']) {
+    const d = decide({ paths: [p], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.creator });
+    assert.equal(d.check, 'pass', p);
+    assert.equal(d.label, 'paid', p);
+  }
+});
+
+test('sow-185: a paid status with tier none (an unmapped price) is denied even for a comment (fail closed)', () => {
+  const d = decide({ paths: ['members/octocat/comments/c.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.none });
+  assert.equal(d.check, 'fail');
+  assert.equal(d.label, 'rejected-not-creator');
+});
+
+test('sow-185 contribution: a Network Member cannot contribute public content (rejected-not-creator)', () => {
+  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.member, ownerApproved: true, ownerPaid: true, ownerTier: TIER.creator });
+  assert.equal(d.check, 'fail');
+  assert.equal(d.label, 'rejected-not-creator');
+});
+
+test('sow-185 contribution: a Content Creator contributing into a Network Member owner folder is rejected (cannot live there)', () => {
+  const d = decide({ paths: ['members/bob/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.creator, ownerApproved: true, ownerPaid: true, ownerTier: TIER.member });
+  assert.equal(d.check, 'fail');
+  assert.equal(d.label, 'rejected-not-creator');
+});
+
+test('sow-185 contribution: a comment by a Network Member into a Network Member owner folder is accepted', () => {
+  const d = decide({ paths: ['members/bob/comments/c.md'], role: ROLE.member, effective: PAID, ownedFolder: 'octocat', tier: TIER.member, ownerApproved: true, ownerPaid: true, ownerTier: TIER.member });
+  assert.equal(d.check, 'pass');
+  assert.equal(d.label, 'contribution-accepted');
+});
+
+test('sow-185 requiredTierFor: public types -> creator, comments-only -> member, mixed/empty -> creator', () => {
+  for (const t of ['post', 'product', 'prompt', 'profile']) assert.equal(requiredTierFor([t]), TIER.creator, t);
+  assert.equal(requiredTierFor(['comment']), TIER.member);
+  assert.equal(requiredTierFor(['comment', 'post']), TIER.creator);
+  assert.equal(requiredTierFor([]), TIER.creator);
+  assert.equal(requiredTierFor(null), TIER.creator);
 });
 
 test('SOW-108: a superadmin auto-merges any path they touch, including house/** and Tier S', () => {

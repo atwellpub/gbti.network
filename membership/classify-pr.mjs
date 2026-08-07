@@ -12,6 +12,9 @@
 // ROLE comes from the node-free overrides-core (not overrides.mjs, which adds node:fs loaders): this module is
 // bundled into the browser client + MV3 extension (SOW-028 inbox), so it must not transitively pull in node:fs.
 import { ROLE } from './overrides-core.mjs';
+// sow-185 phase 3a: the tier axis. tiers.mjs has ZERO imports (node-free), so it is safe in this bundled module.
+// The caller (pr-gate) resolves the author's + owner's effective tier; decide() only ranks it with meetsTier.
+import { TIER, meetsTier } from './tiers.mjs';
 
 const CONTENT_DIRS = ['posts', 'products', 'prompts', 'comments'];
 const ROLE_RANK = { [ROLE.member]: 0, [ROLE.moderator]: 1, [ROLE.admin]: 2, [ROLE.superadmin]: 3 };
@@ -142,6 +145,17 @@ export function contentTypesTouched(paths, ownedFolder) {
   return [...types];
 }
 
+/**
+ * sow-185: the minimum TIER required to author a set of content types (from contentTypesTouched). Content
+ * Creator authors public presence (post / product / prompt / profile); a Network Member authors comments.
+ * Fail closed: an empty or mixed set, or any non-comment type, requires creator, the higher tier, so a type we
+ * cannot cleanly classify as comments-only never publishes on the member floor.
+ */
+export function requiredTierFor(types) {
+  if (!Array.isArray(types) || types.length === 0) return TIER.creator;
+  return types.every((t) => t === 'comment') ? TIER.member : TIER.creator;
+}
+
 const fail = (label, reason) => ({ check: 'fail', autoMerge: false, label, reasons: [reason] });
 const pass = (label, autoMerge, reason) => ({ check: 'pass', autoMerge, label, reasons: [reason] });
 
@@ -156,11 +170,16 @@ const pass = (label, autoMerge, reason) => ({ check: 'pass', autoMerge, label, r
  *   5. Privileged author (moderator/admin/superadmin or bot) -> pass, may touch others' folders.
  *   6. Contribution (member, exactly one OTHER member's folder, nothing else) -> publishing a credit on
  *      the live site is paid-only, so a non-paid (trial) contributor -> fail `rejected-not-paid` (the gate
- *      auto-closes these; the draft stays on the contributor's fork). A paid contributor passes only when
- *      the folder owner approved (ownerApproved) AND the owner is paid (ownerPaid); else held
- *      (`contribution-pending-owner`). Any mixed or multi-owner cross-folder PR -> fail `rejected-escalation`.
- *   7. Plain member, own folder only -> paid passes (+ auto-merge); a trial member -> fail `rejected-not-paid`
- *      (auto-closed; the draft stays on their fork until they pay, so no trial content reaches the repo).
+ *      auto-closes these; the draft stays on the contributor's fork). The contribution's content type sets a
+ *      tier BOTH the contributor and the folder owner must hold (sow-185): a post/product/prompt needs Content
+ *      Creator, a comment needs Network Member. A contributor below that tier -> fail `rejected-not-creator`;
+ *      a folder owner below it -> fail `rejected-not-creator` (the content cannot live there). Otherwise a paid
+ *      contributor passes only when the folder owner approved (ownerApproved) AND the owner is paid (ownerPaid);
+ *      else held (`contribution-pending-owner`). Any mixed or multi-owner cross-folder PR -> `rejected-escalation`.
+ *   7. Plain member, own folder only -> paid AND meeting the content's tier passes (+ auto-merge): Content
+ *      Creator for post/product/prompt/profile, Network Member for comments (sow-185). A paid member below the
+ *      required tier -> fail `rejected-not-creator`; a trial member -> fail `rejected-not-paid` (auto-closed;
+ *      the draft stays on their fork until they pay, so no trial content reaches the repo).
  *
  * @param {object} a
  * @param {string[]} a.paths           changed file paths (repo-relative, forward slashes)
@@ -171,8 +190,10 @@ const pass = (label, autoMerge, reason) => ({ check: 'pass', autoMerge, label, r
  * @param {boolean}  [a.ownerApproved] for a contribution: the target folder owner submitted an
  *                                     APPROVED review on the current head SHA (read by github_id)
  * @param {boolean}  [a.ownerPaid]     for a contribution: the target folder owner is paid
+ * @param {string}   [a.tier]          the author's effective TIER (tier-gate resolveEffectiveTier), default none
+ * @param {string}   [a.ownerTier]     for a contribution: the target folder owner's effective TIER, default none
  */
-export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBot = false, ownerApproved = false, ownerPaid = false }) {
+export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBot = false, ownerApproved = false, ownerPaid = false, tier = TIER.none, ownerTier = TIER.none }) {
   const c = classifyPaths(paths, ownedFolder);
   // isBot is a FLOOR, not an override: it promotes an unprivileged bot to admin, but never DEMOTES a
   // bot that already holds a higher role. So an automation account that is also a superadmin (for
@@ -234,9 +255,22 @@ export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBo
     if (status !== 'paid') {
       return fail('rejected-not-paid', `contributions publish your credit on the live site, which requires paid membership (status: ${status ?? 'none'})`);
     }
+    // sow-185: the contribution's content type sets a tier BOTH parties must hold. A post/product/prompt can
+    // only be authored by, and land in, a Content Creator's folder; a comment needs only Network Member.
+    const required = requiredTierFor(contentTypesTouched(paths, c.otherOwners[0]));
+    const need = required === TIER.creator ? 'Content Creator' : 'Network Member';
+    if (!meetsTier(tier, required)) {
+      return fail('rejected-not-creator', `contributing this content requires the ${need} tier or higher (your tier: ${tier ?? 'none'})`);
+    }
     if (ownerApproved && ownerPaid) {
+      // The owner is paid (folder is live) and has approved: the content's tier must also be one their folder
+      // can host, else a post could be published into a Network Member's folder.
+      if (!meetsTier(ownerTier, required)) {
+        return fail('rejected-not-creator', `the folder owner (${c.otherOwners[0]}) is a ${ownerTier ?? 'none'} member, so ${need} content cannot be published there`);
+      }
       return pass('contribution-accepted', false, `owner ${c.otherOwners[0]} approved the contribution`);
     }
+    // Not yet approved, or the owner is not paid: hold (the existing pending-owner behavior is unchanged).
     return fail('contribution-pending-owner', `awaiting an approving review from the folder owner (${c.otherOwners[0]})`);
   }
   // Any remaining cross-folder PR (own mixed with other, or multiple other owners) is an escalation.
@@ -244,10 +278,16 @@ export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBo
     return fail('rejected-escalation', `mixed or multi-owner cross-folder PR: ${c.otherMemberPaths.join(', ')}`);
   }
 
-  // 7. Plain member: own folder only at this point. Publishing requires paid. A trial member's drafts
-  //    stay on their own fork until they pay (the gate rejects + the runnable wrapper auto-closes with a
-  //    nudge), so no trial content ever reaches the canonical repo.
+  // 7. Plain member: own folder only at this point. Publishing requires paid AND the tier for what is being
+  //    published (sow-185): Content Creator for public presence (post/product/prompt/profile), Network Member
+  //    for comments. A trial member's drafts stay on their own fork until they pay (the gate rejects + the
+  //    runnable wrapper auto-closes with a nudge), so no trial content ever reaches the canonical repo.
   if (status === 'paid') {
+    const required = requiredTierFor(contentTypesTouched(paths, ownedFolder));
+    if (!meetsTier(tier, required)) {
+      const need = required === TIER.creator ? 'Content Creator' : 'Network Member';
+      return fail('rejected-not-creator', `publishing this content requires the ${need} tier or higher (your tier: ${tier ?? 'none'})`);
+    }
     return pass('paid', c.ownFolderOnly, 'paid member own-folder content');
   }
   return fail('rejected-not-paid', `publishing requires paid membership; trial drafts stay on your fork (status: ${status ?? 'none'})`);

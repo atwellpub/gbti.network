@@ -113,7 +113,7 @@ test('contribution merges when the folder owner approved and is paid', async () 
   // resolveOwner is what main() builds from the reviews API + owner Stripe status; here it is faked.
   const resolveOwner = async (owner) => {
     assert.equal(owner, 'octocat');
-    return { ownerApproved: true, ownerPaid: true };
+    return { ownerApproved: true, ownerPaid: true, ownerTier: 'creator' }; // sow-185: owner is a Content Creator (folder can host a post)
   };
   const d = await evaluatePR({
     author: ev.pull_request.user.id,
