@@ -8,6 +8,7 @@
 import yaml from 'js-yaml';
 import { AUTHORABLE_TYPES, SYSTEM_MANAGED, schemaFor, shareSchema, commentSchema } from './schemas.mjs';
 import { encAssetFor } from './member-content.mjs';
+import { stripTrackingParams } from './url-normalize.mjs';
 
 const SUBDIR = Object.freeze({ post: 'posts', product: 'products', prompt: 'prompts' });
 const MAX_BODY_BYTES = 1_000_000; // 1MB cap on a content body (well under GitHub's per-file limit + the 2MB HTTP cap)
@@ -247,6 +248,10 @@ export function buildShareFile({ username, input, body = '' }) {
   // A published share must carry status:published in its frontmatter, or the readers (which filter on
   // status === 'published') skip it. Default to published; an explicit input.status still wins.
   const cleaned = stripUndefined({ status: 'published', ...(input ?? {}), type: 'share', author: username });
+  // sow-190: strip unambiguous tracking parameters from the shared link at this single ingest chokepoint, so
+  // every host (extension, website, MCP) stores a clean url and every downstream reader (feed, share page,
+  // syndication) inherits it. Denylist-only: functional params (a video id, timestamp, playlist) survive.
+  if (typeof cleaned.url === 'string') cleaned.url = stripTrackingParams(cleaned.url);
   const result = shareSchema.safeParse(cleaned);
   if (!result.success) throw new ContentValidationError('share', result.error.issues);
   const id = cleaned.id;

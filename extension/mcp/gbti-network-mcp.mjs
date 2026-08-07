@@ -17315,6 +17315,51 @@ function encAssetFor(type, username, slug, scope = "member") {
   return { assetId, path: path4 };
 }
 
+// client/src/url-normalize.mjs
+var TRACKING_KEYS = /* @__PURE__ */ new Set([
+  "si",
+  // YouTube per-share attribution token (the reported case)
+  "fbclid",
+  // Facebook click id
+  "gclid",
+  // Google Ads click id
+  "igshid",
+  // Instagram share id
+  "mc_cid",
+  // Mailchimp campaign id
+  "mc_eid",
+  // Mailchimp recipient id
+  "ab_channel"
+  // YouTube channel-attribution on a watch url
+]);
+var TRACKING_PREFIXES = ["utm_"];
+function isTrackingKey(key) {
+  const k = String(key).toLowerCase();
+  if (TRACKING_KEYS.has(k)) return true;
+  return TRACKING_PREFIXES.some((p) => k.startsWith(p));
+}
+function stripTrackingParams(input) {
+  const s = String(input ?? "").trim();
+  if (!/^https?:\/\//i.test(s)) return s;
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return s;
+  }
+  let changed = false;
+  for (const key of [...u.searchParams.keys()]) {
+    if (isTrackingKey(key)) {
+      u.searchParams.delete(key);
+      changed = true;
+    }
+  }
+  if (!changed) return s;
+  const qs = u.searchParams.toString();
+  u.search = qs ? `?${qs}` : "";
+  return u.toString();
+}
+
 // client/src/content-ops.mjs
 var SUBDIR = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var MAX_BODY_BYTES = 1e6;
@@ -17385,6 +17430,7 @@ function shareId(createdAt, title) {
 function buildShareFile({ username, input, body = "" }) {
   if (!username) throw new Error("buildShareFile: username is required");
   const cleaned = stripUndefined({ status: "published", ...input ?? {}, type: "share", author: username });
+  if (typeof cleaned.url === "string") cleaned.url = stripTrackingParams(cleaned.url);
   const result = shareSchema.safeParse(cleaned);
   if (!result.success) throw new ContentValidationError("share", result.error.issues);
   const id = cleaned.id;
