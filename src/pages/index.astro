@@ -14,6 +14,7 @@ import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
 import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
 import { authorItem } from '../lib/avatars';
+import { contentIcon } from '../lib/content-icons';
 import { getCollection } from 'astro:content';
 import { isListed, byNewest } from '../lib/content';
 import { authorDisplay, authorHref } from '../lib/authors';
@@ -186,7 +187,7 @@ const SHOPTALK = {
                 {it.thumb && <img class="pop-thumb" src={it.thumb} alt="" loading="lazy" decoding="async" />}
                 <div class="pop-info">
                   <div class="pop-title">{it.title}</div>
-                  <div class="pop-meta"><span class={`kind-tag kt-${it.kind}`}>{it.kind}</span><span class="pop-by"><Avatar item={authorItem(it.author, avatarIndex)} size={18} class="pop-av" />{authorDisplay(it.author)}</span></div>
+                  <div class="pop-meta"><span class={`kind-tag kt-${it.kind}`}><svg class="kt-ico" viewBox="0 0 24 24" aria-hidden="true"><use href={`#${contentIcon(it.kind)}`}/></svg>{it.kind}</span><span class="pop-by"><Avatar item={authorItem(it.author, avatarIndex)} size={18} class="pop-av" />{authorDisplay(it.author)}</span></div>
                 </div>
               </a>
             ))}

@@ -969,6 +969,9 @@ a.who:hover { color: var(--fg); }
 .pop-title { font-size: 13px; line-height: 1.35; color: var(--fg); }
 .pop-row:hover .pop-title { color: var(--green-700); }
 .pop-meta { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+/* sow-192 QA: a standard content-type icon (design-ops/icons.md) left of the type label in the Popular chip. */
+.pop-meta .kind-tag { display: inline-flex; align-items: center; gap: 4px; }
+.pop-meta .kt-ico { width: 11px; height: 11px; flex: none; }
 .pop-by { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10.5px; color: var(--fg-mute); min-width: 0; }
 .pop-by span, .pop-by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop-by :global(.pop-av) { width: 18px; height: 18px; border-radius: 50%; flex: none; }
