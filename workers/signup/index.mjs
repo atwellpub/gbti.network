@@ -82,6 +82,7 @@ import { membershipContentOpened } from './membership-content-opened.mjs'; // SO
 import { membershipDeployStatus } from './membership-deploy-status.mjs'; // sow-185: public "still deploying" status check
 import { handleDiscordInvite } from './discord-invite.mjs';
 import { openPullForMember, listMemberPulls, memberPrStatus, listOpenPullsForReview, reviewPrDetail, reviewPrFiles, reviewFileContent } from './github-app.mjs';
+import { listRepoDrafts } from './membership-repo-drafts.mjs'; // sow-194: owner-scoped repo-draft listing
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
@@ -1082,6 +1083,14 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET') {
           const r = await reviewFileContent(request, env);
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+      if (pathname === '/membership/repo-drafts') {
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-194: owner-scoped repo-draft listing (cookie or bearer)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await listRepoDrafts(request, env);
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }

@@ -1,0 +1,48 @@
+name: Index repo drafts
+
+# sow-194: refresh the `repo-drafts:index` blob in SIGNUP_KV whenever content is pushed, so a draft committed to
+# the canonical repo (status: draft) becomes reviewable in the WorkBench within ~1-2 min. The signup Worker reads
+# this ONE key and scopes it to the caller (own folder, or all + house for a superadmin) instead of scanning 86
+# content files per request (which would blow the free-tier 50-subrequest limit). CI reads the repo locally, so
+# there is no API limit. Same creds + fail-loud posture as sync-overrides-mirror.
+#
+# Run locally: node scripts/index-repo-drafts.mjs --dry-run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'members/**'
+      - 'house/**'
+  workflow_dispatch: {}
+  # The signup Worker can fire repository_dispatch type 'index-repo-drafts' after a hosted draft write so the
+  # index refreshes immediately instead of waiting for the push event.
+  repository_dispatch:
+    types: [index-repo-drafts]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: index-repo-drafts
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Build + write the repo-drafts index
+        run: node scripts/index-repo-drafts.mjs
+        env:
+          # CF_ACCOUNT_ID + CF_KV_NAMESPACE_ID are non-secret identifiers (acting on them needs the token), inlined
+          # like reconcile.yml / sync-overrides-mirror.yml. CF_KV_NAMESPACE_ID MUST equal the production Worker's
+          # SIGNUP_KV id. Only CF_API_TOKEN (scoped to Workers KV Storage Edit) is a real secret. A missing token
+          # exits non-zero (a red run), never a silent no-op that would leave the Drafts view empty.
+          CF_ACCOUNT_ID: "d42b12e969229c5187ad0f7289536487"
+          CF_KV_NAMESPACE_ID: "49432379e11844ac81b6fdaf22d3937a"
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

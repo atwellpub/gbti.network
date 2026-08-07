@@ -63,7 +63,7 @@ export async function mirrorSyndicationConfigToKv({ raw, env = process.env, fetc
 }
 
 /** Shared creds-gated KV REST PUT (the overrides-mirror pattern). Throws only on a real API error. */
-async function putKvJson({ label, body, env = process.env, fetchImpl = globalThis.fetch, key }) {
+export async function putKvJson({ label, body, env = process.env, fetchImpl = globalThis.fetch, key }) {
   const accountId = env.CF_ACCOUNT_ID;
   const namespaceId = env.CF_KV_NAMESPACE_ID;
   const apiToken = env.CF_API_TOKEN;
