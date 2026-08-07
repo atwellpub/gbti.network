@@ -2,7 +2,7 @@
 // SOW-018 reversal), the New & Popular ranking, tag aggregation, and relative time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, heatCells } from '../src/lib/home-feed.mjs';
+import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, heatCells, personalizeOrder } from '../src/lib/home-feed.mjs';
 
 test('decodeEntities resolves numeric + common named entities in scraped share metadata', () => {
   assert.equal(decodeEntities('WordPress Down &#8211; SQL Injection'), 'WordPress Down – SQL Injection');
@@ -42,6 +42,44 @@ test('heatCells (sow-192): empty input is all zeros; levels are 1..4 scaled to t
   assert.ok(cells.every((l) => l >= 0 && l <= 4));
   // non-numeric / non-positive stamps are ignored, not counted
   assert.deepEqual(heatCells([0, -5, NaN, 'x'], 3), [0, 0, 0]);
+});
+
+test('personalizeOrder (sow-192 Phase D): defaults to newest-first over every row', () => {
+  const rows = [
+    { index: 0, kind: 'article', author: 'a', tags: [], comments: 1, date: 100, read: false },
+    { index: 1, kind: 'share', author: 'b', tags: [], comments: 9, date: 300, read: false },
+    { index: 2, kind: 'product', author: 'a', tags: [], comments: 4, date: 200, read: true },
+  ];
+  assert.deepEqual(personalizeOrder(rows), [1, 2, 0]); // newest first, all visible
+  assert.deepEqual(personalizeOrder([]), []);
+});
+
+test('personalizeOrder: scope=followed keeps only followed authors; hideRead + shares rules filter', () => {
+  const rows = [
+    { index: 0, kind: 'article', author: 'Alice', tags: [], comments: 1, date: 100, read: false },
+    { index: 1, kind: 'share', author: 'Bob', tags: [], comments: 0, date: 300, read: false },
+    { index: 2, kind: 'product', author: 'alice', tags: [], comments: 4, date: 200, read: true },
+    { index: 3, kind: 'news', author: 'wired.com', tags: [], comments: 0, date: 400, read: false },
+  ];
+  // only followed 'alice' (case-insensitive) -> rows 0 and 2, newest first
+  assert.deepEqual(personalizeOrder(rows, { scope: 'followed', followedAuthors: ['alice'] }), [2, 0]);
+  // hide read drops row 2; drop shares drops row 1
+  assert.deepEqual(
+    personalizeOrder(rows, { rules: { hideRead: true, sharesInline: false } }),
+    [3, 0],
+  );
+});
+
+test('personalizeOrder: most-discussed order and the followed-tag boost', () => {
+  const rows = [
+    { index: 0, kind: 'article', author: 'a', tags: ['x'], comments: 2, date: 100 },
+    { index: 1, kind: 'article', author: 'b', tags: ['mcp'], comments: 1, date: 90 },
+    { index: 2, kind: 'article', author: 'c', tags: [], comments: 5, date: 80 },
+  ];
+  // most-discussed: comments desc -> 2 (5), 0 (2), 1 (1)
+  assert.deepEqual(personalizeOrder(rows, { rules: { newestFirst: false } }), [2, 0, 1]);
+  // followed tag 'mcp' floats row 1 to the top, then newest-first for the rest
+  assert.deepEqual(personalizeOrder(rows, { followedTags: ['mcp'] }), [1, 0, 2]);
 });
 
 test('feedCounts tolerates empty/absent inputs and ignores unknown kinds', () => {

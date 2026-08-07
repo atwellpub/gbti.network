@@ -145,6 +145,46 @@ export function heatCells(stamps, cells) {
   return counts.map((c) => (c === 0 ? 0 : Math.max(1, Math.ceil((c / max) * 4))));
 }
 
+/**
+ * sow-192 Phase D (Personalize): re-order + filter the homepage feed for a signed-in member. Pure and
+ * testable; the client builds a plain row descriptor per rendered feed row ({index, kind, author, tags,
+ * comments, date, read}) and applies the returned display order (rows not returned are hidden). Rules:
+ * - scope 'followed' keeps only rows authored by a followed member (drops news + unfollowed);
+ * - !sharesInline drops share rows; hideRead drops rows the member has read;
+ * - order is newest-first (default) or most-discussed (comments desc, date breaks ties);
+ * - a followed tag floats its rows to the top (a boost, applied before the base order).
+ * Everything defaults to the unchanged newest-first feed, so an empty/absent opts is a no-op ordering.
+ */
+export function personalizeOrder(rows, opts = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const scope = opts.scope === 'followed' ? 'followed' : 'everything';
+  const followed = new Set((opts.followedAuthors || []).map((a) => String(a).toLowerCase()));
+  const followedTags = new Set((opts.followedTags || []).map((t) => String(t).toLowerCase()));
+  const rules = opts.rules || {};
+  const newestFirst = rules.newestFirst !== false;
+  const sharesInline = rules.sharesInline !== false;
+  const hideRead = rules.hideRead === true;
+
+  const visible = list.filter((r) => {
+    if (scope === 'followed' && !followed.has(String(r.author).toLowerCase())) return false;
+    if (!sharesInline && r.kind === 'share') return false;
+    if (hideRead && r.read) return false;
+    return true;
+  });
+  const hasFollowedTag = (r) => (r.tags || []).some((t) => followedTags.has(String(t).toLowerCase()));
+  visible.sort((a, b) => {
+    const ta = hasFollowedTag(a) ? 1 : 0;
+    const tb = hasFollowedTag(b) ? 1 : 0;
+    if (ta !== tb) return tb - ta;
+    if (newestFirst) return (b.date || 0) - (a.date || 0);
+    const ca = a.comments || 0;
+    const cb = b.comments || 0;
+    if (ca !== cb) return cb - ca;
+    return (b.date || 0) - (a.date || 0);
+  });
+  return visible.map((r) => r.index);
+}
+
 /** Split items into page chunks of `size` (the ladder pager renders one pager row per chunk). */
 export function chunkPages(items, size = 10) {
   const chunks = [];

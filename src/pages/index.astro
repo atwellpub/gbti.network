@@ -14,8 +14,10 @@ import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
 import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
 import PricingAccordion from '../components/home/PricingAccordion.astro';
+import PersonalizeModal from '../components/home/PersonalizeModal.astro';
 import { authorItem } from '../lib/avatars';
 import { contentIcon } from '../lib/content-icons';
+import { topLevelCategories } from '../lib/taxonomy';
 import { getCollection } from 'astro:content';
 import { isListed, byNewest } from '../lib/content';
 import { authorDisplay, authorHref } from '../lib/authors';
@@ -76,6 +78,17 @@ const homePrompts = listedPrompts.slice(0, 3);
 const homeComments = await getCollection('comment');
 const homeProfiles = await getCollection('profile');
 
+// sow-192 Phase D: the Personalize modal's candidate lists, emitted as a build-time JSON so the modal never
+// guesses an endpoint shape. Members = directory opt-ins; categories = the taxonomy top levels present in the
+// content; tags = the same trending set the sidebar uses.
+const personalizeData = {
+  members: homeProfiles
+    .filter((p) => p.data.directory)
+    .map((p) => ({ username: p.data.username, name: p.data.displayName, avatar: p.data.avatar ?? null })),
+  categories: topLevelCategories([...listedPosts, ...listedProducts, ...listedPrompts].map((e) => e.data.categories)),
+  tags,
+};
+
 // sow-192: a REAL git-commit activity heatmap (this replaced the earlier publish-date bucketing, which read
 // as an activity graph but was not one). commitsByDate() reads the whole repo history at build and is
 // fail-closed to empty on a shallow clone; heatCells buckets it into 7x36 level-0..4 cells scaled to the
@@ -120,6 +133,11 @@ const SHOPTALK = {
        for a signed-in member via the shared [data-home-joincard] hook. -->
   <PricingAccordion />
 
+  <!-- sow-192 Phase D: the Personalize modal + its build-time candidate lists (members/categories/tags). The
+       modal itself is a fixed <dialog>, inert until the signed-in Personalize button opens it. -->
+  <script type="application/json" id="gbti-personalize-data" set:html={JSON.stringify(personalizeData)}></script>
+  <PersonalizeModal />
+
   <!-- sow-192 Phase C: the signed-in creator composer bar. Hidden for signed-out / no-JS; revealed on the
        sow-158 member signal, which also lazy-mounts the client-ui composer (see the script below). -->
   <div class="home-composer card" data-home-signedin hidden>
@@ -142,6 +160,7 @@ const SHOPTALK = {
       </nav>
 
       <div class="feed-toolbar">
+        <button type="button" class="pz-open-btn" data-home-signedin data-personalize-open hidden><span class="pz-dot-blue"></span>Personalize</button>
         <span class="feed-tb-sp"></span>
         <div class="view-toggle" role="group" aria-label="Density">
           <button type="button" class="vt-btn" data-feedview-density="card" aria-pressed="false" aria-label="Cards" data-tooltip="Cards" data-tooltip-pos="below"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><use href="#ico-grid"/></svg></button>
@@ -426,6 +445,7 @@ const SHOPTALK = {
         if (on) t.setAttribute('aria-current', 'true'); else t.removeAttribute('aria-current');
       });
       applyFilter();
+      document.dispatchEvent(new Event('gbti:tab-changed')); // sow-192 Phase D: let personalize re-sync
     }
 
     tabs.forEach((t) => {
@@ -551,6 +571,66 @@ const SHOPTALK = {
         document.dispatchEvent(new Event('gbti:feed-updated'));
       })
       .catch(() => { dropLatestNews(); /* news is optional garnish; the built feed stands alone */ });
+  })();
+</script>
+
+<script>
+  // sow-192 Phase D: apply the member's Personalize FILTER to the Everything feed, client-side. The modal
+  // (PersonalizeModal) dispatches `gbti:personalize` with the current settings; this hides feed rows that do
+  // not pass (scope 'only followed members', hide-read, mix-shares-off), keeping the newest-first order (the
+  // most-discussed reorder + tag boost are a documented follow-up). Personalization applies ONLY on the
+  // Everything tab; the per-kind tab filter owns the others. Signed-out visitors never trigger this (the
+  // modal only emits after a signed-in load), so the default feed is untouched. Read-state is per-device
+  // (localStorage), set when a member opens a feed item.
+  import { personalizeOrder } from '../lib/home-feed.mjs';
+  (() => {
+    const view = document.querySelector<HTMLElement>('[data-hometabs]');
+    const list = view?.querySelector<HTMLElement>('[data-feedlist]');
+    if (!view || !list) return;
+    const READ = 'gbti-read';
+    let settings: any = null;
+
+    const activeTab = () => view.querySelector('.feed-tab.on')?.getAttribute('data-hometab') || 'all';
+    const isActive = (s: any) => !!s && (s.scope === 'followed' || s.rules?.hideRead || s.rules?.sharesInline === false);
+
+    function apply() {
+      const onAll = activeTab() === 'all';
+      // Always clear our own hides first, so switching tabs / clearing settings restores cleanly. We never
+      // touch rows the tab filter hid (it uses r.hidden without our marker).
+      list!.querySelectorAll<HTMLElement>('[data-fi][data-pz-hidden]').forEach((r) => { r.hidden = false; r.removeAttribute('data-pz-hidden'); });
+      if (!onAll || !isActive(settings)) return;
+      // Flatten so filtered rows across chunks all evaluate (mirrors the tab filter).
+      list!.querySelectorAll<HTMLElement>('.feed-chunk').forEach((c) => { if (c.hidden) { c.setAttribute('data-rehide', '1'); c.hidden = false; } });
+      view!.classList.add('feed-flat');
+      let read = new Set<string>();
+      try { read = new Set(JSON.parse(localStorage.getItem(READ) || '[]')); } catch { /* private mode */ }
+      const rows = Array.from(list!.querySelectorAll<HTMLElement>('[data-fi]'));
+      const desc = rows.map((r, i) => ({
+        index: i,
+        kind: r.getAttribute('data-kind') || '',
+        author: r.getAttribute('data-author') || '',
+        tags: (r.getAttribute('data-tags') || '').split(' ').filter(Boolean),
+        comments: Number(r.getAttribute('data-comments') || 0),
+        date: rows.length - i, // rows are server-rendered newest-first; keep that order
+        read: read.has(r.querySelector('.feed-title a')?.getAttribute('href') || ''), // the ITEM link, not the author link
+      }));
+      const visible = new Set(personalizeOrder(desc, settings));
+      rows.forEach((r, i) => { const show = visible.has(i); r.hidden = !show; if (!show) r.setAttribute('data-pz-hidden', '1'); });
+    }
+
+    document.addEventListener('gbti:personalize', (e: any) => { settings = e.detail; apply(); });
+    document.addEventListener('gbti:tab-changed', apply);
+    document.addEventListener('gbti:feed-updated', apply); // late news rows
+
+    // Read beacon: mark a feed item read when the member OPENS it (clicks the title or cover, not the author
+    // or meta links), keyed on the item's title link so it matches the read-check above.
+    list.addEventListener('click', (e) => {
+      const row = (e.target as HTMLElement)?.closest('[data-fi]');
+      if (!row || !(e.target as HTMLElement)?.closest('.feed-title, .feed-cover')) return;
+      const href = row.querySelector('.feed-title a')?.getAttribute('href') || '';
+      if (!href || href.startsWith('#')) return;
+      try { const s = new Set(JSON.parse(localStorage.getItem(READ) || '[]')); s.add(href); localStorage.setItem(READ, JSON.stringify([...s].slice(-500))); } catch { /* private mode */ }
+    });
   })();
 </script>
 

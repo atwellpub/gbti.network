@@ -1,0 +1,219 @@
+---
+// sow-192 Phase D: the homepage Personalize modal (signed-in only). A native <dialog> with five tabs:
+//   Algo    -> feed scope (everything | only followed members) + rules (newest-first, mix shares inline,
+//              hide read), persisted CLIENT-LOCAL (localStorage 'gbti-personalize') for v1.
+//   Members -> follow/unfollow members (server: getFollows / setFollow).
+//   News    -> follow/unfollow news sources (server: getNewsSources + prefs.followedChannels / setPrefs).
+//   Categories -> follow/unfollow taxonomy topics (server: prefs.categories / setPrefs).
+//   Tags    -> follow/unfollow feed tags, persisted CLIENT-LOCAL (localStorage 'gbti-followed-tags') for v1.
+// The follow GRAPH is server-synced (cross-device); the net-new bits are per-device v1 (a documented follow-up
+// promotes them to server prefs + a read-state KV). On any change the modal dispatches `gbti:personalize`
+// (detail = the current settings), which the homepage feed engine (index.astro) applies via personalizeOrder.
+// The candidate lists (members / categories / tags) come from a build-time JSON index.astro emits, so the
+// modal never guesses an endpoint shape. Nothing here runs for a signed-out visitor (the dialog is inert until
+// the signed-in Personalize button opens it, and the client-ui adapter is imported lazily on first open).
+---
+<dialog class="pz" data-personalize aria-labelledby="pz-title">
+  <div class="pz-card">
+    <header class="pz-head">
+      <div>
+        <div class="pz-eyebrow">Personalize</div>
+        <h2 class="pz-title" id="pz-title">Your feed, your mix.</h2>
+      </div>
+      <button type="button" class="pz-x" data-pz-close aria-label="Close">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <nav class="pz-tabs" data-pz-tabs aria-label="Personalize sections">
+      <button type="button" class="pz-tab on" data-pz-tab="algo">Algo</button>
+      <button type="button" class="pz-tab" data-pz-tab="members">Members <b data-pz-count="members"></b></button>
+      <button type="button" class="pz-tab" data-pz-tab="news">News <b data-pz-count="news"></b></button>
+      <button type="button" class="pz-tab" data-pz-tab="categories">Categories <b data-pz-count="categories"></b></button>
+      <button type="button" class="pz-tab" data-pz-tab="tags">Tags <b data-pz-count="tags"></b></button>
+    </nav>
+
+    <div class="pz-body">
+      <section class="pz-panel on" data-pz-panel="algo">
+        <div class="pz-sub">What fills the feed</div>
+        <div class="pz-scopes">
+          <label class="pz-scope"><input type="radio" name="pz-scope" value="everything" checked /><span><b>Everything</b><small>The whole network plus curated news, newest first.</small></span></label>
+          <label class="pz-scope"><input type="radio" name="pz-scope" value="followed" /><span><b>Only followed members</b><small>Only work by members you follow. News and unfollowed members are hidden.</small></span></label>
+        </div>
+        <div class="pz-sub">Rules</div>
+        <label class="pz-rule"><input type="checkbox" data-pz-rule="sharesInline" checked /><span>Mix shares into the feed</span></label>
+        <label class="pz-rule"><input type="checkbox" data-pz-rule="hideRead" /><span>Hide items I have already read</span></label>
+      </section>
+      <section class="pz-panel" data-pz-panel="members" hidden><ul class="pz-list" data-pz-list="members"></ul></section>
+      <section class="pz-panel" data-pz-panel="news" hidden><ul class="pz-list" data-pz-list="news"></ul></section>
+      <section class="pz-panel" data-pz-panel="categories" hidden><ul class="pz-list" data-pz-list="categories"></ul></section>
+      <section class="pz-panel" data-pz-panel="tags" hidden><ul class="pz-list" data-pz-list="tags"></ul></section>
+      <p class="pz-empty" data-pz-loading hidden>Loading&hellip;</p>
+    </div>
+
+    <footer class="pz-foot">
+      <button type="button" class="pz-reset" data-pz-reset>Reset to defaults</button>
+      <button type="button" class="btn btn-primary pz-done" data-pz-close>Done</button>
+    </footer>
+  </div>
+</dialog>
+
+<script>
+  // The Personalize modal controller. Runs only after the signed-in Personalize button opens the dialog.
+  (() => {
+    const dialog = document.querySelector<HTMLDialogElement>('[data-personalize]');
+    if (!dialog) return;
+    const LS_ALGO = 'gbti-personalize';
+    const LS_TAGS = 'gbti-followed-tags';
+
+    const readJson = (k: string, fb: any) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch { return fb; } };
+    const writeJson = (k: string, v: any) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
+
+    // v1 client-local settings (Algo + tag-follows). Server-synced follows are loaded from the adapter.
+    // v1 applies FILTER rules (scope + shares + hide-read); the feed keeps its newest-first order. The
+    // most-discussed reorder + tag boost are a documented follow-up, so no dead controls ship.
+    const DEFAULT_ALGO = { scope: 'everything', sharesInline: true, hideRead: false };
+    let algo = { ...DEFAULT_ALGO, ...readJson(LS_ALGO, {}) };
+    let followedTags: string[] = readJson(LS_TAGS, []);
+
+    // Build-time candidate lists (members/categories/tags) emitted by index.astro.
+    let data: any = { members: [], categories: [], tags: [] };
+    try { data = JSON.parse(document.getElementById('gbti-personalize-data')?.textContent || '{}'); } catch { /* keep defaults */ }
+
+    let client: any = null;           // the cookie adapter (lazy)
+    let followedMembers = new Set<string>();
+    let followedCategories = new Set<string>();
+    let followedChannels = new Set<string>();
+    let newsSources: any[] = [];
+    let loaded = false;
+
+    function emit() {
+      document.dispatchEvent(new CustomEvent('gbti:personalize', { detail: {
+        scope: algo.scope,
+        rules: { sharesInline: algo.sharesInline, hideRead: algo.hideRead },
+        followedAuthors: [...followedMembers],
+      } }));
+    }
+
+    async function ensureClient() {
+      if (client) return client;
+      const signupBase = document.documentElement.dataset.signupBase || '';
+      const login = (() => { try { return JSON.parse(document.documentElement.dataset.gbtiMember || '{}').login || ''; } catch { return ''; } })();
+      const { createWorkbenchClient } = await import('../../lib/workbench-client');
+      client = createWorkbenchClient({ signupBase, login });
+      return client;
+    }
+
+    const rowTpl = (id: string, label: string, sub: string, on: boolean, avatar?: string) => `
+      <li class="pz-row" data-id="${id}">
+        ${avatar ? `<img class="pz-av" src="${avatar}" alt="" loading="lazy">` : '<span class="pz-dot"></span>'}
+        <span class="pz-nm">${label}${sub ? `<small>${sub}</small>` : ''}</span>
+        <button type="button" class="pz-follow${on ? ' on' : ''}" aria-pressed="${on}">${on ? 'Following' : 'Follow'}</button>
+      </li>`;
+
+    function renderLists() {
+      const set = (name: string, html: string, n: number) => {
+        const ul = dialog!.querySelector(`[data-pz-list="${name}"]`);
+        if (ul) ul.innerHTML = html;
+        const c = dialog!.querySelector(`[data-pz-count="${name}"]`);
+        if (c) c.textContent = n ? String(n) : '';
+      };
+      set('members', (data.members || []).map((m: any) => rowTpl('m:' + m.username, m.name || m.username, '@' + m.username, followedMembers.has(String(m.username).toLowerCase()), m.avatar)).join(''), followedMembers.size);
+      set('news', (newsSources || []).map((s: any) => rowTpl('s:' + (s.id ?? s.name), s.name || s.id, '', followedChannels.has(String(s.id ?? s.name)))).join(''), followedChannels.size);
+      set('categories', (data.categories || []).map((c: any) => rowTpl('c:' + c.key, c.label || c.key, '', followedCategories.has(String(c.key)))).join(''), followedCategories.size);
+      set('tags', (data.tags || []).map((t: any) => rowTpl('t:' + t.tag, '#' + t.tag, (t.count ? t.count + ' items' : ''), followedTags.map((x) => x.toLowerCase()).includes(String(t.tag).toLowerCase()))).join(''), followedTags.length);
+    }
+
+    function syncAlgoInputs() {
+      dialog!.querySelectorAll<HTMLInputElement>('input[name="pz-scope"]').forEach((r) => { r.checked = r.value === algo.scope; });
+      dialog!.querySelectorAll<HTMLInputElement>('[data-pz-rule]').forEach((c) => { c.checked = !!(algo as any)[c.dataset.pzRule!]; });
+    }
+
+    async function load() {
+      if (loaded) return;
+      loaded = true;
+      const loading = dialog!.querySelector<HTMLElement>('[data-pz-loading]');
+      if (loading) loading.hidden = false;
+      try {
+        const c = await ensureClient();
+        const [follows, prefs, sources] = await Promise.all([
+          c.getFollows().catch(() => ({})),
+          c.getPrefs().catch(() => ({})),
+          c.getNewsSources().catch(() => ({})),
+        ]);
+        const followingList = Array.isArray(follows?.following) ? follows.following : (Array.isArray(follows) ? follows : []);
+        followedMembers = new Set(followingList.map((f: any) => String(f?.username ?? f).toLowerCase()).filter(Boolean));
+        followedCategories = new Set((Array.isArray(prefs?.categories) ? prefs.categories : []).map((x: any) => String(x)));
+        followedChannels = new Set((Array.isArray(prefs?.followedChannels) ? prefs.followedChannels : []).map((x: any) => String(x)));
+        newsSources = Array.isArray(sources?.sources) ? sources.sources : (Array.isArray(sources?.items) ? sources.items : (Array.isArray(sources) ? sources : []));
+      } catch { /* a failed load leaves the follow tabs empty; Algo + Tags still work */ }
+      if (loading) loading.hidden = true;
+      renderLists();
+      emit(); // apply the loaded follow graph to the feed
+    }
+
+    // ----- interactions -----
+    dialog.addEventListener('click', async (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-pz-close]')) { dialog.close(); return; }
+      const tab = t.closest<HTMLElement>('[data-pz-tab]');
+      if (tab) {
+        const key = tab.dataset.pzTab!;
+        dialog.querySelectorAll('[data-pz-tab]').forEach((x) => x.classList.toggle('on', x === tab));
+        dialog.querySelectorAll<HTMLElement>('[data-pz-panel]').forEach((p) => { p.hidden = p.dataset.pzPanel !== key; });
+        return;
+      }
+      const follow = t.closest<HTMLButtonElement>('.pz-follow');
+      if (follow) {
+        const row = follow.closest<HTMLElement>('.pz-row');
+        const id = row?.dataset.id || '';
+        const on = !follow.classList.contains('on');
+        follow.classList.toggle('on', on);
+        follow.setAttribute('aria-pressed', String(on));
+        follow.textContent = on ? 'Following' : 'Follow';
+        const [kind, ...rest] = id.split(':');
+        const val = rest.join(':');
+        try {
+          const c = await ensureClient();
+          if (kind === 'm') { on ? followedMembers.add(val.toLowerCase()) : followedMembers.delete(val.toLowerCase()); await c.setFollow({ username: val, on }); }
+          else if (kind === 'c') { on ? followedCategories.add(val) : followedCategories.delete(val); await c.setPrefs({ categories: [...followedCategories] }); }
+          else if (kind === 's') { on ? followedChannels.add(val) : followedChannels.delete(val); await c.setPrefs({ followChannel: { id: val, on } }); }
+          else if (kind === 't') {
+            const low = val.toLowerCase();
+            followedTags = on ? [...new Set([...followedTags, low])] : followedTags.filter((x) => x.toLowerCase() !== low);
+            writeJson(LS_TAGS, followedTags);
+          }
+        } catch { /* optimistic; a failed server write still updates the local view */ }
+        const c = dialog.querySelector(`[data-pz-count="${kind === 'm' ? 'members' : kind === 'c' ? 'categories' : kind === 's' ? 'news' : 'tags'}"]`);
+        if (c) { const n = kind === 'm' ? followedMembers.size : kind === 'c' ? followedCategories.size : kind === 's' ? followedChannels.size : followedTags.length; c.textContent = n ? String(n) : ''; }
+        emit();
+        return;
+      }
+      if (t.closest('[data-pz-reset]')) {
+        algo = { ...DEFAULT_ALGO }; followedTags = []; writeJson(LS_ALGO, algo); writeJson(LS_TAGS, followedTags);
+        syncAlgoInputs(); renderLists(); emit(); return;
+      }
+    });
+
+    dialog.addEventListener('change', (e) => {
+      const t = e.target as HTMLInputElement;
+      if (t.name === 'pz-scope') { algo.scope = t.value; writeJson(LS_ALGO, algo); emit(); return; }
+      if (t.dataset.pzRule) { (algo as any)[t.dataset.pzRule] = t.checked; writeJson(LS_ALGO, algo); emit(); return; }
+    });
+
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); }); // backdrop
+
+    // Open handler: any [data-personalize-open] control opens the dialog and lazy-loads on first open.
+    document.addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement)?.closest('[data-personalize-open]')) return;
+      syncAlgoInputs();
+      renderLists();
+      dialog.showModal();
+      load();
+    });
+
+    // On page load, apply whatever the member already chose (client-local settings), so the feed reflects it
+    // before the modal is even opened. The follow-graph part fills in after the first open's load().
+    emit();
+  })();
+</script>

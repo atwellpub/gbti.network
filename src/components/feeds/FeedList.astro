@@ -40,6 +40,8 @@ const tagsAttr = (it: FeedItem) => (it.tags ?? []).map((t) => String(t).trim().t
               class:list={['feed-item', !it.cover && 'nocover']}
               data-fi
               data-kind={it.kind}
+              data-author={it.author}
+              data-comments={it.comments ?? 0}
               data-visibility={it.stub ? 'members' : 'public'}
               data-tags={tagsAttr(it)}
             >
