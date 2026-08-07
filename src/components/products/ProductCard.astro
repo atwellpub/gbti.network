@@ -10,8 +10,11 @@ import StackedAvatars from '../StackedAvatars.astro';
 
 interface Props {
   product: CollectionEntry<'product'>;
+  // sow-192 QA: the homepage variant drops the Repo link and puts "View details" on the author row,
+  // right-justified. The directory rendering (default) is unchanged.
+  home?: boolean;
 }
-const { product } = Astro.props;
+const { product, home = false } = Astro.props;
 const d = product.data;
 const stub = isStub(product); // SOW-016: a listed members item is a Mode B stub (the body is gated)
 const paid = d.pricing && d.pricing !== 'free'; // SOW-014
@@ -46,12 +49,24 @@ const stack = avatarStack({ author: d.author, contributors: d.contributors, comm
     </div>
   </a>
   <p class="body-sm muted" style="flex:1;margin-bottom:16px">{d.shortDescription}</p>
-  <div class="flex items-center g12" style="margin-bottom:14px">
-    <StackedAvatars items={stack} size="sm" max={4} />
-    <a href={authorHref(d.author)} class="body-sm" style="color:var(--fg-soft);font-weight:500">{authorDisplay(d.author)}</a>
-  </div>
-  <div class="flex items-center g16">
-    <a href={`/products/${d.slug}/`} class="link" style="font-size:14px">View details <svg class="ar" viewBox="0 0 24 24" width="16" height="16"><use href="#ico-arrow"/></svg></a>
-    {repo && <a href={repo} rel="noopener" class="body-sm muted" style="font-weight:600">Repo</a>}
-  </div>
+  {home ? (
+    <div class="flex items-center g12" style="justify-content:space-between">
+      <span class="flex items-center g12" style="min-width:0">
+        <StackedAvatars items={stack} size="sm" max={4} />
+        <a href={authorHref(d.author)} class="body-sm" style="color:var(--fg-soft);font-weight:500">{authorDisplay(d.author)}</a>
+      </span>
+      <a href={`/products/${d.slug}/`} class="link" style="font-size:14px;flex:none;white-space:nowrap">View details <svg class="ar" viewBox="0 0 24 24" width="16" height="16"><use href="#ico-arrow"/></svg></a>
+    </div>
+  ) : (
+    <>
+      <div class="flex items-center g12" style="margin-bottom:14px">
+        <StackedAvatars items={stack} size="sm" max={4} />
+        <a href={authorHref(d.author)} class="body-sm" style="color:var(--fg-soft);font-weight:500">{authorDisplay(d.author)}</a>
+      </div>
+      <div class="flex items-center g16">
+        <a href={`/products/${d.slug}/`} class="link" style="font-size:14px">View details <svg class="ar" viewBox="0 0 24 24" width="16" height="16"><use href="#ico-arrow"/></svg></a>
+        {repo && <a href={repo} rel="noopener" class="body-sm muted" style="font-weight:600">Repo</a>}
+      </div>
+    </>
+  )}
 </article>

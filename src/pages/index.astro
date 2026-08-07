@@ -12,7 +12,8 @@ import FavoriteButton from '../components/FavoriteButton.astro';
 import FeedList from '../components/feeds/FeedList.astro';
 import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
 import ProductCard from '../components/products/ProductCard.astro';
-import PromptCard from '../components/prompts/PromptCard.astro';
+import HomePromptCard from '../components/home/HomePromptCard.astro';
+import { authorItem } from '../lib/avatars';
 import { getCollection } from 'astro:content';
 import { isListed, byNewest } from '../lib/content';
 import { authorDisplay, authorHref } from '../lib/authors';
@@ -69,6 +70,9 @@ const listedPrompts = (await getCollection('prompt')).filter(isListed).sort(byNe
 const homeArticles = listedPosts.slice(0, 6);
 const homeProducts = listedProducts.slice(0, 4);
 const homePrompts = listedPrompts.slice(0, 3);
+// The overlay prompt cards need the comment collection (for the "from the author" note) + profiles (avatars).
+const homeComments = await getCollection('comment');
+const homeProfiles = await getCollection('profile');
 
 // sow-192: a REAL git-commit activity heatmap (this replaced the earlier publish-date bucketing, which read
 // as an activity graph but was not one). commitsByDate() reads the whole repo history at build and is
@@ -182,7 +186,7 @@ const SHOPTALK = {
                 {it.thumb && <img class="pop-thumb" src={it.thumb} alt="" loading="lazy" decoding="async" />}
                 <div class="pop-info">
                   <div class="pop-title">{it.title}</div>
-                  <div class="pop-meta"><span class={`kind-tag kt-${it.kind}`}>{it.kind}</span><span class="pop-by">{authorDisplay(it.author)}</span></div>
+                  <div class="pop-meta"><span class={`kind-tag kt-${it.kind}`}>{it.kind}</span><span class="pop-by"><Avatar item={authorItem(it.author, avatarIndex)} size={18} class="pop-av" />{authorDisplay(it.author)}</span></div>
                 </div>
               </a>
             ))}
@@ -254,8 +258,8 @@ const SHOPTALK = {
         <div><h2 class="h2">Prompts &amp; Skills</h2><p class="home-sec-sub">{counts.prompts} published · one library, three kinds</p></div>
         <a href="/prompts/" class="link">All prompts &amp; skills <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
       </div>
-      <div class="works-grid">
-        {homePrompts.map((p) => <PromptCard prompt={p} />)}
+      <div class="works-grid hp-grid">
+        {homePrompts.map((p) => <HomePromptCard prompt={p} comments={homeComments} profiles={homeProfiles} />)}
       </div>
     </div>
   </section>
@@ -269,7 +273,7 @@ const SHOPTALK = {
         <a href="/products/" class="link">All products <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
       </div>
       <div class="works-grid">
-        {homeProducts.map((p) => <ProductCard product={p} />)}
+        {homeProducts.map((p) => <ProductCard product={p} home />)}
       </div>
     </div>
   </section>
@@ -317,7 +321,7 @@ const SHOPTALK = {
 <!-- ============ JOIN THE NETWORK ============ -->
 <!-- The nine-offer card grid lives in src/components/JoinOffers.astro (lifted off the homepage per
      owner QA, arrangement preserved for reuse); the homepage keeps the simple CTA band. -->
-<section class="band" id="join-network">
+<section class="band" id="join-network" data-home-joincard>
   <div class="wrap">
     <div class="sec-head center" style="margin-bottom:0">
       <h2 class="h2">Join the GBTI Network</h2>
@@ -553,7 +557,9 @@ const SHOPTALK = {
   import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
   (() => {
     const signedInEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-signedin]'));
-    const joinCard = document.querySelector<HTMLElement>('[data-home-joincard]');
+    // The signed-out join / "start your free trial" cards (the rail promo + the bottom band) hide for a
+    // signed-in member (sow-192 QA: the trial CTA is not for members/creators; sow-185 retires the trial).
+    const joinCards = Array.from(document.querySelectorAll<HTMLElement>('[data-home-joincard]'));
     if (!signedInEls.length) return;
     let mounted = false;
 
@@ -573,7 +579,7 @@ const SHOPTALK = {
     function render(s: any) {
       const signedIn = !!(s && s.login);
       signedInEls.forEach((el) => { el.hidden = !signedIn; });
-      if (joinCard) joinCard.hidden = signedIn;
+      joinCards.forEach((el) => { el.hidden = signedIn; });
       if (signedIn) mountComposer(s);
     }
 

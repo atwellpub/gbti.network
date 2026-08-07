@@ -1,0 +1,77 @@
+---
+// sow-192 QA (owner, 2026-08-07): the homepage Prompts & Skills card. Unlike the directory PromptCard (a
+// glyph fallback + side meta), this is an IMAGE WITH AN OVERLAY: the branded prompt feature image (or the
+// prompt's own image when it has one), with the category + title + supported models pinned top, the
+// "from the author" note in the middle, and the favorite + save controls bottom-right. Homepage-only, so it
+// does not touch the shared PromptCard the directory uses.
+import type { CollectionEntry } from 'astro:content';
+import { getCollection } from 'astro:content';
+import { Image } from 'astro:assets';
+import { authorDisplay, authorAvatar } from '../../lib/authors';
+import { leafLabel, topKey } from '../../lib/taxonomy';
+import { defaultFeatureImage } from '../../lib/feature-image';
+import { favoriteCount } from '../../lib/favorites';
+import Avatar from '../Avatar.astro';
+import FavoriteButton from '../FavoriteButton.astro';
+import CollectionButton from '../CollectionButton.astro';
+
+interface Props {
+  prompt: CollectionEntry<'prompt'>;
+  comments: CollectionEntry<'comment'>[];
+  profiles: CollectionEntry<'profile'>[];
+}
+const { prompt, comments, profiles } = Astro.props;
+const d = prompt.data;
+const models = (d.targets ?? []).slice(0, 2);
+
+// SOW-014 "from the author" note: the owner's published, public, authorNote-flagged comment for this prompt.
+const note = comments.find(
+  (c) =>
+    c.data.targetType === 'prompt' &&
+    c.data.targetSlug === d.slug &&
+    c.data.author === d.author &&
+    c.data.authorNote === true &&
+    c.data.status === 'published' &&
+    c.data.visibility === 'public',
+);
+const noteText = (note?.body ?? '')
+  .replace(/```[\s\S]*?```/g, ' ')
+  .replace(/[#>*_`~\[\]()]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 170);
+
+const profile = profiles.find((p) => p.data.username === d.author)?.data;
+const authorName = profile?.displayName ?? authorDisplay(d.author);
+const avatar = authorAvatar(d.author, profile?.avatar);
+---
+<article class="hp-card">
+  <a class="hp-media" href={`/prompts/${d.slug}/`} aria-label={d.title}>
+    {d.image
+      ? <Image class="hp-img" src={d.image} width={640} height={480} alt="" />
+      : <img class="hp-img" src={defaultFeatureImage('prompt')} alt="" loading="lazy" decoding="async" />}
+    <span class="hp-scrim"></span>
+  </a>
+  <div class="hp-overlay">
+    <div class="hp-top">
+      <div class="hp-chips">
+        <a class="hp-cat" href={`/prompts/?cat=${topKey(d.categories)}`}>{leafLabel(d.categories)}</a>
+        {models.map((m) => <a class="hp-model" href={`/prompts/?target=${encodeURIComponent(m)}`}>{m}</a>)}
+      </div>
+      <h3 class="hp-title"><a href={`/prompts/${d.slug}/`}>{d.title}</a></h3>
+    </div>
+    <div class="hp-bottom">
+      {noteText && <p class="hp-note">{noteText}</p>}
+      <div class="hp-foot">
+        <a class="hp-author" href={`/prompts/?author=${encodeURIComponent(d.author)}`}>
+          <Avatar item={{ name: authorName, avatar }} class="hp-av" size={22} />
+          <span>{authorName}</span>
+        </a>
+        <div class="hp-actions">
+          <FavoriteButton targetType="prompt" targetSlug={d.slug} count={favoriteCount('prompt', d.slug)} size="sm" />
+          <CollectionButton targetType="prompt" targetSlug={d.slug} size="sm" />
+        </div>
+      </div>
+    </div>
+  </div>
+</article>
