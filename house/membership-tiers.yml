@@ -1,0 +1,62 @@
+# sow-185: the canonical membership tier data. SINGLE SOURCE OF TRUTH for both the homepage pricing accordion +
+# the Your-membership/Upgrade rail cards (sow-192, rendered by the presentation layer) AND the tier gating
+# (sow-185). The tier IDENTITY + ranking + price-id->tier resolution live in membership/tiers.mjs (the axis);
+# the actual Stripe price ids live in the Worker env (owner-provisioned). This file carries DISPLAY data (label,
+# tagline, prices, benefit bullets, revenue copy) + the price-id ENV VAR NAMES for the checkout allowlist.
+#
+# The build reads this directly via src/lib/tiers.ts (no JSON artifact), scripts/validate-content.mjs validates
+# its shape, and membership/tiers-display.mjs is the shared pure parser. Superadmin-CODEOWNED, reviewed in a PR.
+#
+# BENEFIT COPY IS A LEGAL LINE ON A PAID PAGE. Per sow-185 section 7 (the offerings register): a tier may ship
+# with unbuilt benefits removed, but it must NEVER advertise a benefit that does not exist. Every bullet below is
+# an "already built" offering (section 7) or a settled SOFTEN wording. Deliberately EXCLUDED until they ship:
+# instant notifications (sow-150), advanced custom feeds, member-only curation pools (DROP), the weekly digest
+# (sow-166), a free-tier save limit (DROP), creator analytics, AI editorial review (softened to human), the
+# founding badge, and "sell products / sponsorships" (mockup-only, not built). The Creator "connect a news
+# source" privilege is held until its governed workflow (sow-185 phase 2b) ships. "by application" on Creator is
+# mockup-only and NOT in sow-185; it is an OPEN owner question and is intentionally not encoded here.
+tiers:
+  - key: none
+    label: Free
+    tagline: Browse, follow, and save across the network.
+    priceMonthly: 0
+    priceAnnual: 0
+    priceEnv: {}
+    benefits:
+      - Browse the network, the news feed, and public shares
+      - Follow creators, sources, and topics
+      - Save items and build collections
+      - A personalized feed and the new-tab extension
+    revenue: ""
+
+  - key: member
+    label: Network Member
+    tagline: Join the community and start earning from your invites.
+    priceMonthly: 5
+    priceAnnual: 50
+    priceEnv:
+      monthly: STRIPE_PRICE_MEMBER_MONTHLY
+      annual: STRIPE_PRICE_MEMBER_ANNUAL
+    benefits:
+      - Everything in Free
+      - Post comments across the network
+      - Full Discord access
+      - Read members-only content and comment bodies
+      - Curate your feed (compact, detailed, and card views plus source selection)
+    revenue: Earn 10% for life on the paid revenue of members you invite.
+
+  - key: creator
+    label: Content Creator
+    tagline: Publish, get discovered, and share in the revenue.
+    priceMonthly: 15
+    priceAnnual: 150
+    priceEnv:
+      monthly: STRIPE_PRICE_CREATOR_MONTHLY
+      annual: STRIPE_PRICE_CREATOR_ANNUAL
+    benefits:
+      - Everything in Network Member
+      - Publish articles, products, and prompts
+      - Your creator profile and unified portfolio
+      - Reshare and syndicate your work
+      - Weekly product-development shop talk
+    revenue: Everything a Network Member earns, plus a share of the creator collaboration pool.

@@ -15,6 +15,7 @@ import { validateNewsChannels } from '../membership/news-channels.mjs'; // SOW-0
 import { validateCoupons } from '../membership/coupons.mjs'; // SOW-119: the coupon registry
 import { validateTopicMap } from '../membership/topic-map.mjs'; // SOW-054: the followed-topic -> news-category map
 import { topicVocabKeys } from '../membership/topics-vocab.mjs'; // SOW-080: the flat house/topics.yml topic vocabulary
+import { validateTierDisplay } from '../membership/tiers-display.mjs'; // sow-185: the membership tier display data
 import { CATEGORY_NAMES } from '../workers/signup/news/config/categories.mjs'; // SOW-054: the canonical news category labels
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
@@ -468,6 +469,21 @@ function validateTopicMapConfig() {
   for (const err of validateTopicMap(parsed, opts)) errors.push(err);
 }
 validateTopicMapConfig();
+
+// sow-185: the membership tier data (house/membership-tiers.yml), the single source of truth for the homepage
+// pricing accordion + the tier gating. REQUIRED: the site build (src/lib/tiers.ts) reads it directly. A missing
+// tier, a purchasable tier with no price env var, or any malformed field fails CI. Pure validation lives in
+// membership/tiers-display.mjs, the same parser the build uses.
+function validateTiersConfig() {
+  const rel = 'house/membership-tiers.yml';
+  if (!has(path.join(ROOT, rel))) { errors.push(`${rel}: the required membership tier data file is missing`); return; }
+  let parsed;
+  try { parsed = yaml.load(fs.readFileSync(path.join(ROOT, rel), 'utf8')); }
+  catch { errors.push(`${rel}: not valid YAML`); return; }
+  const r = validateTierDisplay(parsed);
+  if (!r.ok) errors.push(`${rel}: ${r.error}`);
+}
+validateTiersConfig();
 
 // SOW-076 Phase 3: `--json` emits the errors as machine-readable JSON (for the post-publish remediation), while the
 // exit code is unchanged. The default human output is untouched.
