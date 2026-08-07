@@ -10,17 +10,22 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import Avatar from '../components/Avatar.astro';
 import FavoriteButton from '../components/FavoriteButton.astro';
 import FeedList from '../components/feeds/FeedList.astro';
+import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
+import ProductCard from '../components/products/ProductCard.astro';
+import PromptCard from '../components/prompts/PromptCard.astro';
+import { getCollection } from 'astro:content';
+import { isListed, byNewest } from '../lib/content';
 import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
-import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime, feedCounts, heatCells } from '../lib/home-feed.mjs';
+import { sortByNewest, rankNewAndPopular, aggregateTags, feedCounts, heatCells } from '../lib/home-feed.mjs';
 import { commitsByDate, commitCount } from '../lib/git-history';
 import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
 const { contentItems, shareItems, profiles, avatarIndex } = await loadFeedItems();
 
-// New & Popular: member content only (no shares), favorites x3 + comments x2, newest breaks ties.
-const np = rankNewAndPopular(contentItems, 6);
-const npCols = [np.filter((_, i) => i % 2 === 0), np.filter((_, i) => i % 2 === 1)];
+// sow-192: Popular moved into the right rail (it was a standalone New & Popular grid at the top). Ranked by
+// favorites + comments, degrading to recency pre-launch. Member content only (no shares).
+const popular = rankNewAndPopular(contentItems, 5);
 
 // The Feed: everything, newest first. All items render (SEO); the ladder pager reveals 10 at a time.
 const feed = sortByNewest([...contentItems, ...shareItems]);
@@ -54,6 +59,17 @@ const feedTabs: { key: string; label: string; href: string; count: number | null
   { key: 'shares', label: 'Shares', href: '/feeds/shares/', count: counts.shares },
 ];
 
+// sow-192 Phase B: the per-type section blocks (Everything tab only). Fed from the real content collections
+// through the SAME cards the directory pages use (ArticleTeaser / ProductCard / PromptCard), isListed +
+// newest-first. Sizes: Articles 6, Products 4, Prompts & Skills 3. "Runs on" logos + product license are
+// deferred (sow-192 Q5/Q6); the cards render the fields that exist today.
+const listedPosts = (await getCollection('post')).filter(isListed).sort(byNewest);
+const listedProducts = (await getCollection('product')).filter(isListed).sort(byNewest);
+const listedPrompts = (await getCollection('prompt')).filter(isListed).sort(byNewest);
+const homeArticles = listedPosts.slice(0, 6);
+const homeProducts = listedProducts.slice(0, 4);
+const homePrompts = listedPrompts.slice(0, 3);
+
 // sow-192: a REAL git-commit activity heatmap (this replaced the earlier publish-date bucketing, which read
 // as an activity graph but was not one). commitsByDate() reads the whole repo history at build and is
 // fail-closed to empty on a shallow clone; heatCells buckets it into 7x36 level-0..4 cells scaled to the
@@ -72,9 +88,6 @@ const actStats = [
   { n: memberCount, l: memberCount === 1 ? 'member' : 'members' },
 ];
 
-// Build-time "now" for relative times (the site redeploys on every push, so drift stays small).
-const NOW = Date.now();
-
 // Shop Talk: the weekly open call. The calendar CTA is membership-aware (owner directive, 2026-07-21):
 // a visitor goes to the join page; a signed-in member (the SOW-030 extension identity signal,
 // presentation-only) gets the Google Calendar link that adds the recurring event to their own calendar.
@@ -92,41 +105,10 @@ const SHOPTALK = {
     '&recur=' + encodeURIComponent('RRULE:FREQ=WEEKLY;BYDAY=SA'),
 };
 
-const kindLabel: Record<string, string> = { article: 'article', product: 'product', prompt: 'prompt' };
 ---
 <BaseLayout title="Publish your work. Build with peers. Share the revenue." description={`A creator network powered by Git. Publish articles, products, and prompts, build with peers, and earn from the members your work brings in. Start a ${TRIAL_DAYS_SITE}-day limited-access trial, no card required.`}>
 
 <div class="wrap feedwrap">
-
-  <!-- ============ NEW & POPULAR ============ -->
-  <section class="np" aria-label="New and popular member content">
-    <div class="feed-lab"><span class="dot"></span><span class="t">New &amp; Popular</span><span class="rule"></span><span class="more">Member articles, products &amp; prompts</span></div>
-    <div class="np-grid">
-      {npCols.map((col) => (
-        <div class="np-col">
-          {col.map((it) => (
-            <article class="np-item">
-              {it.href ? (
-                <a class="np-thumb" href={it.href} aria-hidden="true" tabindex="-1">{it.thumb && <img src={it.thumb} alt="" loading="lazy" decoding="async" />}</a>
-              ) : (
-                <span class="np-thumb">{it.thumb && <img src={it.thumb} alt="" loading="lazy" decoding="async" />}</span>
-              )}
-              <div class="np-body">
-                <div class="tmeta"><a class="who" href={authorHref(it.author)}>{authorDisplay(it.author)}</a><span class="dotsep"></span>{relativeTime(it.date, NOW)}{it.read ? <><span class="dotsep"></span>{it.read} min</> : null}</div>
-                <h3 class="np-title">{it.href ? <a href={it.href}>{it.title}</a> : it.title}</h3>
-                <div class="rx-row">
-                  <span class={`kind-tag kt-${it.kind}`}>{kindLabel[it.kind]}</span>
-                  {it.stub && <span class="kind-tag kt-members">members</span>}
-                  {!it.stub && <FavoriteButton targetType={it.targetType as 'post' | 'product' | 'prompt'} targetSlug={it.slug} count={it.favorites} size="sm" />}
-                  <span class="rx rx-static"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-chat"/></svg> {it.comments}<span class="sr-only"> comments</span></span>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      ))}
-    </div>
-  </section>
 
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
@@ -166,6 +148,24 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
         <a href="/membership/" class="btn btn-primary" style="width:100%;justify-content:center">Start your free trial</a>
         <p class="note">{TRIAL_DAYS_SITE}-day limited-access trial · no card required</p>
       </div>
+
+      <!-- popular (sow-192: moved from the top New & Popular grid into the rail) -->
+      {popular.length > 0 && (
+        <div class="card side-card">
+          <div class="side-h" style="display:flex;align-items:center;gap:7px"><span class="pop-dot"></span>Popular</div>
+          <div class="pop-list">
+            {popular.map((it) => (
+              <a class="pop-row" href={it.href}>
+                {it.thumb && <img class="pop-thumb" src={it.thumb} alt="" loading="lazy" decoding="async" />}
+                <div class="pop-info">
+                  <div class="pop-title">{it.title}</div>
+                  <div class="pop-meta"><span class={`kind-tag kt-${it.kind}`}>{it.kind}</span><span class="pop-by">{authorDisplay(it.author)}</span></div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       <!-- live / events -->
       <div class="card side-card live-card">
@@ -207,7 +207,67 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
   </div>
 </div>
 
-<!-- ============ ACTIVITY (the v1 git grid, above the footer) ============ -->
+<!-- ============ SECTION BLOCKS (sow-192 Phase B; shown on the Everything tab, hidden under a content tab) ============ -->
+<div data-home-sections>
+
+  {homeArticles.length > 0 && (
+  <section class="band home-sec" aria-label="Articles">
+    <div class="wrap">
+      <div class="sec-head">
+        <div><h2 class="h2">Articles</h2><p class="home-sec-sub">{counts.articles} published</p></div>
+        <a href="/articles/" class="link">All articles <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+      <div class="works-grid">
+        {homeArticles.map((p) => <ArticleTeaser post={p} />)}
+      </div>
+    </div>
+  </section>
+  )}
+
+  {homePrompts.length > 0 && (
+  <section class="band tint home-sec" aria-label="Prompts and Skills">
+    <div class="wrap">
+      <div class="sec-head">
+        <div><h2 class="h2">Prompts &amp; Skills</h2><p class="home-sec-sub">{counts.prompts} published · one library, three kinds</p></div>
+        <a href="/prompts/" class="link">All prompts &amp; skills <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+      <div class="works-grid">
+        {homePrompts.map((p) => <PromptCard prompt={p} />)}
+      </div>
+    </div>
+  </section>
+  )}
+
+  {homeProducts.length > 0 && (
+  <section class="band home-sec" aria-label="Products">
+    <div class="wrap">
+      <div class="sec-head">
+        <div><h2 class="h2">Products</h2><p class="home-sec-sub">{counts.products} released · built by members</p></div>
+        <a href="/products/" class="link">All products <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+      <div class="works-grid">
+        {homeProducts.map((p) => <ProductCard product={p} />)}
+      </div>
+    </div>
+  </section>
+  )}
+
+  <!-- Latest news: runtime worker fetch, filled by the news script below (hidden if the feed is empty). -->
+  <section class="band tint home-sec" aria-label="Latest news" data-latest-news>
+    <div class="wrap">
+      <div class="sec-head">
+        <div><h2 class="h2">Latest news</h2><p class="home-sec-sub">Curated developer news · not GBTI work</p></div>
+        <a href="/feeds/news/" class="link">All news <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+      </div>
+      <div class="feed-list" data-latest-news-list>
+        <p class="feed-empty" data-latest-news-empty style="margin-top:20px">Loading the news stream&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============ ACTIVITY (the git commit grid, above the footer) ============ -->
 <section class="band tint" id="activity">
   <div class="wrap">
     <div class="sec-head">
@@ -302,10 +362,14 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
     const NARROW_KIND: Record<string, string> = { articles: 'article', products: 'product', prompts: 'prompt', shares: 'share' };
     let active = 'all';
 
+    const sections = document.querySelector<HTMLElement>('[data-home-sections]');
+
     function applyFilter() {
       const filtered = active !== 'all';
       const wantKind = NARROW_KIND[active] || '';
       view!.classList.toggle('feed-flat', filtered);
+      // sow-192: the per-type section blocks show only on Everything; hide them under a content tab.
+      if (sections) sections.hidden = filtered;
       // Flatten the ladder while a kind filter is active: lift the chunks' hidden attribute (Tailwind's
       // layered [hidden]{display:none!important} outranks author CSS, so this must be done in JS), and
       // restore it on return to Everything.
@@ -430,17 +494,29 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
       art.append(cover);
       return art;
     };
+    // sow-192: the dedicated "Latest news" section is filled from this same fetch (no second request), and
+    // removed entirely when the feed is empty or unavailable so it never lingers on "Loading".
+    const lnSection = document.querySelector('[data-latest-news]');
+    const lnList = document.querySelector('[data-latest-news-list]');
+    const dropLatestNews = () => { if (lnSection) lnSection.remove(); };
     fetch(base + '/news/feed?limit=60')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('bad status'))))
       .then((data) => {
         const items = Array.isArray(data?.items) ? data.items : [];
-        if (!items.length) return;
+        if (!items.length) { dropLatestNews(); return; }
+        // Fill the Latest news section with the freshest items (each newsRow() is a fresh node).
+        if (lnList) {
+          const chunk = el('div', 'feed-chunk');
+          items.slice(0, 6).forEach((it: any) => chunk.append(newsRow(it)));
+          lnList.replaceChildren(chunk);
+        }
+        // Pepper news into the main blended feed (existing behavior).
         const rows = Array.from(list.querySelectorAll('.feed-chunk [data-fi]'));
         const plan = newsInsertionPlan(rows.length, items.length);
         plan.forEach((pos, i) => rows[pos]?.after(newsRow(items[i])));
         // sow-192: let the tabbed-feed filter re-apply so late news rows respect the active content tab.
         document.dispatchEvent(new Event('gbti:feed-updated'));
       })
-      .catch(() => { /* news is optional garnish; the built feed stands alone */ });
+      .catch(() => { dropLatestNews(); /* news is optional garnish; the built feed stands alone */ });
   })();
 </script>
