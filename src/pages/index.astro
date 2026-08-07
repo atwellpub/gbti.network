@@ -12,7 +12,8 @@ import FavoriteButton from '../components/FavoriteButton.astro';
 import FeedList from '../components/feeds/FeedList.astro';
 import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
-import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime, feedCounts } from '../lib/home-feed.mjs';
+import { sortByNewest, rankNewAndPopular, aggregateTags, relativeTime, feedCounts, heatCells } from '../lib/home-feed.mjs';
+import { commitsByDate, commitCount } from '../lib/git-history';
 import { TRIAL_DAYS_SITE, FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
 const { contentItems, shareItems, profiles, avatarIndex } = await loadFeedItems();
@@ -53,24 +54,21 @@ const feedTabs: { key: string; label: string; href: string; count: number | null
   { key: 'shares', label: 'Shares', href: '/feeds/shares/', count: counts.shares },
 ];
 
-// The v1 contribution heatmap, back above the footer (sow-136 QA, owner request): bucket every
-// content publish date across the project's history into level-0..4 cells, the v1 algorithm. The
-// full-width band (owner QA 2) uses 7 rows x 36 cols (v1 was 18 cols inside a half-width card, too
-// blocky stretched across the wrap); the dates come from the already-normalized items.
+// sow-192: a REAL git-commit activity heatmap (this replaced the earlier publish-date bucketing, which read
+// as an activity graph but was not one). commitsByDate() reads the whole repo history at build and is
+// fail-closed to empty on a shallow clone; heatCells buckets it into 7x36 level-0..4 cells scaled to the
+// busiest cell. The counters are honest, non-windowed totals only (no reads/installs/"this week"):
+// commits / articles / products / prompts / members. The deploy build checks out at fetch-depth: 0, so
+// production has the full history (a shallow/git-less build simply renders an empty band).
 const HEAT_CELLS = 7 * 36;
-const stamps = contentItems.map((it) => it.date).filter((t) => t > 0).sort((a, b) => a - b);
-let heat: number[] = new Array(HEAT_CELLS).fill(0);
-if (stamps.length) {
-  const min = stamps[0];
-  const span = Math.max(1, stamps[stamps.length - 1] - min);
-  const counts = new Array(HEAT_CELLS).fill(0);
-  for (const t of stamps) counts[Math.min(HEAT_CELLS - 1, Math.floor(((t - min) / span) * HEAT_CELLS))]++;
-  heat = counts.map((n) => (n === 0 ? 0 : Math.min(4, n)));
-}
+const commitStamps = commitsByDate().flatMap(([day, n]) => Array(n).fill(new Date(day).valueOf()));
+const heat: number[] = heatCells(commitStamps, HEAT_CELLS);
 const memberCount = profiles.length;
 const actStats = [
-  { n: contentItems.filter((i) => i.kind === 'article').length, l: 'articles' },
-  { n: contentItems.filter((i) => i.kind === 'product').length, l: 'products' },
+  { n: commitCount(), l: 'commits' },
+  { n: counts.articles, l: 'articles' },
+  { n: counts.products, l: 'products' },
+  { n: counts.prompts, l: 'prompts' },
   { n: memberCount, l: memberCount === 1 ? 'member' : 'members' },
 ];
 
@@ -219,7 +217,7 @@ const kindLabel: Record<string, string> = { article: 'article', product: 'produc
       <a href="https://github.com/gbti-network/gbti.network" class="link">View the public repo <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
     </div>
     <div class="card act-card">
-      <p class="mono" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-mute);margin-bottom:16px">Publishing activity</p>
+      <p class="mono" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-mute);margin-bottom:16px">Commit activity</p>
       <div class="heat heat-wide" aria-hidden="true">{heat.map((lv) => <span class={lv ? `l${lv}` : undefined}></span>)}</div>
       <div class="heat-legend">
         <span>Less</span>

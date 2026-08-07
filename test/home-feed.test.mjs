@@ -2,7 +2,7 @@
 // SOW-018 reversal), the New & Popular ranking, tag aggregation, and relative time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts } from '../src/lib/home-feed.mjs';
+import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, heatCells } from '../src/lib/home-feed.mjs';
 
 test('decodeEntities resolves numeric + common named entities in scraped share metadata', () => {
   assert.equal(decodeEntities('WordPress Down &#8211; SQL Injection'), 'WordPress Down – SQL Injection');
@@ -26,6 +26,22 @@ test('feedCounts (sow-192): per-tab counts from the build arrays, news is null, 
   assert.equal(c.network, 6); // publications only, no shares
   assert.equal(c.all, 8); // network + shares
   assert.equal(c.news, null); // runtime worker data has no build-time count
+});
+
+test('heatCells (sow-192): empty input is all zeros; levels are 1..4 scaled to the busiest cell', () => {
+  assert.deepEqual(heatCells([], 5), [0, 0, 0, 0, 0]);
+  assert.deepEqual(heatCells(undefined, 3), [0, 0, 0]);
+  assert.deepEqual(heatCells([100, 200], 0), []);
+  // day 1 has 1 commit, day 10 (the max span) has 4 -> busiest cell = 4, so day-10 cell is level 4 and
+  // the day-1 cell is level 1; empty middle cells stay 0.
+  const D = (n) => new Date(2026, 0, n).valueOf();
+  const cells = heatCells([D(1), D(10), D(10), D(10), D(10)], 4);
+  assert.equal(cells.length, 4);
+  assert.equal(cells[0], 1); // the single early commit
+  assert.equal(cells[3], 4); // the four late commits are the busiest cell
+  assert.ok(cells.every((l) => l >= 0 && l <= 4));
+  // non-numeric / non-positive stamps are ignored, not counted
+  assert.deepEqual(heatCells([0, -5, NaN, 'x'], 3), [0, 0, 0]);
 });
 
 test('feedCounts tolerates empty/absent inputs and ignores unknown kinds', () => {

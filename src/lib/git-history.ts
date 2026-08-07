@@ -101,6 +101,37 @@ export function fileCommits(filePath?: string, limit = 25): FileCommit[] {
   return commits;
 }
 
+/**
+ * sow-192: the whole repo's commit dates as [YYYY-MM-DD, count] pairs, oldest first, for the homepage
+ * activity heatmap and the "commits" counter. Read once at build with `git log --all` (no API, no token).
+ * Fail closed: [] on any failure (a shallow CI clone, a git-less environment), so the heatmap renders empty
+ * and the counter shows 0. The deploy build checks out at fetch-depth: 0, so production has the full history.
+ */
+let commitDatesCache: Array<[string, number]> | null = null;
+export function commitsByDate(): Array<[string, number]> {
+  if (commitDatesCache) return commitDatesCache;
+  let out: Array<[string, number]> = [];
+  try {
+    const raw = execFileSync('git', ['log', '--all', '--date=short', '--pretty=%ad'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const counts = new Map<string, number>();
+    for (const line of raw.split('\n')) {
+      const day = line.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+    out = [...counts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  } catch {
+    out = [];
+  }
+  commitDatesCache = out;
+  return out;
+}
+
+/** sow-192: total commits across the repo history (0 on any failure). Derived from commitsByDate(). */
+export function commitCount(): number {
+  return commitsByDate().reduce((n, [, c]) => n + c, 0);
+}
+
 export function fileHistoryHref(filePath?: string): string {
   if (!filePath) return REPO_URL;
   return `${REPO_URL}/commits/main/${filePath.replace(/^\.?\//, '')}`;

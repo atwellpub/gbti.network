@@ -124,6 +124,27 @@ export function feedCounts(contentItems = [], shareItems = []) {
   return { all: network + shares, news: null, network, articles: c.article, products: c.product, prompts: c.prompt, shares };
 }
 
+/**
+ * sow-192 (homepage v2): bucket a set of day-stamps (epoch ms) into `cells` heatmap cells across the
+ * min..max span, returning a level per cell: 0 for an empty cell, else 1..4 scaled RELATIVE to the busiest
+ * cell (so a dense commit history reads as a proper contribution graph rather than saturating every cell at
+ * 4). Pure and testable; the homepage feeds it git commit dates (see git-history.commitsByDate). An empty
+ * input returns all zeros, so a shallow clone with no history renders a blank band.
+ */
+export function heatCells(stamps, cells) {
+  const n = Math.max(0, cells | 0);
+  const clean = (stamps || []).filter((t) => typeof t === 'number' && t > 0).sort((a, b) => a - b);
+  const out = new Array(n).fill(0);
+  if (!clean.length || n === 0) return out;
+  const min = clean[0];
+  const span = Math.max(1, clean[clean.length - 1] - min);
+  const counts = new Array(n).fill(0);
+  for (const t of clean) counts[Math.min(n - 1, Math.floor(((t - min) / span) * n))]++;
+  const max = Math.max(...counts);
+  if (max === 0) return out;
+  return counts.map((c) => (c === 0 ? 0 : Math.max(1, Math.ceil((c / max) * 4))));
+}
+
 /** Split items into page chunks of `size` (the ladder pager renders one pager row per chunk). */
 export function chunkPages(items, size = 10) {
   const chunks = [];
