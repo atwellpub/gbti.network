@@ -2,7 +2,7 @@
 title: 'VSCode Extension: Terminal Session Profiles'
 slug: terminal-session-profiles
 shortDescription: >-
-  Save your VS Code terminals as one-click profiles and get them back, still running, after a
+  Save your VS Code terminals as one-click profiles and relaunch them, commands and all, after a
   restart. Built for long-lived agent sessions, with an optional column layout for the Explorer,
   editor, terminal and chat panes.
 categories:
@@ -12,7 +12,7 @@ status: published
 visibility: public
 publicStub: false
 pricing: free
-version: 0.2.2
+version: 0.5.5
 tags:
   - vscode
   - terminal
@@ -24,7 +24,7 @@ platforms:
   - VS Code
 icon: ./images/terminal-session-profiles-icon-128x128-1.webp
 iconLarge: ./images/terminal-session-profiles-icon-256x256.webp
-featuredImage: ../../images/banner-c-columns.webp
+featuredImage: ./images/terminal-session-profiles-cover-1200x630.webp
 bannerPreset: ide-plugins
 video: https://youtu.be/eaAsh42seho
 links:
@@ -32,6 +32,9 @@ links:
     url: https://marketplace.visualstudio.com/items?itemName=GBTI.gbti-terminal-sessions
     label: Visual Studio Marketplace
     primary: true
+  - type: download
+    url: https://open-vsx.org/extension/GBTI/gbti-terminal-sessions
+    label: Open VSX (VSCodium, Cursor)
   - type: repository
     url: https://github.com/gbti-network/vscode-terminal-sessions
     label: Source on GitHub
