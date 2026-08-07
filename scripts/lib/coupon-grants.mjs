@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { grandfathersFromParsed } from '../../membership/overrides-core.mjs';
+import { PAID_GRANT_TIERS } from '../../membership/tier-gate.mjs'; // sow-185: the paid tiers a grant may carry
 
 export const GRANDFATHERED_PATH = 'house/grandfathered.yml';
 export const COUPON_REASON_PREFIX = 'coupon:';
@@ -99,6 +100,10 @@ export function planCouponGrants({ redemptions = [], grandfatheredParsed = null,
       code: r.code,
       until: until.toISOString(),
       ...(replaces ? { replaces: true } : {}),
+      // sow-185: converting a permanent comp changes only the time BOUND (permanent -> free year); a hand-set
+      // tier is orthogonal to that and must survive the conversion, else renderGrantBlock would drop it and
+      // tier-gate.grantTier would silently revert the grant to the creator default. Only carry a real paid tier.
+      ...(entry && PAID_GRANT_TIERS.includes(entry.tier) ? { tier: entry.tier } : {}),
     });
   }
   grants.sort((a, b) => a.githubId.localeCompare(b.githubId));
@@ -115,6 +120,7 @@ function renderGrantBlock(a, stamp) {
   if (a.login) lines.push(`    login: ${a.login}`);
   lines.push(`    reason: ${COUPON_REASON_PREFIX}${a.code}`);
   lines.push(`    until: "${a.until}"`);
+  if (a.tier) lines.push(`    tier: ${a.tier}`); // sow-185: preserve a converted comp's hand-set tier
   return lines.join('\n');
 }
 

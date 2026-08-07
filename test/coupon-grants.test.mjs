@@ -57,6 +57,37 @@ test('planCouponGrants: the four-way policy (add / replace permanent comp / skip
   assert.match(skippedBounded[0].reason, /temporary comp/);
 });
 
+// sow-185: converting a permanent comp changes the time BOUND only; a hand-set tier is orthogonal and must
+// survive the conversion, else the standard fold machinery would silently revert it to the creator default.
+test('planCouponGrants + appendGrantEntries carry a hand-set tier through a permanent-comp conversion', () => {
+  const file = FILE + `  - github_id: "888"   # github.com/tieredcomp\n    login: tieredcomp\n    reason: complimentary access (member level)\n    until: null\n    tier: member\n`;
+  const { grants } = planCouponGrants({
+    redemptions: [{ githubId: '888', code: 'CODEABLEYEAR', login: 'tieredcomp', until: '2027-07-15T12:00:00.000Z' }],
+    grandfatheredParsed: yaml.load(file),
+    now: NOW,
+  });
+  assert.equal(grants.length, 1);
+  assert.equal(grants[0].replaces, true);
+  assert.equal(grants[0].tier, 'member'); // the hand-set tier is carried onto the grant
+
+  const next = appendGrantEntries(file, grants, NOW);
+  const map = grandfathersFromParsed(yaml.load(next));
+  assert.equal(map.get('888').reason, 'coupon:CODEABLEYEAR');
+  assert.equal(map.get('888').until, '2027-07-15T12:00:00.000Z');
+  assert.equal(map.get('888').tier, 'member'); // renderGrantBlock emitted the tier line, so it survives the fold
+});
+
+test('planCouponGrants invents no tier when the permanent comp had none (fold defaults to creator downstream)', () => {
+  // github_id 111 in FILE is a permanent comp with NO tier -> the converted grant carries no tier field.
+  const { grants } = planCouponGrants({
+    redemptions: [{ githubId: '111', code: 'CODEABLEYEAR', login: 'existing', until: '2027-01-01T00:00:00.000Z' }],
+    grandfatheredParsed: yaml.load(FILE),
+    now: NOW,
+  });
+  assert.equal(grants.length, 1);
+  assert.equal('tier' in grants[0], false); // no tier -> tier-gate.grantTier applies the creator default
+});
+
 test('appendGrantEntries keeps comments, parses back, and round-trips through overrides-core', () => {
   const additions = [
     { githubId: '222', login: 'newbie', code: 'CODEABLEYEAR', until: '2027-07-15T12:00:00.000Z' },
