@@ -29,7 +29,10 @@ export function createReader(repoPath) {
   function readItem(absPath, relPath) {
     const { frontmatter } = parseContentFile(fs.readFileSync(absPath, 'utf8'));
     // SOW-085: a sortable publish date (ms, or null when unset/unparseable) for the WorkBench list controls.
+    // 2026-08-07: `updatedAt` rides alongside it so the WorkBench can offer a "Recently updated" sort that is
+    // SEPARATE from "Newest". They used to be the same field because publishing re-stamped publishedAt.
     const pubMs = frontmatter.publishedAt ? new Date(frontmatter.publishedAt).getTime() : NaN;
+    const updMs = frontmatter.updatedAt ? new Date(frontmatter.updatedAt).getTime() : NaN;
     return {
       path: relPath,
       type: frontmatter.type ?? null,
@@ -38,6 +41,7 @@ export function createReader(repoPath) {
       status: frontmatter.status ?? null,
       visibility: frontmatter.visibility ?? null,
       publishedAt: Number.isFinite(pubMs) ? pubMs : null,
+      updatedAt: Number.isFinite(updMs) ? updMs : null,
     };
   }
 

@@ -17601,6 +17601,7 @@ function createReader(repoPath) {
   function readItem(absPath, relPath) {
     const { frontmatter } = parseContentFile(fs2.readFileSync(absPath, "utf8"));
     const pubMs = frontmatter.publishedAt ? new Date(frontmatter.publishedAt).getTime() : NaN;
+    const updMs = frontmatter.updatedAt ? new Date(frontmatter.updatedAt).getTime() : NaN;
     return {
       path: relPath,
       type: frontmatter.type ?? null,
@@ -17608,7 +17609,8 @@ function createReader(repoPath) {
       slug: frontmatter.slug ?? null,
       status: frontmatter.status ?? null,
       visibility: frontmatter.visibility ?? null,
-      publishedAt: Number.isFinite(pubMs) ? pubMs : null
+      publishedAt: Number.isFinite(pubMs) ? pubMs : null,
+      updatedAt: Number.isFinite(updMs) ? updMs : null
     };
   }
   function listType(username, type, scope = "member") {

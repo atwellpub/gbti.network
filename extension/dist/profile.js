@@ -1603,7 +1603,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     const m = String(x?.path || "").match(/\/([^/]+)\/index\.md$/);
     return String(m && m[1] || x?.slug || x?.pendingSlug || "").toLowerCase();
   }
-  var SORT_MODES = /* @__PURE__ */ new Set(["newest", "oldest", "title-asc", "title-desc"]);
+  var SORT_MODES = /* @__PURE__ */ new Set(["newest", "oldest", "updated", "title-asc", "title-desc"]);
   var DEFAULT_SORT = "newest";
   var WORKSPACE_SORT_KEY = "gbti-wb-sort";
   function sortModeFor(stored) {
@@ -1620,9 +1620,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     const list = Array.isArray(items) ? [...items] : [];
     const byTitle = (a, b) => String(a?.title || "").localeCompare(String(b?.title || ""), void 0, { sensitivity: "base" });
     const dateOf = (x) => Number.isFinite(x?.publishedAt) ? x.publishedAt : Infinity;
+    const touchedOf = (x) => Number.isFinite(x?.updatedAt) ? x.updatedAt : dateOf(x);
     switch (sort) {
       case "oldest":
         return list.sort((a, b) => dateOf(a) - dateOf(b) || byTitle(a, b));
+      case "updated":
+        return list.sort((a, b) => touchedOf(b) - touchedOf(a) || byTitle(a, b));
       case "title-asc":
         return list.sort(byTitle);
       case "title-desc":
@@ -3420,9 +3423,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const authorNote = this.$("#authornote")?.value?.trim() || void 0;
         if (this.fields.some((f) => f.key === "status")) input.status = "published";
         if (["post", "product", "prompt"].includes(type)) {
-          const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-          input.updatedAt = nowIso;
-          input.publishedAt = nowIso;
+          input.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
         }
         const ownerSel = this.$("#ownerSelect")?.value;
         const authorTarget = ownerSel === "house" ? { scope: "house" } : ownerSel?.startsWith("member:") ? { scope: "member", username: ownerSel.slice(7) } : void 0;
@@ -14372,7 +14373,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const now = this._scopeNow();
       const scopeBtn = (v, label) => `<button class="lc-scope ${now === v ? "on" : ""}" data-scope="${v}" type="button" aria-pressed="${now === v}">${label}</button>`;
       const scopeSwitch = this._canScope() ? `<div class="lc-scopes" role="group" aria-label="Content scope">${scopeBtn("member", "My content")}${scopeBtn("house", "House content")}</div>` : "";
-      return `<div class="lc-bar">` + scopeSwitch + `<div class="lc-filter" role="group" aria-label="Filter by status">${f("all", "All")}${f("published", "Published")}${f("draft", "Drafts")}</div><label class="lc-sort"><span class="lc-sl">Sort</span><select data-sort aria-label="Sort">${opt("newest", "Newest")}${opt("oldest", "Oldest")}${opt("title-asc", "Title A-Z")}${opt("title-desc", "Title Z-A")}</select></label></div>`;
+      return `<div class="lc-bar">` + scopeSwitch + `<div class="lc-filter" role="group" aria-label="Filter by status">${f("all", "All")}${f("published", "Published")}${f("draft", "Drafts")}</div><label class="lc-sort"><span class="lc-sl">Sort</span><select data-sort aria-label="Sort">${opt("newest", "Newest")}${opt("oldest", "Oldest")}${opt("updated", "Recently updated")}${opt("title-asc", "Title A-Z")}${opt("title-desc", "Title Z-A")}</select></label></div>`;
     }
     // SOW-145: switch the content scope (My content <-> House content), persist it, reset the page + status filter,
     // and load the newly-active scope's list for the current tab (the scope-keyed cache makes a repeat switch instant).

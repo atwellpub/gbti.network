@@ -94,7 +94,9 @@ export function createGithubReader({ upstream, token, ref = 'HEAD', fetch = glob
 
   function summarize(relPath, frontmatter) {
     // SOW-085: a sortable publish date (ms, or null) matching client/src/repo-fs.mjs readItem (extension parity).
+    // 2026-08-07: `updatedAt` too, for the separate "Recently updated" WorkBench sort. Keep both readers in step.
     const pubMs = frontmatter.publishedAt ? new Date(frontmatter.publishedAt).getTime() : NaN;
+    const updMs = frontmatter.updatedAt ? new Date(frontmatter.updatedAt).getTime() : NaN;
     return {
       path: relPath,
       type: frontmatter.type ?? null,
@@ -103,6 +105,7 @@ export function createGithubReader({ upstream, token, ref = 'HEAD', fetch = glob
       status: frontmatter.status ?? null,
       visibility: frontmatter.visibility ?? null,
       publishedAt: Number.isFinite(pubMs) ? pubMs : null,
+      updatedAt: Number.isFinite(updMs) ? updMs : null,
     };
   }
 

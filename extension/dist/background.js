@@ -17588,6 +17588,7 @@ function createGithubReader({ upstream, token, ref = "HEAD", fetch: fetch2 = glo
   }
   function summarize(relPath, frontmatter) {
     const pubMs = frontmatter.publishedAt ? new Date(frontmatter.publishedAt).getTime() : NaN;
+    const updMs = frontmatter.updatedAt ? new Date(frontmatter.updatedAt).getTime() : NaN;
     return {
       path: relPath,
       type: frontmatter.type ?? null,
@@ -17595,7 +17596,8 @@ function createGithubReader({ upstream, token, ref = "HEAD", fetch: fetch2 = glo
       slug: frontmatter.slug ?? null,
       status: frontmatter.status ?? null,
       visibility: frontmatter.visibility ?? null,
-      publishedAt: Number.isFinite(pubMs) ? pubMs : null
+      publishedAt: Number.isFinite(pubMs) ? pubMs : null,
+      updatedAt: Number.isFinite(updMs) ? updMs : null
     };
   }
   async function listType(username, type, scope = "member") {

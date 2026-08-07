@@ -1203,9 +1203,14 @@ class GbtiContentEditor extends GbtiElement {
       // SOW-062 P6: the from-the-author note seeds/updates the intro-<slug> comment in the same PR (product/prompt).
       const authorNote = this.$('#authornote')?.value?.trim() || undefined;
       if (this.fields.some((f) => f.key === 'status')) input.status = 'published'; // status is action-driven (no rail dropdown)
-      // SOW-062 P6: stamp the update timestamps so the meta can show last-updated-on-live vs -locally, and so an
-      // updated item re-surfaces in the (publishedAt-sorted) activity feed. post/product/prompt carry these fields.
-      if (['post', 'product', 'prompt'].includes(type)) { const nowIso = new Date().toISOString(); input.updatedAt = nowIso; input.publishedAt = nowIso; }
+      // SOW-062 P6: stamp `updatedAt` so the meta can show last-updated-on-live vs -locally.
+      // publishedAt is DELIBERATELY NOT stamped here (owner bug, 2026-08-07). It used to be, so that an edit
+      // re-surfaced the item in the publishedAt-sorted feed, but that overwrote the real publication date: a
+      // Nov 2025 post edited today claimed to be from today, in the WorkBench list AND on the public site.
+      // operations.mjs (publishContent) already sets publishedAt only when it is ABSENT and otherwise preserves
+      // the prior value, so a first publish still gets its date and a re-publish keeps it. Resurfacing is now
+      // the feed's job: feedTime sorts on the later of publishedAt/updatedAt and the row marks itself Updated.
+      if (['post', 'product', 'prompt'].includes(type)) { input.updatedAt = new Date().toISOString(); }
       // publish() already stages to the member's OWN fork first (publishFiles -> commitToBranchOnFork) and opens the
       // network PR FROM that fork branch, so no separate pre-publish saveDraft is needed.
       // SOW-112 v2: `path` names the loaded canonical item; a changed permalink makes this publish a RENAME.

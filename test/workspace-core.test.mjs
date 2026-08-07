@@ -244,6 +244,40 @@ test('sortItems: newest is publishedAt desc with dateless (drafts) at the top, t
   assert.deepEqual(sortItems(null, 'newest'), []); // defensive
 });
 
+// 2026-08-07 owner bug: "Newest" appeared to sort by most-recently-updated. The sort was always correct; the
+// EDITOR was overwriting publishedAt with now on every save, so an old post edited today claimed to be new.
+// The editor now stamps updatedAt only, and `updated` is a SEPARATE mode for asking after recently-touched.
+test('sortItems: `updated` sorts on updatedAt, distinct from `newest` which stays on publishedAt', () => {
+  const items = [
+    // The real shape of the bug: an OLD post edited today must NOT outrank a genuinely new one under Newest.
+    { title: 'Old post edited today', publishedAt: 1000, updatedAt: 9000 },
+    { title: 'Published today', publishedAt: 8000, updatedAt: 8000 },
+    { title: 'Mid, never edited', publishedAt: 5000 },
+  ];
+  assert.deepEqual(titles(sortItems(items, 'newest')), ['Published today', 'Mid, never edited', 'Old post edited today']);
+  assert.deepEqual(titles(sortItems(items, 'updated')), ['Old post edited today', 'Published today', 'Mid, never edited']);
+});
+
+test('sortItems: `updated` falls back to publishedAt, so a never-edited item ranks by when it appeared', () => {
+  // Falling back to publishedAt (rather than treating a missing updatedAt as dateless) keeps a never-edited
+  // item in its real place instead of floating it to the top of the Recently-updated list.
+  const items = [
+    { title: 'Edited recently', publishedAt: 1000, updatedAt: 7000 },
+    { title: 'Never edited, old', publishedAt: 2000 },
+    { title: 'Never edited, newer', publishedAt: 6000 },
+  ];
+  assert.deepEqual(titles(sortItems(items, 'updated')), ['Edited recently', 'Never edited, newer', 'Never edited, old']);
+  // A genuine draft (no dates at all) still sorts to the top under `updated`, matching `newest`.
+  assert.deepEqual(titles(sortItems([...items, { title: 'Aaa draft' }], 'updated'))[0], 'Aaa draft');
+});
+
+test('sortModeFor accepts the new `updated` mode and still rejects junk', () => {
+  assert.equal(sortModeFor('updated'), 'updated');
+  assert.equal(sortModeFor('newest'), 'newest');
+  assert.equal(sortModeFor('not-a-mode'), 'newest'); // falls back to the default
+  assert.equal(sortModeFor(null), 'newest');
+});
+
 test('filterByStatus: all / published / draft (anything not published)', () => {
   const items = [{ title: 'P', status: 'published' }, { title: 'D', status: 'draft' }, { title: 'S', status: 'staged' }];
   assert.deepEqual(titles(filterByStatus(items, 'all')), ['P', 'D', 'S']);

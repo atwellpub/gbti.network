@@ -17,7 +17,7 @@ tags:
 layout: journal
 coverImage: ./images/fm-pricing-increase.webp
 featured: false
-publishedAt: '2026-08-06T02:07:06.604Z'
+publishedAt: '2026-08-04T00:00:00.000Z'
 updatedAt: '2026-08-06T13:50:00.000Z'
 type: post
 author: gbti

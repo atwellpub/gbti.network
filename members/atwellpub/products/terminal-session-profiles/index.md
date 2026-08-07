@@ -39,7 +39,7 @@ links:
   - type: repository
     url: https://github.com/gbti-network/vscode-terminal-sessions
     label: Source on GitHub
-publishedAt: '2026-08-07T14:19:54.670Z'
+publishedAt: '2026-08-04T01:15:58.920Z'
 updatedAt: '2026-08-07T14:19:54.670Z'
 type: product
 author: atwellpub

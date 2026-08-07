@@ -700,7 +700,7 @@ class GbtiWorkspace extends GbtiElement {
     return `<div class="lc-bar">`
       + scopeSwitch
       + `<div class="lc-filter" role="group" aria-label="Filter by status">${f('all', 'All')}${f('published', 'Published')}${f('draft', 'Drafts')}</div>`
-      + `<label class="lc-sort"><span class="lc-sl">Sort</span><select data-sort aria-label="Sort">${opt('newest', 'Newest')}${opt('oldest', 'Oldest')}${opt('title-asc', 'Title A-Z')}${opt('title-desc', 'Title Z-A')}</select></label>`
+      + `<label class="lc-sort"><span class="lc-sl">Sort</span><select data-sort aria-label="Sort">${opt('newest', 'Newest')}${opt('oldest', 'Oldest')}${opt('updated', 'Recently updated')}${opt('title-asc', 'Title A-Z')}${opt('title-desc', 'Title Z-A')}</select></label>`
       + `</div>`;
   }
 

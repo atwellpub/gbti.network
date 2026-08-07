@@ -189,7 +189,7 @@ function slugOf(x) {
 
 /** The valid sort modes + the default. `sortModeFor` mirrors newtab-prefs `viewModeFor` (a valid stored value
  *  wins, else the default) so the element can persist the choice with one localStorage key. */
-export const SORT_MODES = new Set(['newest', 'oldest', 'title-asc', 'title-desc']);
+export const SORT_MODES = new Set(['newest', 'oldest', 'updated', 'title-asc', 'title-desc']);
 export const DEFAULT_SORT = 'newest';
 export const WORKSPACE_SORT_KEY = 'gbti-wb-sort'; // one device-local sort pref shared across the content tabs
 export function sortModeFor(stored) {
@@ -221,13 +221,22 @@ export function scopeFor(stored, { personalCount = 0, role = 'member' } = {}) {
  * Sort a content list (a copy; the input is not mutated). A dateless item (a fork-staged draft carries no
  * publishedAt) sorts as the NEWEST (top for Newest, bottom for Oldest) so in-progress work stays visible; the
  * title is the stable tiebreak. `newest` (default) = publishedAt desc.
+ *
+ * 2026-08-07: `updated` is a SEPARATE mode sorting on updatedAt desc. Until now the two were indistinguishable
+ * because publishing re-stamped publishedAt to now, so "Newest" silently meant "most recently touched" and an
+ * old edited post outranked a genuinely new one. The editor no longer re-stamps publishedAt, so "Newest" means
+ * first published and this mode is how you ask for recently-touched on purpose. An item with no updatedAt
+ * falls back to its publishedAt rather than sorting as dateless, so a never-edited item still ranks by when it
+ * actually appeared instead of jumping to the top.
  */
 export function sortItems(items, sort = DEFAULT_SORT) {
   const list = Array.isArray(items) ? [...items] : [];
   const byTitle = (a, b) => String(a?.title || '').localeCompare(String(b?.title || ''), undefined, { sensitivity: 'base' });
   const dateOf = (x) => (Number.isFinite(x?.publishedAt) ? x.publishedAt : Infinity); // dateless -> newest
+  const touchedOf = (x) => (Number.isFinite(x?.updatedAt) ? x.updatedAt : dateOf(x));
   switch (sort) {
     case 'oldest': return list.sort((a, b) => (dateOf(a) - dateOf(b)) || byTitle(a, b));
+    case 'updated': return list.sort((a, b) => (touchedOf(b) - touchedOf(a)) || byTitle(a, b));
     case 'title-asc': return list.sort(byTitle);
     case 'title-desc': return list.sort((a, b) => byTitle(b, a));
     case 'newest':

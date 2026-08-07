@@ -14,7 +14,7 @@ categories:
 layout: journal
 coverImage: ./images/flan-datapack-darken-opt-cleanedimized.webp
 featured: false
-publishedAt: '2026-08-06T14:47:25.678Z'
+publishedAt: '2025-11-16T00:00:00.000Z'
 updatedAt: '2026-08-06T14:47:25.678Z'
 type: post
 author: gbti
