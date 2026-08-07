@@ -16,17 +16,17 @@ const benefitsUrl = '/membership/';
     {/* sow-158 Phase 2: web sign-in is the primary path (GitHub OAuth -> an httpOnly session, no extension needed);
         the extension is now an optional add-on for in-place editing/publishing. */}
     <div data-state="absent">
-      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-github"/></svg></span>
-      <h2 class="h3 mt12" id="signin-title">Sign in to GBTI Network</h2>
+      <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-spark"/></svg></span>
+      <h2 class="h3 mt12" id="signin-title">Join the GBTI co-op</h2>
       <p class="body-sm muted mt8">
-        Sign in on the web with GitHub to save, collect, and follow. To edit and publish your own content in place,
-        add the free GBTI browser extension too.
+        Saving, collecting, and following are member perks. Sign in with a free GitHub account to keep what you
+        find, and become a member to comment, join the Discord, and unlock members-only content.
       </p>
       <div class="signin-actions mt20">
-        <a class="btn btn-primary" href="/login/" data-web-signin>Sign in on the web</a>
-        <a class="btn btn-ghost" href={extensionInstallUrl} data-install-link rel={extensionIsListed ? null : 'nofollow'}>Get the extension</a>
+        <a class="btn btn-primary" href="/login/" data-web-signin>Sign in with GitHub</a>
+        <a class="btn btn-ghost" href={benefitsUrl}>See membership options</a>
       </div>
-      <p class="body-sm muted mt12" style="font-size:12.5px"><a href={benefitsUrl}>Read about member benefits</a></p>
+      <p class="body-sm muted mt12" style="font-size:12.5px"><a href={extensionInstallUrl} data-install-link rel={extensionIsListed ? null : 'nofollow'}>Get the extension</a> to edit and publish your work in place.</p>
     </div>
 
     {/* Extension installed. sow-158 Phase 2 residual fix: web sign-in stays the PRIMARY path even here (it sets the
