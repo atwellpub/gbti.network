@@ -10,7 +10,7 @@
 
 import { githubFetchUser } from './oauth.mjs';
 import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 3a: bearer-or-cookie identity for the member reads
-import { authorizePaid } from './membership-content.mjs';
+import { authorizeCreator } from './membership-content.mjs';
 import { parseHostedRef } from '../../membership/hosted-author.mjs'; // SOW-157: hosted PR ownership match
 
 const GH = 'https://api.github.com';
@@ -121,7 +121,7 @@ export async function getForkInstallationToken(env, login, { fetchImpl = globalT
  */
 export async function openPullForMember(request, env, deps = {}) {
   const {
-    fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, authorize = authorizePaid,
+    fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, authorize = authorizeCreator,
     upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
   } = deps;
 

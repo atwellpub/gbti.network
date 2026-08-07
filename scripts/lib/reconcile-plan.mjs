@@ -14,6 +14,7 @@
 
 import { ROLE } from '../../membership/overrides.mjs';
 import { TRIAL_DAYS } from '../../membership/derive-status.mjs';
+import { TIER } from '../../membership/tiers.mjs'; // sow-185: the paid tier axis (for the Content-Creator Discord badge)
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_DAY = 87; // day-87 trial reminder window opens here and closes at TRIAL_DAYS (90)
@@ -41,6 +42,17 @@ export function discordRoleTarget(effectiveStatus) {
   if (PUBLISHED_STATUSES.has(effectiveStatus)) return 'member';
   if (TRIAL_STATUSES.has(effectiveStatus)) return 'trial';
   return 'locked';
+}
+
+// sow-185: the Content-Creator Discord badge is a SEPARATE, STACKABLE axis from the exclusive access role above.
+// A Content Creator holds @Member (access) AND @Creator (badge); a Network Member holds @Member only. It is kept
+// OUT of MANAGED_DISCORD_ROLES so the exclusive access swap never strips it. Inert until DISCORD_CREATOR_ROLE_ID
+// is provisioned (an unset id is a no-op in enactDiscord).
+export const CREATOR_DISCORD_ROLE = 'creator';
+
+/** True when an effective TIER should hold the stackable @Creator badge (Content Creator only). */
+export function discordCreatorTarget(tier) {
+  return tier === TIER.creator;
 }
 
 /** True when this effective status means the member's public content should be published. */
@@ -115,7 +127,7 @@ function filesToPublish(repoEntry) {
  *   { kind:'block', githubId, username }   // informational: a ban deplatforms; content draft + the
  *                                          // Locked-role swap are emitted as their own actions above it.
  */
-export function planReconcile({ members = [], repoIndex = {}, now = new Date() } = {}) {
+export function planReconcile({ members = [], repoIndex = {}, now = new Date(), creatorRoleEnabled = false } = {}) {
   const actions = [];
 
   for (const m of members) {
@@ -159,6 +171,7 @@ export function planReconcile({ members = [], repoIndex = {}, now = new Date() }
     //    when they already hold exactly the target, no action is emitted. The reconcile only assigns
     //    roles; the Locked role's owner-configured channel overwrites enforce the actual lockout.
     if (m.discordUserId) {
+      // Access role: EXACTLY ONE of member/trial/locked (the exclusive swap; unchanged).
       const target = discordRoleTarget(status); // 'member' | 'trial' | 'locked'
       const held = new Set((Array.isArray(m.discordRoles) ? m.discordRoles : []).filter((r) => MANAGED_DISCORD_ROLES.includes(r)));
       if (!held.has(target)) {
@@ -167,6 +180,21 @@ export function planReconcile({ members = [], repoIndex = {}, now = new Date() }
       for (const role of MANAGED_DISCORD_ROLES) {
         if (role !== target && held.has(role)) {
           actions.push({ kind: 'discord', type: 'remove-role', githubId, discordUserId: m.discordUserId, role });
+        }
+      }
+      // sow-185: the Content-Creator badge is an INDEPENDENT, stackable axis (a creator holds member + creator).
+      // Add it for a creator-tier account, remove it otherwise. It is NEVER touched by the access swap above (it
+      // is not in MANAGED_DISCORD_ROLES). Gated on creatorRoleEnabled (reconcile passes !!DISCORD_CREATOR_ROLE_ID):
+      // until the owner provisions the role, the axis emits NOTHING, so the plan stays idempotent (pre-provision
+      // EVERY paid member resolves to creator via the inert price map, which would otherwise flood the plan with
+      // no-op adds). m.tier absent -> discordCreatorTarget false -> no badge, the safe direction.
+      if (creatorRoleEnabled) {
+        const wantsCreator = discordCreatorTarget(m.tier);
+        const hasCreator = (Array.isArray(m.discordRoles) ? m.discordRoles : []).includes(CREATOR_DISCORD_ROLE);
+        if (wantsCreator && !hasCreator) {
+          actions.push({ kind: 'discord', type: 'add-role', githubId, discordUserId: m.discordUserId, role: CREATOR_DISCORD_ROLE });
+        } else if (!wantsCreator && hasCreator) {
+          actions.push({ kind: 'discord', type: 'remove-role', githubId, discordUserId: m.discordUserId, role: CREATOR_DISCORD_ROLE });
         }
       }
     }

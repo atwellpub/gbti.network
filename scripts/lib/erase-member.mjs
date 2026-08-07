@@ -269,7 +269,7 @@ export async function eraseDiscordRoles({ githubId, stripe = null, discord = nul
   }
   if (!discordUserId) return { skipped: true, reason: 'no discord_user_id in Stripe metadata' };
 
-  const roleIds = { member: env.DISCORD_MEMBER_ROLE_ID, trial: env.DISCORD_TRIAL_ROLE_ID, locked: env.DISCORD_LOCKED_ROLE_ID };
+  const roleIds = { member: env.DISCORD_MEMBER_ROLE_ID, trial: env.DISCORD_TRIAL_ROLE_ID, locked: env.DISCORD_LOCKED_ROLE_ID, creator: env.DISCORD_CREATOR_ROLE_ID }; // sow-185: also strip the Content-Creator badge on erasure
   let member = null;
   try { member = await discord.getMember(guildId, discordUserId); } catch { member = null; }
   if (!member) return { skipped: true, reason: 'member not in the guild (nothing to remove)' };

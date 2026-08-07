@@ -13,7 +13,7 @@
 // fakes: no network, no secrets.
 
 import { githubFetchUser } from './oauth.mjs';
-import { authorizePaid } from './membership-content.mjs';
+import { authorizeCreator } from './membership-content.mjs';
 import { authorizeSuperadmin } from './membership-admin.mjs';
 import { getInstallationToken } from './github-app.mjs';
 import { rateLimit } from './abuse.mjs';
@@ -39,7 +39,7 @@ async function ghJson(fetchImpl, url, init) {
 
 export async function membershipAuthor(request, env, deps = {}) {
   const {
-    fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, authorize = authorizePaid,
+    fetchImpl = globalThis.fetch, fetchUser = githubFetchUser, authorize = authorizeCreator,
     authorizeSuper = authorizeSuperadmin, kv = env?.SIGNUP_KV, limiter = rateLimit,
     upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
   } = deps;

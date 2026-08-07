@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { planReconcile, discordRoleTarget, REMINDER_DAY } from '../scripts/lib/reconcile-plan.mjs';
+import { planReconcile, discordRoleTarget, discordCreatorTarget, CREATOR_DISCORD_ROLE, REMINDER_DAY } from '../scripts/lib/reconcile-plan.mjs';
 import {
   flipStatus,
   parseArgs,
@@ -106,6 +106,42 @@ test('grandfathered member keeps published content and gets the member role', ()
   assert.equal(discord.length, 1);
   assert.equal(discord[0].type, 'add-role');
   assert.equal(discord[0].role, 'member');
+});
+
+// sow-185: the Content-Creator Discord badge is a SEPARATE, stackable axis (a creator holds member + creator;
+// a member holds member only). Gated on creatorRoleEnabled (reconcile passes !!DISCORD_CREATOR_ROLE_ID).
+test('discordCreatorTarget: only creator tier wants the badge', () => {
+  assert.equal(discordCreatorTarget('creator'), true);
+  assert.equal(discordCreatorTarget('member'), false);
+  assert.equal(discordCreatorTarget('none'), false);
+  assert.equal(discordCreatorTarget(undefined), false);
+  assert.equal(CREATOR_DISCORD_ROLE, 'creator');
+});
+
+const creatorMember = (over = {}) => ({ githubId: '300', username: 'cr', derived: 'paid', effective: effective('300', 'paid'), discordUserId: 'd300', discordRoles: ['member'], tier: 'creator', ...over });
+
+test('sow-185: a Content Creator gains the @Creator badge on TOP of @Member (member kept, not swapped)', () => {
+  const actions = ofKind(planReconcile({ members: [creatorMember()], repoIndex: {}, now: NOW, creatorRoleEnabled: true }), 'discord');
+  // no member add (already held), no member remove, exactly one creator add
+  assert.deepEqual(actions, [{ kind: 'discord', type: 'add-role', githubId: '300', discordUserId: 'd300', role: 'creator' }]);
+});
+
+test('sow-185: a Content Creator already holding member + creator gets NO action (idempotent)', () => {
+  const actions = ofKind(planReconcile({ members: [creatorMember({ discordRoles: ['member', 'creator'] })], repoIndex: {}, now: NOW, creatorRoleEnabled: true }), 'discord');
+  assert.equal(actions.length, 0);
+});
+
+test('sow-185: a Network Member (member tier) never gets @Creator; a downgraded creator LOSES the badge', () => {
+  const memberTier = planReconcile({ members: [creatorMember({ tier: 'member', discordRoles: ['member'] })], repoIndex: {}, now: NOW, creatorRoleEnabled: true });
+  assert.equal(ofKind(memberTier, 'discord').length, 0); // member tier holds member already -> nothing
+  const downgraded = ofKind(planReconcile({ members: [creatorMember({ tier: 'member', discordRoles: ['member', 'creator'] })], repoIndex: {}, now: NOW, creatorRoleEnabled: true }), 'discord');
+  assert.deepEqual(downgraded, [{ kind: 'discord', type: 'remove-role', githubId: '300', discordUserId: 'd300', role: 'creator' }]);
+});
+
+test('sow-185: with the Creator role UNPROVISIONED (creatorRoleEnabled false) the badge axis emits NOTHING', () => {
+  // pre-provision every paid member resolves to creator via the inert price map; the flag keeps the plan clean.
+  const actions = ofKind(planReconcile({ members: [creatorMember()], repoIndex: {}, now: NOW }), 'discord');
+  assert.equal(actions.filter((a) => a.role === 'creator').length, 0);
 });
 
 // ---- grandfathered member with DRAFT content -> publish ----
@@ -388,6 +424,23 @@ test('memberEntryFor derives status, resolves username via members-index, and re
   assert.equal(deriveStatusFromCustomer(customer, NOW), 'paid');
 });
 
+test('sow-185: memberEntryFor resolves the effective TIER override-aware (Stripe price, grandfather, default)', () => {
+  const ov = (over = {}) => ({ roles: new Map(), bans: new Map(), grandfathers: new Map(), membersIndex: new Map(), ...over });
+  const paidCustomer = (priceId) => ({ id: 'c', metadata: { github_id: '710' }, subscriptions: { data: [{ status: 'active', created: 1, ...(priceId ? { items: { data: [{ price: { id: priceId } }] } } : {}) }] } });
+  const priceMap = new Map([['price_m', 'member'], ['price_c', 'creator']]);
+  // no price map (inert): a paid sub resolves to creator (legacy single-price mode = no regression)
+  assert.equal(memberEntryFor(paidCustomer(), ov(), NOW).tier, 'creator');
+  // with the map: a member-priced sub -> member, a creator-priced sub -> creator
+  assert.equal(memberEntryFor(paidCustomer('price_m'), ov(), NOW, { priceTierMap: priceMap }).tier, 'member');
+  assert.equal(memberEntryFor(paidCustomer('price_c'), ov(), NOW, { priceTierMap: priceMap }).tier, 'creator');
+  // a grandfathered member (no sub) -> creator by default; a tier:member grant -> member (the override wins)
+  const noSub = { id: 'c', metadata: { github_id: '720' } };
+  assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'creator');
+  assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720', tier: 'member' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'member');
+  // a non-paid (expired) account -> tier none
+  assert.equal(memberEntryFor(noSub, ov(), NOW, { priceTierMap: priceMap }).tier, 'none');
+});
+
 test('memberEntryFor resolves the folder via repoIndex byGithubLogin (login != folder name)', () => {
   // Real-data shape: folder 'frankfolder' whose profile links.github is github.com/frank.
   const customer = { id: 'cus_2', metadata: { github_id: '701', github_login: 'frank' } };
@@ -583,6 +636,7 @@ test('gatherOverrideOnlyMembers: a grandfathered member with no Stripe customer 
   assert.equal(members[0].discordUserId, '629903610582663183'); // resolved from the override map
   assert.equal(members[0].effective.status, 'paid'); // grandfather -> paid
   assert.equal(members[0].effective.source, 'grandfather');
+  assert.equal(members[0].tier, 'creator'); // sow-185: a default grandfather grant resolves to creator (was undefined pre-fix)
 
   const actions = planReconcile({ members, repoIndex: {}, now: NOW });
   const discordActions = ofKind(actions, 'discord');
@@ -590,6 +644,11 @@ test('gatherOverrideOnlyMembers: a grandfathered member with no Stripe customer 
   assert.equal(discordActions[0].type, 'add-role');
   assert.equal(discordActions[0].role, 'member'); // grandfathered co-op member -> the full Member role
   assert.equal(discordActions[0].discordUserId, '629903610582663183');
+
+  // sow-185 (review fix): once the Creator role is provisioned, this override-only grandfathered creator ALSO
+  // gets @Creator on top of @Member (before the fix m.tier was undefined, so @Creator was wrongly withheld).
+  const withCreator = ofKind(planReconcile({ members, repoIndex: {}, now: NOW, creatorRoleEnabled: true }), 'discord');
+  assert.deepEqual(withCreator.filter((a) => a.type === 'add-role').map((a) => a.role).sort(), ['creator', 'member']);
 });
 
 test('gatherOverrideOnlyMembers: skips ids already gathered from Stripe and yields no Discord action without an id', async () => {

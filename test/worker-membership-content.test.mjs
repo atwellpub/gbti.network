@@ -4,7 +4,7 @@
 // the decrypt/encrypt round-trip. Injected fetchUser + Stripe + KV: no network, no secrets.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { membershipDecrypt, membershipEncrypt, authorizePaid, authorizeMember, authorizeMemberCheap, authorizeSignedIn, OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from '../workers/signup/membership-content.mjs';
+import { membershipDecrypt, membershipEncrypt, authorizePaid, authorizeCreator, authorizeMember, authorizeMemberCheap, authorizeSignedIn, OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from '../workers/signup/membership-content.mjs';
 import { encryptAsset, generateEpochKey } from '../client/src/crypto-assets.mjs';
 import { signSession } from '../workers/signup/session.mjs'; // sow-158 Phase 3b: sign a website session for the cookie-encrypt tests
 import { CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
@@ -272,4 +272,60 @@ test('authorizeSignedIn: a free (none) member is admitted; no token -> 401; a st
   assert.equal((await authorizeSignedIn(POST('news', 'Bearer g'), ENV(), deps('9', () => null))).ok, true);
   assert.equal((await authorizeSignedIn(POST('news', null), ENV(), deps('9', () => null))).status, 401);
   assert.equal((await authorizeSignedIn(POST('news', 'Bearer g'), ENV({}, null), deps('9', () => null))).status, 403);
+});
+
+// sow-185: authorizeCreator gates the WRITE routes (encrypt / open-pull / hosted-author) to Content Creator.
+// The tier resolves override-aware from resolveEffective; INERT until the owner maps the $5 price (with no
+// price env every paid sub is creator via the legacy single-price mode).
+const PRICE_ENV = { STRIPE_PRICE_MEMBER_MONTHLY: 'price_m', STRIPE_PRICE_CREATOR_MONTHLY: 'price_c' };
+const paidAt = (priceId) => ({ id: 'c', metadata: { github_id: '1' }, subscriptions: { data: [{ status: 'active', created: 1, items: { data: [{ price: { id: priceId } }] } }] } });
+
+test('authorizeCreator: today (no price env) a paid member resolves to creator and is admitted (no regression)', async () => {
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(), deps('1', () => paid));
+  assert.equal(r.ok, true);
+  assert.equal(r.tier, 'creator');
+});
+
+test('authorizeCreator: a $5 Network Member (member price) is DENIED with a Content Creator message', async () => {
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV), deps('1', () => paidAt('price_m')));
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+  assert.match(r.body.message, /Content Creator/);
+});
+
+test('authorizeCreator: a Content Creator (creator price) is admitted', async () => {
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV), deps('1', () => paidAt('price_c')));
+  assert.equal(r.ok, true);
+  assert.equal(r.tier, 'creator');
+});
+
+test('authorizeCreator: a grandfathered member (no Stripe sub) resolves to creator and is admitted (override wins)', async () => {
+  const mirror = freshMirror({ grandfathered: { grandfathered: [{ github_id: '3' }] } });
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, mirror), deps('3', () => null));
+  assert.equal(r.ok, true);
+  assert.equal(r.tier, 'creator');
+});
+
+test('authorizeCreator: a grandfathered member pinned to tier:member is DENIED (settable tier honored)', async () => {
+  const mirror = freshMirror({ grandfathered: { grandfathered: [{ github_id: '3', tier: 'member' }] } });
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, mirror), deps('3', () => null));
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+  assert.match(r.body.message, /Content Creator/);
+});
+
+test('authorizeCreator: a non-paid caller gets the paid-required message; a banned caller is not permitted', async () => {
+  const none = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV), deps('9', () => null));
+  assert.equal(none.status, 403);
+  assert.match(none.body.message, /paid membership/);
+  const mirror = freshMirror({ bans: { bans: [{ github_id: '1' }] } });
+  const banned = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, mirror), deps('1', () => paidAt('price_c')));
+  assert.equal(banned.status, 403);
+  assert.match(banned.body.message, /not permitted/);
+});
+
+test('encrypt: a $5 Network Member cannot write member content (creator-gated, 403)', async () => {
+  const r = await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'x', assetId: 'post:z:body' }), ENV(PRICE_ENV), deps('1', () => paidAt('price_m')));
+  assert.equal(r.status, 403);
+  assert.match(r.body.message, /Content Creator/);
 });

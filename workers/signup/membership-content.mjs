@@ -12,8 +12,10 @@
 
 import { githubFetchUser } from './oauth.mjs';
 import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 1b: bearer-or-cookie identity choke point
-import { deriveStatus } from '../../membership/derive-status.mjs';
+import { deriveMembership } from '../../membership/derive-status.mjs';
 import { effectiveStatus, bansFromParsed, rolesFromParsed, grandfathersFromParsed } from '../../membership/overrides-core.mjs';
+import { TIER, meetsTier } from '../../membership/tiers.mjs'; // sow-185: the paid tier axis
+import { buildEnvPriceTierMap, resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware tier
 import { createStripeClient } from '../../clients/stripe.mjs';
 import { decryptAssetText, encryptAsset } from '../../client/src/crypto-assets.mjs';
 import { readCouponGrant } from './coupons.mjs'; // SOW-119: the coupon fast-path grant
@@ -47,10 +49,16 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
   // guards + the ban check below are UNCHANGED, so the cheap path still fails closed on a missing/stale/incomplete
   // mirror; only the unneeded `derived` paid/trial signal is dropped (it floors to 'none').
   let derived = 'none';
+  let stripeTier = TIER.none; // sow-185: the tier from the Stripe subscription's price id (none unless paid)
   if (needStripe) {
     if (!env?.STRIPE_SECRET_KEY) return { ok: false, status: 500, body: { error: 'misconfigured', message: 'Stripe is not configured' } };
     const stripe = makeStripe({ apiKey: env.STRIPE_SECRET_KEY, fetch: fetchImpl });
-    derived = await deriveStatus(githubId, stripe, now); // fails closed to 'none'; share the injected clock
+    // deriveMembership returns { status, tier } and fails closed to { none, none }; status is identical to the
+    // old deriveStatus. The price map comes from the Worker env (only the legacy $150 today -> creator, so the
+    // tier axis is INERT until the owner maps the $5 member price). Share the injected clock.
+    const membership = await deriveMembership(githubId, stripe, { priceTierMap: buildEnvPriceTierMap(env), now });
+    derived = membership.status;
+    stripeTier = membership.tier;
   }
 
   let mirror = null;
@@ -73,16 +81,24 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
     grandfathers: grandfathersFromParsed(mirror.grandfathered),
   };
   const effective = effectiveStatus(githubId, derived, overrides, now);
+  // sow-185: resolve the effective TIER from the SAME { status, source } (overrides preserved) plus the Stripe
+  // tier and the grandfather grant. ban -> none, staff -> creator, grandfather -> the grant's tier (default
+  // creator), stripe -> the price's tier when paid. A caller that gates on tier reads this; status-only callers
+  // ignore it. INERT today (legacy price -> creator).
+  const gfGrant = overrides.grandfathers.get(String(githubId));
+  const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, stripeTier, grant: gfGrant });
 
   // SOW-119: the coupon fast-path. A fresh redemption makes the member effective-paid IMMEDIATELY (the
   // daily reconcile lands the durable git grant later). Consulted only when the mirror-derived status is
   // neither paid (nothing to add) nor banned (ban outranks everything, including a coupon).
   if (effective.status !== 'paid' && effective.status !== 'banned') {
     const grant = await readCouponGrant(kv, githubId, now);
-    if (grant) return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon' };
+    // A coupon is the free-year full-membership deal, so it grants creator (matching the grandfather default +
+    // the coupon-fold carry-through). The durable git grant may later carry an explicit tier.
+    if (grant) return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon', tier: TIER.creator };
   }
 
-  return { ok: true, githubId, login, via: id.via, status: effective.status, source: effective.source };
+  return { ok: true, githubId, login, via: id.via, status: effective.status, source: effective.source, tier };
 }
 
 /**
@@ -96,6 +112,25 @@ export async function authorizePaid(request, env, deps = {}) {
     return deny(r.status === 'banned' ? 'this account is not permitted' : 'an active paid membership is required');
   }
   return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status, via: r.via }; // SOW-061 tier; sow-158 P3a via
+}
+
+/**
+ * sow-185: authorize a CONTENT CREATOR caller (the WRITE / publish routes: encrypt, open-pull, hosted author).
+ * Effective-paid AND effective TIER >= creator. A grandfathered / staff account resolves to creator via
+ * resolveEffectiveTier, so it is admitted; a $5 Network Member is denied with an upgrade message; a non-paid
+ * caller gets the paid-required message. This is a defense-in-depth OPEN-time gate; classify-pr is the merge
+ * boundary. INERT until the owner maps the $5 price (the legacy $150 -> creator, so today's paid all pass).
+ */
+export async function authorizeCreator(request, env, deps = {}) {
+  const r = await resolveEffective(request, env, deps);
+  if (!r.ok) return r;
+  if (r.status === 'banned') return deny('this account is not permitted');
+  if (!meetsTier(r.tier, TIER.creator)) {
+    return deny(r.status !== 'paid'
+      ? 'an active paid membership is required'
+      : 'publishing on gbti.network requires the Content Creator plan; upgrade at https://gbti.network');
+  }
+  return { ok: true, githubId: r.githubId, login: r.login, source: r.source, status: r.status, tier: r.tier, via: r.via };
 }
 
 /**
@@ -213,11 +248,12 @@ export async function membershipDecrypt(request, env, deps = {}) {
 }
 
 /**
- * POST /membership/encrypt — body { plaintext, assetId }. Returns { ok, envelope } for an effective-paid
- * author to commit as <assetId>.enc, encrypted under the CURRENT epoch with the Worker-held key.
+ * POST /membership/encrypt — body { plaintext, assetId }. Returns { ok, envelope } for a Content Creator
+ * author to commit as <assetId>.enc, encrypted under the CURRENT epoch with the Worker-held key. sow-185:
+ * writing member-only content is a Content-Creator action, so this is creator-gated (was authorizePaid).
  */
 export async function membershipEncrypt(request, env, deps = {}) {
-  const auth = await authorizePaid(request, env, deps);
+  const auth = await authorizeCreator(request, env, deps);
   if (!auth.ok) return { status: auth.status, body: auth.body };
 
   const body = await readJson(request);

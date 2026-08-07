@@ -25,8 +25,9 @@ import { createStripeClient } from '../clients/stripe.mjs';
 import { createGitHubClient } from '../clients/github.mjs';
 import { createDiscordClient } from '../clients/discord.mjs';
 import { createResendClient } from '../clients/resend.mjs';
-import { deriveStatusFromCustomer, STATUS } from '../membership/derive-status.mjs';
+import { deriveStatusFromCustomer, deriveMembershipFromCustomer, STATUS } from '../membership/derive-status.mjs';
 import { loadOverrides, loadOverridesRaw, effectiveStatus, roleOf, ROLE } from '../membership/overrides.mjs';
+import { buildEnvPriceTierMap, resolveEffectiveTier } from '../membership/tier-gate.mjs'; // sow-185: price map + override-aware tier
 import { buildRepoIndex } from './lib/repo-content.mjs';
 import { planReconcile } from './lib/reconcile-plan.mjs';
 import { buildOverridesMirror, mirrorOverridesToKv, mirrorSyndicationConfigToKv, mirrorContentChannelsToKv, mirrorTopicsToKv, mirrorCouponsToKv } from './lib/kv-mirror.mjs';
@@ -93,12 +94,17 @@ export function resolveUsername(githubId, githubLogin, overrides, repoIndex) {
  * passed in by gatherMembers (the set of managed roles the member currently holds, from Discord
  * getMember); it defaults to empty so the planner stays idempotent when the Discord client is absent.
  */
-export function memberEntryFor(customer, overrides, now, { repoIndex = null, discordRoles = [] } = {}) {
+export function memberEntryFor(customer, overrides, now, { repoIndex = null, discordRoles = [], priceTierMap = null } = {}) {
   const meta = customer.metadata ?? {};
   const githubId = String(meta.github_id ?? '');
   const githubLogin = meta.github_login ?? null;
   const derived = deriveStatusFromCustomer(customer, now);
   const effective = effectiveStatus(githubId, derived, overrides, now);
+  // sow-185: resolve the effective TIER (override-aware) for the Content-Creator Discord badge. stripeTier comes
+  // from the subscription's price id; the override source wins (staff/grandfather -> creator). INERT until the
+  // price env is mapped (a null priceTierMap is legacy single-price mode -> creator).
+  const stripeTier = deriveMembershipFromCustomer(customer, { priceTierMap, now }).tier;
+  const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, stripeTier, grant: overrides.grandfathers.get(githubId) });
   const username = resolveUsername(githubId, githubLogin, overrides, repoIndex);
   return {
     githubId,
@@ -108,6 +114,7 @@ export function memberEntryFor(customer, overrides, now, { repoIndex = null, dis
     username,
     derived,
     effective,
+    tier, // sow-185: the effective paid tier (drives the Content-Creator Discord badge)
     role: roleOf(githubId, overrides.roles),
     trialStartedAt: meta.trial_started_at ?? null,
     converted: isConverted(customer),
@@ -200,6 +207,7 @@ function discordRoleId(role, env) {
   if (role === 'member') return env.DISCORD_MEMBER_ROLE_ID;
   if (role === 'trial') return env.DISCORD_TRIAL_ROLE_ID;
   if (role === 'locked') return env.DISCORD_LOCKED_ROLE_ID;
+  if (role === 'creator') return env.DISCORD_CREATOR_ROLE_ID; // sow-185: the stackable Content-Creator badge (unset -> enactDiscord skips)
   return null;
 }
 
@@ -343,9 +351,10 @@ export async function surfaceConflicts({ github, dryRun = true } = {}) {
 
 /**
  * Resolve the SET of managed Discord roles a member CURRENTLY holds (a subset of 'member' | 'trial' |
- * 'locked') from their live guild member record. The planner reconciles this set to exactly the one
- * target role, removing any stray. Best-effort: any getMember error (including a missing member)
- * returns [] so the planner treats the member as holding no managed role and simply adds the target.
+ * 'locked' | 'creator') from their live guild member record. The planner reconciles the exclusive ACCESS
+ * role (member/trial/locked) to exactly one, removing any stray, AND independently syncs the stackable
+ * 'creator' badge (sow-185). Best-effort: any getMember error (including a missing member) returns [] so the
+ * planner treats the member as holding no managed role and simply adds the target(s).
  */
 export async function resolveDiscordRoles(discord, guildId, discordUserId, env) {
   if (!discord || !guildId || !discordUserId) return [];
@@ -361,6 +370,7 @@ export async function resolveDiscordRoles(discord, guildId, discordUserId, env) 
   if (env.DISCORD_MEMBER_ROLE_ID && roleIds.has(String(env.DISCORD_MEMBER_ROLE_ID))) held.push('member');
   if (env.DISCORD_TRIAL_ROLE_ID && roleIds.has(String(env.DISCORD_TRIAL_ROLE_ID))) held.push('trial');
   if (env.DISCORD_LOCKED_ROLE_ID && roleIds.has(String(env.DISCORD_LOCKED_ROLE_ID))) held.push('locked');
+  if (env.DISCORD_CREATOR_ROLE_ID && roleIds.has(String(env.DISCORD_CREATOR_ROLE_ID))) held.push('creator'); // sow-185: the stackable badge
   return held;
 }
 
@@ -374,12 +384,13 @@ export async function resolveDiscordRoles(discord, guildId, discordUserId, env) 
 export async function gatherMembers(stripe, overrides, now, { repoIndex = null, discord = null, env = {} } = {}) {
   const members = [];
   const guildId = env.DISCORD_GUILD_ID ?? null;
+  const priceTierMap = buildEnvPriceTierMap(env); // sow-185: built once; INERT (legacy $150 -> creator) until the $5 price is mapped
   for await (const customer of stripe.listCustomers()) {
     const meta = customer.metadata ?? {};
     if (!meta.github_id) continue; // not a membership customer
     const githubId = String(meta.github_id);
     const discordRoles = await resolveDiscordRoles(discord, guildId, meta.discord_user_id ?? null, env);
-    const entry = memberEntryFor(customer, overrides, now, { repoIndex, discordRoles });
+    const entry = memberEntryFor(customer, overrides, now, { repoIndex, discordRoles, priceTierMap });
 
     // Fail-closed warning: a member who is NOT effectively paid/grandfathered but has no resolvable
     // folder cannot have their content drafted on lapse. Name them so the owner can fix the index.
@@ -420,6 +431,11 @@ export async function gatherOverrideOnlyMembers(overrides, now, { seen = new Set
     const login = e?.login ?? null;
     const discordUserId = login ? (userMap.get(String(login).toLowerCase()) ?? null) : null;
     const effective = effectiveStatus(githubId, 'none', overrides, now);
+    // sow-185: resolve the tier for the Content-Creator Discord badge. These override-only members have NO
+    // Stripe subscription, so the tier comes entirely from the override (grandfather -> the grant's tier,
+    // default creator; staff -> creator; ban -> none). Mirrors memberEntryFor so the Stripe-customer path and
+    // this override-only path agree, and so a grandfathered creator is not stripped of @Creator every run.
+    const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, grant: overrides.grandfathers.get(githubId) });
     const username = resolveUsername(githubId, login, overrides, repoIndex);
     const discordRoles = await resolveDiscordRoles(discord, guildId, discordUserId, env);
     members.push({
@@ -430,6 +446,7 @@ export async function gatherOverrideOnlyMembers(overrides, now, { seen = new Set
       username,
       derived: 'none',
       effective,
+      tier, // sow-185: keep the Content-Creator badge consistent with the Stripe-customer path + the Worker
       role: roleOf(githubId, overrides.roles),
       trialStartedAt: null,
       converted: false,
@@ -486,7 +503,7 @@ export async function gatherTargetedMember(stripe, overrides, now, githubId, { r
     return [];
   }
   const discordRoles = await resolveDiscordRoles(discord, env.DISCORD_GUILD_ID ?? null, customer.metadata?.discord_user_id ?? null, env);
-  return [memberEntryFor(customer, overrides, now, { repoIndex, discordRoles })];
+  return [memberEntryFor(customer, overrides, now, { repoIndex, discordRoles, priceTierMap: buildEnvPriceTierMap(env) })];
 }
 
 async function main() {
@@ -525,7 +542,10 @@ async function main() {
     }
   }
 
-  const actions = planReconcile({ members, repoIndex: repoIndex.byUsername, now });
+  // sow-185: only sync the Content-Creator badge once the owner has provisioned DISCORD_CREATOR_ROLE_ID.
+  // Until then the axis emits nothing (pre-provision every paid member resolves to creator via the inert price
+  // map, which would otherwise flood the plan with no-op creator adds that enactDiscord skips).
+  const actions = planReconcile({ members, repoIndex: repoIndex.byUsername, now, creatorRoleEnabled: !!env.DISCORD_CREATOR_ROLE_ID });
 
   console.log(`reconcile: ${members.length} membership customer(s), ${actions.length} action(s) planned.`);
   for (const action of actions) console.log('  ' + describe(action));
