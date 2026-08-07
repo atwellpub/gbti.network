@@ -1496,6 +1496,10 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    real reading column, so it applies even on the (unlikely) narrowed mouse-driven browser. */
 @media (hover: none) and (pointer: coarse) and (max-width: 560px), (max-width: 479px) {
   .pd-grid { grid-template-columns: 1fr; gap: 20px; padding: 22px 0 36px; }
+  /* The base [data-side="right"] rule (two attribute/class selectors) outranks this tier's plain .pd-grid
+     override on specificity alone, so without a matching-specificity override here it would win even
+     though this media query is active, silently keeping the two-column grid at phone width. */
+  .pd-grid[data-side="right"] { grid-template-columns: 1fr; }
   .pd-grid[data-side="right"] .pd-rail, .pd-grid[data-side="right"] .pd-col { order: 0; }
   .pd-col { max-width: none; }
   /* The rail becomes a horizontal strip above the body. The contents list goes with it: a table of contents

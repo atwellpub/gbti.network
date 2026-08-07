@@ -165,7 +165,7 @@ export const productSchema = z.object({
   video: z.string().optional(),
   links: contentLinks,
   // Mirrors src/content.config.ts. Which side the Contents rail renders on for this product's detail page.
-  sidebarPosition: z.enum(['left', 'right']).default('left'),
+  sidebarPosition: z.enum(['left', 'right']).default('right'),
   publishedAt: z.coerce.date().optional(),
   redirectFrom: z.array(z.string()).default([]),
 });

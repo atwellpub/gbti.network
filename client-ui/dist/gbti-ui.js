@@ -3041,7 +3041,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           { key: "left", name: "Left", desc: "Contents rail beside the left edge", shape: '<span class="gs-tile" style="flex:0 0 26%"></span><span class="gs-tile"></span>' },
           { key: "right", name: "Right", desc: "Contents rail beside the right edge", shape: '<span class="gs-tile"></span><span class="gs-tile" style="flex:0 0 26%"></span>' }
         ];
-        const cur = v || "left";
+        const cur = v || "right";
         const cardsHtml = cards.map((c) => `<button type="button" class="gs-card${c.key === cur ? " on" : ""}" data-gs="${c.key}">
         <span class="gs-shape">${c.shape}</span><span class="gs-name">${esc(c.name)}</span><span class="gs-desc">${esc(c.desc)}</span></button>`).join("");
         return wrap(`${label}<div class="gs-cards" data-gscards>${cardsHtml}<input data-key="${f.key}" data-kind="enum" type="hidden" value="${esc(cur)}" /></div>`);
