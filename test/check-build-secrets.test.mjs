@@ -253,3 +253,104 @@ test('SOW-136: a members-share FOLDED blurb (>- style) leaking into dist is caug
   assert.ok(errors.some((e) => /NON-public Share leaked into build output/.test(e)), errors.join('; '));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// sow-194: a `status: draft` content item is the unpublish state, so isListed excludes it from every public
+// listing. This guard asserts none reaches a dist `*-index.json`, a fail-closed backstop against a regression
+// that re-lists drafts. The draft set comes from buildRepoDraftsIndex (the same builder the Worker route reads).
+function writeDraftItem(root, rel, fm) {
+  const p = path.join(root, rel);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const front = Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n');
+  fs.writeFileSync(p, `---\n${front}\n---\nbody\n`);
+}
+
+test('sow-194: a repo draft listed by its path in a public index fails the build', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/alice/posts/my-wip/index.md', { title: 'My Work In Progress Post', status: 'draft', visibility: 'public' });
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [
+    { type: 'post', slug: 'my-wip', title: 'My Work In Progress Post', path: 'members/alice/posts/my-wip/index.md' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => /draft \(status:draft\) item is listed in a public index/.test(e)), errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: a repo draft listed by type+slug with NO path field still fails', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'house/prompts/secret-prompt/index.md', { title: 'A Secret Prompt Draft', status: 'draft' });
+  fs.writeFileSync(path.join(root, 'dist/prompts-index.json'), JSON.stringify({ items: [
+    { type: 'prompt', slug: 'secret-prompt' }, // the entry omits path; type+slug still identifies it
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => /draft \(status:draft\) item is listed in a public index/.test(e)), errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: a draft TITLE leaking into an index (entry reshaped, no path/slug match) is caught by the backstop', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/bob/posts/hidden/index.md', { title: 'An Unpublished Headline Only', status: 'draft' });
+  // the entry carries a different slug and no path, but the draft title text is present in the JSON
+  fs.writeFileSync(path.join(root, 'dist/activity-index.json'), JSON.stringify({ entries: [
+    { type: 'post', slug: 'something-else', headline: 'An Unpublished Headline Only' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => /draft title leaked into a public index/.test(e)), errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: a structural draft leak reports once (the title backstop does not double-report)', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/alice/posts/my-wip/index.md', { title: 'My Work In Progress Post', status: 'draft', visibility: 'public' });
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [
+    { type: 'post', slug: 'my-wip', title: 'My Work In Progress Post', path: 'members/alice/posts/my-wip/index.md' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  const draftErrors = errors.filter((e) => /sow-194/.test(e));
+  assert.equal(draftErrors.length, 1, 'one draft leak yields one error, not a structural + title pair: ' + draftErrors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: published items in the index pass while a repo draft stays correctly excluded (normal case)', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/alice/posts/my-wip/index.md', { title: 'My Work In Progress Post', status: 'draft', visibility: 'public' });
+  // the index lists ONLY a published item (the draft is correctly absent)
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [
+    { type: 'post', slug: 'shipped', title: 'A Fully Shipped Article', path: 'members/alice/posts/shipped/index.md' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, [], 'a repo draft correctly absent from the index must not trip the guard: ' + errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: a draft slug that is a substring of a published slug does NOT false-positive (exact type+slug)', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/alice/posts/ai/index.md', { title: 'AI', status: 'draft' }); // short title (<12), slug 'ai'
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [
+    { type: 'post', slug: 'ai-tools-roundup', title: 'A Roundup of AI Tools', path: 'members/bob/posts/ai-tools-roundup/index.md' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, [], 'an exact type+slug match must not fire on a substring: ' + errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: a published excerpt that merely MENTIONS a draft title (substring) does NOT false-positive', () => {
+  const root = tmpRoot();
+  writeDraftItem(root, 'members/alice/posts/wip/index.md', { title: 'An Unpublished Headline Only', status: 'draft' });
+  // a legitimately published entry whose excerpt quotes the draft title inside a longer sentence
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [
+    { type: 'post', slug: 'commentary', title: 'A Published Commentary', path: 'members/bob/posts/commentary/index.md',
+      excerpt: 'I disagree with the take in "An Unpublished Headline Only" and here is why.' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, [], 'exact-field-equality must not fire on a title mentioned inside a longer field: ' + errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('sow-194: fail CLOSED if the draft index cannot be enumerated (the builder throws)', () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'dist/blog-index.json'), JSON.stringify({ items: [{ type: 'post', slug: 'x', path: 'p' }] }));
+  const throwing = () => { throw new Error('boom reading the repo'); };
+  const { errors } = checkBuildSecrets({ root, env: {}, buildDrafts: throwing });
+  assert.ok(errors.some((e) => /could not enumerate repo drafts.*failing closed/.test(e)), errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});

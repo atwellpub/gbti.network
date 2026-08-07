@@ -9,9 +9,14 @@
 // SCOPE NOTE: the plaintext-beside-ciphertext check only catches a same-name sibling (<id> next to <id>.enc),
 // not an arbitrary plaintext copy committed elsewhere. The envelope-shape check additionally catches a
 // plaintext accidentally committed AS `<id>.enc`.
+//
+// sow-194 also folds in a no-draft-in-a-public-index check: a `status: draft` item is the UNPUBLISH state, so
+// isListed excludes it from every public listing. This guard asserts that invariant against the built dist as a
+// fail-closed backstop, so a future regression that re-lists drafts reds the build instead of publishing them.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildRepoDraftsIndex } from './lib/repo-drafts-index.mjs';
 
 function* walk(dir) {
   if (!fs.existsSync(dir)) return;
@@ -31,7 +36,7 @@ const BINARY = /\.(png|jpe?g|webp|avif|gif|ico|woff2?|ttf|eot|otf|pdf|wasm|mp4|w
  * Scan a repo root + its dist for leaked member-content key material and .enc hygiene problems. Pure over the
  * passed root/dist/env, so it is unit-testable. Returns { errors, notes }.
  */
-export function checkBuildSecrets({ root, distDir = path.join(root, 'dist'), env = process.env } = {}) {
+export function checkBuildSecrets({ root, distDir = path.join(root, 'dist'), env = process.env, buildDrafts = buildRepoDraftsIndex } = {}) {
   const errors = [];
   const notes = [];
 
@@ -179,6 +184,75 @@ export function checkBuildSecrets({ root, distDir = path.join(root, 'dist'), env
         for (const [needle, srcRel] of shareNeedles) {
           if (txt.includes(needle)) {
             errors.push(`a NON-public Share leaked into build output: text from ${srcRel} appears in ${path.relative(root, f)} — only published + visibility:public Shares may reach a public artifact. See SOW-018 (scoped by SOW-136).`);
+          }
+        }
+      }
+    }
+  }
+
+  // sow-194: NO `status: draft` content item may appear in a public build-time index JSON. A draft is the
+  // unpublish state, so isListed already excludes it (src/lib/content.ts:35); this is the fail-closed backstop
+  // against a regression that re-lists drafts, mirroring the Share leak scan above. The draft set comes from the
+  // SAME builder the Worker route reads (buildRepoDraftsIndex), so the guard and the served WorkBench listing
+  // agree on exactly what a draft is. Matched two ways: (1) structurally on the entry's `path` (exact) or
+  // `type`+`slug` (globally unique per type), catching the realistic regression with zero false positives; and
+  // (2) a shape-independent title backstop matching a draft title EXACTLY against any of the entry's string
+  // field values (so a reshaped entry that moved the title to another key is still caught, while a description
+  // that merely mentions the title is not, and JSON-escaped chars in the raw text cannot cause a silent miss).
+  // Scanned only over `*-index.json` (the public listing artifacts).
+  if (fs.existsSync(distDir)) {
+    let drafts = null;
+    try { drafts = buildDrafts(root); } catch (err) {
+      // Fail CLOSED: this guard cannot certify the build if it cannot enumerate the repo's drafts. Report it as
+      // a build error rather than passing vacuously (the whole point is to red a build that might list a draft).
+      errors.push(`could not enumerate repo drafts to verify none are listed (${err?.message || err}); failing closed. See sow-194.`);
+    }
+    if (drafts && drafts.length) {
+      const draftPaths = new Set(drafts.map((d) => d.path));
+      const draftTypeSlug = new Map(drafts.map((d) => [`${d.type}:${d.slug}`, d.path]));
+      const titleToSrc = new Map(); // an exact draft title (>=12 chars) -> its source path, for the backstop
+      for (const d of drafts) {
+        const t = typeof d.title === 'string' ? d.title.trim() : '';
+        if (t.length >= 12) titleToSrc.set(t, d.path);
+      }
+      // Parse each public index once; keep the entries array (items | entries) alongside its path.
+      const indexFiles = [];
+      for (const f of walk(distDir)) {
+        if (!/-index\.json$/i.test(path.basename(f))) continue; // only the public listing artifacts
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { continue; } // a malformed index is caught elsewhere
+        const entries = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed?.entries) ? parsed.entries : [];
+        indexFiles.push({ rel: path.relative(root, f), entries });
+      }
+      const flagged = new Set(); // draft paths already reported (so the title backstop does not double-report)
+      // Pass 1: structural. An entry pointing at a draft by its exact path, or by its (type, slug), is a leak.
+      for (const { rel, entries } of indexFiles) {
+        for (const e of entries) {
+          if (!e || typeof e !== 'object') continue;
+          const hit = (typeof e.path === 'string' && draftPaths.has(e.path)) ? e.path
+            : (typeof e.slug === 'string' && typeof e.type === 'string' && draftTypeSlug.has(`${e.type}:${e.slug}`))
+              ? draftTypeSlug.get(`${e.type}:${e.slug}`)
+              : null;
+          if (hit) {
+            flagged.add(hit);
+            errors.push(`a draft (status:draft) item is listed in a public index: ${hit} in ${rel}. Drafts must never reach a public listing (isListed excludes them). See sow-194.`);
+          }
+        }
+      }
+      // Pass 2: the shape-independent title backstop. Any string field of any entry that EXACTLY equals a draft
+      // title (trimmed) is a leak the structural pass missed (the entry moved path/slug to unknown keys).
+      if (titleToSrc.size) {
+        for (const { rel, entries } of indexFiles) {
+          for (const e of entries) {
+            if (!e || typeof e !== 'object') continue;
+            for (const v of Object.values(e)) {
+              if (typeof v !== 'string') continue;
+              const src = titleToSrc.get(v.trim());
+              if (src && !flagged.has(src)) {
+                flagged.add(src);
+                errors.push(`a draft title leaked into a public index: the title of ${src} appears as an entry field in ${rel}. Drafts must never reach a public listing. See sow-194.`);
+              }
+            }
           }
         }
       }
