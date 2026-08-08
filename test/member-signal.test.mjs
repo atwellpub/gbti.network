@@ -38,6 +38,14 @@ test('memberSignalFromStatus falls back to status + member for an older Worker (
   const s = memberSignalFromStatus({ ok: true, login: 'a', status: 'paid' });
   assert.equal(s.membership, 'paid');
   assert.equal(s.role, 'member');
+  assert.equal(s.paidTier, 'none'); // sow-185: an older Worker sends no paidTier -> fail-closed to none
+});
+
+test('sow-185: memberSignalFromStatus surfaces the resolved paid tier (fail-closed to none)', () => {
+  assert.equal(memberSignalFromStatus({ ok: true, login: 'a', status: 'paid', paidTier: 'creator' }).paidTier, 'creator');
+  assert.equal(memberSignalFromStatus({ ok: true, login: 'a', status: 'paid', paidTier: 'member' }).paidTier, 'member');
+  assert.equal(memberSignalFromStatus({ ok: true, login: 'a', status: 'none', paidTier: 'none' }).paidTier, 'none');
+  assert.equal(memberSignalFromStatus({ ok: true, login: 'a', status: 'paid', paidTier: 5 }).paidTier, 'none'); // non-string -> none
 });
 
 test('memberSignalFromStatus returns null for a non-member payload', () => {

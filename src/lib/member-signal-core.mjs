@@ -23,6 +23,9 @@ export function memberSignalFromStatus(payload) {
     username: String(payload.login),
     role: typeof payload.role === 'string' && payload.role ? payload.role : 'member',
     membership,
+    // sow-185: the resolved paid TIER (none|member|creator) the Worker now folds server-side. Fail closed to
+    // 'none' for an older Worker that does not send it, so a creator gate keyed on this never opens by default.
+    paidTier: typeof payload.paidTier === 'string' ? payload.paidTier : 'none',
     canPublish: membership === 'paid',
     source: 'cookie',
   };

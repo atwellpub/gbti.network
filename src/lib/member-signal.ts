@@ -18,6 +18,7 @@ export interface MemberSignal {
   username: string | null;
   role: string;
   membership: string;
+  paidTier: string; // sow-185: the resolved paid tier ('none' | 'member' | 'creator'); fail-closed to 'none'
   canPublish: boolean;
   source?: 'cookie' | 'extension'; // sow-158 Phase 2: which producer set it (the cookie session wins over the extension)
 }
@@ -35,6 +36,7 @@ function coerce(o: unknown): MemberSignal | null {
     username: str(r.username),
     role: typeof r.role === 'string' ? r.role : 'member',
     membership: typeof r.membership === 'string' ? r.membership : 'unknown',
+    paidTier: typeof r.paidTier === 'string' ? r.paidTier : 'none', // sow-185: fail-closed to 'none'
     canPublish: r.canPublish === true,
     source: 'extension', // sow-158 Phase 2: the attribute/event path is the extension signal (display-only)
   };
@@ -86,6 +88,11 @@ export function applyMemberSignalClasses(s: MemberSignal | null): void {
   el.classList.toggle('is-gbti-paid', s?.membership === 'paid');
   // SOW-050: an ACTIVE member is paid OR on trial (both are "members" for whom the Join CTA is irrelevant).
   el.classList.toggle('is-gbti-member-active', s?.membership === 'paid' || s?.membership === 'trialing');
+  // sow-185: the resolved paid TIER, for a creator-only gate (the composer bar, Member-vs-Creator UI). A
+  // superadmin / staff already resolves to 'creator' server-side, so this hook includes them. Presentation only.
+  el.classList.toggle('is-gbti-creator', s?.paidTier === 'creator');
+  if (s && s.paidTier) el.dataset.gbtiTier = s.paidTier;
+  else delete el.dataset.gbtiTier;
   if (s && s.role) el.dataset.gbtiRole = s.role;
   else delete el.dataset.gbtiRole;
 }

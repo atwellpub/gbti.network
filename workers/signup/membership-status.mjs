@@ -9,13 +9,15 @@
 
 import { githubFetchUser } from './oauth.mjs';
 import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 1b: bearer-or-cookie identity
-import { deriveStatus } from '../../membership/derive-status.mjs';
+import { deriveMembership } from '../../membership/derive-status.mjs'; // sow-185: { status, tier } (status == old deriveStatus)
 import { createStripeClient } from '../../clients/stripe.mjs';
-import { rolesFromParsed, roleOf, curatorsFromParsed, isCurator, canCurateNews, grandfathersFromParsed } from '../../membership/overrides-core.mjs';
+import { rolesFromParsed, roleOf, curatorsFromParsed, isCurator, canCurateNews, grandfathersFromParsed, effectiveStatus as effectiveStatusOf } from '../../membership/overrides-core.mjs';
 import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs';
 import { recordUsage } from './analytics.mjs'; // SOW-061: usage analytics seam
 import { readCouponGrant } from './coupons.mjs'; // SOW-119: the coupon fast-path grant
 import { usageBucket, overridesFromMirror } from '../../membership/usage-bucket.mjs'; // SOW-061: effective tier bucket
+import { buildEnvPriceTierMap, resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware paid tier
+import { TIER, meetsTier, isTier } from '../../membership/tiers.mjs'; // sow-185: the paid-tier axis (none < member < creator)
 
 // SOW-046 C: best-effort read of the caller's NEWS-CURATOR capability from the KV overrides mirror. Used ONLY to
 // hint the client UI (show the "Add to Discord" action); the Worker re-checks server-side on every publish, so a
@@ -55,9 +57,14 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
   if (!env?.STRIPE_SECRET_KEY) return { status: 500, body: { error: 'misconfigured', message: 'Stripe is not configured' } };
   const stripe = makeStripe({ apiKey: env.STRIPE_SECRET_KEY, fetch: fetchImpl });
 
-  // deriveStatus already fails closed to 'none' on any lookup error, so a Stripe outage never default-opens.
-  let status = await deriveStatus(githubId, stripe);
-  const stripePaid = status === 'paid';
+  // deriveMembership fails closed to { status: 'none', tier: 'none' } on any lookup error, so a Stripe outage
+  // never default-opens. `derivedStatus` is IDENTICAL to the old deriveStatus (every existing line is unchanged);
+  // sow-185 additionally reads `stripeTier` (the paid tier from the subscription's price via the env price map,
+  // which is INERT / all-creator until the owner maps the $5 member price). derivedStatus stays the PRE-coupon
+  // value, used below for the tier's effective-source computation.
+  const { status: derivedStatus, tier: stripeTier } = await deriveMembership(githubId, stripe, { priceTierMap: buildEnvPriceTierMap(env), now });
+  let status = derivedStatus;
+  const stripePaid = derivedStatus === 'paid';
   // SOW-119: the coupon fast-path. A fresh redemption reports as paid so the client unlocks immediately
   // (the durable git grant lands at the next reconcile). The client still folds its own overrides on top,
   // so a ban keeps outranking this exactly as it outranks a real subscription.
@@ -88,6 +95,23 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
   const overrides = overridesFromMirror(mirror);
   const effectiveStatus = usageBucket(status, { githubId, overrides, now });
   const role = roleOf(githubId, overrides?.roles ?? new Map());
+  // sow-185: resolve the paid TIER (none|member|creator) with the SAME rules the gate's authorizeCreator uses
+  // (membership-content resolveEffective), so the client never shows a creator perk the server denies. This is
+  // the BILLING axis, NOT the SOW-061 usageBucket above (which reuses the word "tier" for the analytics cohort).
+  // Fail closed to none: an unresolvable source resolves to none, and NO fresh mirror -> none (the gate DENIES
+  // creator on a stale/absent mirror, so the UI must not offer it either). effectiveStatusOf uses the PRE-coupon
+  // derivedStatus for the source, exactly as resolveEffective does.
+  let paidTier = TIER.none;
+  if (overrides) {
+    const eff = effectiveStatusOf(githubId, derivedStatus, overrides, now); // { status, source }
+    const gfGrant = overrides.grandfathers.get(String(githubId));
+    paidTier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant: gfGrant });
+    // A fresh coupon is the free-year full membership -> creator, guarded exactly as resolveEffective: only when
+    // the pre-coupon effective status is neither paid (nothing to add) nor banned (a ban outranks a coupon).
+    if (couponUntil && eff.status !== 'paid' && eff.status !== 'banned' && !meetsTier(paidTier, TIER.creator)) {
+      paidTier = TIER.creator;
+    }
+  }
   recordUsage(env, { tier: effectiveStatus, event: 'status_check', request });
-  return { status: 200, body: { ok: true, github_id: githubId, login: login || null, status, effectiveStatus, role, canCurate, couponUntil } };
+  return { status: 200, body: { ok: true, github_id: githubId, login: login || null, status, effectiveStatus, role, canCurate, couponUntil, paidTier } };
 }
