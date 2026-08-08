@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createGithubReader } from '../extension/src/github-reader.mjs';
+import { createGithubReader } from '../client/src/github-reader.mjs';
 
 const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 const fileRes = (text) => ({ ok: true, json: async () => ({ type: 'file', content: b64(text) }) });

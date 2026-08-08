@@ -17527,7 +17527,7 @@ function isReadablePath(path) {
   return typeof path === "string" && !path.includes("..") && !path.includes("\\") && READ_PATH_RE.test(path);
 }
 
-// extension/src/github-reader.mjs
+// client/src/github-reader.mjs
 var SUBDIR2 = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var TYPES = ["post", "product", "prompt", "profile"];
 var SHARE_PATH = /^members\/[^/]+\/shares\/[^/]+\.(md|mdx)$/;
@@ -19311,6 +19311,10 @@ async function listContent(ctx, { type, scope = "member" } = {}) {
     return { items: await ctx.reader.list(null, type || void 0, "house") };
   }
   return { items: await ctx.reader.list(id.username, type || void 0, "member") };
+}
+async function listMembersOnly(ctx) {
+  requireIdentity(ctx);
+  return { items: await ctx.reader.listMembersOnly() ?? [] };
 }
 async function listShares(ctx, { limit } = {}) {
   requireIdentity(ctx);
@@ -22711,7 +22715,7 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
         return ok(await readContent(ctx, { path: query.path }));
       // shared op (parity with the npm host /api/read)
       case "/api/members-content":
-        return ok({ items: await ctx.reader.listMembersOnly() });
+        return ok(await listMembersOnly(ctx));
       case "/api/form-fields":
         return ok({ fields: fieldsFor(query.type) ?? [] });
       case "/api/preview":

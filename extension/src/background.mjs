@@ -7,7 +7,7 @@ import { createExtStore } from './ext-store.mjs';
 import { buildExtContext, UPSTREAM } from './ext-context.mjs';
 import { dispatch, computeRole } from './ext-dispatch.mjs';
 import { devlog } from './devlog.mjs';
-import { createGithubReader } from './github-reader.mjs';
+import { createGithubReader } from '../../client/src/github-reader.mjs';
 import { deviceFlowLogin } from '../../client/src/auth-device.mjs';
 import { createRepoClient } from '../../client/src/github-repo.mjs';
 import { resolveMembership } from '../../client/src/membership.mjs';

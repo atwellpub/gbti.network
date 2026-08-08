@@ -10,7 +10,7 @@ import path from 'node:path';
 import { shareSummary, byShareNewest, commentSummary, byCommentOldest } from '../client/src/content-ops.mjs';
 import { listShares, listShareComments, listComments, OperationError } from '../client/src/operations.mjs';
 import { createReader } from '../client/src/repo-fs.mjs';
-import { createGithubReader } from '../extension/src/github-reader.mjs';
+import { createGithubReader } from '../client/src/github-reader.mjs';
 
 // SOW-078: the list ops now tier-filter member-visibility stubs, so the ctx carries the caller's membership
 // (defaults to 'paid' = sees everything, matching the prior behavior the existing tests assert).

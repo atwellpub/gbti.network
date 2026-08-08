@@ -17287,6 +17287,19 @@ var MemberContentLockedError = class extends Error {
   }
 };
 var base = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+async function decryptViaWorker({ envelope, token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
+  const res = await fetch(base(signupBase) + "/membership/decrypt", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify(envelope)
+  });
+  if (res.status === 401 || res.status === 403) throw new MemberContentLockedError();
+  if (!res.ok) throw new Error("decrypt failed (" + res.status + ")");
+  const data = await res.json();
+  if (!data || data.ok !== true || typeof data.text !== "string") throw new Error("decrypt: malformed response");
+  return data.text;
+}
 async function encryptViaWorker({ plaintext, assetId, token, signupBase, fetch = globalThis.fetch }) {
   if (!token || !signupBase) throw new MemberContentLockedError("not signed in");
   const res = await fetch(base(signupBase) + "/membership/encrypt", {
@@ -17830,6 +17843,188 @@ function createStager(repoPath) {
   };
 }
 
+// client/src/github-reader.mjs
+var SUBDIR3 = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
+var TYPES2 = ["post", "product", "prompt", "profile"];
+var SHARE_PATH = /^members\/[^/]+\/shares\/[^/]+\.(md|mdx)$/;
+var COMMENT_PATH = /^(members\/[^/]+|house)\/comments\/[^/]+\.(md|mdx)$/;
+var basename = (p) => p.slice(p.lastIndexOf("/") + 1);
+function decodeBase64Utf8(b64) {
+  const clean = String(b64 || "").replace(/\s/g, "");
+  const bytes = Uint8Array.from(atob(clean), (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+function safeRel2(relPath) {
+  return typeof relPath === "string" && relPath.length > 0 && !relPath.includes("..") && !relPath.includes("\\") && !relPath.startsWith("/");
+}
+function createGithubReader({ upstream, token, ref = "HEAD", fetch = globalThis.fetch, onAuthError, devlog = () => {
+} } = {}) {
+  const [owner, repo] = String(upstream || "").split("/");
+  const headers = { Accept: "application/vnd.github+json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let signaled = false;
+  async function ghFetch(url2) {
+    const res = await fetch(url2, { headers });
+    if (!res.ok) devlog("reader", "github read not ok", { status: res.status, url: url2, hadToken: !!token });
+    if (res.status === 401 && token && onAuthError && !signaled) {
+      signaled = true;
+      devlog("reader", "onAuthError: token rejected, clearing session", { url: url2 });
+      try {
+        onAuthError();
+      } catch {
+      }
+    }
+    return res;
+  }
+  async function contents(relPath) {
+    const url2 = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURI(relPath)}?ref=${encodeURIComponent(ref)}`;
+    const res = await ghFetch(url2);
+    if (!res.ok) return null;
+    return res.json();
+  }
+  async function tree() {
+    const url2 = `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
+    const res = await ghFetch(url2);
+    if (!res.ok) return null;
+    return res.json();
+  }
+  async function readFile(relPath) {
+    if (!owner || !repo || !safeRel2(relPath)) return null;
+    const j = await contents(relPath);
+    if (!j || Array.isArray(j) || j.type !== "file" || typeof j.content !== "string") return null;
+    return decodeBase64Utf8(j.content);
+  }
+  async function get(username, relPath) {
+    if (!username || typeof relPath !== "string") return null;
+    if (relPath.includes("..") || relPath.includes("\\") || !relPath.startsWith(`members/${username}/`)) return null;
+    const text = await readFile(relPath);
+    if (text == null) return null;
+    const { frontmatter, body } = parseContentFile(text);
+    return { path: relPath, frontmatter, body };
+  }
+  function summarize(relPath, frontmatter) {
+    const pubMs = frontmatter.publishedAt ? new Date(frontmatter.publishedAt).getTime() : NaN;
+    const updMs = frontmatter.updatedAt ? new Date(frontmatter.updatedAt).getTime() : NaN;
+    return {
+      path: relPath,
+      type: frontmatter.type ?? null,
+      title: frontmatter.title ?? frontmatter.displayName ?? relPath,
+      slug: frontmatter.slug ?? null,
+      status: frontmatter.status ?? null,
+      visibility: frontmatter.visibility ?? null,
+      publishedAt: Number.isFinite(pubMs) ? pubMs : null,
+      updatedAt: Number.isFinite(updMs) ? updMs : null
+    };
+  }
+  async function listType(username, type, scope = "member") {
+    const houseScope = scope === "house";
+    if (type === "profile") {
+      if (houseScope) return [];
+      const rel = `members/${username}/profile.md`;
+      const text = await readFile(rel);
+      if (text == null) return [];
+      return [summarize(rel, parseContentFile(text).frontmatter)];
+    }
+    const sub = SUBDIR3[type];
+    if (!sub) return [];
+    const base2 = houseScope ? `house/${sub}` : `members/${username}/${sub}`;
+    const dir = await contents(base2);
+    if (!Array.isArray(dir)) return [];
+    const out = [];
+    for (const entry of dir) {
+      if (entry.type !== "dir") continue;
+      const rel = `${base2}/${entry.name}/index.md`;
+      const text = await readFile(rel);
+      if (text != null) out.push(summarize(rel, parseContentFile(text).frontmatter));
+    }
+    return out;
+  }
+  return {
+    readFile,
+    get,
+    // SOW-031: read ANY member's or house's PUBLISHED content index.md for the in-extension reader. Unlike
+    // get() (own-folder-scoped for editing), this is read-only over the public repo, gated by a strict
+    // allowlist (only posts/products/prompts index.md, no traversal, no roles.yml / house/pages) so the member
+    // token cannot become a general file-exfil oracle. Member-only BODIES are not here: the public teaser comes
+    // back as `body`, and frontmatter.encryptedBody points at the .enc the reader decrypts via the Worker.
+    async read(relPath) {
+      if (!isReadablePath(relPath)) return null;
+      const text = await readFile(relPath);
+      if (text == null) return null;
+      const { frontmatter, body } = parseContentFile(text);
+      return { path: relPath, frontmatter, body };
+    },
+    async list(username, type, scope = "member") {
+      if (scope !== "house" && !username) return [];
+      if (type) return listType(username, type, scope);
+      const all = [];
+      for (const t of TYPES2) all.push(...await listType(username, t, scope));
+      return all;
+    },
+    /** Browsing ALL members-only content over the Contents API is too many calls for the live overlay; the npm
+     * host portal (local working copy) is the surface for that. Deferred: returns []. */
+    async listMembersOnly() {
+      return [];
+    },
+    /**
+     * SOW-018: list PUBLISHED Shares across ALL members for the extension Shares feed. ONE recursive Git Trees
+     * call enumerates every members/<u>/shares/<id>.md path; because the Share id is a timestamp-slug, sorting
+     * by the FILENAME yields newest-first, so we read only the newest `limit` files (bounded API calls), filter
+     * drafts, and re-sort by createdAt. A members Share's plaintext is NOT read here (the stub body is empty;
+     * its .enc is decrypted client-side via the Worker).
+     */
+    async listShares(limit = 40) {
+      if (!owner || !repo) return [];
+      const t = await tree();
+      if (!t || !Array.isArray(t.tree)) return [];
+      const paths = t.tree.filter((e) => e && e.type === "blob" && typeof e.path === "string" && SHARE_PATH.test(e.path)).map((e) => e.path).sort((a, b) => basename(b).localeCompare(basename(a)));
+      const cap = Math.max(0, limit);
+      const out = [];
+      for (const rel of paths) {
+        if (out.length >= cap) break;
+        const text = await readFile(rel);
+        if (text == null) continue;
+        const { frontmatter, body } = parseContentFile(text);
+        if ((frontmatter?.status ?? "published") !== "published") continue;
+        out.push(shareSummary(rel, frontmatter, body));
+      }
+      out.sort(byShareNewest);
+      return out.slice(0, cap);
+    },
+    /**
+     * SOW-032: list PUBLISHED comments for a Share's discussion. ONE recursive Git Trees call enumerates every
+     * members/<u>/comments/<id>.md + house/comments/<id>.md; we read the newest `limit` by filename (timestamp
+     * stem -> newest first), keep published `targetType:'share'` comments whose targetSlug matches, and return
+     * them OLDEST-first (a conversation reads top-down). A members comment's plaintext is NOT read here; its .enc
+     * is decrypted client-side via the Worker, exactly like a members Share body.
+     */
+    // SOW-041: the generic comment-thread reader for ANY content type; listShareComments is a thin alias.
+    async listShareComments(targetSlug, limit = 100) {
+      return this.listComments("share", targetSlug, limit);
+    },
+    async listComments(targetType, targetSlug, limit = 100, aliases = []) {
+      if (!owner || !repo || !targetType || !targetSlug) return [];
+      const slugs = /* @__PURE__ */ new Set([targetSlug, ...Array.isArray(aliases) ? aliases : []]);
+      const t = await tree();
+      if (!t || !Array.isArray(t.tree)) return [];
+      const paths = t.tree.filter((e) => e && e.type === "blob" && typeof e.path === "string" && COMMENT_PATH.test(e.path)).map((e) => e.path).sort((a, b) => basename(b).localeCompare(basename(a)));
+      const cap = Math.max(0, limit);
+      const out = [];
+      for (const rel of paths) {
+        if (out.length >= cap) break;
+        const text = await readFile(rel);
+        if (text == null) continue;
+        const { frontmatter, body } = parseContentFile(text);
+        if ((frontmatter?.status ?? "published") !== "published") continue;
+        if (frontmatter?.targetType !== targetType || !slugs.has(frontmatter?.targetSlug)) continue;
+        out.push(commentSummary(rel, frontmatter, body));
+      }
+      out.sort(byCommentOldest);
+      return out.slice(0, cap);
+    }
+  };
+}
+
 // client/src/signup-base.mjs
 var SIGNUP_BASE = globalThis.process?.env?.GBTI_SIGNUP_BASE || "https://signup.gbti.network";
 var GITHUB_CLIENT_ID = globalThis.process?.env?.GBTI_GITHUB_CLIENT_ID || "Ov23limR5x7taIm33sTY";
@@ -18356,7 +18551,7 @@ var UPSTREAM = process.env.GBTI_UPSTREAM || "gbti-network/gbti.network";
 var npmDevlog = createDevlog({ enabled: () => !!process.env.GBTI_DEVLOG, sink: console });
 function buildContext(store) {
   const repoPath = store.get("repoPath");
-  const reader = createReader(repoPath);
+  const reader = repoPath ? createReader(repoPath) : createGithubReader({ upstream: UPSTREAM, token: store.get("githubToken"), devlog: npmDevlog });
   let membershipFlight = null;
   return {
     store,
@@ -18628,8 +18823,14 @@ async function call2(method, body, { token, signupBase, fetch = globalThis.fetch
   if (!res.ok) throw new DraftsClientError(data?.message || data?.error || `drafts request failed (${res.status})`);
   return data;
 }
+async function workerListDrafts(opts) {
+  return call2("GET", null, opts);
+}
 async function workerPutDraft({ draft, ...opts }) {
   return call2("POST", { op: "put", draft }, opts);
+}
+async function workerDeleteDraft({ type, slug, ...opts }) {
+  return call2("POST", { op: "delete", type, slug }, opts);
 }
 
 // membership/overrides-core.mjs
@@ -18836,12 +19037,12 @@ function validateContent(ctx2, { type, input, body } = {}) {
     return { valid: false, error: err.message };
   }
 }
-async function authorContent(ctx2, { type, input, body, status, message, title, prBody, authorNote } = {}) {
+async function authorContent(ctx2, { type, input, body, status, message, title, prBody, authorNote, path: path4, scope } = {}) {
   if (status !== "draft" && status !== "published") {
     throw new OperationError("status-required", 'Specify status: "published" to publish (merge and go live on the network) or "draft" to stage on your fork for review before publishing.');
   }
-  if (status === "draft") return saveDraft(ctx2, { type, input, body, message });
-  return publish(ctx2, { type, input, body, message, title, prBody, authorNote });
+  if (status === "draft") return saveDraft(ctx2, { type, input, body, message, path: path4 });
+  return publish(ctx2, { type, input, body, message, title, prBody, authorNote, path: path4, scope });
 }
 var RENAME_URL_BASE = { post: "/articles", product: "/products", prompt: "/prompts" };
 function renameOriginOf({ path: path4, username, type }) {
@@ -19100,6 +19301,11 @@ async function planMemberFiles({ built, body, encrypt }) {
     assetId
   };
 }
+function draftMetaFromBranch(branch) {
+  if (branch === "gbti/profile") return { type: "profile", slug: null };
+  const m = String(branch || "").match(/^gbti\/(post|product|prompt)-(.+)$/);
+  return m ? { type: m[1], slug: m[2] } : null;
+}
 async function saveDraft(ctx2, { type, input, body, message, path: path4 } = {}) {
   const id = requireIdentity(ctx2);
   const repo = requireRepo(ctx2);
@@ -19154,6 +19360,267 @@ async function saveDraft(ctx2, { type, input, body, message, path: path4 } = {})
   await syncForkIfCreatingBranch(ctx2, repo, branch);
   await commitToBranchOnFork({ repo, branch, files, message: message ?? `Draft: ${built.slug ?? built.type}` });
   return { ok: true, branch, type: built.type, slug: built.slug ?? null, path: staging ? staging.oldPath : built.path, state: "staged", ...staging ? { renamed: { from: staging.oldSlug, to: built.slug } } : {} };
+}
+async function forkContentMatchesLive(ctx2, path4, forkText) {
+  try {
+    const staged = parseContentFile(forkText);
+    if (staged.frontmatter?.encryptedBody) return false;
+    const live = await ctx2.reader?.read?.(path4);
+    if (!live) return false;
+    return String(staged.body ?? "").trim() === String(live.body ?? "").trim() && JSON.stringify(staged.frontmatter ?? {}) === JSON.stringify(live.frontmatter ?? {});
+  } catch {
+    return false;
+  }
+}
+async function listDrafts(ctx2, { type } = {}) {
+  const id = requireIdentity(ctx2);
+  if (isHostedCtx(ctx2)) {
+    const opts = { token: ctx2.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const drafts2 = [];
+    for (const r of recs ?? []) {
+      if (type && r.type !== type) continue;
+      let valid = true;
+      let invalidReason = null;
+      try {
+        buildContentFile({ type: r.type, username: id.username, input: r.frontmatter ?? {}, body: r.body ?? "" });
+      } catch (err) {
+        valid = false;
+        invalidReason = err?.message || "this draft no longer matches the current schema";
+      }
+      let rowPath = r.path;
+      if (!rowPath) {
+        try {
+          rowPath = contentPath(r.type, id.username, r.slug);
+        } catch {
+          rowPath = null;
+        }
+      }
+      drafts2.push({
+        type: r.type,
+        slug: r.slug,
+        branch: branchName(r.type, r.slug),
+        path: rowPath,
+        pendingSlug: r.pendingSlug ?? null,
+        title: r.frontmatter?.title || r.frontmatter?.displayName || r.slug || r.type,
+        visibility: r.frontmatter?.visibility || "public",
+        status: r.frontmatter?.status || "draft",
+        valid,
+        invalidReason,
+        pull: null
+      });
+    }
+    return { drafts: drafts2 };
+  }
+  const repo = requireRepo(ctx2);
+  const fork = await repo.ensureFork();
+  const refs = await repo.listMatchingRefs(fork.full_name, "gbti/");
+  const drafts = [];
+  for (const { branch, sha } of refs) {
+    const meta3 = draftMetaFromBranch(branch);
+    if (!meta3) continue;
+    if (type && meta3.type !== type) continue;
+    let path4;
+    try {
+      path4 = contentPath(meta3.type, id.username, meta3.slug);
+    } catch {
+      continue;
+    }
+    let text = null;
+    try {
+      text = await repo.getForkFileContent(fork.full_name, path4, sha || branch);
+    } catch {
+      text = null;
+    }
+    if (!text) continue;
+    let fm = {};
+    let draftBody = "";
+    try {
+      const parsed = parseContentFile(text);
+      fm = parsed.frontmatter ?? {};
+      draftBody = parsed.body ?? "";
+    } catch {
+      fm = {};
+    }
+    let valid = true;
+    let invalidReason = null;
+    try {
+      buildContentFile({ type: meta3.type, username: id.username, input: fm, body: draftBody });
+    } catch (err) {
+      valid = false;
+      invalidReason = err?.message || "this draft no longer matches the current schema";
+    }
+    let pull = null;
+    try {
+      pull = await repo.findOpenPull({ head: `${fork.owner}:${branch}` });
+    } catch {
+      pull = null;
+    }
+    if (!pull && await forkContentMatchesLive(ctx2, path4, text)) {
+      try {
+        await repo.deleteBranch(fork.full_name, branch);
+      } catch {
+      }
+      continue;
+    }
+    drafts.push({
+      type: meta3.type,
+      slug: meta3.slug,
+      branch,
+      path: path4,
+      // SOW-112 v2: a frontmatter slug that differs from the branch identity is a PENDING RENAME (it applies
+      // when the draft publishes). Surfaced so same-titled drafts are tellable apart in the Drafts tab.
+      pendingSlug: typeof fm.slug === "string" && fm.slug !== meta3.slug ? fm.slug : null,
+      title: fm.title || fm.displayName || meta3.slug || meta3.type,
+      visibility: fm.visibility || "public",
+      status: fm.status || "draft",
+      valid,
+      invalidReason,
+      pull: pull ? { number: pull.number, html_url: pull.html_url } : null
+    });
+  }
+  return { drafts };
+}
+async function readDraft(ctx2, { type, slug } = {}) {
+  const id = requireIdentity(ctx2);
+  if (!type) throw new OperationError("bad-request", "type is required");
+  if (isHostedCtx(ctx2)) {
+    const opts = { token: ctx2.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const rec = (recs ?? []).find((r) => r.type === type && r.slug === slug);
+    if (!rec) throw new OperationError("not-found", "no such draft");
+    let recPath = rec.path;
+    if (!recPath) {
+      try {
+        recPath = contentPath(type, id.username, slug);
+      } catch {
+        recPath = null;
+      }
+    }
+    return { path: recPath, branch: branchName(type, slug), frontmatter: rec.frontmatter ?? {}, body: rec.body ?? "" };
+  }
+  const repo = requireRepo(ctx2);
+  const branch = branchName(type, slug);
+  const fork = await repo.ensureFork();
+  let path4;
+  try {
+    path4 = contentPath(type, id.username, slug);
+  } catch (err) {
+    throw new OperationError("bad-request", err.message);
+  }
+  const text = await repo.getForkFileContent(fork.full_name, path4, branch);
+  if (!text) throw new OperationError("not-found", "no such draft on your fork");
+  const { frontmatter, body } = parseContentFile(text);
+  if (frontmatter?.encryptedBody) {
+    try {
+      const { text: plain } = await decryptMemberAsset(ctx2, { encPath: frontmatter.encryptedBody });
+      return { path: path4, branch, frontmatter, body: plain };
+    } catch {
+    }
+  }
+  return { path: path4, branch, frontmatter, body };
+}
+async function discardDraft(ctx2, { type, slug } = {}) {
+  requireIdentity(ctx2);
+  if (!type) throw new OperationError("bad-request", "type is required");
+  if (isHostedCtx(ctx2)) {
+    await workerDeleteDraft({ type, slug, token: ctx2.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch });
+    return { ok: true, branch: branchName(type, slug), hosted: true };
+  }
+  const repo = requireRepo(ctx2);
+  const branch = branchName(type, slug);
+  const fork = await repo.ensureFork();
+  let pull = null;
+  try {
+    pull = await repo.findOpenPull({ head: `${fork.owner}:${branch}` });
+  } catch {
+    pull = null;
+  }
+  if (pull) throw new OperationError("bad-request", "This draft has an open pull request; withdraw it from review before discarding.", { prNumber: pull.number });
+  try {
+    await repo.deleteBranch(fork.full_name, branch);
+  } catch (err) {
+    const still = await repo.getBranchSha(fork.full_name, branch).catch(() => null);
+    if (still) throw err;
+    return { ok: true, branch, alreadyGone: true };
+  }
+  return { ok: true, branch };
+}
+async function publishDraft(ctx2, { type, slug, title, prBody } = {}) {
+  const id = requireIdentity(ctx2);
+  const repo = requireRepo(ctx2);
+  const membership = await membershipOf(ctx2);
+  if (isBlockedFromPublishing(membership)) {
+    throw new OperationError("membership-required", "Publishing on gbti.network requires a paid membership. Your draft is saved on your own fork. Upgrade to a paid membership at https://gbti.network, and your client publishes your staged drafts.", { membership });
+  }
+  if (isHostedCtx(ctx2)) {
+    const opts = { token: ctx2.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch };
+    const { drafts: recs } = await workerListDrafts(opts);
+    const rec = (recs ?? []).find((r2) => r2.type === type && r2.slug === slug);
+    if (!rec) throw new OperationError("not-found", "no such draft");
+    const r = await publish(ctx2, {
+      type,
+      input: rec.frontmatter ?? {},
+      body: rec.body ?? "",
+      title,
+      prBody,
+      ...rec.pendingSlug && rec.path ? { path: rec.path } : {}
+      // a pending rename applies at the publish event (SOW-112)
+    });
+    try {
+      await workerDeleteDraft({ type, slug, ...opts });
+    } catch {
+    }
+    return { ...r, ok: true, hosted: true };
+  }
+  const branch = branchName(type, slug);
+  const fork = await repo.ensureFork();
+  const head = `${fork.owner}:${branch}`;
+  const existing = await repo.findOpenPull({ head });
+  if (existing) return { prNumber: existing.number, prUrl: existing.html_url, branch, updated: true };
+  if (type !== "profile") {
+    const oldPath = contentPath(type, id.username, slug);
+    const text = await repo.getForkFileContent(fork.full_name, oldPath, branch).catch(() => null);
+    if (text != null) {
+      const parsed = parseContentFile(text);
+      const fm = parsed.frontmatter ?? {};
+      if (typeof fm.slug === "string" && fm.slug !== slug) {
+        return publish(ctx2, { type, input: { ...fm, status: "published" }, body: parsed.body, path: oldPath, title, prBody });
+      }
+    }
+  }
+  const base2 = await repo.getDefaultBranch(repo.upstream);
+  const titleText = title ?? (type === "profile" ? `Update ${id.username}'s profile` : `${type}: ${slug}`);
+  const pull = await repo.openPull({ title: titleText, head, base: base2, body: prBody ?? "" });
+  return { prNumber: pull.number, prUrl: pull.html_url, branch, updated: false };
+}
+var ENC_PATH_RE = /^(members\/[a-z0-9][a-z0-9-]*|house)\/_enc\/[a-z0-9][a-z0-9._-]*\.enc$/;
+async function decryptMemberAsset(ctx2, { encPath } = {}) {
+  requireIdentity(ctx2);
+  if (!encPath || typeof encPath !== "string") throw new OperationError("bad-request", "encPath is required");
+  if (!ENC_PATH_RE.test(encPath)) throw new OperationError("bad-request", "invalid encrypted-asset path");
+  let raw;
+  try {
+    raw = await ctx2.reader.readFile(encPath);
+  } catch {
+    throw new OperationError("not-found", `could not read the encrypted asset: ${encPath}`);
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(raw);
+  } catch {
+    throw new OperationError("bad-request", "the encrypted asset is not a valid envelope");
+  }
+  const token = ctx2.store?.get?.("githubToken");
+  try {
+    const text = await decryptViaWorker({ envelope, token, signupBase: SIGNUP_BASE, fetch: ctx2.fetch ?? globalThis.fetch });
+    return { text };
+  } catch (err) {
+    if (err instanceof MemberContentLockedError) {
+      throw new OperationError("membership-required", "This content is for paid members. Upgrade at https://gbti.network to unlock.");
+    }
+    throw new OperationError("decrypt-failed", err?.message || "could not decrypt the asset");
+  }
 }
 async function publishShare(ctx2, { input = {}, body = "", message, title, prBody } = {}) {
   const id = requireIdentity(ctx2);
@@ -19545,6 +20012,8 @@ var obj = (properties, required2 = []) => ({ type: "object", properties, require
 var TYPE_ENUM = { type: "string", enum: ["post", "product", "prompt", "profile"] };
 var STATUS_ENUM = { type: "string", enum: ["draft", "published"], description: 'REQUIRED: "published" merges and goes live on the network; "draft" stages on your fork for review.' };
 var COMMENT_TARGET = { type: "string", enum: ["post", "product", "prompt", "share", "news"] };
+var PATH_PARAM = { type: "string", description: "The repo path of the EXISTING item you are editing (members/<you>/<type>s/<slug>/index.md). Pass it whenever the item already exists: it preserves publishedAt, carries redirectFrom, and makes a changed slug a rename rather than a duplicate." };
+var SCOPE_PARAM = { type: "string", enum: ["member", "house"], description: 'Target folder. "member" (default) is your own folder; "house" is the non-member house/ content and is superadmin-only, re-checked server-side.' };
 var TOOLS = [
   {
     name: "login",
@@ -19573,8 +20042,8 @@ var TOOLS = [
   {
     name: "list_my_content",
     description: "List the member's own content (posts/products/prompts/profile). Optional `type` filter.",
-    inputSchema: obj({ type: TYPE_ENUM }),
-    handler: (ctx2, args) => listContent(ctx2, { type: args?.type })
+    inputSchema: obj({ type: TYPE_ENUM, scope: SCOPE_PARAM }),
+    handler: (ctx2, args) => listContent(ctx2, { type: args?.type, scope: args?.scope })
   },
   {
     name: "get_content",
@@ -19592,7 +20061,7 @@ var TOOLS = [
     name: "publish_content",
     description: 'Author a content object. REQUIRED `status`: "published" merges it (public, goes live on the network) and returns the PR number + url; "draft" stages it on your fork for review (no PR). Forces author/owner fields; goes through the gate. For a new product/prompt, pass `authorNote` (markdown) to seed the required SOW-014 from-the-author intro comment into the SAME PR.',
     inputSchema: obj(
-      { type: TYPE_ENUM, input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } },
+      { type: TYPE_ENUM, input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" }, path: PATH_PARAM, scope: SCOPE_PARAM },
       ["type", "input", "status"]
     ),
     handler: (ctx2, args) => authorContent(ctx2, args ?? {})
@@ -19603,20 +20072,48 @@ var TOOLS = [
   {
     name: "add_prompt",
     description: 'Author a PROMPT. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug (kebab-case), shortDescription; optional: targets[], categories[] (taxonomy path), tags[], variables[], sourceUrl. The markdown `body` is the prompt text. author is forced to you. SOW-014: a new prompt needs a from-the-author intro, so pass `authorNote` (markdown) and it publishes as your public intro comment in the SAME PR.',
-    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } }, ["input", "status"]),
+    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" }, path: PATH_PARAM, scope: SCOPE_PARAM }, ["input", "status"]),
     handler: (ctx2, args) => authorContent(ctx2, { ...args ?? {}, type: "prompt" })
   },
   {
     name: "add_product",
     description: 'Author a PRODUCT. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug, shortDescription, icon (repo image path), featuredImage (16:10 repo image path); optional: categories[], tags[], pricing, links[]. The markdown `body` is the product description. author is forced to you. SOW-014: a new product needs a from-the-author intro, so pass `authorNote` (markdown) and it publishes as your public intro comment in the SAME PR. (Attach images via the repo first; an MCP image-upload tool is a follow-on.)',
-    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } }, ["input", "status"]),
+    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, authorNote: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" }, path: PATH_PARAM, scope: SCOPE_PARAM }, ["input", "status"]),
     handler: (ctx2, args) => authorContent(ctx2, { ...args ?? {}, type: "product" })
   },
   {
     name: "add_post",
     description: 'Author a BLOG POST. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug (kebab-case); optional: excerpt, categories[], tags[], coverImage, publishedAt. The markdown `body` is the article. author is forced to you.',
-    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } }, ["input", "status"]),
+    inputSchema: obj({ input: { type: "object" }, status: STATUS_ENUM, body: { type: "string" }, message: { type: "string" }, title: { type: "string" }, prBody: { type: "string" }, path: PATH_PARAM, scope: SCOPE_PARAM }, ["input", "status"]),
     handler: (ctx2, args) => authorContent(ctx2, { ...args ?? {}, type: "post" })
+  },
+  // sow-193: the DRAFT lifecycle. These four operations existed and were tested since SOW-082 but none was
+  // exposed as a tool, so an agent could create a draft with status:"draft" and then never list, read, publish
+  // or discard it. A fork-staged draft is at least a visible branch on the member's own GitHub; a hosted draft
+  // lives in private KV, so the hole was about to get worse. Thin wrappers, no new logic.
+  {
+    name: "list_drafts",
+    description: 'List your staged drafts (items saved with status:"draft" and not yet published). Optional `type` filter. Each row carries its type, slug, title, whether it still validates against the current schema, and its pull request if one is open.',
+    inputSchema: obj({ type: TYPE_ENUM }),
+    handler: (ctx2, args) => listDrafts(ctx2, { type: args?.type })
+  },
+  {
+    name: "read_draft",
+    description: "Read one staged draft (frontmatter + body) by `type` and `slug`, so you can revise it before publishing.",
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" } }, ["type", "slug"]),
+    handler: (ctx2, args) => readDraft(ctx2, { type: args?.type, slug: args?.slug })
+  },
+  {
+    name: "publish_draft",
+    description: "Publish a staged draft: opens the gated pull request from the draft branch it is already on. Paid-only, like every publish.",
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } }, ["type", "slug"]),
+    handler: (ctx2, args) => publishDraft(ctx2, { type: args?.type, slug: args?.slug, title: args?.title, prBody: args?.prBody })
+  },
+  {
+    name: "discard_draft",
+    description: "Discard a staged draft and delete its branch. Refused while the draft has an open pull request: withdraw the pull request first. This is not reversible, so confirm with the member before calling it.",
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" } }, ["type", "slug"]),
+    handler: (ctx2, args) => discardDraft(ctx2, { type: args?.type, slug: args?.slug })
   },
   {
     name: "list_prs",

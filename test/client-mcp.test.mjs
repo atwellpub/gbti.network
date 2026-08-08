@@ -136,3 +136,66 @@ test('unknown tool -> JSON-RPC error; unknown method -> -32601; notification -> 
   const notif = await dispatch({ jsonrpc: '2.0', method: 'notifications/initialized' }, ctx);
   assert.equal(notif, null);
 });
+
+// ---------------------------------------------------------------------------
+// sow-193: the MCP author surface can express what publish() supports, and the
+// draft lifecycle is reachable at all.
+// ---------------------------------------------------------------------------
+
+test('sow-193: the four draft-lifecycle tools are exposed (an agent could create a draft it could never retrieve)', async () => {
+  const res = await dispatch({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, ctxFor());
+  const names = res.result.tools.map((t) => t.name);
+  for (const expected of ['list_drafts', 'read_draft', 'publish_draft', 'discard_draft']) {
+    assert.ok(names.includes(expected), `missing draft tool ${expected}`);
+  }
+});
+
+test('sow-193: the author tools accept path + scope (rename and house targeting were previously inexpressible)', async () => {
+  const res = await dispatch({ jsonrpc: '2.0', id: 4, method: 'tools/list' }, ctxFor());
+  const byName = Object.fromEntries(res.result.tools.map((t) => [t.name, t]));
+  for (const name of ['publish_content', 'add_post', 'add_product', 'add_prompt']) {
+    assert.ok(byName[name].inputSchema.properties.path, `${name} cannot express a rename`);
+    assert.ok(byName[name].inputSchema.properties.scope, `${name} cannot express a scope`);
+  }
+  // scope is an enum, so an agent cannot invent a folder.
+  assert.deepEqual(byName.publish_content.inputSchema.properties.scope.enum, ['member', 'house']);
+  // list_my_content reads house content for a superadmin; it never forwarded scope before.
+  assert.ok(byName.list_my_content.inputSchema.properties.scope);
+});
+
+test('sow-193: authorContent FORWARDS path to publish, so a changed slug renames instead of duplicating', async () => {
+  // The proof is that publish() sees `path`: with it, the existing item is read and its slug compared, which
+  // is what turns a re-publish into a rename. Without it publish() never enters that branch at all.
+  // publish() turns `path` into a rename origin (renameOriginOf) and then reads the OLD file to merge its
+  // redirectFrom and preserve publishedAt. That read is the first observable effect of `path`: with `path`
+  // dropped, `origin` is null and readFile is never called for the old path at all.
+  const seen = [];
+  const withSpy = (repoPath) => {
+    const ctx = ctxFor({ repoPath, repo: fakeRepo() });
+    const orig = ctx.reader.readFile.bind(ctx.reader);
+    ctx.reader.readFile = (p) => { seen.push(p); return orig(p); };
+    return ctx;
+  };
+  const repoDir = tmpRepo();
+  const args = { status: 'published', input: { title: 'Hello renamed', slug: 'hello-renamed' }, body: 'x' };
+  await call('add_post', { ...args, path: 'members/alice/posts/hello/index.md' }, withSpy(repoDir)).catch(() => {});
+  assert.ok(seen.includes('members/alice/posts/hello/index.md'), 'publish never read the existing item, so path was dropped');
+
+  // Control: the SAME call without `path` must never look for the old file. This is the regression the fix
+  // closes, so it is worth asserting both directions rather than only the positive.
+  seen.length = 0;
+  await call('add_post', args, withSpy(repoDir)).catch(() => {});
+  assert.ok(!seen.includes('members/alice/posts/hello/index.md'), 'without path there is no rename origin to read');
+});
+
+test('sow-193: listMembersOnly awaits its reader (a Promise as `items` was the async-reader trap)', async () => {
+  const { listMembersOnly } = await import('../client/src/operations.mjs');
+  // An ASYNC reader, which is what a clone-free npm host and the extension both use.
+  const ctx = {
+    identity: () => ({ login: 'alice', githubId: '1', username: 'alice' }),
+    reader: { listMembersOnly: async () => [{ path: 'members/alice/posts/x/index.md' }] },
+  };
+  const out = await listMembersOnly(ctx);
+  assert.ok(Array.isArray(out.items), 'items must be an array, not a pending Promise');
+  assert.equal(out.items.length, 1);
+});

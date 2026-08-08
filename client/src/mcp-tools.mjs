@@ -25,6 +25,10 @@ import {
   listComments,
   publishShare,
   ogPreview,
+  listDrafts,
+  readDraft,
+  discardDraft,
+  publishDraft,
 } from './operations.mjs';
 import { startDeviceLogin, confirmDeviceLogin, logout } from './mcp-auth.mjs';
 
@@ -35,6 +39,12 @@ const TYPE_ENUM = { type: 'string', enum: ['post', 'product', 'prompt', 'profile
 // SOW-106: the REQUIRED author intent. "published" merges to the network (public); "draft" stages on the fork.
 const STATUS_ENUM = { type: 'string', enum: ['draft', 'published'], description: 'REQUIRED: "published" merges and goes live on the network; "draft" stages on your fork for review.' };
 const COMMENT_TARGET = { type: 'string', enum: ['post', 'product', 'prompt', 'share', 'news'] }; // SOW-072
+// sow-193: `path` + `scope`, which authorContent forwards to publish()/saveDraft() now. `path` is what turns a
+// re-publish under a changed slug into a RENAME (one PR that moves the item and 301s the old URL) instead of a
+// duplicate item with the old page still live. `scope` targets the non-member house/ folder (superadmin only,
+// re-checked server-side); omit it for your own folder.
+const PATH_PARAM = { type: 'string', description: 'The repo path of the EXISTING item you are editing (members/<you>/<type>s/<slug>/index.md). Pass it whenever the item already exists: it preserves publishedAt, carries redirectFrom, and makes a changed slug a rename rather than a duplicate.' };
+const SCOPE_PARAM = { type: 'string', enum: ['member', 'house'], description: 'Target folder. "member" (default) is your own folder; "house" is the non-member house/ content and is superadmin-only, re-checked server-side.' };
 
 // The managed-abstraction tools. Each handler returns a plain JSON-serializable result (or throws an
 // OperationError); dispatch() wraps it into MCP tool-call content.
@@ -66,8 +76,8 @@ export const TOOLS = [
   {
     name: 'list_my_content',
     description: "List the member's own content (posts/products/prompts/profile). Optional `type` filter.",
-    inputSchema: obj({ type: TYPE_ENUM }),
-    handler: (ctx, args) => listContent(ctx, { type: args?.type }),
+    inputSchema: obj({ type: TYPE_ENUM, scope: SCOPE_PARAM }),
+    handler: (ctx, args) => listContent(ctx, { type: args?.type, scope: args?.scope }),
   },
   {
     name: 'get_content',
@@ -85,7 +95,7 @@ export const TOOLS = [
     name: 'publish_content',
     description: 'Author a content object. REQUIRED `status`: "published" merges it (public, goes live on the network) and returns the PR number + url; "draft" stages it on your fork for review (no PR). Forces author/owner fields; goes through the gate. For a new product/prompt, pass `authorNote` (markdown) to seed the required SOW-014 from-the-author intro comment into the SAME PR.',
     inputSchema: obj(
-      { type: TYPE_ENUM, input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } },
+      { type: TYPE_ENUM, input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' }, path: PATH_PARAM, scope: SCOPE_PARAM },
       ['type', 'input', 'status'],
     ),
     handler: (ctx, args) => authorContent(ctx, args ?? {}),
@@ -96,20 +106,48 @@ export const TOOLS = [
   {
     name: 'add_prompt',
     description: 'Author a PROMPT. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug (kebab-case), shortDescription; optional: targets[], categories[] (taxonomy path), tags[], variables[], sourceUrl. The markdown `body` is the prompt text. author is forced to you. SOW-014: a new prompt needs a from-the-author intro, so pass `authorNote` (markdown) and it publishes as your public intro comment in the SAME PR.',
-    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } }, ['input', 'status']),
+    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' }, path: PATH_PARAM, scope: SCOPE_PARAM }, ['input', 'status']),
     handler: (ctx, args) => authorContent(ctx, { ...(args ?? {}), type: 'prompt' }),
   },
   {
     name: 'add_product',
     description: 'Author a PRODUCT. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug, shortDescription, icon (repo image path), featuredImage (16:10 repo image path); optional: categories[], tags[], pricing, links[]. The markdown `body` is the product description. author is forced to you. SOW-014: a new product needs a from-the-author intro, so pass `authorNote` (markdown) and it publishes as your public intro comment in the SAME PR. (Attach images via the repo first; an MCP image-upload tool is a follow-on.)',
-    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } }, ['input', 'status']),
+    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, authorNote: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' }, path: PATH_PARAM, scope: SCOPE_PARAM }, ['input', 'status']),
     handler: (ctx, args) => authorContent(ctx, { ...(args ?? {}), type: 'product' }),
   },
   {
     name: 'add_post',
     description: 'Author a BLOG POST. REQUIRED `status`: "published" publishes it live (a PR that merges), "draft" stages it on your fork for review. input requires: title, slug (kebab-case); optional: excerpt, categories[], tags[], coverImage, publishedAt. The markdown `body` is the article. author is forced to you.',
-    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } }, ['input', 'status']),
+    inputSchema: obj({ input: { type: 'object' }, status: STATUS_ENUM, body: { type: 'string' }, message: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' }, path: PATH_PARAM, scope: SCOPE_PARAM }, ['input', 'status']),
     handler: (ctx, args) => authorContent(ctx, { ...(args ?? {}), type: 'post' }),
+  },
+  // sow-193: the DRAFT lifecycle. These four operations existed and were tested since SOW-082 but none was
+  // exposed as a tool, so an agent could create a draft with status:"draft" and then never list, read, publish
+  // or discard it. A fork-staged draft is at least a visible branch on the member's own GitHub; a hosted draft
+  // lives in private KV, so the hole was about to get worse. Thin wrappers, no new logic.
+  {
+    name: 'list_drafts',
+    description: 'List your staged drafts (items saved with status:"draft" and not yet published). Optional `type` filter. Each row carries its type, slug, title, whether it still validates against the current schema, and its pull request if one is open.',
+    inputSchema: obj({ type: TYPE_ENUM }),
+    handler: (ctx, args) => listDrafts(ctx, { type: args?.type }),
+  },
+  {
+    name: 'read_draft',
+    description: 'Read one staged draft (frontmatter + body) by `type` and `slug`, so you can revise it before publishing.',
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' } }, ['type', 'slug']),
+    handler: (ctx, args) => readDraft(ctx, { type: args?.type, slug: args?.slug }),
+  },
+  {
+    name: 'publish_draft',
+    description: 'Publish a staged draft: opens the gated pull request from the draft branch it is already on. Paid-only, like every publish.',
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } }, ['type', 'slug']),
+    handler: (ctx, args) => publishDraft(ctx, { type: args?.type, slug: args?.slug, title: args?.title, prBody: args?.prBody }),
+  },
+  {
+    name: 'discard_draft',
+    description: 'Discard a staged draft and delete its branch. Refused while the draft has an open pull request: withdraw the pull request first. This is not reversible, so confirm with the member before calling it.',
+    inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' } }, ['type', 'slug']),
+    handler: (ctx, args) => discardDraft(ctx, { type: args?.type, slug: args?.slug }),
   },
   {
     name: 'list_prs',

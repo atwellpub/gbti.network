@@ -1,11 +1,16 @@
-// The EXTENSION's Reader (SOW-006 v2 P4). The npm host reads content from a local working copy (repo-fs.mjs);
-// the Chrome extension has no filesystem, so it reads the SAME content via the GitHub Contents API over the
-// member's token. It implements the host-agnostic Reader interface the core depends on
-// ({ list, listMembersOnly, get, readFile }), so operations.mjs / api.mjs / role resolution run unchanged.
+// The CLONE-FREE Reader (SOW-006 v2 P4; moved out of extension/src by sow-193). Content is read over the
+// GitHub Contents API with the member's own token, so a host needs no working copy on disk. It implements the
+// host-agnostic Reader interface the core depends on ({ list, listMembersOnly, get, readFile }), so
+// operations.mjs / api.mjs / role resolution run unchanged.
+//
+// TWO hosts use it now. The Chrome extension has no filesystem and never had a choice. The npm/MCP host picks
+// it when no `repoPath` is configured (client/src/context.mjs), which is what lets an agent drive the MCP
+// without cloning the repo. A member who DOES have a clone keeps the faster fs reader (repo-fs.mjs).
+// It lives in client/src because it is shared core: `client/src` must never import from a host folder.
 // Pure + injectable-fetch (no chrome APIs here), so it is unit-tested in node. The NESTED content layout
 // (members/<u>/<sub>/<slug>/index.md) is the canonical on-disk layout reconciled in P5.
 
-import { parseContentFile, shareSummary, byShareNewest, commentSummary, byCommentOldest } from '../../client/src/content-ops.mjs';
+import { parseContentFile, shareSummary, byShareNewest, commentSummary, byCommentOldest } from './content-ops.mjs';
 import { isReadablePath } from '../../src/lib/content-index.mjs';
 
 const SUBDIR = Object.freeze({ post: 'posts', product: 'products', prompt: 'prompts' });

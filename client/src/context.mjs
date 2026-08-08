@@ -3,6 +3,7 @@
 // tools, so the CMS HTTP server and the stdio MCP entry are wired identically.
 
 import { createReader, createStager } from './repo-fs.mjs';
+import { createGithubReader } from './github-reader.mjs'; // sow-193: the clone-free reader, shared with the extension
 import { createRepoClient } from './github-repo.mjs';
 import { roleOf, rolesFromText, curatorsFromText, canCurateNews } from './roles.mjs';
 import { resolveMembership } from './membership.mjs';
@@ -15,12 +16,25 @@ export const UPSTREAM = process.env.GBTI_UPSTREAM || 'gbti-network/gbti.network'
 // who runs the local CMS is already the trusted node owner). Redaction is enforced by the core regardless.
 const npmDevlog = createDevlog({ enabled: () => !!process.env.GBTI_DEVLOG, sink: console });
 
-// The node host wires the fs-backed Reader + Stager into the host-agnostic core. The extension host builds
-// the same shape with GitHub-Contents-API + chrome.storage implementations, so api.mjs / operations.mjs /
-// the MCP tools run identically on both.
+// The node host wires a Reader + Stager into the host-agnostic core. The extension host builds the same shape
+// with GitHub-Contents-API + chrome.storage implementations, so api.mjs / operations.mjs / the MCP tools run
+// identically on both.
+//
+// sow-193: the node host NO LONGER REQUIRES A CLONE. The reader is chosen by whether `repoPath` is configured:
+//   - repoPath set   -> the fs reader (repo-fs.mjs). Faster, offline, and the maintainer workflow.
+//   - repoPath unset -> the SAME GitHub Contents-API reader the extension uses (github-reader.mjs).
+// Before this, an unset repoPath left every reader method returning [] or null, so a clone-less MCP host
+// silently reported "no content" instead of failing, which is why nobody noticed it was unusable. The FORK is
+// unaffected and still required for MCP publishing by the sow-193 split-by-host decision: a fork lives on
+// GitHub, a clone lives on disk, and only the clone goes away here.
 export function buildContext(store) {
   const repoPath = store.get('repoPath');
-  const reader = createReader(repoPath);
+  // Read the token at construction, exactly as the extension does (ext-context.mjs:14,28). Safe because the
+  // node host builds a FRESH context per request (index.mjs:60,68), so a token that arrives at sign-in is
+  // picked up by the next call rather than being pinned for the process lifetime.
+  const reader = repoPath
+    ? createReader(repoPath)
+    : createGithubReader({ upstream: UPSTREAM, token: store.get('githubToken'), devlog: npmDevlog });
   let membershipFlight = null;
   return {
     store,

@@ -117,10 +117,13 @@ export async function listContent(ctx, { type, scope = 'member' } = {}) {
   return { items: await ctx.reader.list(id.username, type || undefined, 'member') };
 }
 
-/** List members-only content (visibility: members) across all folders, for the members-only portal. */
-export function listMembersOnly(ctx) {
+/** List members-only content (visibility: members) across all folders, for the members-only portal.
+ *  sow-193: AWAIT the reader. This was the one call site in the core that did not, which was harmless only
+ *  while the node host was guaranteed a SYNCHRONOUS fs reader. The extension papered over it by bypassing this
+ *  operation entirely and awaiting the reader itself; that bypass is now gone and both hosts run this path. */
+export async function listMembersOnly(ctx) {
   requireIdentity(ctx);
-  return { items: ctx.reader.listMembersOnly() };
+  return { items: (await ctx.reader.listMembersOnly()) ?? [] };
 }
 
 /**
@@ -288,13 +291,23 @@ export function validateContent(ctx, { type, input, body } = {}) {
  * the network repo, which is public) and "draft" stages on the member fork for review. The status is the INTENT
  * and is NOT written into the content input (publish/saveDraft set the content status themselves, defaulting to
  * published), so nothing silently drafts. Throws `status-required` if the caller omits or mis-spells it.
+ *
+ * sow-193: `path` and `scope` are FORWARDED now. Before this they were simply absent from the signature while
+ * publish() accepted both, and the three consequences were all silent:
+ *   - a RENAME was impossible. publish() derives one from `path` via renameOriginOf, so with `path` undefined
+ *     an agent re-publishing under a changed slug created a SECOND item and left the old page live.
+ *   - `redirectFrom` was dropped, because the merge only happens inside the `if (oldFm)` branch that `path`
+ *     unlocks, so the old URL never got its 301.
+ *   - `scope: 'house'` could not be expressed at all from this entry point.
+ * saveDraft takes `path` too (it stages a pending rename on the item's own branch) but has no house scope by
+ * design (sow-145: house content publishes directly), so `scope` is only meaningful on the publish arm.
  */
-export async function authorContent(ctx, { type, input, body, status, message, title, prBody, authorNote } = {}) {
+export async function authorContent(ctx, { type, input, body, status, message, title, prBody, authorNote, path, scope } = {}) {
   if (status !== 'draft' && status !== 'published') {
     throw new OperationError('status-required', 'Specify status: "published" to publish (merge and go live on the network) or "draft" to stage on your fork for review before publishing.');
   }
-  if (status === 'draft') return saveDraft(ctx, { type, input, body, message });
-  return publish(ctx, { type, input, body, message, title, prBody, authorNote });
+  if (status === 'draft') return saveDraft(ctx, { type, input, body, message, path });
+  return publish(ctx, { type, input, body, message, title, prBody, authorNote, path, scope });
 }
 
 /** Build + publish a content change as (or into) a PR through the gate. */

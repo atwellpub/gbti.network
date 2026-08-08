@@ -2,7 +2,7 @@
 // the extension adapters (a GitHub-Contents-API Reader instead of fs, the in-memory chrome-backed store). The
 // dispatcher computes the role itself (async reader), so no sync role() is needed here.
 
-import { createGithubReader } from './github-reader.mjs';
+import { createGithubReader } from '../../client/src/github-reader.mjs';
 import { createRepoClient } from '../../client/src/github-repo.mjs';
 import { resolveMembership } from '../../client/src/membership.mjs';
 import { SIGNUP_BASE, authModeFor } from '../../client/src/signup-base.mjs';
