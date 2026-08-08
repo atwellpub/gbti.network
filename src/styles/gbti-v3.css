@@ -987,6 +987,38 @@ a.who:hover { color: var(--fg); }
 .wb-links .wb-open { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 13px; color: var(--green-700); font-weight: 600; }
 .wb-links .wb-open svg { color: var(--green-700); }
 
+/* sow-192 (Image #11/#12): the COLLAPSED creator composer bar. It opens the four-step Share wizard in a modal
+   (HomeShareModal) rather than rendering it inline. Paid-gated + hidden until the signed-in signal. */
+.home-share-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; padding: 0 16px 0 0;
+  background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--r); }
+.dark .home-share-bar { background: var(--ink-2); border-color: var(--line-dark); }
+.hsb-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; padding: 13px 4px 13px 16px;
+  background: none; border: 0; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.hsb-av { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: none; background: var(--tint); }
+.hsb-prompt { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; font-size: 14.5px;
+  color: var(--fg-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hsb-caret { width: 1.5px; height: 17px; background: var(--fg-mute); flex: none; animation: hsb-caret 1.1s steps(1) infinite; }
+@keyframes hsb-caret { 50% { opacity: 0; } }
+.hsb-act { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-mute);
+  flex: none; text-decoration: none; white-space: nowrap; }
+.hsb-act svg { width: 19px; height: 19px; flex: none; }
+.hsb-share svg { color: var(--green); }
+.hsb-wb { padding: 10px 4px; border-radius: var(--r); }
+.hsb-open:hover .hsb-prompt, .hsb-wb:hover { color: var(--fg); }
+
+/* The Share wizard modal: a chromeless native <dialog>; the composer's own card is the 620px panel. The
+   margin:auto + height:fit-content centre it against the UA modal inset (same as .pz); overflow:visible lets
+   the floating close X sit at the card corner. */
+.share-modal { width: 620px; max-width: calc(100vw - 32px); margin: auto; height: fit-content; padding: 0;
+  border: 0; background: transparent; overflow: visible; color: var(--fg); }
+.share-modal::backdrop { background: rgba(20, 18, 24, .55); backdrop-filter: blur(2px); }
+.share-modal .sm-x { position: absolute; top: -14px; right: -14px; z-index: 2; width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--paper); border: 1.5px solid var(--line); color: var(--fg-mute); cursor: pointer; box-shadow: var(--sh-md); }
+.dark .share-modal .sm-x { background: var(--ink-2); border-color: var(--line-dark); }
+.share-modal .sm-x:hover { color: var(--fg); }
+.share-modal gbti-share-composer { display: block; }
+
 /* sow-192 QA v2: the homepage Prompts & Skills card. No background image; a clean wide ONE-PER-ROW card led
    by the robot glyph on a brand tile, with the prompt's substance beside it. */
 .hp-grid { display: flex; flex-direction: column; gap: 16px; }

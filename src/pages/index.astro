@@ -15,6 +15,7 @@ import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
 import PricingAccordion from '../components/home/PricingAccordion.astro';
 import PersonalizeModal from '../components/home/PersonalizeModal.astro';
+import HomeShareModal from '../components/home/HomeShareModal.astro';
 import { authorItem } from '../lib/avatars';
 import { contentIcon } from '../lib/content-icons';
 import { topLevelCategories } from '../lib/taxonomy';
@@ -138,13 +139,23 @@ const SHOPTALK = {
   <script type="application/json" id="gbti-personalize-data" set:html={JSON.stringify(personalizeData)}></script>
   <PersonalizeModal />
 
-  <!-- sow-192 Phase C: the signed-in creator composer bar. Hidden for signed-out / no-JS; revealed on the
-       sow-158 member signal, which also lazy-mounts the client-ui composer (see the script below). -->
-  <div class="home-composer card" data-home-signedin hidden>
-    <div class="hc-eyebrow">Share with the network</div>
-    <p class="hub-load" data-home-composer-load>Loading the composer&hellip;</p>
-    <gbti-share-composer></gbti-share-composer>
+  <!-- sow-192 (Image #11/#12): the COLLAPSED creator composer bar. It opens the four-step Share wizard in a
+       modal (HomeShareModal) instead of rendering the wizard inline. Paid-gated (data-home-creator) + hidden
+       for signed-out / no-JS; revealed on the sow-158 member signal, which also lazy-mounts the client-ui
+       composer into the modal (see the script below). -->
+  <div class="home-share-bar" data-home-creator hidden>
+    <button type="button" class="hsb-open" data-share-open>
+      <img class="hsb-av" alt="" width="34" height="34" decoding="async" />
+      <span class="hsb-prompt"><i class="hsb-caret" aria-hidden="true"></i>Share something with the network&hellip;</span>
+      <span class="hsb-act hsb-share">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a3 3 0 1 0-2.82-4H15a3 3 0 0 0 .12.83l-6.1 3.55a3 3 0 1 0 0 4.24l6.1 3.55A3 3 0 1 0 18 16a3 3 0 0 0-1.77.58l-6.1-3.55a3 3 0 0 0 0-1.66l6.1-3.55A3 3 0 0 0 18 8Z" fill="currentColor"/></svg>Share
+      </span>
+    </button>
+    <a class="hsb-act hsb-wb" href="/workbench/">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm5-3h6a1 1 0 0 1 1 1v2H8V5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>Workbench
+    </a>
   </div>
+  <HomeShareModal />
 
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
@@ -643,10 +654,14 @@ const SHOPTALK = {
   import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
   (() => {
     const signedInEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-signedin]'));
+    // The composer BAR (data-home-creator) is paid-gated separately: only an effective-paid member sees it
+    // (the mockup shows it in the Content Creator state). Interim gate = membership==='paid' until the Worker
+    // surfaces the resolved member-vs-creator tier (sow-185 / UnifiedWorker); then tighten to creator-only.
+    const creatorEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-creator]'));
     // The signed-out join / "start your free trial" cards (the rail promo + the bottom band) hide for a
     // signed-in member (sow-192 QA: the trial CTA is not for members/creators; sow-185 retires the trial).
     const joinCards = Array.from(document.querySelectorAll<HTMLElement>('[data-home-joincard]'));
-    if (!signedInEls.length) return;
+    if (!signedInEls.length && !creatorEls.length) return;
     let mounted = false;
 
     async function mountComposer(s: any) {
@@ -657,16 +672,25 @@ const SHOPTALK = {
       const { setClient } = await import('../../client-ui/src/base.mjs');
       const adapter = createWorkbenchClient({ signupBase, login: String(s.login), githubId: s.githubId != null ? String(s.githubId) : null });
       setClient(adapter);
-      document.querySelectorAll('[data-home-composer-load]').forEach((el) => el.setAttribute('hidden', ''));
-      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
+      // Defining the element upgrades the <gbti-share-composer> inside HomeShareModal; it loads its status on
+      // connect (the client is already set), then renders the four-step wizard on the setClient fan-out.
       await import('../../client-ui/src/elements/gbti-share-composer.mjs');
     }
 
     function render(s: any) {
       const signedIn = !!(s && s.login);
+      const paid = signedIn && s.membership === 'paid'; // fail-closed: only effective-paid gets the composer bar
       signedInEls.forEach((el) => { el.hidden = !signedIn; });
+      creatorEls.forEach((el) => { el.hidden = !paid; });
       joinCards.forEach((el) => { el.hidden = signedIn; });
-      if (signedIn) mountComposer(s);
+      if (paid) {
+        // Point the bar avatar at the member's GitHub avatar (same convention as the header).
+        document.querySelectorAll<HTMLImageElement>('.hsb-av').forEach((img) => {
+          img.src = 'https://github.com/' + encodeURIComponent(String(s.login)) + '.png?size=68';
+          img.alt = '@' + String(s.login);
+        });
+        mountComposer(s); // load the client-ui composer only for a paid member (who can actually open the modal)
+      }
     }
 
     render(currentIdentity(readMemberSignal()));

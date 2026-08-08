@@ -1,0 +1,38 @@
+---
+// sow-192 (homepage composer, Image #11/#12): the Share wizard as a MODAL, not an inline panel. The collapsed
+// composer bar on the homepage (index.astro, [data-share-open]) opens this native <dialog>; the four-step
+// <gbti-share-composer> (Phase E) is the modal body, unchanged. The client is injected by index.astro's
+// mountComposer (setClient + the lazy element import), so the composer inside this dialog hydrates on the
+// signed-in signal exactly as it did inline. Backdrop click, Esc, and the close X dismiss it; a successful
+// post (the composer emits gbti-share-posted, bubbling + composed) closes it too, mirroring the extension
+// shell's openComposeModal. Styles live in gbti-v3.css (.share-modal), like PersonalizeModal. Inert for a
+// signed-out / no-JS visitor (the dialog never opens; the bar that opens it is paid-gated and ships hidden).
+---
+<dialog class="share-modal" data-share-modal aria-label="Share with the network">
+  <button type="button" class="sm-x" data-share-close aria-label="Close">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+  </button>
+  <gbti-share-composer></gbti-share-composer>
+</dialog>
+
+<script>
+  // The share modal controller: open on any [data-share-open], close on the X / backdrop / Esc / a post.
+  (() => {
+    const dialog = document.querySelector<HTMLDialogElement>('[data-share-modal]');
+    if (!dialog) return;
+
+    dialog.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-share-close]')) { dialog.close(); return; }
+      if (t === dialog) dialog.close(); // backdrop (clicks on the dialog box itself, outside the card)
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement)?.closest('[data-share-open]')) return;
+      if (!dialog.open) dialog.showModal();
+    });
+
+    // The composer reports a successful post; let the instant-feel ack show briefly, then close.
+    dialog.addEventListener('gbti-share-posted', () => { setTimeout(() => { if (dialog.open) dialog.close(); }, 1100); });
+  })();
+</script>
