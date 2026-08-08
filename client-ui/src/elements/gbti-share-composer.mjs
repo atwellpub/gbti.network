@@ -11,9 +11,25 @@ import { GbtiElement, define, esc } from '../base.mjs';
 import { submitAck, failHint } from '../workspace-core.mjs'; // SOW-072 P2: the one consistent submit acknowledgement
 import { topicsFromJson } from '../topic-picker-core.mjs'; // SOW-087: the flat topic vocabulary for the category select
 import { optimisticShareItem } from '../share-post-core.mjs'; // SOW-092: the reader-ready item for the instant redirect
+// sow-192 Phase E: the Note step's Write/Preview toggle renders markdown with the SAME node-free, escape-first,
+// XSS-hardened helpers the block editor uses (no client.preview needed, so the preview is portable to the
+// cookie-adapter hosts that lack it).
+import { parseBlocks, inlineMdToHtml, isDangerousUrl } from '../markdown-blocks.mjs';
 
 const LOCKED = new Set(['expired', 'cancelled', 'none', 'banned']);
 const SITE = 'https://gbti.network';
+
+// sow-192 Phase E: inline glyphs for the wizard chrome. The shadow DOM cannot reach the site's light-DOM sprite
+// (#ico-*), so the step icons are inlined here. `fill:currentColor` lets them inherit the button/label color.
+const IC = {
+  bolt: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11l-1 8.5L18.5 10.5H12z"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5m0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m6.9 6h-2.9a15.7 15.7 0 0 0-1.3-3.3A8 8 0 0 1 18.9 8M12 4c.9 1.2 1.5 2.5 1.9 4h-3.8c.4-1.5 1-2.8 1.9-4M4.3 14a7.9 7.9 0 0 1 0-4h3.1a17 17 0 0 0 0 4zm.8 2h2.9c.4 1.2.8 2.3 1.3 3.3A8 8 0 0 1 5.1 16m2.9-8H5.1a8 8 0 0 1 3.8-3.3A15.7 15.7 0 0 0 8 8M12 20c-.9-1.2-1.5-2.5-1.9-4h3.8c-.4 1.5-1 2.8-1.9 4m2.3-6H9.7a15 15 0 0 1 0-4h4.6a15 15 0 0 1 0 4m.4 5.3c.5-1 .9-2.1 1.3-3.3h2.9a8 8 0 0 1-4.2 3.3M16.6 14a17 17 0 0 0 0-4h3.1a7.9 7.9 0 0 1 0 4z"/></svg>',
+  fwd: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11h12.2l-3.6-3.6L14 6l6 6-6 6-1.4-1.4 3.6-3.6H4z"/></svg>',
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l3.6-3.6L10 6l-6 6 6 6 1.4-1.4L7.8 13H20z"/></svg>',
+};
+const STEP_LABELS = ['Link', 'Preview', 'Note', 'Publish'];
+const NEXT_LABEL = { 1: 'Fetch details', 2: 'Looks good', 3: 'Continue' };
 
 const CSS = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
@@ -58,6 +74,54 @@ const CSS = `
   .og .ogdomain { font-size:11px; color:var(--muted); opacity:.8; text-transform:lowercase; }
   .og .ogclear { margin-top:6px; font:inherit; font-size:12px; background:none; border:0; color:var(--muted); cursor:pointer; padding:0; }
   .og .ogclear:hover { color:var(--brand); text-decoration:underline; }
+  /* sow-192 Phase E: the four-step wizard chrome (Link -> Preview -> Note -> Publish). */
+  /* The step sections + nav buttons are toggled with the [hidden] attribute, but several of them carry an
+     explicit display (flex/inline-flex) that would beat the UA [hidden]{display:none}. Force it here so a
+     hidden step or a hidden Back/Next/Post button actually disappears. */
+  [hidden] { display:none !important; }
+  .rail { display:flex; gap:6px; margin:0 0 16px; }
+  .rail .dot { flex:1; display:flex; align-items:center; gap:7px; padding:0; background:none; border:0; font:inherit; font-size:12px; color:var(--muted); cursor:pointer; text-align:left; }
+  .rail .dot .num { flex:none; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; border:1.5px solid var(--line); background:var(--panel); color:var(--muted); }
+  .rail .dot .lbl { white-space:nowrap; }
+  .rail .dot.on { color:var(--fg); font-weight:600; }
+  .rail .dot.done { color:var(--fg); }
+  .rail .dot.on .num, .rail .dot.done .num { background:var(--brand); border-color:var(--brand); color:#fff; }
+  .step h3 { margin:0 0 4px; }
+  .step .sub { margin:0 0 12px; }
+  .hint { margin:8px 0 0; font-size:12px; color:var(--muted); font-family:var(--font-mono, monospace); }
+  .autoblock { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+  .autolabel { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; color:var(--brand); margin-bottom:8px; }
+  .autolabel svg { width:14px; height:14px; fill:currentColor; flex:none; }
+  .notetabs { display:flex; align-items:center; gap:4px; margin-bottom:8px; }
+  .notetabs .nt { font:inherit; font-size:13px; font-weight:600; padding:5px 12px; border:1.5px solid var(--line); border-radius:8px; background:var(--panel); color:var(--muted); cursor:pointer; }
+  .notetabs .nt.on { border-color:var(--brand); color:var(--brand); }
+  .notetabs .mdlabel { margin-left:auto; font-size:11px; color:var(--muted); font-family:var(--font-mono, monospace); }
+  .notepreview { min-height:84px; padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; background:var(--panel); font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
+  .notepreview :is(h1,h2,h3) { font-family:var(--font-display, var(--font-body)); font-size:16px; margin:.6em 0 .3em; }
+  .notepreview p { margin:0 0 .7em; }
+  .notepreview p:last-child, .notepreview :is(ul,ol):last-child, .notepreview blockquote:last-child { margin-bottom:0; }
+  .notepreview a { color:var(--brand); }
+  .notepreview ul, .notepreview ol { padding-left:1.3em; margin:0 0 .7em; }
+  .notepreview blockquote { margin:0 0 .7em; padding:2px 0 2px 12px; border-left:3px solid var(--line); color:var(--muted); }
+  .notepreview pre { background:var(--hover, rgba(0,0,0,.05)); padding:8px 10px; border-radius:8px; overflow-x:auto; font-size:12.5px; }
+  .notepreview code { font-family:var(--font-mono, monospace); font-size:.92em; }
+  .notepreview .empty { color:var(--muted); font-style:italic; }
+  .aud { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .audcard { display:flex; flex-direction:column; gap:3px; text-align:left; font:inherit; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; background:var(--panel); color:var(--fg); cursor:pointer; }
+  .audcard .at { display:flex; align-items:center; gap:7px; font-weight:700; font-size:14px; }
+  .audcard .at svg { width:15px; height:15px; fill:currentColor; flex:none; }
+  .audcard .ad { font-size:12px; color:var(--muted); }
+  .audcard.on { border-color:var(--brand); box-shadow:inset 0 0 0 1px var(--brand); }
+  .audcard.on .at { color:var(--brand); }
+  .wizfoot { display:flex; align-items:center; gap:10px; margin-top:16px; }
+  .wizfoot .msg { margin-right:auto; }
+  .navbtns { display:flex; align-items:center; gap:8px; }
+  .navbtns button.back, .navbtns button.next { font:inherit; font-weight:700; font-size:14px; padding:9px 16px; border-radius:10px; cursor:pointer; display:inline-flex; align-items:center; gap:7px; }
+  .navbtns .back { background:none; border:1.5px solid var(--line); color:var(--fg); }
+  .navbtns .next { background:var(--brand); border:0; color:#fff; }
+  .navbtns svg { width:15px; height:15px; fill:currentColor; flex:none; }
+  @media (max-width:420px) { .aud { grid-template-columns:1fr; } }
+  @media (max-width:360px) { .rail .dot .lbl { display:none; } }
 `;
 
 class GbtiShareComposer extends GbtiElement {
@@ -106,32 +170,84 @@ class GbtiShareComposer extends GbtiElement {
     ));
   }
 
+  // sow-192 Phase E: the same fields as before, redistributed into a four-step wizard (Link -> Preview ->
+  // Note -> Publish). Every field stays in the DOM at all times (hidden steps keep their nodes), so the eager
+  // OG fetch + the field values persist across steps and the existing selectors in _fetchPreview / _loadTopics
+  // / _post keep working unchanged. Only the layout + step chrome are new; the data paths are identical.
   _renderComposer() {
+    this._step = 1;
+    this._noteTab = 'write';
+    this._visibility = 'members'; // shares stay members-only by default (unchanged product behavior)
+    const rail = STEP_LABELS.map((l, i) =>
+      `<button class="dot" type="button" data-goto="${i + 1}"><span class="num">${i + 1}</span><span class="lbl">${l}</span></button>`).join('');
     this.set(this.css(CSS) + `
-      <div class="card">
-        <h3>Share an update</h3>
-        <p class="sub">A short note or an off-network link for the co-op. Members-only by default.</p>
-        <input class="title" type="text" placeholder="Title (optional)" maxlength="80" />
-        <input class="desc" type="text" placeholder="Short description (optional)" maxlength="200" />
-        <textarea placeholder="What are you reading, building, or finding?" maxlength="4000"></textarea>
-        <div class="row">
-          <input type="url" placeholder="https://… (optional link)" />
-          <select class="cat" aria-label="Category">
-            <option value="">Category (optional)</option>
-          </select>
-          <select class="vis" aria-label="Visibility">
-            <option value="members">Members only</option>
-            <option value="public">Public</option>
-          </select>
-        </div>
-        <div class="og" data-og hidden></div>
-        <div class="actions">
+      <div class="card wizard">
+        <div class="rail">${rail}</div>
+
+        <section class="step" data-step="1">
+          <h3>What are you sharing?</h3>
+          <p class="sub">Paste a link and we will pull the title, description and image for you. You can also skip it and just write a note.</p>
+          <div class="row">
+            <input type="url" placeholder="https://… (optional link)" />
+          </div>
+          <p class="hint">Works with articles, videos, repos and product pages.</p>
+        </section>
+
+        <section class="step" data-step="2" hidden>
+          <h3>Does this look right?</h3>
+          <p class="sub">Edit anything that reads badly. Every field is optional.</p>
+          <div class="og" data-og hidden></div>
+          <input class="title" type="text" placeholder="Title (optional)" maxlength="80" />
+          <input class="desc" type="text" placeholder="Short description (optional)" maxlength="200" />
+          <div class="autoblock">
+            <span class="autolabel">${IC.bolt} Categorised automatically</span>
+            <select class="cat" aria-label="Category">
+              <option value="">Category (optional)</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="step" data-step="3" hidden>
+          <h3>Add your take</h3>
+          <p class="sub">Optional, but a share with a note gets read far more often.</p>
+          <div class="notetabs">
+            <button class="nt on" type="button" data-note-tab="write">Write</button>
+            <button class="nt" type="button" data-note-tab="preview">Preview</button>
+            <span class="mdlabel">Markdown</span>
+          </div>
+          <textarea placeholder="What are you reading, building, or finding?" maxlength="4000"></textarea>
+          <div class="notepreview" data-note-preview hidden></div>
+        </section>
+
+        <section class="step" data-step="4" hidden>
+          <h3>Who sees this?</h3>
+          <p class="sub">Set the audience for your share.</p>
+          <div class="aud">
+            <button class="audcard on" type="button" data-vis="members" aria-pressed="true">
+              <span class="at">${IC.lock} Members only</span>
+              <span class="ad">Signed-in members of the network, nobody else.</span>
+            </button>
+            <button class="audcard" type="button" data-vis="public" aria-pressed="false">
+              <span class="at">${IC.globe} Public</span>
+              <span class="ad">Anyone can read it, and it can be indexed.</span>
+            </button>
+          </div>
+        </section>
+
+        <div class="wizfoot">
           <span class="msg" aria-live="polite"></span>
-          <button class="post" type="button">Post Share</button>
+          <div class="navbtns">
+            <button class="back" type="button" data-back hidden>${IC.back} Back</button>
+            <button class="next" type="button" data-next>${esc(NEXT_LABEL[1])} ${IC.fwd}</button>
+            <button class="post" type="button" hidden>Post Share</button>
+          </div>
         </div>
       </div>`);
     this._image = null;
     this._suggested = null; // SOW-087: the Worker's category suggestion, applied once topics are loaded
+    // One delegated handler for the wizard controls (rail dots, Back/Next, note tabs, audience cards); base
+    // `on()` binds a single element, so a group of buttons needs delegation.
+    this.$('.card')?.addEventListener('click', (e) => this._onCardClick(e));
     this.on('.post', 'click', () => this._post());
     // SOW-057 + SOW-102: fetch the link preview EAGERLY — on paste and on a debounced input, not only on
     // blur/enter (change) — so a pasted URL imports without the member ever leaving the field. The same-URL
@@ -142,7 +258,101 @@ class GbtiShareComposer extends GbtiElement {
       clearTimeout(this._ogTimer);
       this._ogTimer = setTimeout(() => this._fetchPreview(), 400);
     });
+    this._go(1);
     this._loadTopics();
+  }
+
+  // Delegated wizard navigation + toggles.
+  _onCardClick(e) {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const goto = t.closest('[data-goto]');
+    if (goto) { this._go(Number(goto.dataset.goto)); return; }
+    if (t.closest('[data-next]')) { this._advance(); return; }
+    if (t.closest('[data-back]')) { this._go(this._step - 1); return; }
+    const nt = t.closest('[data-note-tab]');
+    if (nt) { this._setNoteTab(nt.dataset.noteTab); return; }
+    const vis = t.closest('[data-vis]');
+    if (vis) { this._selectAudience(vis.dataset.vis); return; }
+  }
+
+  // Advance from the current step. Leaving step 1 makes sure the link preview is fetched (idempotent + same-URL
+  // guarded), so "Fetch details" reliably imports even if the debounce had not fired yet.
+  _advance() {
+    if (this._step === 1) this._fetchPreview();
+    this._go(this._step + 1);
+  }
+
+  // Show one step; update the rail, the Back button, and the Next/Post label.
+  _go(n) {
+    const step = Math.max(1, Math.min(4, n));
+    // Leaving the Note step returns it to Write so the textarea is the source of truth on return.
+    if (this._step === 3 && step !== 3 && this._noteTab === 'preview') this._setNoteTab('write');
+    this._step = step;
+    for (const sec of this.$$('.step')) sec.hidden = Number(sec.dataset.step) !== step;
+    for (const dot of this.$$('.rail .dot')) {
+      const dn = Number(dot.dataset.goto);
+      dot.classList.toggle('on', dn === step);
+      dot.classList.toggle('done', dn < step);
+    }
+    const back = this.$('.back'); if (back) back.hidden = step === 1;
+    const next = this.$('.next'); const post = this.$('.post');
+    if (step === 4) {
+      if (next) next.hidden = true;
+      if (post) post.hidden = false;
+    } else {
+      if (post) post.hidden = true;
+      if (next) { next.hidden = false; next.innerHTML = `${esc(NEXT_LABEL[step])} ${IC.fwd}`; }
+    }
+  }
+
+  _setNoteTab(tab) {
+    this._noteTab = tab === 'preview' ? 'preview' : 'write';
+    const ta = this.$('textarea');
+    const pv = this.$('[data-note-preview]');
+    for (const b of this.$$('[data-note-tab]')) b.classList.toggle('on', b.dataset.noteTab === this._noteTab);
+    if (this._noteTab === 'preview') {
+      if (pv) { pv.innerHTML = this._notePreviewHtml(ta?.value || ''); pv.hidden = false; }
+      if (ta) ta.hidden = true;
+    } else {
+      if (pv) pv.hidden = true;
+      if (ta) ta.hidden = false;
+    }
+  }
+
+  _selectAudience(vis) {
+    this._visibility = vis === 'public' ? 'public' : 'members';
+    for (const c of this.$$('[data-vis]')) {
+      const on = c.dataset.vis === this._visibility;
+      c.classList.toggle('on', on);
+      c.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+
+  // Render the note's markdown for the Preview tab using the shared, escape-first block helpers. Escape-first
+  // means no author markdown can inject active HTML into the preview (member-markdown XSS stays closed).
+  _notePreviewHtml(md) {
+    const src = String(md || '').trim();
+    if (!src) return `<span class="empty">Nothing to preview yet.</span>`;
+    const html = parseBlocks(src).map((b) => this._blockPreview(b)).join('');
+    return html || `<span class="empty">Nothing to preview yet.</span>`;
+  }
+
+  _blockPreview(b) {
+    switch (b.type) {
+      case 'members': return ''; // the members-only split marker is meaningless in a short share note
+      case 'heading': { const lv = Math.min(3, Math.max(1, b.level || 2)); return `<h${lv}>${inlineMdToHtml(b.text || '')}</h${lv}>`; }
+      case 'quote': case 'callout': return `<blockquote>${inlineMdToHtml(b.text || '')}</blockquote>`;
+      case 'code': return `<pre><code>${esc(b.code || '')}</code></pre>`;
+      case 'list': {
+        const items = (Array.isArray(b.items) ? b.items : []).map((it) => `<li>${inlineMdToHtml(it)}</li>`).join('');
+        return b.ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`;
+      }
+      case 'image': return b.url && !isDangerousUrl(b.url) ? `<p><img src="${esc(b.url)}" alt="${esc(b.alt || '')}" /></p>` : '';
+      case 'embed': return b.url && !isDangerousUrl(b.url) ? `<p><a href="${esc(b.url)}">${esc(b.url)}</a></p>` : '';
+      case 'table': return ''; // rare in a note; the light preview omits tables
+      case 'paragraph': default: return `<p>${inlineMdToHtml(b.text || '')}</p>`;
+    }
   }
 
   // SOW-087: populate the category select from the public topic vocabulary (/topics.json). The vocabulary is
@@ -218,7 +428,7 @@ class GbtiShareComposer extends GbtiElement {
     const shortDescription = (this.$('input.desc')?.value || '').trim();
     const body = (this.$('textarea')?.value || '').trim();
     const url = (this.$('input[type=url]')?.value || '').trim();
-    const visibility = this.$('select.vis')?.value || 'members';
+    const visibility = this._visibility || 'members'; // sow-192 Phase E: the audience card selection
     const category = this.$('select.cat')?.value || ''; // SOW-087: the optional topic category
     const msg = this.$('.msg');
     if (!body && !url && !title) { this._say(msg, 'Add a title, a note, or a link first.', 'err'); return; }
@@ -244,6 +454,11 @@ class GbtiShareComposer extends GbtiElement {
       this._suggested = null;
       this._lastOgUrl = null;
       const ogBox = this.$('[data-og]'); if (ogBox) { ogBox.hidden = true; ogBox.innerHTML = ''; }
+      // sow-192 Phase E: return the wizard to a clean first step for the next share (the ack stays visible in
+      // the always-on footer).
+      this._setNoteTab('write');
+      this._selectAudience('members');
+      this._go(1);
       // SOW-092: emit a READER-READY optimistic item alongside the publish result so the host redirects
       // the member to their share IMMEDIATELY (SOW-076 instant-feel; the emit only fires on success).
       const item = optimisticShareItem({ res, input: { ...input, image: postedImage }, body });
