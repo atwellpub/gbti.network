@@ -32,6 +32,8 @@ import {
 import { SIGNUP_BASE, GITHUB_APP_SLUG, UPSTREAM_REPO, authModeFor, isHostedCtx } from './signup-base.mjs';
 import { hostedAuthor, hostedItemId, hostedPublishFiles } from './hosted-publish.mjs'; // SOW-156/157: hosted-mode publish transport
 import { workerListDrafts, workerPutDraft, workerDeleteDraft } from './drafts-client.mjs'; // SOW-157: the hosted draft store
+import { workerListRepoDrafts } from './repo-drafts-client.mjs'; // sow-194: the committed repo-drafts listing
+import { mergeRepoDrafts } from './repo-drafts-core.mjs'; // sow-194: shared repo-draft mapping + dedup
 import { isContributionToFolder } from '../../membership/classify-pr.mjs';
 import yaml from 'js-yaml';
 import { rolesFromParsed, roleOf, isAdminRole } from '../../membership/overrides-core.mjs';
@@ -891,6 +893,22 @@ export async function forkContentMatchesLive(ctx, path, forkText) {
   } catch { return false; }
 }
 
+/**
+ * sow-194: fetch the caller's committed repo drafts (status:draft items in the public repo) and merge them into
+ * the fork/KV draft rows. FAIL-SOFT: a repo-drafts error (route down, not signed in) must NOT blank the Drafts
+ * list, so a member still sees their fork/KV drafts. mergeRepoDrafts drops a repo row whose (type,slug) already
+ * has a fork/KV draft (the editable copy wins) and filters repo rows to `type` when one is given.
+ */
+async function foldRepoDrafts(ctx, drafts, type) {
+  let items = [];
+  try {
+    const token = ctx.store?.get?.('githubToken');
+    const r = await workerListRepoDrafts({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
+    items = Array.isArray(r?.items) ? r.items : [];
+  } catch { items = []; }
+  return mergeRepoDrafts(drafts, items, { type });
+}
+
 export async function listDrafts(ctx, { type } = {}) {
   const id = requireIdentity(ctx);
   // SOW-157: hosted drafts come from the KV store; the same row shape, with no PR (drafts never open one).
@@ -917,9 +935,10 @@ export async function listDrafts(ctx, { type } = {}) {
         visibility: r.frontmatter?.visibility || 'public',
         status: r.frontmatter?.status || 'draft',
         valid, invalidReason, pull: null,
+        store: 'kv', // sow-194: the store discriminator, so a repo draft never collides with a KV draft
       });
     }
-    return { drafts };
+    return { drafts: await foldRepoDrafts(ctx, drafts, type) };
   }
   const repo = requireRepo(ctx);
   const fork = await repo.ensureFork();
@@ -976,16 +995,37 @@ export async function listDrafts(ctx, { type } = {}) {
       valid,
       invalidReason,
       pull: pull ? { number: pull.number, html_url: pull.html_url } : null,
+      store: 'fork', // sow-194: the store discriminator, so a repo draft never collides with a fork draft
     });
   }
-  return { drafts };
+  return { drafts: await foldRepoDrafts(ctx, drafts, type) };
 }
 
 /** Read one fork-staged draft (frontmatter + body) for the editor prefill. A members-only draft stores its body
  *  in the sibling .enc; decrypt it (the author is paid) so a re-save never replaces the gated text with a stub. */
-export async function readDraft(ctx, { type, slug } = {}) {
+export async function readDraft(ctx, { type, slug, store, path: repoPath } = {}) {
   const id = requireIdentity(ctx);
   if (!type) throw new OperationError('bad-request', 'type is required');
+  // sow-194: a repo draft is a committed status:draft item at its canonical path in the PUBLIC repo. Read it via
+  // the reader (upstream/canonical, not a fork branch or the KV store), decrypting a members-only body like a
+  // fork draft. Route it BEFORE the hosted/fork branches so a repo draft never reads the wrong record. (The
+  // canonical path arrives as `repoPath` to avoid shadowing the fork branch's own `let path` below.)
+  if (store === 'repo') {
+    let rel = repoPath;
+    if (!rel) { try { rel = contentPath(type, id.username, slug); } catch { rel = null; } }
+    if (!rel) throw new OperationError('bad-request', 'a repo draft needs its path');
+    let text = null;
+    try { text = await ctx.reader?.readFile?.(rel); } catch { text = null; }
+    if (text == null) throw new OperationError('not-found', `could not read the repo draft: ${rel}`);
+    const { frontmatter, body } = parseContentFile(text);
+    if (frontmatter?.encryptedBody) {
+      try {
+        const { text: plain } = await decryptMemberAsset(ctx, { encPath: frontmatter.encryptedBody });
+        return { path: rel, branch: null, store: 'repo', frontmatter, body: plain };
+      } catch { /* the decrypt is unavailable (not paid): fall through to the public part */ }
+    }
+    return { path: rel, branch: null, store: 'repo', frontmatter, body };
+  }
   // SOW-157: a hosted draft's restore state (frontmatter + plain body) comes straight from the KV record.
   if (isHostedCtx(ctx)) {
     const opts = { token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch };
@@ -1015,9 +1055,13 @@ export async function readDraft(ctx, { type, slug } = {}) {
 
 /** Discard a fork-staged draft (delete its branch). Refuses when an open PR exists (deleting the branch would
  *  abruptly close the PR + lose the review thread); the member withdraws the PR first. */
-export async function discardDraft(ctx, { type, slug } = {}) {
+export async function discardDraft(ctx, { type, slug, store } = {}) {
   requireIdentity(ctx);
   if (!type) throw new OperationError('bad-request', 'type is required');
+  // sow-194: a repo draft is committed to the public repo; discarding it is a delete request, not a from-here
+  // action. Refuse with a recognizable code (never a silent no-op, and never a KV/fork delete of the wrong
+  // record). Route BEFORE the hosted/fork branches.
+  if (store === 'repo') throw new OperationError('unsupported', 'This draft is committed to the network and cannot be discarded here. Publish it, or open a removal request.');
   // SOW-157: a hosted discard is a KV delete (idempotent; no branch, no PR to strand).
   if (isHostedCtx(ctx)) {
     await workerDeleteDraft({ type, slug, token: ctx.store?.get?.('githubToken'), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
@@ -1044,8 +1088,17 @@ export async function discardDraft(ctx, { type, slug } = {}) {
 
 /** Publish a staged draft to the network: open the canonical PR from the branch Save already created (no rebuild,
  *  so a members-only draft's encrypted files round-trip untouched). Paid-only — the gate stays the backstop. */
-export async function publishDraft(ctx, { type, slug, title, prBody } = {}) {
+export async function publishDraft(ctx, { type, slug, title, prBody, store, path } = {}) {
   const id = requireIdentity(ctx);
+  // sow-194: publishing a repo draft is the draft->published status flip on the canonical item, NOT a fork PR.
+  // setOwnContentStatus handles hosted-vs-fork AND member-vs-house scope AND the paid gate, so route to it BEFORE
+  // requireRepo/the fork path (the 5th short-circuit site PublicationMaster flagged is covered inside it).
+  if (store === 'repo') {
+    let rel = path;
+    if (!rel) { try { rel = contentPath(type, id.username, slug); } catch { rel = null; } }
+    if (!rel) throw new OperationError('bad-request', 'a repo draft needs its path to publish');
+    return setOwnContentStatus(ctx, { path: rel, status: 'published' });
+  }
   const repo = requireRepo(ctx);
   const membership = await membershipOf(ctx);
   if (isBlockedFromPublishing(membership)) {

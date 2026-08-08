@@ -17489,13 +17489,13 @@ From the author:
       saveDraft: (b) => request("POST", "/api/draft", b),
       // { type, input, body } -> { branch, state: 'staged' }
       listDrafts: ({ type } = {}) => request("GET", `/api/drafts${qs({ type })}`),
-      // -> { drafts: [{ type, slug, title, branch, pull }] }
-      readDraft: ({ type, slug } = {}) => request("GET", `/api/draft${qs({ type, slug })}`),
-      // -> { frontmatter, body } for the editor prefill
+      // -> { drafts: [{ type, slug, title, branch, pull, store }] } (sow-194: store is 'fork'|'kv'|'repo')
+      readDraft: ({ type, slug, store: store2, path } = {}) => request("GET", `/api/draft${qs({ type, slug, store: store2, path })}`),
+      // -> { frontmatter, body } for the editor prefill (sow-194: store+path route a repo draft to its canonical file)
       discardDraft: (b) => request("POST", "/api/draft/discard", b),
-      // { type, slug } -> { ok, branch }
+      // { type, slug, store } -> { ok, branch } (sow-194: store:'repo' is refused 'unsupported')
       publishDraft: (b) => request("POST", "/api/draft/publish", b),
-      // { type, slug } -> { prNumber, prUrl } (paid-only)
+      // { type, slug, store, path } -> { prNumber, prUrl } (paid-only; sow-194: store:'repo' is the status flip)
       postShare: (b) => request("POST", "/api/share", b),
       // SOW-018: returns { id, path, visibility, encrypted }
       listShares: ({ limit } = {}) => request("GET", `/api/shares${qs({ limit })}`),

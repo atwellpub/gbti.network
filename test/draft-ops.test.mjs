@@ -157,6 +157,84 @@ test('discardDraft still surfaces a REAL delete failure (the branch exists)', as
   await assert.rejects(discardDraft(ctx, { type: 'prompt', slug: 'held' }), /403/);
 });
 
+// sow-194: the extension/npm client-core fold of committed repo drafts into the Drafts listing + the store
+// routing of the draft ops. A repo draft is a status:draft item committed to the public repo (store:'repo').
+const withRepoDrafts = (ctx, items) => {
+  ctx.fetch = async (url) => {
+    if (String(url).includes('/membership/repo-drafts')) return { ok: true, json: async () => ({ ok: true, items }) };
+    throw new Error('no other network in this unit test');
+  };
+  return ctx;
+};
+
+test('listDrafts: folds the caller\'s committed repo drafts (store:repo), deduped against a fork draft of the same slug', async () => {
+  const fork = '---\ntitle: Forked\nstatus: published\nvisibility: public\n---\nx';
+  const items = [
+    { type: 'post', slug: 'committed-wip', path: 'members/alice/posts/committed-wip/index.md', owner: 'alice', title: 'Committed WIP', visibility: 'public', status: 'draft' },
+    { type: 'post', slug: 'my-post', path: 'members/alice/posts/my-post/index.md', owner: 'alice', title: 'repo dupe of the fork draft', visibility: 'public', status: 'draft' },
+  ];
+  const ctx = withRepoDrafts(draftCtx({ refs: ['gbti/post-my-post'], files: { 'gbti/post-my-post': fork } }), items);
+  const { drafts } = await listDrafts(ctx, {});
+  const repoRows = drafts.filter((d) => d.store === 'repo');
+  assert.deepEqual(repoRows.map((d) => d.slug), ['committed-wip']); // the my-post repo row is dropped (fork wins)
+  assert.equal(repoRows[0].title, 'Committed WIP');
+  assert.equal(repoRows[0].branch, null);
+  assert.ok(drafts.some((d) => d.slug === 'my-post' && d.store === 'fork'), 'the fork my-post stays, not the repo dupe');
+});
+
+test('listDrafts: a repo-drafts fetch error is FAIL-SOFT (fork drafts still list; no repo rows)', async () => {
+  const fork = '---\ntitle: Forked\nstatus: published\nvisibility: public\n---\nx';
+  const ctx = draftCtx({ refs: ['gbti/post-my-post'], files: { 'gbti/post-my-post': fork } }); // default fetch throws
+  const { drafts } = await listDrafts(ctx, {});
+  assert.deepEqual(drafts.map((d) => d.slug), ['my-post']);
+  assert.equal(drafts.every((d) => d.store !== 'repo'), true, 'a repo-drafts error must add no repo rows, not blank the list');
+});
+
+test('readDraft: store:repo reads the CANONICAL file via the reader (not a fork/KV record); path falls back to contentPath', async () => {
+  const canonical = '---\ntitle: Committed\nstatus: draft\nvisibility: public\n---\nThe committed body';
+  const ctx = draftCtx({});
+  const seen = [];
+  ctx.reader = { readFile: async (p) => { seen.push(p); return p === 'members/alice/posts/committed-wip/index.md' ? canonical : null; } };
+  const out = await readDraft(ctx, { type: 'post', slug: 'committed-wip', store: 'repo', path: 'members/alice/posts/committed-wip/index.md' });
+  assert.equal(out.store, 'repo');
+  assert.equal(out.branch, null);
+  assert.equal(out.frontmatter.title, 'Committed');
+  assert.equal(out.body, 'The committed body');
+  // no path -> contentPath(type, username, slug) resolves the same canonical path
+  const out2 = await readDraft(ctx, { type: 'post', slug: 'committed-wip', store: 'repo' });
+  assert.equal(out2.frontmatter.title, 'Committed');
+  assert.ok(seen.includes('members/alice/posts/committed-wip/index.md'));
+});
+
+test('discardDraft: store:repo is refused with a typed "unsupported" error (never a fork/KV delete)', async () => {
+  const ctx = draftCtx({});
+  await assert.rejects(
+    () => discardDraft(ctx, { type: 'post', slug: 'committed-wip', store: 'repo' }),
+    (e) => { assert.ok(e instanceof OperationError); assert.equal(e.code, 'unsupported'); return true; },
+  );
+  assert.equal(ctx.calls.deleteBranch.length, 0, 'a repo draft must never delete a fork branch');
+});
+
+test('publishDraft: store:repo routes to the status flip (reads canonical + a status branch), NOT a PR from the draft branch', async () => {
+  const canonical = '---\ntitle: Committed\nstatus: draft\nvisibility: public\n---\nBody';
+  const ctx = draftCtx({ membership: 'paid' });
+  const seen = [];
+  ctx.reader = { readFile: async (p) => { seen.push(p); return canonical; } };
+  await publishDraft(ctx, { type: 'post', slug: 'committed-wip', store: 'repo', path: 'members/alice/posts/committed-wip/index.md' });
+  assert.ok(seen.includes('members/alice/posts/committed-wip/index.md'), 'the flip reads the canonical file via the reader');
+  // it must NOT open a PR from the draft branch (that is the fork-publish path a repo draft must never take)
+  assert.equal(ctx.calls.openPull.filter((p) => p.head === 'alice:gbti/post-committed-wip').length, 0);
+});
+
+test('publishDraft: store:repo for a non-paid member is blocked by the flip\'s own gate', async () => {
+  const ctx = draftCtx({ membership: 'trialing' });
+  ctx.reader = { readFile: async () => '---\ntitle: C\nstatus: draft\nvisibility: public\n---\nB' };
+  await assert.rejects(
+    () => publishDraft(ctx, { type: 'post', slug: 'committed-wip', store: 'repo', path: 'members/alice/posts/committed-wip/index.md' }),
+    (e) => { assert.equal(e.code, 'membership-required'); return true; },
+  );
+});
+
 // SOW-112 v2: a frontmatter slug differing from the branch identity is a PENDING RENAME; the row surfaces it.
 test('listDrafts: a pending-rename draft carries pendingSlug (frontmatter slug differs from the branch)', async () => {
   const renamed = '---\ntitle: My Post\nslug: brand-new-name\nstatus: published\nvisibility: public\n---\nBody';

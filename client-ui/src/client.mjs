@@ -65,10 +65,10 @@ export function createHttpClient({ baseUrl = '', token, fetch = globalThis.fetch
     publish: (b) => request('POST', '/api/publish', b),
     // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
     saveDraft: (b) => request('POST', '/api/draft', b), // { type, input, body } -> { branch, state: 'staged' }
-    listDrafts: ({ type } = {}) => request('GET', `/api/drafts${qs({ type })}`), // -> { drafts: [{ type, slug, title, branch, pull }] }
-    readDraft: ({ type, slug } = {}) => request('GET', `/api/draft${qs({ type, slug })}`), // -> { frontmatter, body } for the editor prefill
-    discardDraft: (b) => request('POST', '/api/draft/discard', b), // { type, slug } -> { ok, branch }
-    publishDraft: (b) => request('POST', '/api/draft/publish', b), // { type, slug } -> { prNumber, prUrl } (paid-only)
+    listDrafts: ({ type } = {}) => request('GET', `/api/drafts${qs({ type })}`), // -> { drafts: [{ type, slug, title, branch, pull, store }] } (sow-194: store is 'fork'|'kv'|'repo')
+    readDraft: ({ type, slug, store, path } = {}) => request('GET', `/api/draft${qs({ type, slug, store, path })}`), // -> { frontmatter, body } for the editor prefill (sow-194: store+path route a repo draft to its canonical file)
+    discardDraft: (b) => request('POST', '/api/draft/discard', b), // { type, slug, store } -> { ok, branch } (sow-194: store:'repo' is refused 'unsupported')
+    publishDraft: (b) => request('POST', '/api/draft/publish', b), // { type, slug, store, path } -> { prNumber, prUrl } (paid-only; sow-194: store:'repo' is the status flip)
     postShare: (b) => request('POST', '/api/share', b), // SOW-018: returns { id, path, visibility, encrypted }
     listShares: ({ limit } = {}) => request('GET', `/api/shares${qs({ limit })}`), // SOW-018: returns { items: [share summaries] }
     listShareComments: ({ targetSlug, limit } = {}) => request('GET', `/api/share-comments${qs({ targetSlug, limit })}`), // SOW-032: a Share's discussion -> { items: [comment summaries] }

@@ -139,7 +139,7 @@ export async function handleApi(reqInfo, ctx) {
   if (method === 'POST' && pathname === '/api/publish') return run(() => publish(ctx, body ?? {}));
   // SOW-082: universal draft staging (save to the fork without a PR; review; publish from the staged branch).
   if (method === 'GET' && pathname === '/api/drafts') return run(() => listDrafts(ctx, { type: query.type }));
-  if (method === 'GET' && pathname === '/api/draft') return run(() => readDraft(ctx, { type: query.type, slug: query.slug }));
+  if (method === 'GET' && pathname === '/api/draft') return run(() => readDraft(ctx, { type: query.type, slug: query.slug, store: query.store, path: query.path }));
   if (method === 'POST' && pathname === '/api/draft') return run(() => saveDraft(ctx, body ?? {}));
   if (method === 'POST' && pathname === '/api/draft/discard') return run(() => discardDraft(ctx, body ?? {}));
   if (method === 'POST' && pathname === '/api/draft/publish') return run(() => publishDraft(ctx, body ?? {}));

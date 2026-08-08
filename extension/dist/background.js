@@ -18890,6 +18890,56 @@ async function workerDeleteDraft({ type, slug, ...opts }) {
   return call4("POST", { op: "delete", type, slug }, opts);
 }
 
+// client/src/repo-drafts-client.mjs
+var trimBase10 = (b) => String(b || "").replace(/\/$/, "");
+var RepoDraftsClientError = class extends Error {
+};
+async function workerListRepoDrafts({ token, signupBase, fetch: fetch2 = globalThis.fetch } = {}) {
+  if (!token || !signupBase) throw new RepoDraftsClientError("not signed in");
+  const res = await fetch2(trimBase10(signupBase) + "/membership/repo-drafts", { headers: { Authorization: "Bearer " + token } });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new RepoDraftsClientError(data?.message || data?.error || `repo-drafts request failed (${res.status})`);
+  return data;
+}
+
+// client/src/repo-drafts-core.mjs
+function mapRepoDraftItem(item = {}) {
+  const type = item?.type;
+  const slug = item?.slug;
+  return {
+    type,
+    slug,
+    branch: null,
+    path: typeof item?.path === "string" ? item.path : null,
+    pendingSlug: null,
+    title: typeof item?.title === "string" && item.title ? item.title : slug || type || "",
+    visibility: item?.visibility === "members" ? "members" : "public",
+    status: "draft",
+    owner: item?.owner ?? null,
+    valid: true,
+    invalidReason: null,
+    pull: null,
+    store: "repo"
+  };
+}
+function mergeRepoDrafts(existing = [], repoItems = [], { type = null } = {}) {
+  const rows = Array.isArray(existing) ? [...existing] : [];
+  const seen = new Set(rows.map((d) => `${d?.type}:${d?.slug}`));
+  for (const item of Array.isArray(repoItems) ? repoItems : []) {
+    if (!item || !item.type || !item.slug) continue;
+    if (type && item.type !== type) continue;
+    const key = `${item.type}:${item.slug}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(mapRepoDraftItem(item));
+  }
+  return rows;
+}
+
 // membership/overrides-core.mjs
 var ROLE2 = Object.freeze({
   member: "member",
@@ -19117,12 +19167,12 @@ function filterActivity(activity, types2) {
 }
 
 // client/src/member-admin-client.mjs
-var trimBase10 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var trimBase11 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
 var AdminClientError = class extends Error {
 };
 async function getRosterStatuses({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/admin/statuses", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/admin/statuses", {
     method: "GET",
     headers: { Authorization: "Bearer " + token }
   });
@@ -19136,7 +19186,7 @@ async function getRosterStatuses({ token, signupBase, fetch: fetch2 = globalThis
 }
 async function getDiscordChannels({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/discord-channels", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/discord-channels", {
     method: "GET",
     headers: { Authorization: "Bearer " + token }
   });
@@ -19150,7 +19200,7 @@ async function getDiscordChannels({ token, signupBase, fetch: fetch2 = globalThi
 }
 async function triggerAdminOp({ token, signupBase, fetch: fetch2 = globalThis.fetch, action, params }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/admin/ops", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/admin/ops", {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify(params ? { action, params } : { action })
@@ -19166,7 +19216,7 @@ async function triggerAdminOp({ token, signupBase, fetch: fetch2 = globalThis.fe
 }
 async function getCouponUsage({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/admin/coupon-usage", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/admin/coupon-usage", {
     method: "GET",
     headers: { Authorization: "Bearer " + token }
   });
@@ -19180,7 +19230,7 @@ async function getCouponUsage({ token, signupBase, fetch: fetch2 = globalThis.fe
 }
 async function getSyndicationQueue({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/syndication", { method: "GET", headers: { Authorization: "Bearer " + token } });
+  const res = await fetch2(trimBase11(signupBase) + "/membership/syndication", { method: "GET", headers: { Authorization: "Bearer " + token } });
   let data = null;
   try {
     data = await res.json();
@@ -19191,7 +19241,7 @@ async function getSyndicationQueue({ token, signupBase, fetch: fetch2 = globalTh
 }
 async function getSyndicateNow({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/syndicate-now", { method: "GET", headers: { Authorization: "Bearer " + token } });
+  const res = await fetch2(trimBase11(signupBase) + "/membership/syndicate-now", { method: "GET", headers: { Authorization: "Bearer " + token } });
   let data = null;
   try {
     data = await res.json();
@@ -19202,7 +19252,7 @@ async function getSyndicateNow({ token, signupBase, fetch: fetch2 = globalThis.f
 }
 async function syndicateNow({ destination, item, template, channelId, forwardChannelId, redditKind, bodyTemplate, commentTemplate, devtoIntroTemplate, devtoFooterTemplate, devtoStubTemplate, devtoDraft, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/syndicate-now", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/syndicate-now", {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify({ destination, item, template, channelId, forwardChannelId, redditKind, bodyTemplate, commentTemplate, devtoIntroTemplate, devtoFooterTemplate, devtoStubTemplate, devtoDraft })
@@ -19217,7 +19267,7 @@ async function syndicateNow({ destination, item, template, channelId, forwardCha
 }
 async function cancelSyndication({ id, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/syndication/cancel", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/syndication/cancel", {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify({ id })
@@ -19232,7 +19282,7 @@ async function cancelSyndication({ id, token, signupBase, fetch: fetch2 = global
 }
 async function approveSyndication({ id, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/syndication/approve", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/syndication/approve", {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify({ id })
@@ -19247,7 +19297,7 @@ async function approveSyndication({ id, token, signupBase, fetch: fetch2 = globa
 }
 async function getSocialQueue({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/social-queue", { method: "GET", headers: { Authorization: "Bearer " + token } });
+  const res = await fetch2(trimBase11(signupBase) + "/membership/social-queue", { method: "GET", headers: { Authorization: "Bearer " + token } });
   let data = null;
   try {
     data = await res.json();
@@ -19258,7 +19308,7 @@ async function getSocialQueue({ token, signupBase, fetch: fetch2 = globalThis.fe
 }
 async function socialQueueAction({ action, id, token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
-  const res = await fetch2(trimBase10(signupBase) + "/membership/social-queue", {
+  const res = await fetch2(trimBase11(signupBase) + "/membership/social-queue", {
     method: "POST",
     headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: JSON.stringify({ action, id })
@@ -19438,6 +19488,55 @@ async function introMoveFiles(ctx, { username, type, oldSlug, newSlug }) {
   ];
 }
 var OWN_STATUS_PATH_RE = /^members\/([a-z0-9][a-z0-9-]*)\/(posts|products|prompts)\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
+async function setOwnContentStatus(ctx, { path: rel, status } = {}) {
+  const id = requireIdentity(ctx);
+  const repo = requireRepo(ctx);
+  if (status !== "published" && status !== "draft") {
+    throw new OperationError("bad-request", 'status must be "published" or "draft"');
+  }
+  const houseTarget = String(rel || "").startsWith("house/");
+  let type, slug, branch;
+  if (houseTarget) {
+    const hm = HOUSE_CONTENT_PATH_RE.exec(String(rel || ""));
+    if (!hm) throw new OperationError("bad-request", "invalid house content path");
+    await requireSuperadminForHouse(ctx);
+    type = hm[1].slice(0, -1);
+    slug = String(rel).split("/")[2];
+    branch = `gbti/status-house-${type}-${slug}`;
+  } else {
+    const m = OWN_STATUS_PATH_RE.exec(String(rel || ""));
+    if (!m) throw new OperationError("bad-request", "path must be members/<you>/(posts|products|prompts)/<slug>/index.md");
+    if (m[1] !== String(id.username).toLowerCase()) {
+      throw new OperationError("forbidden", "you may only change the status of your own content");
+    }
+    type = m[2].slice(0, -1);
+    slug = m[3];
+    branch = `gbti/status-${type}-${slug}`;
+  }
+  const membership = await membershipOf(ctx);
+  if (isBlockedFromPublishing(membership)) {
+    throw new OperationError("membership-required", "Changing a published item requires a paid membership.", { membership });
+  }
+  const text = await ctx.reader?.readFile?.(rel);
+  if (text == null) throw new OperationError("not-found", `no such file: ${rel}`);
+  const flip = flipContentStatus(text, status);
+  if (!flip.changed) return { ok: true, noop: true, status };
+  const verb = status === "draft" ? "Unpublish" : "Republish";
+  if (isHostedCtx(ctx)) {
+    const pr2 = await hostedPublishFiles(ctx, { branch, files: [{ path: rel, content: flip.content }], title: `${verb}: ${slug}` });
+    return { ...pr2, ok: true, status };
+  }
+  await syncForkIfCreatingBranch(ctx, repo, branch);
+  const pr = await publishFiles({
+    repo,
+    branch,
+    files: [{ path: rel, content: flip.content }],
+    message: `${verb} ${slug}`,
+    title: `${verb}: ${slug}`,
+    body: status === "draft" ? "Member unpublish: a reversible status flip to draft (SOW-106). The file stays in the repo; republishing reverses it." : "Member republish: the status flips back to published (SOW-106)."
+  });
+  return { ...pr, ok: true, status };
+}
 async function syncForkIfCreatingBranch(ctx, repo, branch, { sync = workerSyncFork } = {}) {
   try {
     const fork = await repo.ensureFork();
@@ -19745,6 +19844,17 @@ async function forkContentMatchesLive(ctx, path, forkText) {
     return false;
   }
 }
+async function foldRepoDrafts(ctx, drafts, type) {
+  let items = [];
+  try {
+    const token = ctx.store?.get?.("githubToken");
+    const r = await workerListRepoDrafts({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
+    items = Array.isArray(r?.items) ? r.items : [];
+  } catch {
+    items = [];
+  }
+  return mergeRepoDrafts(drafts, items, { type });
+}
 async function listDrafts(ctx, { type } = {}) {
   const id = requireIdentity(ctx);
   if (isHostedCtx(ctx)) {
@@ -19780,10 +19890,12 @@ async function listDrafts(ctx, { type } = {}) {
         status: r.frontmatter?.status || "draft",
         valid,
         invalidReason,
-        pull: null
+        pull: null,
+        store: "kv"
+        // sow-194: the store discriminator, so a repo draft never collides with a KV draft
       });
     }
-    return { drafts: drafts2 };
+    return { drafts: await foldRepoDrafts(ctx, drafts2, type) };
   }
   const repo = requireRepo(ctx);
   const fork = await repo.ensureFork();
@@ -19849,14 +19961,43 @@ async function listDrafts(ctx, { type } = {}) {
       status: fm.status || "draft",
       valid,
       invalidReason,
-      pull: pull ? { number: pull.number, html_url: pull.html_url } : null
+      pull: pull ? { number: pull.number, html_url: pull.html_url } : null,
+      store: "fork"
+      // sow-194: the store discriminator, so a repo draft never collides with a fork draft
     });
   }
-  return { drafts };
+  return { drafts: await foldRepoDrafts(ctx, drafts, type) };
 }
-async function readDraft(ctx, { type, slug } = {}) {
+async function readDraft(ctx, { type, slug, store, path: repoPath } = {}) {
   const id = requireIdentity(ctx);
   if (!type) throw new OperationError("bad-request", "type is required");
+  if (store === "repo") {
+    let rel = repoPath;
+    if (!rel) {
+      try {
+        rel = contentPath(type, id.username, slug);
+      } catch {
+        rel = null;
+      }
+    }
+    if (!rel) throw new OperationError("bad-request", "a repo draft needs its path");
+    let text2 = null;
+    try {
+      text2 = await ctx.reader?.readFile?.(rel);
+    } catch {
+      text2 = null;
+    }
+    if (text2 == null) throw new OperationError("not-found", `could not read the repo draft: ${rel}`);
+    const { frontmatter: frontmatter2, body: body2 } = parseContentFile(text2);
+    if (frontmatter2?.encryptedBody) {
+      try {
+        const { text: plain } = await decryptMemberAsset(ctx, { encPath: frontmatter2.encryptedBody });
+        return { path: rel, branch: null, store: "repo", frontmatter: frontmatter2, body: plain };
+      } catch {
+      }
+    }
+    return { path: rel, branch: null, store: "repo", frontmatter: frontmatter2, body: body2 };
+  }
   if (isHostedCtx(ctx)) {
     const opts = { token: ctx.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch };
     const { drafts: recs } = await workerListDrafts(opts);
@@ -19893,9 +20034,10 @@ async function readDraft(ctx, { type, slug } = {}) {
   }
   return { path, branch, frontmatter, body };
 }
-async function discardDraft(ctx, { type, slug } = {}) {
+async function discardDraft(ctx, { type, slug, store } = {}) {
   requireIdentity(ctx);
   if (!type) throw new OperationError("bad-request", "type is required");
+  if (store === "repo") throw new OperationError("unsupported", "This draft is committed to the network and cannot be discarded here. Publish it, or open a removal request.");
   if (isHostedCtx(ctx)) {
     await workerDeleteDraft({ type, slug, token: ctx.store?.get?.("githubToken"), signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
     return { ok: true, branch: branchName(type, slug), hosted: true };
@@ -19919,8 +20061,20 @@ async function discardDraft(ctx, { type, slug } = {}) {
   }
   return { ok: true, branch };
 }
-async function publishDraft(ctx, { type, slug, title, prBody: prBody2 } = {}) {
+async function publishDraft(ctx, { type, slug, title, prBody: prBody2, store, path } = {}) {
   const id = requireIdentity(ctx);
+  if (store === "repo") {
+    let rel = path;
+    if (!rel) {
+      try {
+        rel = contentPath(type, id.username, slug);
+      } catch {
+        rel = null;
+      }
+    }
+    if (!rel) throw new OperationError("bad-request", "a repo draft needs its path to publish");
+    return setOwnContentStatus(ctx, { path: rel, status: "published" });
+  }
   const repo = requireRepo(ctx);
   const membership = await membershipOf(ctx);
   if (isBlockedFromPublishing(membership)) {
@@ -22730,7 +22884,7 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
       case "/api/drafts":
         return ok(await listDrafts(ctx, { type: query.type }));
       case "/api/draft":
-        return ok(method === "POST" ? await saveDraft(ctx, body) : await readDraft(ctx, { type: query.type, slug: query.slug }));
+        return ok(method === "POST" ? await saveDraft(ctx, body) : await readDraft(ctx, { type: query.type, slug: query.slug, store: query.store, path: query.path }));
       case "/api/draft/discard":
         return ok(await discardDraft(ctx, body));
       case "/api/draft/publish":

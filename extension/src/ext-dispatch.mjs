@@ -133,7 +133,7 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
       case '/api/drafts':
         return ok(await listDrafts(ctx, { type: query.type }));
       case '/api/draft':
-        return ok(method === 'POST' ? await saveDraft(ctx, body) : await readDraft(ctx, { type: query.type, slug: query.slug }));
+        return ok(method === 'POST' ? await saveDraft(ctx, body) : await readDraft(ctx, { type: query.type, slug: query.slug, store: query.store, path: query.path }));
       case '/api/draft/discard':
         return ok(await discardDraft(ctx, body));
       case '/api/draft/publish':
