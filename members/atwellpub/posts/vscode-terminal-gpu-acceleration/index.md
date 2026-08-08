@@ -12,7 +12,7 @@ tags:
   - terminal
   - performance
   - wsl
-status: draft
+status: published
 type: post
 author: atwellpub
 ---
