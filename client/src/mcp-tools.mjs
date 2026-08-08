@@ -46,6 +46,41 @@ const COMMENT_TARGET = { type: 'string', enum: ['post', 'product', 'prompt', 'sh
 const PATH_PARAM = { type: 'string', description: 'The repo path of the EXISTING item you are editing (members/<you>/<type>s/<slug>/index.md). Pass it whenever the item already exists: it preserves publishedAt, carries redirectFrom, and makes a changed slug a rename rather than a duplicate.' };
 const SCOPE_PARAM = { type: 'string', enum: ['member', 'house'], description: 'Target folder. "member" (default) is your own folder; "house" is the non-member house/ content and is superadmin-only, re-checked server-side.' };
 
+// sow-194 + sow-193: RESOLVE a draft's store server-side before acting on it.
+//
+// listDrafts folds three stores now (a fork branch, a hosted KV record, and a repo draft committed to the
+// canonical repo), and each action routes differently. The operations take `store` and `path` to do that
+// routing, but the tool schema advertises only { type, slug }, so that is what an agent sends. With `store`
+// undefined, discardDraft's `store === 'repo'` guard never fires and it falls through to the FORK path, where
+// it computes gbti/<type>-<slug> and deletes that branch. A member holding a stale fork branch at the same
+// slug would lose their unpublished fork work, reported as success by the alreadyGone catch.
+//
+// Threading `store` through the handlers would only fix the caller who remembers to pass it. Resolving it here
+// means the caller cannot get it wrong, because the caller no longer supplies it. An explicit `store` argument
+// is still accepted as a hint, but the resolved row wins.
+//
+// FAIL SAFE: when the row cannot be identified, the caller gets a typed error rather than the fork fallback.
+// An unresolvable discard must be a no-op with a message, never a silent branch delete.
+async function resolveDraftRow(ctx, { type, slug }) {
+  try {
+    const { drafts } = await listDrafts(ctx, { type });
+    return (Array.isArray(drafts) ? drafts : []).find((d) => d?.type === type && d?.slug === slug) ?? null;
+  } catch {
+    return null; // a listing failure must not silently downgrade to the fork path
+  }
+}
+
+/** The { store, path } to act with, resolved from the live row. Throws `not-found` when it cannot be resolved. */
+async function draftTarget(ctx, args, { require: mustResolve = true } = {}) {
+  const type = args?.type;
+  const slug = args?.slug;
+  const row = await resolveDraftRow(ctx, { type, slug });
+  if (!row && mustResolve) {
+    throw new OperationError('not-found', `no draft found for ${type}/${slug}. Call list_drafts to see what exists; refusing to act on an unidentified draft.`);
+  }
+  return { type, slug, store: row?.store ?? args?.store ?? undefined, path: row?.path ?? args?.path ?? undefined };
+}
+
 // The managed-abstraction tools. Each handler returns a plain JSON-serializable result (or throws an
 // OperationError); dispatch() wraps it into MCP tool-call content.
 export const TOOLS = [
@@ -135,19 +170,19 @@ export const TOOLS = [
     name: 'read_draft',
     description: 'Read one staged draft (frontmatter + body) by `type` and `slug`, so you can revise it before publishing.',
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' } }, ['type', 'slug']),
-    handler: (ctx, args) => readDraft(ctx, { type: args?.type, slug: args?.slug }),
+    handler: async (ctx, args) => readDraft(ctx, await draftTarget(ctx, args)),
   },
   {
     name: 'publish_draft',
     description: 'Publish a staged draft: opens the gated pull request from the draft branch it is already on. Paid-only, like every publish.',
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' }, title: { type: 'string' }, prBody: { type: 'string' } }, ['type', 'slug']),
-    handler: (ctx, args) => publishDraft(ctx, { type: args?.type, slug: args?.slug, title: args?.title, prBody: args?.prBody }),
+    handler: async (ctx, args) => publishDraft(ctx, { ...(await draftTarget(ctx, args)), title: args?.title, prBody: args?.prBody }),
   },
   {
     name: 'discard_draft',
     description: 'Discard a staged draft and delete its branch. Refused while the draft has an open pull request: withdraw the pull request first. This is not reversible, so confirm with the member before calling it.',
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: 'string' } }, ['type', 'slug']),
-    handler: (ctx, args) => discardDraft(ctx, { type: args?.type, slug: args?.slug }),
+    handler: async (ctx, args) => discardDraft(ctx, await draftTarget(ctx, args)),
   },
   {
     name: 'list_prs',

@@ -199,3 +199,87 @@ test('sow-193: listMembersOnly awaits its reader (a Promise as `items` was the a
   assert.ok(Array.isArray(out.items), 'items must be an array, not a pending Promise');
   assert.equal(out.items.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// sow-194 seam: list_drafts folds REPO drafts, so the action tools must route
+// by store. Asserted at the TOOL layer, driving the REAL listDrafts path via
+// the ctx (no module mocking: mcp-tools binds these imports at load, so mocking
+// the module export would not affect the handler under test). The op-layer test
+// supplies `store` by hand, which is the one condition a real caller never meets.
+// ---------------------------------------------------------------------------
+
+/** A ctx whose repo-drafts route returns `repoItems` and whose fork carries `forkBranches`. */
+function ctxWithRepoDrafts({ repoItems = [], forkBranches = [], onDeleteBranch } = {}) {
+  const repo = {
+    ...fakeRepo(),
+    async listMatchingRefs() { return forkBranches.map((b) => ({ branch: b, sha: 'sha' })); },
+    // listDrafts builds a fork row from the file ON the branch, read by tip sha; without this the row is
+    // skipped and the branch alone proves nothing.
+    async getForkFileContent(_full, p) {
+      const slug = p.split('/').at(-2);
+      return `---\ntype: post\ntitle: Fork draft\nslug: ${slug}\nauthor: alice\nstatus: published\n---\n\nbody\n`;
+    },
+    async deleteBranch(_full, branch) { onDeleteBranch?.(branch); },
+    async getBranchSha() { return null; }, // so an attempted delete reports alreadyGone rather than throwing
+  };
+  const ctx = ctxFor({ repoPath: tmpRepo(), repo });
+  // foldRepoDrafts -> workerListRepoDrafts(fetch) -> GET /membership/repo-drafts
+  ctx.fetch = async (url) => (String(url).includes('/membership/repo-drafts')
+    ? { ok: true, json: async () => ({ items: repoItems }) }
+    : { ok: false, status: 404, json: async () => ({}) });
+  return ctx;
+}
+
+test('sow-194 seam: discard_draft on a REPO row is refused instead of reporting a false success', async () => {
+  // The accurate hazard. mergeRepoDrafts drops a repo row when a fork/KV draft exists for the same
+  // (type, slug), so a repo row only survives when there is NO fork branch to delete. Before the fix, `store`
+  // was undefined at the tool boundary, so discard fell to the fork path, tried to delete a branch that does
+  // not exist, and the alreadyGone catch turned that into `{ ok: true }`. The agent was told it discarded a
+  // draft that is still sitting in the repo.
+  const deleted = [];
+  const ctx = ctxWithRepoDrafts({
+    repoItems: [{ type: 'post', slug: 'my-repo-draft', path: 'members/alice/posts/my-repo-draft/index.md', title: 'My repo draft' }],
+    forkBranches: [],
+    onDeleteBranch: (b) => deleted.push(b),
+  });
+
+  const res = await call('discard_draft', { type: 'post', slug: 'my-repo-draft' }, ctx);
+  assert.equal(res.result.isError, true, 'a repo draft must be refused, not silently "discarded"');
+  assert.equal(textOf(res).error, 'unsupported');
+  assert.deepEqual(deleted, [], 'nothing may be deleted for a repo draft');
+});
+
+test('sow-194 seam: a fork branch whose file is unreadable does NOT get deleted by a repo-draft discard', async () => {
+  // The narrow destructive case. If a fork branch exists at the same slug but its file cannot be read,
+  // listDrafts skips the fork row, so the repo row survives the merge AND the branch is still there. The old
+  // code would have deleted that orphan branch while the caller believed it was discarding a repo draft.
+  const deleted = [];
+  const ctx = ctxWithRepoDrafts({
+    repoItems: [{ type: 'post', slug: 'orphaned', path: 'members/alice/posts/orphaned/index.md', title: 'Orphaned' }],
+    forkBranches: ['gbti/post-orphaned'],
+    onDeleteBranch: (b) => deleted.push(b),
+  });
+  ctx.getRepoClient().getForkFileContent = async () => null; // unreadable -> the fork row is skipped
+
+  const res = await call('discard_draft', { type: 'post', slug: 'orphaned' }, ctx);
+  assert.equal(res.result.isError, true);
+  assert.equal(textOf(res).error, 'unsupported');
+  assert.deepEqual(deleted, [], 'the orphan fork branch must survive');
+});
+
+test('sow-194 seam: an UNRESOLVABLE draft is refused rather than falling through to a fork delete', async () => {
+  const deleted = [];
+  const ctx = ctxWithRepoDrafts({ repoItems: [], forkBranches: [], onDeleteBranch: (b) => deleted.push(b) });
+  const res = await call('discard_draft', { type: 'post', slug: 'ghost' }, ctx);
+  assert.equal(res.result.isError, true);
+  assert.equal(textOf(res).error, 'not-found');
+  assert.deepEqual(deleted, [], 'an unidentified draft must never reach deleteBranch');
+});
+
+test('sow-194 seam: a genuine FORK draft still discards (the guard is not over-broad)', async () => {
+  const deleted = [];
+  const ctx = ctxWithRepoDrafts({ repoItems: [], forkBranches: ['gbti/post-real-fork-draft'], onDeleteBranch: (b) => deleted.push(b) });
+  const res = await call('discard_draft', { type: 'post', slug: 'real-fork-draft' }, ctx);
+  assert.notEqual(res.result.isError, true, textOf(res)?.error ?? 'expected success');
+  assert.deepEqual(deleted, ['gbti/post-real-fork-draft']);
+});
