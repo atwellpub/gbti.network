@@ -17,15 +17,18 @@ test('grandfatherActive: unparseable until expires the grant (fail closed)', () 
   assert.equal(grandfatherActive('1', new Map([['1', { github_id: '1', until: '2099-01-01' }]]), new Date()), true); // future still works
 });
 
-// #3/#4 reconcile: a banned/lapsed member with no resolvable folder yields an `unresolved` action (fail closed).
-test('planReconcile: banned/lapsed member with null username emits an unresolved action', () => {
+// #3/#4 reconcile: a BANNED member with no resolvable folder yields an `unresolved` action (fail closed).
+// sow-197 narrowed this to bans only. A lapse no longer touches content, so an unresolvable lapsed member is
+// not a deplatforming failure to report; a ban still is, and that is the case that must stay loud.
+test('planReconcile: a banned member with null username emits an unresolved action', () => {
   const banned = planReconcile({ members: [{ githubId: '9', username: null, effective: { status: 'banned' } }], repoIndex: {} });
   const u = banned.find((a) => a.kind === 'unresolved');
   assert.ok(u && u.status === 'banned', 'banned + no folder => unresolved');
   assert.equal(banned.filter((a) => a.kind === 'content').length, 0, 'no content action without a folder');
 
+  // a lapsed member with no folder is NOT flagged: there is nothing to enforce against their content
   const lapsed = planReconcile({ members: [{ githubId: '8', username: null, effective: { status: 'cancelled' } }], repoIndex: {} });
-  assert.ok(lapsed.some((a) => a.kind === 'unresolved' && a.status === 'cancelled'));
+  assert.equal(lapsed.filter((a) => a.kind === 'unresolved').length, 0);
 
   // a paid member with no folder is NOT flagged (nothing to deplatform)
   const paid = planReconcile({ members: [{ githubId: '7', username: null, effective: { status: 'paid' } }], repoIndex: {} });

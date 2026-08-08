@@ -36,19 +36,17 @@ function effective(githubId, derived, { bans = new Map(), grandfathers = new Map
   return effectiveStatus(githubId, derived, { bans, grandfathers }, NOW);
 }
 
-/** Repo entry helper: files with their current status.
- *
- * `publishedAt` defaults to a real date because that is what these fixtures model: content that EXISTS on the
- * site and is being drafted or restored around a membership change. Reconcile only republishes a draft that
- * carries one, since that is how it tells content it drafted after a lapse from a draft the author has never
- * published (see filesToPublish). Pass null explicitly for a never-published draft. */
-const file = (p, status, visibility = 'public', publishedAt = '2026-01-01T00:00:00.000Z') => ({ path: p, status, visibility, publishedAt });
+/** Repo entry helper: files with their current status. */
+const file = (p, status, visibility = 'public') => ({ path: p, status, visibility });
 
 // helper to find actions by kind/type
 const ofKind = (actions, kind) => actions.filter((a) => a.kind === kind);
 
-// ---- cancelled member with published posts -> draft actions ----
-test('cancelled member with published content is drafted', () => {
+// ---- cancelled member with published posts -> NO content action, Locked role only (sow-197) ----
+// This test used to assert the opposite. A lapse now changes ACCESS, never published work: membership is
+// enforced at write time (the gate, the Worker author route, the client), so nothing new can be published,
+// and reconcile no longer reaches back into content it did not author. Only a BAN still drafts.
+test('cancelled member keeps their published content and only loses the Discord role', () => {
   const members = [
     {
       githubId: '100',
@@ -69,14 +67,7 @@ test('cancelled member with published content is drafted', () => {
     },
   };
   const actions = planReconcile({ members, repoIndex, now: NOW });
-  const content = ofKind(actions, 'content');
-  assert.equal(content.length, 1);
-  assert.equal(content[0].type, 'draft');
-  // only the two published files are flipped; the already-draft one is skipped (idempotent)
-  assert.deepEqual(content[0].files, [
-    'members/casey/posts/hello/index.md',
-    'members/casey/profile.md',
-  ]);
+  assert.deepEqual(ofKind(actions, 'content'), [], 'a lapse must not touch content in either direction');
   // cancelled -> the Locked role: add locked, remove the member role they still hold (locked out, not kicked)
   const discord = ofKind(actions, 'discord');
   assert.equal(discord.length, 2);
@@ -149,41 +140,27 @@ test('sow-185: with the Creator role UNPROVISIONED (creatorRoleEnabled false) th
   assert.equal(actions.filter((a) => a.role === 'creator').length, 0);
 });
 
-// ---- a NEVER-PUBLISHED draft is left alone (2026-08-08 incident) ----
-// Reconcile published an unfinished article overnight (63c2800) because filesToPublish took ANY draft a paid
-// member owned. It cannot see intent, so it uses publishedAt: content it drafted after a lapse has one, a
-// draft the author has never published does not. Without this the WorkBench draft review shipped in sow-194 is
-// pointless, since every reviewable draft is one nightly run from going live.
-test('a paid member\'s NEVER-PUBLISHED draft is not auto-published', () => {
+// ---- a draft is left alone, full stop (the 2026-08-08 incident) ----
+// Reconcile published an unfinished article overnight (63c2800) because it republished ANY draft a paid member
+// owned: nothing records WHY a file is draft, so it could not tell content it had drafted after a lapse from a
+// draft the author was still writing. sow-197 removed the publish path entirely rather than guessing at intent.
+// Without this the WorkBench draft review shipped in sow-194 is pointless, since every reviewable draft would
+// be one nightly run from going live.
+test('a paid member\'s draft is never auto-published', () => {
   const members = [
     {
       githubId: '900', username: 'nia', derived: 'paid', effective: effective('900', 'paid'),
       discordUserId: 'd900', discordRoles: ['member'],
     },
   ];
-  const repoIndex = { nia: { files: [file('members/nia/posts/wip/index.md', 'draft', 'public', null)] } };
+  const repoIndex = { nia: { files: [file('members/nia/posts/wip/index.md', 'draft')] } };
   const actions = planReconcile({ members, repoIndex, now: NOW });
   assert.deepEqual(ofKind(actions, 'content'), [], 'an unfinished draft must never be auto-published');
 });
 
-test('a paid member\'s PREVIOUSLY-published draft is still restored (the guard is not over-broad)', () => {
-  // The resubscribe path this function exists for: reconcile drafted it on lapse, so it carries a date.
-  const members = [
-    {
-      githubId: '901', username: 'omar', derived: 'paid', effective: effective('901', 'paid'),
-      discordUserId: 'd901', discordRoles: ['member'],
-    },
-  ];
-  const repoIndex = { omar: { files: [file('members/omar/posts/was-live/index.md', 'draft')] } };
-  const content = ofKind(planReconcile({ members, repoIndex, now: NOW }), 'content');
-  assert.equal(content.length, 1);
-  assert.equal(content[0].type, 'publish');
-  assert.deepEqual(content[0].files, ['members/omar/posts/was-live/index.md']);
-});
-
-test('the guard does NOT weaken the ban path: a banned member is still drafted', () => {
-  // ban > staff > grandfather > Stripe exists so a ban deplatforms regardless of payment. filesToDraft is
-  // untouched by the publishedAt guard, and this asserts it: the one direction that must never regress.
+test('removing the publish path does NOT weaken the ban path: a banned member is still drafted', () => {
+  // ban > staff > grandfather > Stripe exists so a ban deplatforms regardless of payment. The ban branch is
+  // the one content path sow-197 kept, and this asserts it: the one direction that must never regress.
   const bans = new Map([['902', { github_id: '902' }]]);
   const members = [
     {
@@ -197,8 +174,10 @@ test('the guard does NOT weaken the ban path: a banned member is still drafted',
   assert.equal(content[0].type, 'draft');
 });
 
-// ---- grandfathered member with DRAFT content -> publish ----
-test('grandfathered member with drafted content is re-published', () => {
+// ---- grandfathered member with DRAFT content -> still no publish (sow-197) ----
+// A grant makes the member effective-paid, and that used to republish anything of theirs sitting in draft.
+// It no longer does: a draft is the author's own unpublish state, and only the author republishes it.
+test('grandfathered member\'s drafted content is left in draft', () => {
   const grandfathers = new Map([['205', { github_id: '205' }]]);
   const members = [
     {
@@ -212,10 +191,7 @@ test('grandfathered member with drafted content is re-published', () => {
   ];
   const repoIndex = { gabe: { files: [file('members/gabe/posts/p1/index.md', 'draft')] } };
   const actions = planReconcile({ members, repoIndex, now: NOW });
-  const content = ofKind(actions, 'content');
-  assert.equal(content.length, 1);
-  assert.equal(content[0].type, 'publish');
-  assert.deepEqual(content[0].files, ['members/gabe/posts/p1/index.md']);
+  assert.deepEqual(ofKind(actions, 'content'), [], 'a grant changes access, not content status');
   // role already member -> no discord action
   assert.equal(ofKind(actions, 'discord').length, 0);
 });
@@ -315,8 +291,10 @@ test('day-87 reminder never targets an effective-paid member with a Stripe trial
   assert.equal(ofKind(planReconcile({ members: [plain], now: NOW }), 'reminder').filter((r) => r.type === 'day-87').length, 1);
 });
 
-// ---- resubscribed member with drafted content -> publish actions + member role added ----
-test('resubscribed (paid) member with drafted content is re-published and gets the member role', () => {
+// ---- resubscribed member -> member role added, content untouched (sow-197) ----
+// Resubscribing restores ACCESS. It does not sweep the member's drafts live: reconcile never drafted them in
+// the first place, so there is nothing of its own making left to reverse.
+test('resubscribed (paid) member gets the member role and their drafts stay drafts', () => {
   const members = [
     {
       githubId: '500',
@@ -337,10 +315,7 @@ test('resubscribed (paid) member with drafted content is re-published and gets t
     },
   };
   const actions = planReconcile({ members, repoIndex, now: NOW });
-  const content = ofKind(actions, 'content');
-  assert.equal(content.length, 1);
-  assert.equal(content[0].type, 'publish');
-  assert.deepEqual(content[0].files, ['members/rhea/posts/p/index.md', 'members/rhea/profile.md']);
+  assert.deepEqual(ofKind(actions, 'content'), [], 'resubscribing restores access, not content status');
   // role swap: add member, remove the locked role they held while lapsed
   const discord = ofKind(actions, 'discord');
   assert.equal(discord.length, 2);
@@ -569,8 +544,10 @@ test('resolveUsername precedence: members-index > byGithubId > byGithubLogin > c
   assert.equal(resolveUsername('1', 'ghost', noOverrides(), repoIndex), null);
 });
 
-test('FIX 1: a lapsed member whose login != folder name (hudson/atwellpub) IS drafted', () => {
-  // The confirmed real-data bug: Stripe github_login is 'atwellpub' but the folder is 'hudson'.
+test('FIX 1: a member whose login != folder name (hudson/atwellpub) still resolves, and a BAN reaches their content', () => {
+  // The confirmed real-data bug: Stripe github_login is 'atwellpub' but the folder is 'hudson'. Folder
+  // resolution still has to be right after sow-197, because the BAN path depends on it: an unresolvable
+  // banned member is the one case that must never quietly leave content live.
   const repoIndex = {
     byUsername: { hudson: { files: [file('members/hudson/profile.md', 'published')] } },
     byGithubLogin: new Map([['atwellpub', 'hudson']]),
@@ -582,11 +559,18 @@ test('FIX 1: a lapsed member whose login != folder name (hudson/atwellpub) IS dr
   assert.equal(entry.effective.status, 'expired'); // no sub, no trial -> not paid
 
   // Plan against the SAME byUsername the production main() passes to the planner.
-  const actions = planReconcile({ members: [entry], repoIndex: repoIndex.byUsername, now: NOW });
-  const content = ofKind(actions, 'content');
-  assert.equal(content.length, 1, 'lapsed hudson content must be drafted, not left live');
-  assert.equal(content[0].type, 'draft');
-  assert.deepEqual(content[0].files, ['members/hudson/profile.md']);
+  // Lapsed: access changes, content does not (sow-197).
+  const lapsed = planReconcile({ members: [entry], repoIndex: repoIndex.byUsername, now: NOW });
+  assert.deepEqual(ofKind(lapsed, 'content'), [], 'a lapse leaves hudson\'s published profile live');
+
+  // Banned: the same resolution now feeds the one path that DOES draft.
+  const bans = new Map([['5000', { github_id: '5000' }]]);
+  const bannedEntry = memberEntryFor(customer, { ...noOverrides(), bans }, NOW, { repoIndex });
+  assert.equal(bannedEntry.effective.status, 'banned');
+  const banned = ofKind(planReconcile({ members: [bannedEntry], repoIndex: repoIndex.byUsername, now: NOW }), 'content');
+  assert.equal(banned.length, 1, 'a banned member\'s content must be drafted, not left live');
+  assert.equal(banned[0].type, 'draft');
+  assert.deepEqual(banned[0].files, ['members/hudson/profile.md']);
 });
 
 test('FIX 1: buildRepoIndex parses login + status from a real on-disk member folder', () => {

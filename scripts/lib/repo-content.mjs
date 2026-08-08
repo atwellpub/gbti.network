@@ -63,16 +63,12 @@ export function githubLoginFromUrl(value) {
   return segment.toLowerCase();
 }
 
-/** Parse a single content file into { path, status, visibility, publishedAt }. Defaults: status 'published',
- *  visibility 'public'. `publishedAt` is null when absent, which is how the planner tells a file that has NEVER
- *  been published from one reconcile drafted after a lapse (see filesToPublish in reconcile-plan.mjs). Presence
- *  is all that is read, so the value is not normalized; `field` leaves surrounding single quotes in place. */
+/** Parse a single content file into { path, status, visibility }. Defaults: status 'published', visibility 'public'. */
 function readContentFile(root, abs) {
   const txt = fs.readFileSync(abs, 'utf8');
   const status = field(txt, 'status') ?? 'published';
   const visibility = field(txt, 'visibility') ?? 'public';
-  const publishedAt = field(txt, 'publishedAt');
-  return { path: relPath(root, abs), status, visibility, publishedAt: publishedAt ?? null };
+  return { path: relPath(root, abs), status, visibility };
 }
 
 /**

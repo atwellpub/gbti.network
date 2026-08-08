@@ -13,7 +13,8 @@
 // a successful apply yields an empty plan.
 //
 // Fail closed: deriveStatusFromCustomer + effectiveStatus already treat any missing or error state as
-// NOT paid, so a customer we cannot classify has their content drafted, never default-published.
+// NOT paid. sow-197 narrowed what that costs: a lapse moves the member to the Locked Discord role and
+// leaves their published work alone. Only a BAN drafts content, and only ever toward draft, never back.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,8 +65,9 @@ function isConverted(customer) {
  *
  * This exists because a Stripe metadata.github_login does NOT always equal the on-disk folder name.
  * Confirmed in real data: folder 'hudson' has links.github https://github.com/atwellpub, so the login
- * is 'atwellpub' and a plain login -> folder lookup misses, leaving the lapsed member published (a
- * fail-OPEN bug). Steps 1 to 3 close that hole.
+ * is 'atwellpub' and a plain login -> folder lookup misses. Steps 1 to 3 close that hole. Since sow-197
+ * the stake is BAN enforcement rather than lapse enforcement: an unresolvable banned member would leave
+ * their content live, which is the fail-OPEN case the planner now reports as `unresolved`.
  */
 export function resolveUsername(githubId, githubLogin, overrides, repoIndex) {
   const id = String(githubId ?? '');
@@ -158,13 +160,19 @@ function flipBranch(kind, githubId) {
 }
 
 /**
- * Enact a single content action (draft or publish) as ONE auto-merged PR that flips every selected
- * file's `status`. The bot is listed as admin in roles.yml, so the PR-gate passes it (it never runs PR
- * code; this is a base-branch metadata-only gate). We open the PR off a fresh branch, commit each file
- * flip, then squash-merge.
+ * Enact a single content action as ONE auto-merged PR that flips every selected file's `status`. The bot
+ * is listed as admin in roles.yml, so the PR-gate passes it (it never runs PR code; this is a base-branch
+ * metadata-only gate). We open the PR off a fresh branch, commit each file flip, then squash-merge.
+ *
+ * sow-197: `draft` is the ONLY content action, and this shell refuses anything else rather than defaulting
+ * to publish. The planner no longer emits a publish action; this makes the enactment side incapable of
+ * resurrecting one, so a future planner bug cannot quietly push a member's unfinished draft live again.
  */
 async function enactContent(github, action, { base = 'main' } = {}) {
-  const to = action.type === 'draft' ? 'draft' : 'published';
+  if (action.type !== 'draft') {
+    throw new Error(`reconcile: refusing content action '${action.type}': only 'draft' (ban enforcement) is permitted`);
+  }
+  const to = 'draft';
   const branch = flipBranch(action.type, action.githubId);
 
   // 1. Branch off the base head.
@@ -189,14 +197,14 @@ async function enactContent(github, action, { base = 'main' } = {}) {
   }
 
   // 3. Open + squash-merge the PR. The gate passes the admin bot, so this auto-merges.
-  const verb = action.type === 'draft' ? 'Disable' : 'Re-enable';
   const pull = await github.createPull({
-    title: `reconcile: ${verb} ${action.username ?? action.githubId} content`,
+    title: `reconcile: Disable ${action.username ?? action.githubId} content (ban)`,
     head: branch,
     base,
     body:
-      `Automated membership reconcile. Flips status -> ${to} for ${action.files.length} file(s) ` +
-      `owned by github_id ${action.githubId}. Never deletes content; resubscribe reverses it.`,
+      `Automated ban enforcement. Flips status -> draft for ${action.files.length} file(s) ` +
+      `owned by github_id ${action.githubId}. Never deletes content; lifting the ban does not ` +
+      `re-publish automatically, the author republishes their own work.`,
   });
   await github.mergePull(pull.number, { method: 'squash' });
   return pull.number;
@@ -493,8 +501,7 @@ export function targetedGithubId(env = process.env) {
 /**
  * Gather only the single targeted member (FIX 4). In repository_dispatch 'regate' mode we fetch ONLY
  * that customer via Stripe Search (instead of iterating every customer) and build one member entry, so
- * a just-paid member's Discord role is upgraded and content published right away. Returns an array of
- * zero or one member entries.
+ * a just-paid member's Discord role is upgraded right away. Returns an array of zero or one member entries.
  */
 export async function gatherTargetedMember(stripe, overrides, now, githubId, { repoIndex = null, discord = null, env = {} } = {}) {
   const customer = await stripe.searchCustomerByGithubId(githubId);

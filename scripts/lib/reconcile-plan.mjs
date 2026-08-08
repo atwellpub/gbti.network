@@ -3,8 +3,9 @@
 // content index into an ordered list of actions. scripts/reconcile.mjs enacts them via the GitHub,
 // Discord, and email clients (unless --dry-run).
 //
-// Fail closed everywhere: a member with an unknown or error status is treated as NOT paid, so their
-// published content is flipped to draft. We never default-open.
+// Fail closed everywhere: a member with an unknown or error status is treated as NOT paid. sow-197 narrowed
+// what that COSTS them: a lapse no longer changes content at all, so failing closed now means the locked
+// Discord role rather than unpublishing their work. Only a BAN still drafts content.
 //
 // Idempotency is the core contract: an action is only emitted when the desired state does NOT already
 // hold. Running the plan against an already-correct repo + role set yields an empty action list.
@@ -20,7 +21,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_DAY = 87; // day-87 trial reminder window opens here and closes at TRIAL_DAYS (90)
 const COUPON_REMINDER_DAYS = 14; // SOW-119: the coupon-expiry reminder window opens 14 days before `until`
 
-// Which effective statuses keep a member's content published (and grant the full member Discord role).
+// Which effective statuses grant the full member Discord role. sow-197: this no longer governs CONTENT
+// (a lapse leaves published work alone); it is the access-role axis only.
 // A grandfather grant resolves to effective.status === 'paid' (source 'grandfather'), so it is covered.
 const PUBLISHED_STATUSES = new Set(['paid']);
 // Which effective statuses grant the trial (not full member) Discord role.
@@ -55,11 +57,6 @@ export function discordCreatorTarget(tier) {
   return tier === TIER.creator;
 }
 
-/** True when this effective status means the member's public content should be published. */
-function shouldBePublished(effectiveStatus) {
-  return PUBLISHED_STATUSES.has(effectiveStatus);
-}
-
 /**
  * Compute the day-87 reminder eligibility for a trial member.
  * Eligible when trial_started_at + 87d <= now < trial_started_at + 90d AND the member has not
@@ -78,8 +75,8 @@ function inReminderWindow(trialStartedAt, converted, now) {
 }
 
 /**
- * The files for a member that are currently published but should be drafted (lapse / cancel / ban),
- * in stable path order. repoEntry is { files: [{ path, status, visibility }] } or undefined.
+ * The files for a member that are currently published but should be drafted. sow-197: BAN ONLY, since a
+ * lapse no longer drafts anything. In stable path order. repoEntry is { files: [{ path, status, visibility }] }.
  */
 function filesToDraft(repoEntry) {
   if (!repoEntry?.files) return [];
@@ -89,29 +86,6 @@ function filesToDraft(repoEntry) {
     .sort();
 }
 
-/**
- * The files for a member that reconcile PREVIOUSLY DRAFTED and should now restore (resubscribe / grandfather),
- * in stable path order.
- *
- * A file qualifies only if it has a `publishedAt`. That is the discriminator for the distinction reconcile
- * could not previously make: this path exists to restore content reconcile itself drafted when a membership
- * lapsed, and such a file was published at some point, so it carries a date. A draft the author has never
- * published has none, and was never reconcile's to publish.
- *
- * Without that check, reconcile republished ANY draft a paid member owned. It took an unfinished article live
- * overnight (63c2800, 2026-08-08) and would have done so again every night, which defeats sow-194: committed
- * drafts became reviewable in the WorkBench precisely so they could sit there UNpublished.
- *
- * NOTE this is a stopgap. The owner has decided a lapse should not draft content at all, which removes this
- * path entirely along with the drafting that feeds it; this guard goes with it.
- */
-function filesToPublish(repoEntry) {
-  if (!repoEntry?.files) return [];
-  return repoEntry.files
-    .filter((f) => f.status === 'draft' && f.publishedAt)
-    .map((f) => f.path)
-    .sort();
-}
 
 /**
  * Pure reconcile planner.
@@ -133,7 +107,7 @@ function filesToPublish(repoEntry) {
  * @param {object}  args.repoIndex    map username -> { files: [{ path, status, visibility }] }
  * @param {Date}    [args.now]
  * @returns {Array} ordered actions. Action shapes:
- *   { kind:'content', type:'draft'|'publish', githubId, username, files:[...] }
+ *   { kind:'content', type:'draft', githubId, username, files:[...] }  // BAN only (sow-197)
  *   { kind:'discord', type:'add-role'|'remove-role', githubId, discordUserId, role:'member'|'trial'|'locked' }
  *   { kind:'reminder', type:'day-87', githubId, email, discordUserId }
  *   { kind:'block', githubId, username }   // informational: a ban deplatforms; content draft + the
@@ -149,10 +123,10 @@ export function planReconcile({ members = [], repoIndex = {}, now = new Date(), 
     const repoEntry = username ? repoIndex[username] : undefined;
     const banned = status === 'banned';
 
-    // 1. Content: bring the published/draft state of this member's files in line with effective status.
-    //    FAIL CLOSED: a member who must be deplatformed (banned) or un-published (lapsed) but whose folder
-    //    cannot be resolved gets an `unresolved` action instead of a silent no-op, so the reconcile surfaces
-    //    it (and exits non-zero on a banned one) rather than leaving their content live.
+    // 1. Content: BAN ONLY (sow-197). A ban deplatforms, so a banned member's live files are drafted.
+    //    Nothing else here touches content: a lapse leaves published work exactly as it is.
+    //    FAIL CLOSED: a banned member whose folder cannot be resolved gets an `unresolved` action instead of
+    //    a silent no-op, so the reconcile surfaces it and exits non-zero rather than leaving content live.
     if (banned) {
       if (!username) {
         actions.push({ kind: 'unresolved', githubId, status, reason: 'banned member has no resolvable folder; ban cannot be enforced' });
@@ -160,22 +134,29 @@ export function planReconcile({ members = [], repoIndex = {}, now = new Date(), 
         const files = filesToDraft(repoEntry); // ban overrides paid AND grandfather: drafted, never published
         if (files.length) actions.push({ kind: 'content', type: 'draft', githubId, username, files });
       }
-    } else if (shouldBePublished(status)) {
-      // Paid or grandfathered: any drafted file should be (re)published. Already-published files are skipped.
-      const files = filesToPublish(repoEntry);
-      if (files.length) {
-        actions.push({ kind: 'content', type: 'publish', githubId, username, files });
-      }
-    } else if (!username && (status === 'cancelled' || status === 'expired')) {
-      // A lapsed member who likely HAD published content but whose folder cannot be resolved.
-      actions.push({ kind: 'unresolved', githubId, status, reason: 'lapsed member has no resolvable folder; content cannot be drafted' });
-    } else {
-      // Lapsed / cancelled / expired / trialing / none with a resolvable folder: draft anything live.
-      const files = filesToDraft(repoEntry);
-      if (files.length) {
-        actions.push({ kind: 'content', type: 'draft', githubId, username, files });
-      }
     }
+    // sow-197: a LAPSE no longer touches content, in either direction. There is deliberately no else branch.
+    //
+    // Reconcile used to draft a lapsed member's live content and republish it on resubscribe. Both are gone,
+    // and the republish half is what published an unfinished article by itself on 2026-08-08 (63c2800): it
+    // took ANY draft a paid member owned, because nothing records WHY a file is draft, so it could not tell a
+    // file it had drafted for a lapse from one the author was still writing. Deleting the drafting removes the
+    // state the republish existed to reverse, so both go together rather than one being patched.
+    //
+    // This does not weaken enforcement. Membership is already enforced at WRITE time in three independent,
+    // fail-closed layers: the gate (classify-pr.mjs, rejected-not-paid), the Worker author route
+    // (membership-author.mjs, authorizeCreator) and the client (operations.mjs, membership-required). A lapsed
+    // member cannot publish anything NEW. What went away is the only RETROACTIVE mechanism, a survival of the
+    // fork era when a member's content arrived through their own fork and canonical `status` was the only
+    // lever the network had over it.
+    //
+    // The ban branch above stays for exactly the reason this one goes: retroactive content mutation is for
+    // MODERATION, never for billing. `ban > staff > grandfather > Stripe` exists so a ban deplatforms
+    // regardless of payment, and leaving a banned member's content live is the one direction that must never
+    // regress.
+    //
+    // Discord roles are untouched (section 2 below): a lapsed member still moves to Locked. Access changes;
+    // published work does not.
 
     // 2. Discord role sync: a known member holds EXACTLY ONE of the three managed roles. Add the target
     //    for their effective status, then remove any OTHER managed role they still hold (so a stray left
