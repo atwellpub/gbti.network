@@ -818,3 +818,44 @@ test('FIX 6: enactContent opens a branch (unique name), flips each file, and squ
   await enactPlan([action], { github, discord: null, resend: null }, {});
   assert.notEqual(created[0][0], created[1][0]);
 });
+
+// ---- sow-198: one failed action must not abandon the rest of the plan ----
+// enactPlan was the ONE step in main() with no error handling, and its loop had no per-action isolation,
+// so a single throw abandoned every action queued behind it. On 2026-08-08 only one action was planned so
+// nothing was lost; with several, a failed content flip would silently skip the Discord role swaps and the
+// day-87 reminders after it.
+test('enactPlan isolates a failing action and still enacts the ones after it', async () => {
+  const github = {
+    getRef: async () => ({ object: { sha: 'basesha' } }),
+    createRef: async () => {},
+    getContent: async (p) => ({ sha: `sha-${p}`, content: Buffer.from('---\nstatus: published\n---\n').toString('base64') }),
+    putContent: async () => {},
+    createPull: async () => ({ number: 1 }),
+    mergePull: async () => { throw new Error('github error 405: Base branch was modified'); },
+  };
+  const roles = [];
+  const discord = { addRole: async (g, u, r) => { roles.push(['add', r]); }, removeRole: async (g, u, r) => { roles.push(['remove', r]); } };
+  const env = { DISCORD_GUILD_ID: 'g', DISCORD_MEMBER_ROLE_ID: 'rm', DISCORD_LOCKED_ROLE_ID: 'rl' };
+
+  const actions = [
+    { kind: 'content', type: 'draft', githubId: '800', username: 'quinn', files: ['members/quinn/profile.md'] },
+    { kind: 'discord', type: 'add-role', githubId: '800', discordUserId: 'd800', role: 'locked' },
+  ];
+  const { counts, failures } = await enactPlan(actions, { github, discord, resend: null }, env);
+
+  assert.deepEqual(roles, [['add', 'rl']], 'the Discord action queued behind the failure still ran');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].action.kind, 'content');
+  assert.match(failures[0].message, /405/);
+  assert.deepEqual(counts, { content: 1, discord: 1 }, 'counts report what was attempted');
+});
+
+test('enactPlan reports no failures on a clean plan', async () => {
+  const discord = { addRole: async () => {}, removeRole: async () => {} };
+  const env = { DISCORD_GUILD_ID: 'g', DISCORD_LOCKED_ROLE_ID: 'rl' };
+  const { failures } = await enactPlan(
+    [{ kind: 'discord', type: 'add-role', githubId: '801', discordUserId: 'd801', role: 'locked' }],
+    { github: null, discord, resend: null }, env,
+  );
+  assert.deepEqual(failures, []);
+});

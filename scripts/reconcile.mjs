@@ -464,18 +464,36 @@ export async function gatherOverrideOnlyMembers(overrides, now, { seen = new Set
   return members;
 }
 
-/** Enact the full plan via the clients. Returns counts per kind. */
+/**
+ * Enact the full plan via the clients. Returns { counts, failures }.
+ *
+ * sow-198: every action is ISOLATED. A failure is logged against the action that caused it and the plan
+ * continues, exactly as every sync step in main() already behaves. Before this, one throw abandoned every
+ * remaining action, so a single failed content flip could silently skip the Discord role swaps and the
+ * day-87 reminders queued behind it. That half-apply is precisely what made the 2026-08-08 run
+ * unrecoverable: it died on the last step with no record of what it had done.
+ *
+ * `counts` still counts ATTEMPTS per kind, so the summary line reports the plan that was run. `failures`
+ * carries what went wrong so main() can exit non-zero without losing the summary.
+ */
 export async function enactPlan(actions, { github, discord, resend }, env) {
   const counts = {};
+  const failures = [];
   for (const action of actions) {
     counts[action.kind] = (counts[action.kind] ?? 0) + 1;
-    if (action.kind === 'content') await enactContent(github, action);
-    else if (action.kind === 'discord' && discord) await enactDiscord(discord, action, env);
-    else if (action.kind === 'reminder') await enactReminder(action, { resend, discord, env });
-    // 'block' is enacted by re-running the gate / branch protection; the reconcile logs it. The
-    // content draft + role removal for a banned member are emitted as their own actions above.
+    try {
+      if (action.kind === 'content') await enactContent(github, action);
+      else if (action.kind === 'discord' && discord) await enactDiscord(discord, action, env);
+      else if (action.kind === 'reminder') await enactReminder(action, { resend, discord, env });
+      // 'block' is enacted by re-running the gate / branch protection; the reconcile logs it. The
+      // content draft + role removal for a banned member are emitted as their own actions above.
+    } catch (e) {
+      const message = e?.message ?? String(e);
+      console.error(`reconcile: action FAILED (${describe(action)}): ${message}`);
+      failures.push({ action, message });
+    }
   }
-  return counts;
+  return { counts, failures };
 }
 
 /**
@@ -747,8 +765,23 @@ async function main() {
     return;
   }
 
-  const counts = await enactPlan(actions, { github, discord, resend }, env);
+  // sow-198: enactPlan isolates each action and never throws for an action-level failure, so the summary
+  // ALWAYS prints and the log always records what the run attempted. The outer catch covers only a genuine
+  // programming error. A failure still turns the run red via exitCode; what it no longer does is take the
+  // rest of the plan and the summary down with it.
+  let counts = {};
+  let failures = [];
+  try {
+    ({ counts, failures } = await enactPlan(actions, { github, discord, resend }, env));
+  } catch (e) {
+    console.error('reconcile: enact FAILED:', e?.message ?? e);
+    process.exitCode = 1;
+  }
   console.log('reconcile: applied. ' + JSON.stringify(counts));
+  if (failures.length) {
+    console.error(`reconcile: ${failures.length} action(s) failed; the rest of the plan was still enacted.`);
+    process.exitCode = 1;
+  }
 }
 
 // Only run the CLI when invoked directly (so the test can import the helpers without side effects).

@@ -10,7 +10,29 @@ export class GitHubError extends Error {
   }
 }
 
-export function createGitHubClient({ token, repo, fetch = globalThis.fetch, baseUrl = 'https://api.github.com' }) {
+/** Default sleep for the merge retry. Injectable so tests do not actually wait. */
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * sow-198: is this merge failure worth retrying?
+ *
+ * GitHub computes PR mergeability ASYNCHRONOUSLY. When a PR is opened seconds after its own base moved,
+ * a merge call can arrive before that computation settles and is answered `405 Base branch was modified`.
+ * That is the failure that killed the 2026-08-08 reconcile run: it merged PR #256, then opened #257 off
+ * the four-second-old tip, and the merge was refused. The identical merge succeeded twenty seconds later.
+ *
+ * Deliberately NARROW. A 405 for a draft PR or a genuine conflict is a real refusal and must fail fast,
+ * because the PR-gate's fail-open-safe handling (scripts/pr-gate.mjs) reports those correctly today and
+ * should not be slowed down by a pointless retry loop. Only the documented transient message, plus the
+ * usual rate-limit and server-side classes, are retried.
+ */
+export function isRetryableMergeError(err) {
+  if (!(err instanceof GitHubError)) return false;
+  if (err.status === 429 || err.status >= 500) return true;
+  return err.status === 405 && /Base branch was modified/i.test(String(err.body ?? ''));
+}
+
+export function createGitHubClient({ token, repo, fetch = globalThis.fetch, baseUrl = 'https://api.github.com', sleep = defaultSleep }) {
   if (!token) throw new Error('createGitHubClient: token is required');
   if (!repo) throw new Error('createGitHubClient: repo ("owner/name") is required');
 
@@ -120,8 +142,33 @@ export function createGitHubClient({ token, repo, fetch = globalThis.fetch, base
       // race with the gate's auto-merge before it scrubs the PR.
       return req('POST', `/repos/${repo}/pulls`, { title, head, base, body, draft });
     },
-    mergePull(number, { method = 'squash' } = {}) {
-      return req('PUT', `/repos/${repo}/pulls/${number}/merge`, { merge_method: method });
+    /**
+     * Squash-merge a PR, retrying the transient merge race (sow-198). See isRetryableMergeError for why
+     * this is needed and why it is narrow.
+     *
+     * Between attempts we ask whether the merge ALREADY LANDED, which matters twice over. A lost response
+     * to a merge that actually succeeded would otherwise be retried into a spurious failure. And it is how
+     * we notice a CONCURRENT merge by the PR-gate: the gate auto-merges every bot PR on its own
+     * `pull_request_target` run, so on 2026-08-08 it landed #257 twenty seconds after we had given up on
+     * it. An already-merged PR is a success, not an error, and reporting it as one is what made a run that
+     * had done its work exit 1.
+     *
+     * Four attempts with linear backoff (2s, 4s, 6s), so at most about twelve extra seconds.
+     */
+    async mergePull(number, { method = 'squash', attempts = 4, delayMs = 2000 } = {}) {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await req('PUT', `/repos/${repo}/pulls/${number}/merge`, { merge_method: method });
+        } catch (err) {
+          if (attempt >= attempts || !isRetryableMergeError(err)) throw err;
+          // Did it land anyway (a lost response, or the gate merging it concurrently)? Treat that as success.
+          // A failed lookup must NOT mask the original error, so we swallow only the lookup itself.
+          let pull = null;
+          try { pull = await req('GET', `/repos/${repo}/pulls/${number}`); } catch { pull = null; }
+          if (pull?.merged) return { merged: true, sha: pull.merge_commit_sha ?? null, alreadyMerged: true };
+          await sleep(delayMs * attempt);
+        }
+      }
     },
   };
 }

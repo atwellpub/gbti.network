@@ -164,3 +164,71 @@ test('github closePull posts a comment then closes the PR', async () => {
   assert.match(calls[1].url, /\/pulls\/42$/);
   assert.deepEqual(JSON.parse(calls[1].body), { state: 'closed' });
 });
+
+// ---- sow-198: the mergePull retry ----
+// GitHub computes PR mergeability asynchronously, so a merge issued seconds after the base moved can be
+// refused with 405 "Base branch was modified". That killed the 2026-08-08 reconcile run; the identical
+// merge succeeded twenty seconds later. These pin the retry AND its narrowness.
+
+const BASE_MODIFIED = { status: 405, body: { message: 'Base branch was modified. Review and try the merge again.', status: '405' } };
+/** A client whose sleep is recorded instead of waited on, so the tests are instant. */
+const retryClient = (fetch) => {
+  const slept = [];
+  const gh = createGitHubClient({ token: 't', repo: 'o/r', fetch, sleep: async (ms) => { slept.push(ms); } });
+  return { gh, slept };
+};
+
+test('mergePull retries a transient "Base branch was modified" 405 and succeeds', async () => {
+  // merge 405 -> is-it-merged? no -> merge ok. The middle GET is the already-merged probe.
+  const { fetch, calls } = recorder([BASE_MODIFIED, { body: { merged: false } }, { body: { merged: true, sha: 'abc' } }]);
+  const { gh, slept } = retryClient(fetch);
+  const out = await gh.mergePull(42);
+  assert.equal(out.merged, true);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].method, 'PUT');
+  assert.equal(calls[1].method, 'GET'); // the already-merged probe
+  assert.equal(calls[2].method, 'PUT');
+  assert.deepEqual(slept, [2000], 'one linear backoff before the second attempt');
+});
+
+test('mergePull treats an already-merged PR as success (the concurrent PR-gate merge)', async () => {
+  // The 2026-08-08 case: our merge is refused, the gate lands the same PR moments later. Reporting that
+  // as a failure is what made a run that had done its work exit 1.
+  const { fetch, calls } = recorder([BASE_MODIFIED, { body: { merged: true, merge_commit_sha: '63c2800' } }]);
+  const { gh, slept } = retryClient(fetch);
+  const out = await gh.mergePull(42);
+  assert.equal(out.merged, true);
+  assert.equal(out.alreadyMerged, true);
+  assert.equal(out.sha, '63c2800');
+  assert.equal(calls.length, 2, 'no second merge attempt once it is known to have landed');
+  assert.deepEqual(slept, [], 'and no backoff wait either');
+});
+
+test('mergePull does NOT retry a real refusal (draft PR / conflict), so the gate is not slowed down', async () => {
+  const refusal = { status: 405, body: { message: 'Pull Request is not mergeable' } };
+  const { fetch, calls } = recorder([refusal]);
+  const { gh, slept } = retryClient(fetch);
+  await assert.rejects(() => gh.mergePull(42), /github error 405/);
+  assert.equal(calls.length, 1, 'failed fast: one call, no probe, no retry');
+  assert.deepEqual(slept, []);
+});
+
+test('mergePull retries 429 and 5xx, and gives up after the attempt budget', async () => {
+  const { fetch, calls } = recorder([
+    { status: 429, body: 'rate limited' }, { body: { merged: false } },
+    { status: 503, body: 'unavailable' }, { body: { merged: false } },
+    { status: 502, body: 'bad gateway' }, { body: { merged: false } },
+    { status: 502, body: 'bad gateway' },
+  ]);
+  const { gh, slept } = retryClient(fetch);
+  await assert.rejects(() => gh.mergePull(42), /github error 502/);
+  assert.equal(calls.filter((c) => c.method === 'PUT').length, 4, 'exactly the 4-attempt budget, no infinite loop');
+  assert.deepEqual(slept, [2000, 4000, 6000], 'linear backoff');
+});
+
+test('mergePull: a failing already-merged probe does not mask the original merge error', async () => {
+  const { fetch } = recorder([BASE_MODIFIED, { status: 500, body: 'probe blew up' }, BASE_MODIFIED, { status: 500, body: 'probe blew up' },
+    BASE_MODIFIED, { status: 500, body: 'probe blew up' }, BASE_MODIFIED]);
+  const { gh } = retryClient(fetch);
+  await assert.rejects(() => gh.mergePull(42), /Base branch was modified/);
+});
