@@ -7,7 +7,11 @@ import { OVERRIDES_KV_KEY } from '../workers/signup/membership-content.mjs';
 import { REPO_DRAFTS_KV_KEY as BUILDER_KEY } from '../scripts/lib/repo-drafts-index.mjs';
 
 const GET = (auth) => new Request('https://signup.gbti.network/membership/repo-drafts', { headers: auth ? { Authorization: auth } : {} });
-const freshMirror = (over = {}) => ({ generatedAt: new Date().toISOString(), roles: over.roles ?? {}, bans: over.bans ?? { bans: [] }, grandfathered: over.grandfathered ?? { grandfathered: [] } });
+// generatedAt is stamped 1s in the PAST (like a real reconcile-written mirror, which is minutes old): the
+// timestamp is created inside the awaited kv.get, AFTER listRepoDrafts captured its default `now`, so a bare
+// `new Date()` here can round to a millisecond NEWER than `now` on a slow runner and (correctly) trip the
+// fail-closed `ageMs < 0` guard. A 1s backdate keeps ageMs firmly positive and the test deterministic.
+const freshMirror = (over = {}) => ({ generatedAt: new Date(Date.now() - 1000).toISOString(), roles: over.roles ?? {}, bans: over.bans ?? { bans: [] }, grandfathered: over.grandfathered ?? { grandfathered: [] } });
 const INDEX = { generatedAt: '2026-08-07T00:00:00.000Z', items: [
   { path: 'members/alice/posts/wip/index.md', type: 'post', slug: 'wip', owner: 'alice', githubId: '10', title: 'Alice WIP', visibility: 'public' },
   { path: 'members/bob/prompts/p/index.md', type: 'prompt', slug: 'p', owner: 'bob', githubId: '20', title: 'Bob prompt', visibility: 'members' },
