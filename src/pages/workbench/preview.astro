@@ -166,18 +166,73 @@ const labelOf = CATEGORY_LABELS;
       };
 
       if (!slug) { say('No draft named. Open Preview from the editor.'); return; }
+      const store = q.get('store') || '';
+      const repoPath = q.get('path') || '';
+      // sow-194: read the non-HttpOnly gbti_csrf cookie for the double-submit header on the decrypt POST (mirrors
+      // workbench-client.ts readCsrf); the httpOnly session rides on `credentials: 'include'`.
+      const readCsrf = () => {
+        for (const part of document.cookie.split(';')) {
+          const eq = part.indexOf('=');
+          if (eq >= 0 && part.slice(0, eq).trim() === 'gbti_csrf') return part.slice(eq + 1).trim() || null;
+        }
+        return null;
+      };
       let draft: any = null;
-      try {
-        const res = await fetch(`${base}/membership/drafts`, { credentials: 'include' });
-        if (res.status === 401 || res.status === 403) { say('Sign in to preview your staged drafts.'); return; }
-        const data = await res.json();
-        draft = (Array.isArray(data?.drafts) ? data.drafts : []).find((d: any) => d?.slug === slug && (!type || d?.type === type));
-      } catch { /* fall through */ }
+      if (store === 'repo' && repoPath) {
+        // sow-194: a committed repo draft. Read its canonical file directly and parse it; for a members body,
+        // decrypt the sibling .enc via the Worker so the MEMBER view shows the full text. Nothing is written; no
+        // KV shadow is created. GET /membership/file (reviewFileContent) requires a signed-in member and accepts
+        // any members/ or house content path -- deliberately NOT own-folder-only, and safe here because the repo
+        // is PUBLIC (this plaintext is world-readable on GitHub), a members body is .enc ciphertext or a stub, and
+        // the plaintext only ever comes back through the PAID-gated /membership/decrypt below.
+        try {
+          const res = await fetch(`${base}/membership/file?path=${encodeURIComponent(repoPath)}&ref=main`, { credentials: 'include' });
+          if (res.status === 401 || res.status === 403) { say('Sign in to preview this draft.'); return; }
+          const data = res.ok ? await res.json() : null;
+          const text = data?.text;
+          if (typeof text === 'string' && text) {
+            const { parseContentFile } = await import('../../../client/src/content-ops.mjs');
+            const parsed: any = parseContentFile(text);
+            let body = parsed.body || '';
+            const enc = parsed.frontmatter?.encryptedBody;
+            if (enc) {
+              // MEMBER-view body: read the envelope, then decrypt it (the key stays in the Worker). A non-paid
+              // viewer's decrypt returns a non-2xx (never { text }), so the body stays the public stub and the
+              // members gate renders -- fail closed. Both hops guard on res.ok before trusting the payload, exactly
+              // as workbench-client.ts decryptEnc (via workerPost's parseJson) does.
+              try {
+                const encRes = await fetch(`${base}/membership/file?path=${encodeURIComponent(enc)}&ref=main`, { credentials: 'include' });
+                const envelopeText = encRes.ok ? (await encRes.json())?.text : null;
+                if (typeof envelopeText === 'string' && envelopeText) {
+                  const csrf = readCsrf();
+                  const dec = await fetch(`${base}/membership/decrypt`, {
+                    method: 'POST', credentials: 'include',
+                    headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-GBTI-CSRF': csrf } : {}) },
+                    body: envelopeText,
+                  });
+                  const decText = dec.ok ? (await dec.json())?.text : null;
+                  if (typeof decText === 'string') body = decText;
+                }
+              } catch { /* not decryptable (not paid): keep the stub body */ }
+            }
+            draft = { type, slug, path: repoPath, frontmatter: parsed.frontmatter || {}, body };
+          }
+        } catch { /* fall through to not-found */ }
+      } else {
+        try {
+          const res = await fetch(`${base}/membership/drafts`, { credentials: 'include' });
+          if (res.status === 401 || res.status === 403) { say('Sign in to preview your staged drafts.'); return; }
+          const data = await res.json();
+          draft = (Array.isArray(data?.drafts) ? data.drafts : []).find((d: any) => d?.slug === slug && (!type || d?.type === type));
+        } catch { /* fall through */ }
+      }
       if (!draft) { say('That draft was not found. Save it in the editor, then preview.'); return; }
 
       const fm = draft.frontmatter || {};
       const itemPath = draft.path || '';
-      say('This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.');
+      say(store === 'repo'
+        ? 'This is a preview of a committed draft. It is not published, and live counts and discussion are omitted.'
+        : 'This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.');
       document.title = `Preview: ${fm.title || slug}`;
 
       const setImg = (sel: string, val: string) => {

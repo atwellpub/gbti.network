@@ -174,13 +174,14 @@ class GbtiContentEditor extends GbtiElement {
     return out;
   }
 
-  load(type, input, body, path, { staged = false, scope } = {}) {
+  load(type, input, body, path, { staged = false, scope, store = null } = {}) {
     this.type = type || this.type;
     this.preset = { input: input || {}, body: body || '' };
     this.itemPath = path || null; // SOW-062 P6: the item's index.md path, to resolve a repo-relative cover for preview
     // SOW-145: the content scope. Explicit for a NEW house item (no path yet); inferred from a house/ path when
     // editing an existing house item. House content publishes DIRECTLY (no fork-staged house drafts in v1).
     this.itemScope = scope || (path && String(path).startsWith('house/') ? 'house' : 'member');
+    this.itemStore = store; // sow-194: 'repo' when opened from a committed repo draft; Preview reads it canonically
     this.staged = Boolean(staged); // SOW-106 QA: loaded from a fork draft branch (not live until published)
     this._slugVal = null; // SOW-112 v2: the pending permalink value follows the loaded item
     if (this.isConnected) this.render();
@@ -1282,16 +1283,29 @@ class GbtiContentEditor extends GbtiElement {
   async doPreview() {
     const slug = String(this.gather()?.input?.slug || '').trim();
     if (!slug) { this.out('Give the item a permalink before previewing it.', 'danger'); return; }
+    // sow-194: a repo draft is already committed at its canonical path, so Preview reads it directly (store=repo
+    // + path) instead of saving a KV shadow copy first. This keeps it a "Repo draft" in the WorkBench afterward,
+    // rather than the doDraft() below converting it into a KV/fork draft on every preview.
+    const isRepo = this.itemStore === 'repo';
     const tab = typeof window !== 'undefined' ? window.open('', '_blank') : null;
     if (tab) {
       try { tab.opener = null; } catch { /* cross-origin, already severed */ }
       try { tab.document.write('<!doctype html><title>Preparing preview</title><body style="margin:0;font:15px/1.5 system-ui,sans-serif;color:#6c6976;background:#faf9fb;display:flex;align-items:center;justify-content:center;height:100vh">Preparing your preview&hellip;</body>'); } catch { /* about:blank not writable */ }
     }
+    const previewUrl = (extra = '') => `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}${extra}`;
+    if (isRepo) {
+      // No save: point the tab straight at the canonical preview. The path lets preview.astro read the committed
+      // file via /membership/file rather than the KV draft store.
+      const url = previewUrl(`&store=repo${this.itemPath ? `&path=${encodeURIComponent(this.itemPath)}` : ''}`);
+      if (tab) tab.location = url; else window.open(url, '_blank', 'noopener');
+      this.out('<span class="tag ok">preview</span> Opened this committed draft in a new tab as a preview.');
+      return;
+    }
     const restore = this._btnBusy('#preview', 'Saving…');
     this._setChip('Saving…', 'busy');
     try {
       await this.doDraft();
-      const url = `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}`;
+      const url = previewUrl();
       if (tab) tab.location = url;
       else window.open(url, '_blank', 'noopener'); // the synchronous open was popup-blocked: try once directly
       this.out('<span class="tag ok">saved</span> Draft saved and opened in a new tab as a preview.');

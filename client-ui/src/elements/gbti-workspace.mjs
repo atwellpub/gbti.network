@@ -546,7 +546,7 @@ class GbtiWorkspace extends GbtiElement {
       // SOW-062 P6 + SOW-106 QA: path resolves the cover preview; staged drives the fork-draft meta.
       // SOW-145: an EDIT carries a house/ path the editor infers scope from; a NEW item has no path, so the
       // current workspace scope decides (a superadmin in House scope creates house content).
-      if (ed?.load) ed.load(e.type, e.frontmatter, e.body, e.path, { staged: e.staged, scope: e.path ? undefined : this._scopeNow() });
+      if (ed?.load) ed.load(e.type, e.frontmatter, e.body, e.path, { staged: e.staged, scope: e.path ? undefined : this._scopeNow(), store: e.store }); // sow-194: store lets Preview render a repo draft from canonical, no KV shadow
       // SOW-112 QA fix: after a rename PR opens, drop the stale caches and repoint the deep-link hash at the
       // NEW path — but do NOT refetch it yet (the auto-merge takes ~2-3 minutes; an immediate read 404s and
       // looked like the rename did nothing). The editor already updated its own view optimistically.
@@ -918,7 +918,9 @@ class GbtiWorkspace extends GbtiElement {
     try {
       // sow-194: carry store + path so a repo draft reads its canonical file instead of the fork/KV store.
       const full = await this.client.readDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
-      this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || '', staged: true };
+      // sow-194: carry the store onto the editing state so the editor's Preview can render a repo draft from its
+      // canonical content (store:'repo') instead of saving a KV shadow copy first.
+      this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || '', staged: true, store: d.store };
       this._writeHash(`#tab=${encodeURIComponent(d.type)}&draft=${encodeURIComponent(d.type)}:${encodeURIComponent(d.slug)}`);
       // SOW-106 Phase C: re-validate against the CURRENT schema on open, so drift surfaces here (a clear prompt)
       // instead of as a publish-time failure. Best-effort: a validate error never blocks opening the draft.

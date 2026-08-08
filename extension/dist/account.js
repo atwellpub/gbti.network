@@ -2440,11 +2440,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       }
       return out;
     }
-    load(type, input, body, path, { staged = false, scope } = {}) {
+    load(type, input, body, path, { staged = false, scope, store: store2 = null } = {}) {
       this.type = type || this.type;
       this.preset = { input: input || {}, body: body || "" };
       this.itemPath = path || null;
       this.itemScope = scope || (path && String(path).startsWith("house/") ? "house" : "member");
+      this.itemStore = store2;
       this.staged = Boolean(staged);
       this._slugVal = null;
       if (this.isConnected) this.render();
@@ -3490,6 +3491,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.out("Give the item a permalink before previewing it.", "danger");
         return;
       }
+      const isRepo = this.itemStore === "repo";
       const tab = typeof window !== "undefined" ? window.open("", "_blank") : null;
       if (tab) {
         try {
@@ -3501,11 +3503,19 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         } catch {
         }
       }
+      const previewUrl = (extra = "") => `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}${extra}`;
+      if (isRepo) {
+        const url = previewUrl(`&store=repo${this.itemPath ? `&path=${encodeURIComponent(this.itemPath)}` : ""}`);
+        if (tab) tab.location = url;
+        else window.open(url, "_blank", "noopener");
+        this.out('<span class="tag ok">preview</span> Opened this committed draft in a new tab as a preview.');
+        return;
+      }
       const restore = this._btnBusy("#preview", "Saving…");
       this._setChip("Saving…", "busy");
       try {
         await this.doDraft();
-        const url = `https://gbti.network/workbench/preview/?type=${encodeURIComponent(this.type)}&slug=${encodeURIComponent(slug)}`;
+        const url = previewUrl();
         if (tab) tab.location = url;
         else window.open(url, "_blank", "noopener");
         this.out('<span class="tag ok">saved</span> Draft saved and opened in a new tab as a preview.');
@@ -14455,7 +14465,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         });
         const ed = this.$("gbti-content-editor");
         const e = this._editing;
-        if (ed?.load) ed.load(e.type, e.frontmatter, e.body, e.path, { staged: e.staged, scope: e.path ? void 0 : this._scopeNow() });
+        if (ed?.load) ed.load(e.type, e.frontmatter, e.body, e.path, { staged: e.staged, scope: e.path ? void 0 : this._scopeNow(), store: e.store });
         ed?.addEventListener?.("gbti-renamed", (ev) => {
           const r = ev?.detail || {};
           if (!r.path) return;
@@ -14779,7 +14789,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._draftMsg = null;
       try {
         const full = await this.client.readDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
-        this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || "", staged: true };
+        this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || "", staged: true, store: d.store };
         this._writeHash(`#tab=${encodeURIComponent(d.type)}&draft=${encodeURIComponent(d.type)}:${encodeURIComponent(d.slug)}`);
         try {
           const v = await this.client.validateContent({ type: d.type, input: full.frontmatter, body: full.body });
