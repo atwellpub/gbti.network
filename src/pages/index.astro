@@ -665,9 +665,11 @@ const SHOPTALK = {
   import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
   (() => {
     const signedInEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-signedin]'));
-    // The composer BAR (data-home-creator) is paid-gated separately: only an effective-paid member sees it
-    // (the mockup shows it in the Content Creator state). Interim gate = membership==='paid' until the Worker
-    // surfaces the resolved member-vs-creator tier (sow-185 / UnifiedWorker); then tighten to creator-only.
+    // The composer BAR (data-home-creator) is CREATOR-gated (the mockup shows it only in the Content Creator
+    // state). sow-185 now surfaces the resolved paid tier on the member signal, so the gate reads
+    // s.paidTier==='creator' (a superadmin/staff resolves to creator server-side, so no separate role check).
+    // Fail-closed: paidTier is 'none' when unresolvable / an older Worker, so the bar stays hidden by default.
+    // This is UNTRUSTED presentation state; the real creator gate stays server-side (authorizeCreator).
     const creatorEls = Array.from(document.querySelectorAll<HTMLElement>('[data-home-creator]'));
     // The signed-out join / "start your free trial" cards (the rail promo + the bottom band) hide for a
     // signed-in member (sow-192 QA: the trial CTA is not for members/creators; sow-185 retires the trial).
@@ -690,17 +692,17 @@ const SHOPTALK = {
 
     function render(s: any) {
       const signedIn = !!(s && s.login);
-      const paid = signedIn && s.membership === 'paid'; // fail-closed: only effective-paid gets the composer bar
+      const creator = signedIn && s.paidTier === 'creator'; // sow-185: fail-closed to 'none'; staff resolves to creator
       signedInEls.forEach((el) => { el.hidden = !signedIn; });
-      creatorEls.forEach((el) => { el.hidden = !paid; });
+      creatorEls.forEach((el) => { el.hidden = !creator; });
       joinCards.forEach((el) => { el.hidden = signedIn; });
-      if (paid) {
+      if (creator) {
         // Point the bar avatar at the member's GitHub avatar (same convention as the header).
         document.querySelectorAll<HTMLImageElement>('.hsb-av').forEach((img) => {
           img.src = 'https://github.com/' + encodeURIComponent(String(s.login)) + '.png?size=68';
           img.alt = '@' + String(s.login);
         });
-        mountComposer(s); // load the client-ui composer only for a paid member (who can actually open the modal)
+        mountComposer(s); // load the client-ui composer only for a Creator (who can actually publish a share)
       }
     }
 
