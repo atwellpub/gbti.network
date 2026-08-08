@@ -98,7 +98,7 @@ Terminal Session Profiles handles the other half of that recovery.
 
 Profiles that were running are remembered per workspace. When the project is opened again, the extension identifies the restored terminal tabs associated with those profiles and relaunches them using the correct shell, working directory, and command sequence.
 
-Restoration happens automatically by default. It can also be started manually through the **Restore** control in the status bar.
+Restoration happens automatically by default. It can also be started manually with **Restore Last Session** in the Command Palette.
 
 Before replacing a restored terminal, the extension compares the process recorded when the profile was launched with the process that returned. If the original process genuinely survived, the terminal is left alone rather than being terminated and recreated.
 
