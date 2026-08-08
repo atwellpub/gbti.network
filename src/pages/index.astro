@@ -168,6 +168,10 @@ const SHOPTALK = {
             {t.label}{t.count !== null && <b class="tc">{t.count}</b>}
           </a>
         ))}
+        {/* sow-192: the feed ordering caption. SSR default "Newest first" (the honest default + the mockup's
+            logged-out state); the personalize-apply script upgrades it to "Curated by..." only when the member
+            has actually personalized the Everything tab (see the apply() hook below). */}
+        <span class="feed-note" data-feed-note>Newest first</span>
       </nav>
 
       <div class="feed-toolbar">
@@ -606,6 +610,13 @@ const SHOPTALK = {
 
     function apply() {
       const onAll = activeTab() === 'all';
+      // sow-192: keep the feed caption HONEST. The feed is newest-first unless the member has actually
+      // personalized the Everything tab (isActive), so the "Curated by..." wording only shows when that is
+      // true; a member who has followed nothing keeps "Newest first". Bound to the same signal as the re-rank.
+      const note = document.querySelector('[data-feed-note]');
+      if (note) note.textContent = (onAll && isActive(settings))
+        ? 'Curated by the categories and tags you follow, newest first'
+        : 'Newest first';
       // Always clear our own hides first, so switching tabs / clearing settings restores cleanly. We never
       // touch rows the tab filter hid (it uses r.hidden without our marker).
       list!.querySelectorAll<HTMLElement>('[data-fi][data-pz-hidden]').forEach((r) => { r.hidden = false; r.removeAttribute('data-pz-hidden'); });

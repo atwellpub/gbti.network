@@ -950,6 +950,8 @@ a.who:hover { color: var(--fg); }
 .feed-tab.on { border-color: var(--green); color: var(--green-700); background: var(--green-tint); }
 /* sow-192: the per-tab count pill on the homepage tabbed feed. */
 .feed-tab .tc { margin-left: 6px; font-weight: 700; color: var(--fg-mute); }
+/* sow-192: the feed ordering caption, right-aligned in the tab row (wraps below the tabs on narrow). */
+.feed-note { margin-left: auto; align-self: center; font-family: var(--f-mono); font-size: 12px; color: var(--fg-mute); }
 .feed-tab.on .tc { color: var(--green-700); }
 
 /* sow-192: on the homepage the feed sits beside the 338px sidebar, so the card grid caps at 3 columns
