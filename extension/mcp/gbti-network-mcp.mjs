@@ -20181,6 +20181,23 @@ var STATUS_ENUM = { type: "string", enum: ["draft", "published"], description: '
 var COMMENT_TARGET = { type: "string", enum: ["post", "product", "prompt", "share", "news"] };
 var PATH_PARAM = { type: "string", description: "The repo path of the EXISTING item you are editing (members/<you>/<type>s/<slug>/index.md). Pass it whenever the item already exists: it preserves publishedAt, carries redirectFrom, and makes a changed slug a rename rather than a duplicate." };
 var SCOPE_PARAM = { type: "string", enum: ["member", "house"], description: 'Target folder. "member" (default) is your own folder; "house" is the non-member house/ content and is superadmin-only, re-checked server-side.' };
+async function resolveDraftRow(ctx2, { type, slug }) {
+  try {
+    const { drafts } = await listDrafts(ctx2, { type });
+    return (Array.isArray(drafts) ? drafts : []).find((d) => d?.type === type && d?.slug === slug) ?? null;
+  } catch {
+    return null;
+  }
+}
+async function draftTarget(ctx2, args, { require: mustResolve = true } = {}) {
+  const type = args?.type;
+  const slug = args?.slug;
+  const row = await resolveDraftRow(ctx2, { type, slug });
+  if (!row && mustResolve) {
+    throw new OperationError("not-found", `no draft found for ${type}/${slug}. Call list_drafts to see what exists; refusing to act on an unidentified draft.`);
+  }
+  return { type, slug, store: row?.store ?? args?.store ?? void 0, path: row?.path ?? args?.path ?? void 0 };
+}
 var TOOLS = [
   {
     name: "login",
@@ -20268,19 +20285,19 @@ var TOOLS = [
     name: "read_draft",
     description: "Read one staged draft (frontmatter + body) by `type` and `slug`, so you can revise it before publishing.",
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" } }, ["type", "slug"]),
-    handler: (ctx2, args) => readDraft(ctx2, { type: args?.type, slug: args?.slug })
+    handler: async (ctx2, args) => readDraft(ctx2, await draftTarget(ctx2, args))
   },
   {
     name: "publish_draft",
     description: "Publish a staged draft: opens the gated pull request from the draft branch it is already on. Paid-only, like every publish.",
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" }, title: { type: "string" }, prBody: { type: "string" } }, ["type", "slug"]),
-    handler: (ctx2, args) => publishDraft(ctx2, { type: args?.type, slug: args?.slug, title: args?.title, prBody: args?.prBody })
+    handler: async (ctx2, args) => publishDraft(ctx2, { ...await draftTarget(ctx2, args), title: args?.title, prBody: args?.prBody })
   },
   {
     name: "discard_draft",
     description: "Discard a staged draft and delete its branch. Refused while the draft has an open pull request: withdraw the pull request first. This is not reversible, so confirm with the member before calling it.",
     inputSchema: obj({ type: TYPE_ENUM, slug: { type: "string" } }, ["type", "slug"]),
-    handler: (ctx2, args) => discardDraft(ctx2, { type: args?.type, slug: args?.slug })
+    handler: async (ctx2, args) => discardDraft(ctx2, await draftTarget(ctx2, args))
   },
   {
     name: "list_prs",
