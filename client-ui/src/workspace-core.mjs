@@ -169,7 +169,10 @@ export function shouldPollPr(lifecycle) {
 // gbti/<type>-<slug> on the member's fork; its state joins "branch exists" with the PR (if any) for that branch.
 // `pull` is the matched PR ({ state, merged }) or null (no PR yet = still staged on the fork). Reuses classifyPull
 // for the PR half. Pure; node-testable.
-export function classifyDraft({ pull = null, status = null } = {}) {
+export function classifyDraft({ pull = null, status = null, store = null } = {}) {
+  // sow-194: a repo draft is a status:draft item committed to the canonical repo (no fork branch, no PR). It is
+  // neither "Staged" (that means a fork branch) nor "Submitted" (that means an open PR); label it plainly.
+  if (store === 'repo') return { state: 'repo', label: 'Repo draft', tone: '' };
   if (!pull) return { state: 'staged', label: 'Staged', tone: '' }; // branch on the fork, no PR opened yet
   const c = classifyPull(pull, status);
   if (c.label === 'Accepted') return { state: 'published', label: 'Published', tone: 'ok' };

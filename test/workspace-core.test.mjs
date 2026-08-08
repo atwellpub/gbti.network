@@ -27,6 +27,15 @@ test('classifyDraft: a PR maps to Submitted / Needs changes / Published / Declin
   assert.deepEqual(classifyDraft({ pull: { state: 'closed' } }), { state: 'declined', label: 'Declined', tone: 'muted' });
 });
 
+// sow-194: a repo draft (a status:draft item committed to the canonical repo) is neither Staged (fork) nor
+// Submitted (open PR). store:'repo' overrides the pull-based classification with its own plain label.
+test('classifyDraft: store:"repo" -> Repo draft, regardless of pull', () => {
+  assert.deepEqual(classifyDraft({ store: 'repo' }), { state: 'repo', label: 'Repo draft', tone: '' });
+  assert.deepEqual(classifyDraft({ store: 'repo', pull: null }), { state: 'repo', label: 'Repo draft', tone: '' });
+  // fork/KV rows are unaffected (no store, or a non-repo store, keeps the existing behavior).
+  assert.deepEqual(classifyDraft({ pull: null, store: 'kv' }), { state: 'staged', label: 'Staged', tone: '' });
+});
+
 test('open PR maps the gate status to Proposed / Needs changes / Error', () => {
   assert.deepEqual(classifyPull({ state: 'open' }, { state: 'success' }), { label: 'Proposed', tone: 'ok' });
   assert.deepEqual(classifyPull({ state: 'open' }, { state: 'failure' }), { label: 'Needs changes', tone: 'bad' });

@@ -29,6 +29,7 @@ import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
 import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, houseContent } from './workbench-client-core.mjs';
+import { mergeRepoDrafts } from '../../client/src/repo-drafts-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
 const TYPE_INDEX: Record<string, string> = { post: 'blog-index.json', product: 'products-index.json', prompt: 'prompts-index.json' };
@@ -114,6 +115,7 @@ function mapDraftRecord(rec: any) {
     frontmatter: fm,
     body: rec?.body || '',
     pull: null,
+    store: 'kv', // sow-194: the store discriminator, so a KV draft never collides with a repo draft on merge
     publishedAt: fm.publishedAt ? Number(fm.publishedAt) : null,
     updatedAt: rec?.updatedAt || null,
   };
@@ -278,9 +280,28 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     };
   }
 
-  async function discardDraft({ type, slug }: any) {
+  async function discardDraft({ type, slug, store }: any) {
+    // sow-194: a repo draft is committed to the public repo; discarding it is a delete request, not a KV delete.
+    // Refuse with a recognizable code so the UI shows "unsupported" rather than a broken control.
+    if (store === 'repo') throw err('unsupported', 'This draft is committed to the network and cannot be discarded here. Publish it, or open a removal request.');
     await workerPost('/membership/drafts', { op: 'delete', type, slug });
     return { ok: true };
+  }
+
+  // SOW-106 / sow-194: the gated status flip on an OWN canonical item, shared by setContentStatus (unpublish/
+  // republish) and publishDraft(store:'repo') (a repo-draft publish is a draft->published flip). members/ only:
+  // parseContentPath rejects a house/ path, so a house repo-draft publish is unsupported on the website for now
+  // (house content is migrating to members/gbtilabs, sow-195); the Worker re-gates the write regardless.
+  async function flipStatus(path: string, status: string) {
+    const parsed = parseContentPath(path);
+    if (!parsed) throw err('bad-request', 'unsupported content path');
+    const text = await readOwnFile(path);
+    if (text == null) throw err('not-found', 'could not read that item');
+    const flip = flipContentStatus(text, status);
+    if (!flip.changed) return { noop: true } as any;
+    const title = `${status === 'draft' ? 'Unpublish' : 'Republish'} ${TYPE_LABEL[parsed.type] || parsed.type}: ${parsed.slug}`;
+    const res = await workerPost('/membership/author', { itemId: hostedItemId(parsed.type, parsed.slug), files: [{ path, content: flip.content }], title });
+    return { prNumber: res.number, prUrl: res.html_url };
   }
 
   // Read an own `.enc` asset and decrypt it via the Worker (the key stays in the Worker). Returns the plaintext.
@@ -439,17 +460,36 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     async listDrafts({ type }: any = {}) {
       const r = await workerGet('/membership/drafts');
       let drafts = (Array.isArray(r?.drafts) ? r.drafts : []).map(mapDraftRecord);
+      // sow-194: fold in the caller's committed repo drafts (status:draft in the public repo), which both the
+      // KV store and the published index omit. mergeRepoDrafts drops a repo row whose (type,slug) already has a
+      // KV draft (that KV copy is the newer editable staging state). Fail-soft: a repo-drafts error must not
+      // blank the Drafts list, so a KV-only member still sees their KV drafts if the route is unavailable.
+      let repoItems: any[] = [];
+      try { const rr = await workerGet('/membership/repo-drafts'); repoItems = Array.isArray(rr?.items) ? rr.items : []; } catch { repoItems = []; }
+      drafts = mergeRepoDrafts(drafts, repoItems);
       if (type) drafts = drafts.filter((d: any) => d.type === type);
       return { drafts };
     },
-    async readDraft({ type, slug }: any) {
+    async readDraft({ type, slug, store, path }: any) {
+      // sow-194: a repo draft is the canonical committed file (not a KV record); read + reassemble it (decrypting
+      // a members-only body via readAndReassemble) so the editor opens the real content.
+      if (store === 'repo') {
+        if (!path) throw err('bad-request', 'a repo draft needs its path to open');
+        return readAndReassemble(path);
+      }
       const r = await workerGet('/membership/drafts');
       const rec = (Array.isArray(r?.drafts) ? r.drafts : []).find((d: any) => d.type === type && d.slug === slug);
       if (!rec) throw err('not-found', 'could not open that draft');
       return { frontmatter: rec.frontmatter || {}, body: rec.body || '', path: rec.path || '' };
     },
     discardDraft,
-    async publishDraft({ type, slug }: any) {
+    async publishDraft({ type, slug, store, path }: any) {
+      // sow-194: publishing a repo draft is the draft->published status flip on the canonical item (the same
+      // gated hosted PR setContentStatus uses), NOT a KV publish.
+      if (store === 'repo') {
+        if (!path) throw err('bad-request', 'a repo draft needs its path to publish');
+        return flipStatus(path, 'published');
+      }
       const r = await workerGet('/membership/drafts');
       const rec = (Array.isArray(r?.drafts) ? r.drafts : []).find((d: any) => d.type === type && d.slug === slug);
       if (!rec) throw err('not-found', 'could not find that draft');
@@ -458,17 +498,7 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       return { prNumber: res.prNumber, prUrl: res.prUrl };
     },
     // SOW-106: member self-unpublish/republish — flip status on the own canonical item via the gated hosted PR.
-    async setContentStatus({ path, status }: any) {
-      const parsed = parseContentPath(path);
-      if (!parsed) throw err('bad-request', 'unsupported content path');
-      const text = await readOwnFile(path);
-      if (text == null) throw err('not-found', 'could not read that item');
-      const flip = flipContentStatus(text, status);
-      if (!flip.changed) return { noop: true };
-      const title = `${status === 'draft' ? 'Unpublish' : 'Republish'} ${TYPE_LABEL[parsed.type] || parsed.type}: ${parsed.slug}`;
-      const res = await workerPost('/membership/author', { itemId: hostedItemId(parsed.type, parsed.slug), files: [{ path, content: flip.content }], title });
-      return { prNumber: res.number, prUrl: res.html_url };
-    },
+    setContentStatus({ path, status }: any) { return flipStatus(path, status); },
 
     // ----- pull requests (read via the Worker's installation-token proxy, scoped to the caller) -----
     async listPRs() {

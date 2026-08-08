@@ -797,19 +797,26 @@ class GbtiWorkspace extends GbtiElement {
   // index into this._viewList; the actions carry data-drow-* so _wireBody looks the draft up there.
   _draftRow(d, i, paid) {
     const g = glyphFor(null, d.type);
-    const { label, tone } = classifyDraft({ pull: d.pull });
+    const isRepo = d.store === 'repo'; // sow-194: a status:draft item committed to the public repo
+    const { label, tone } = classifyDraft({ pull: d.pull, store: d.store });
     const vis = d.visibility === 'members' ? `<span class="tag">members</span>` : '';
+    // sow-194: a repo draft lives in the PUBLIC repo, so it is readable on GitHub even while unpublished on the
+    // site. Say so, so a Drafts row is never mistaken for private review.
+    const repoNote = isRepo ? `<span class="tag" title="Committed to the public repository, so it is readable on GitHub even though it is not published on the site.">public repo</span>` : '';
     // SOW-106 Phase C: the schema drifted since this draft was saved; it needs fixing before it can publish.
     const bad = d.valid === false ? `<span class="tag bad" title="${esc(d.invalidReason || 'no longer matches the current schema')}">Invalid</span>` : '';
     const pub = label === 'Published' ? ''
       : paid
         ? `<button class="btn" data-drow-publish="${i}" type="button">Publish</button>`
         : `<a class="btn" href="https://gbti.network/membership/" target="_blank" rel="noopener" title="Publishing requires a paid membership">Upgrade to publish</a>`;
+    // sow-194: a repo draft is committed to the network; discarding it is a delete request, not a from-here
+    // action, so omit the Discard control rather than surface one that always fails.
+    const discard = isRepo ? '' : `<button class="btn" data-drow-discard="${i}" type="button">Discard</button>`;
     return `<li class="row"><span class="gl" style="--ka:${esc(g.accent)}"><svg viewBox="0 0 24 24" aria-hidden="true">${g.svg}</svg></span>`
       + `<span class="t"><b>${esc(d.title)}</b><span class="meta">${esc(d.type)} · draft${d.pendingSlug ? ` (renames to ${esc(d.pendingSlug)} on publish)` : ''}</span></span>`
-      + `<span class="right"><span class="tag ${esc(tone)}">${esc(label)}</span>${d.pendingSlug ? `<span class="tag">rename pending</span>` : ''}${bad}${vis}`
+      + `<span class="right"><span class="tag ${esc(tone)}">${esc(label)}</span>${repoNote}${d.pendingSlug ? `<span class="tag">rename pending</span>` : ''}${bad}${vis}`
       + `<button class="btn" data-drow-edit="${i}" type="button">Manage</button>${pub}`
-      + `<button class="btn" data-drow-discard="${i}" type="button">Discard</button></span></li>`;
+      + `${discard}</span></li>`;
   }
 
   _wireBody() {
@@ -909,8 +916,9 @@ class GbtiWorkspace extends GbtiElement {
     if (!d) return;
     this._draftMsg = null;
     try {
-      const full = await this.client.readDraft({ type: d.type, slug: d.slug });
-      this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || '', staged: true };
+      // sow-194: carry store + path so a repo draft reads its canonical file instead of the fork/KV store.
+      const full = await this.client.readDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
+      this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || '', staged: true };
       this._writeHash(`#tab=${encodeURIComponent(d.type)}&draft=${encodeURIComponent(d.type)}:${encodeURIComponent(d.slug)}`);
       // SOW-106 Phase C: re-validate against the CURRENT schema on open, so drift surfaces here (a clear prompt)
       // instead of as a publish-time failure. Best-effort: a validate error never blocks opening the draft.
@@ -929,7 +937,8 @@ class GbtiWorkspace extends GbtiElement {
     this._draftMsg = null;
     if (btn) { btn.disabled = true; btn.textContent = 'Publishing...'; }
     try {
-      await this.client.publishDraft({ type: d.type, slug: d.slug });
+      // sow-194: carry store + path so a repo draft publishes via the status flip, not the fork PR path.
+      await this.client.publishDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
       await this._onPublished(d.type); // clears _drafts + overview + prs and refreshes the visible tab
     } catch (err) {
       if (btn) { btn.disabled = false; btn.textContent = 'Publish'; }
@@ -945,7 +954,8 @@ class GbtiWorkspace extends GbtiElement {
     this._draftMsg = null;
     if (btn) { btn.disabled = true; btn.textContent = 'Discarding...'; }
     try {
-      await this.client.discardDraft({ type: d.type, slug: d.slug });
+      // sow-194: carry store (a repo draft has no Discard control, but a client refuses it with a typed error).
+      await this.client.discardDraft({ type: d.type, slug: d.slug, store: d.store });
       this._drafts = null;
       this._overview = null;
       this._ensureTab(this._tab); // SOW-085: refresh the current content tab (drafts merge into it now)

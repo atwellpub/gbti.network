@@ -1592,7 +1592,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   function shouldPollPr(lifecycle) {
     return lifecycle?.phase === "pending";
   }
-  function classifyDraft({ pull = null, status: status2 = null } = {}) {
+  function classifyDraft({ pull = null, status: status2 = null, store: store2 = null } = {}) {
+    if (store2 === "repo") return { state: "repo", label: "Repo draft", tone: "" };
     if (!pull) return { state: "staged", label: "Staged", tone: "" };
     const c = classifyPull(pull, status2);
     if (c.label === "Accepted") return { state: "published", label: "Published", tone: "ok" };
@@ -14654,11 +14655,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // index into this._viewList; the actions carry data-drow-* so _wireBody looks the draft up there.
     _draftRow(d, i, paid) {
       const g = glyphFor(null, d.type);
-      const { label, tone } = classifyDraft({ pull: d.pull });
+      const isRepo = d.store === "repo";
+      const { label, tone } = classifyDraft({ pull: d.pull, store: d.store });
       const vis = d.visibility === "members" ? `<span class="tag">members</span>` : "";
+      const repoNote = isRepo ? `<span class="tag" title="Committed to the public repository, so it is readable on GitHub even though it is not published on the site.">public repo</span>` : "";
       const bad = d.valid === false ? `<span class="tag bad" title="${esc(d.invalidReason || "no longer matches the current schema")}">Invalid</span>` : "";
       const pub = label === "Published" ? "" : paid ? `<button class="btn" data-drow-publish="${i}" type="button">Publish</button>` : `<a class="btn" href="https://gbti.network/membership/" target="_blank" rel="noopener" title="Publishing requires a paid membership">Upgrade to publish</a>`;
-      return `<li class="row"><span class="gl" style="--ka:${esc(g.accent)}"><svg viewBox="0 0 24 24" aria-hidden="true">${g.svg}</svg></span><span class="t"><b>${esc(d.title)}</b><span class="meta">${esc(d.type)} · draft${d.pendingSlug ? ` (renames to ${esc(d.pendingSlug)} on publish)` : ""}</span></span><span class="right"><span class="tag ${esc(tone)}">${esc(label)}</span>${d.pendingSlug ? `<span class="tag">rename pending</span>` : ""}${bad}${vis}<button class="btn" data-drow-edit="${i}" type="button">Manage</button>${pub}<button class="btn" data-drow-discard="${i}" type="button">Discard</button></span></li>`;
+      const discard = isRepo ? "" : `<button class="btn" data-drow-discard="${i}" type="button">Discard</button>`;
+      return `<li class="row"><span class="gl" style="--ka:${esc(g.accent)}"><svg viewBox="0 0 24 24" aria-hidden="true">${g.svg}</svg></span><span class="t"><b>${esc(d.title)}</b><span class="meta">${esc(d.type)} · draft${d.pendingSlug ? ` (renames to ${esc(d.pendingSlug)} on publish)` : ""}</span></span><span class="right"><span class="tag ${esc(tone)}">${esc(label)}</span>${repoNote}${d.pendingSlug ? `<span class="tag">rename pending</span>` : ""}${bad}${vis}<button class="btn" data-drow-edit="${i}" type="button">Manage</button>${pub}${discard}</span></li>`;
     }
     _wireBody() {
       this.on("[data-profile]", "click", () => {
@@ -14774,8 +14778,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (!d) return;
       this._draftMsg = null;
       try {
-        const full = await this.client.readDraft({ type: d.type, slug: d.slug });
-        this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || "", staged: true };
+        const full = await this.client.readDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
+        this._editing = { type: d.type, frontmatter: full.frontmatter, body: full.body, path: full.path || d.path || "", staged: true };
         this._writeHash(`#tab=${encodeURIComponent(d.type)}&draft=${encodeURIComponent(d.type)}:${encodeURIComponent(d.slug)}`);
         try {
           const v = await this.client.validateContent({ type: d.type, input: full.frontmatter, body: full.body });
@@ -14799,7 +14803,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         btn.textContent = "Publishing...";
       }
       try {
-        await this.client.publishDraft({ type: d.type, slug: d.slug });
+        await this.client.publishDraft({ type: d.type, slug: d.slug, store: d.store, path: d.path });
         await this._onPublished(d.type);
       } catch (err) {
         if (btn) {
@@ -14820,7 +14824,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         btn.textContent = "Discarding...";
       }
       try {
-        await this.client.discardDraft({ type: d.type, slug: d.slug });
+        await this.client.discardDraft({ type: d.type, slug: d.slug, store: d.store });
         this._drafts = null;
         this._overview = null;
         this._ensureTab(this._tab);
