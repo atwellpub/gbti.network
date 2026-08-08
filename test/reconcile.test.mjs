@@ -36,8 +36,13 @@ function effective(githubId, derived, { bans = new Map(), grandfathers = new Map
   return effectiveStatus(githubId, derived, { bans, grandfathers }, NOW);
 }
 
-/** Repo entry helper: files with their current status. */
-const file = (p, status, visibility = 'public') => ({ path: p, status, visibility });
+/** Repo entry helper: files with their current status.
+ *
+ * `publishedAt` defaults to a real date because that is what these fixtures model: content that EXISTS on the
+ * site and is being drafted or restored around a membership change. Reconcile only republishes a draft that
+ * carries one, since that is how it tells content it drafted after a lapse from a draft the author has never
+ * published (see filesToPublish). Pass null explicitly for a never-published draft. */
+const file = (p, status, visibility = 'public', publishedAt = '2026-01-01T00:00:00.000Z') => ({ path: p, status, visibility, publishedAt });
 
 // helper to find actions by kind/type
 const ofKind = (actions, kind) => actions.filter((a) => a.kind === kind);
@@ -142,6 +147,54 @@ test('sow-185: with the Creator role UNPROVISIONED (creatorRoleEnabled false) th
   // pre-provision every paid member resolves to creator via the inert price map; the flag keeps the plan clean.
   const actions = ofKind(planReconcile({ members: [creatorMember()], repoIndex: {}, now: NOW }), 'discord');
   assert.equal(actions.filter((a) => a.role === 'creator').length, 0);
+});
+
+// ---- a NEVER-PUBLISHED draft is left alone (2026-08-08 incident) ----
+// Reconcile published an unfinished article overnight (63c2800) because filesToPublish took ANY draft a paid
+// member owned. It cannot see intent, so it uses publishedAt: content it drafted after a lapse has one, a
+// draft the author has never published does not. Without this the WorkBench draft review shipped in sow-194 is
+// pointless, since every reviewable draft is one nightly run from going live.
+test('a paid member\'s NEVER-PUBLISHED draft is not auto-published', () => {
+  const members = [
+    {
+      githubId: '900', username: 'nia', derived: 'paid', effective: effective('900', 'paid'),
+      discordUserId: 'd900', discordRoles: ['member'],
+    },
+  ];
+  const repoIndex = { nia: { files: [file('members/nia/posts/wip/index.md', 'draft', 'public', null)] } };
+  const actions = planReconcile({ members, repoIndex, now: NOW });
+  assert.deepEqual(ofKind(actions, 'content'), [], 'an unfinished draft must never be auto-published');
+});
+
+test('a paid member\'s PREVIOUSLY-published draft is still restored (the guard is not over-broad)', () => {
+  // The resubscribe path this function exists for: reconcile drafted it on lapse, so it carries a date.
+  const members = [
+    {
+      githubId: '901', username: 'omar', derived: 'paid', effective: effective('901', 'paid'),
+      discordUserId: 'd901', discordRoles: ['member'],
+    },
+  ];
+  const repoIndex = { omar: { files: [file('members/omar/posts/was-live/index.md', 'draft')] } };
+  const content = ofKind(planReconcile({ members, repoIndex, now: NOW }), 'content');
+  assert.equal(content.length, 1);
+  assert.equal(content[0].type, 'publish');
+  assert.deepEqual(content[0].files, ['members/omar/posts/was-live/index.md']);
+});
+
+test('the guard does NOT weaken the ban path: a banned member is still drafted', () => {
+  // ban > staff > grandfather > Stripe exists so a ban deplatforms regardless of payment. filesToDraft is
+  // untouched by the publishedAt guard, and this asserts it: the one direction that must never regress.
+  const bans = new Map([['902', { github_id: '902' }]]);
+  const members = [
+    {
+      githubId: '902', username: 'pat', derived: 'paid', effective: effective('902', 'paid', { bans }),
+      discordUserId: 'd902', discordRoles: ['member'],
+    },
+  ];
+  const repoIndex = { pat: { files: [file('members/pat/posts/live/index.md', 'published')] } };
+  const content = ofKind(planReconcile({ members, repoIndex, now: NOW }), 'content');
+  assert.equal(content.length, 1);
+  assert.equal(content[0].type, 'draft');
 });
 
 // ---- grandfathered member with DRAFT content -> publish ----

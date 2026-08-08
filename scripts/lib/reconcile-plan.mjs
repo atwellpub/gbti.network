@@ -90,13 +90,25 @@ function filesToDraft(repoEntry) {
 }
 
 /**
- * The files for a member that are currently draft but should be published (resubscribe / grandfather),
+ * The files for a member that reconcile PREVIOUSLY DRAFTED and should now restore (resubscribe / grandfather),
  * in stable path order.
+ *
+ * A file qualifies only if it has a `publishedAt`. That is the discriminator for the distinction reconcile
+ * could not previously make: this path exists to restore content reconcile itself drafted when a membership
+ * lapsed, and such a file was published at some point, so it carries a date. A draft the author has never
+ * published has none, and was never reconcile's to publish.
+ *
+ * Without that check, reconcile republished ANY draft a paid member owned. It took an unfinished article live
+ * overnight (63c2800, 2026-08-08) and would have done so again every night, which defeats sow-194: committed
+ * drafts became reviewable in the WorkBench precisely so they could sit there UNpublished.
+ *
+ * NOTE this is a stopgap. The owner has decided a lapse should not draft content at all, which removes this
+ * path entirely along with the drafting that feeds it; this guard goes with it.
  */
 function filesToPublish(repoEntry) {
   if (!repoEntry?.files) return [];
   return repoEntry.files
-    .filter((f) => f.status === 'draft')
+    .filter((f) => f.status === 'draft' && f.publishedAt)
     .map((f) => f.path)
     .sort();
 }
