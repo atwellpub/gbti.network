@@ -12,7 +12,7 @@ status: published
 visibility: public
 publicStub: false
 pricing: free
-version: 0.5.5
+version: 0.6.0
 tags:
   - vscode
   - terminal
@@ -40,7 +40,7 @@ links:
     url: https://github.com/gbti-network/vscode-terminal-sessions
     label: Source on GitHub
 publishedAt: '2026-08-04T01:15:58.920Z'
-updatedAt: '2026-08-07T14:19:54.670Z'
+updatedAt: '2026-08-08T03:40:00.000Z'
 type: product
 author: atwellpub
 ---
@@ -99,6 +99,10 @@ Terminal Session Profiles handles the other half of that recovery.
 Profiles that were running are remembered per workspace. When the project is opened again, the extension identifies the restored terminal tabs associated with those profiles and relaunches them using the correct shell, working directory, and command sequence.
 
 Restoration happens automatically by default. It can also be started manually with **Restore Last Session** in the Command Palette.
+
+Each profile also decides when it takes part. Under **Open on startup** in the profile editor, a profile can open every time the project opens, open only if it was open last time, or never open on its own. The middle option is the default, and describes what most people mean by restoring a session.
+
+A profile that states no preference follows the `terminalSessions.autoLaunch` setting, which accepts the same three values and can be set for one project or for all of them. The most specific answer wins, so a profile overrides a project and a project overrides your user settings.
 
 Before replacing a restored terminal, the extension compares the process recorded when the profile was launched with the process that returned. If the original process genuinely survived, the terminal is left alone rather than being terminated and recreated.
 
