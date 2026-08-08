@@ -193,7 +193,7 @@ const pass = (label, autoMerge, reason) => ({ check: 'pass', autoMerge, label, r
  * @param {string}   [a.tier]          the author's effective TIER (tier-gate resolveEffectiveTier), default none
  * @param {string}   [a.ownerTier]     for a contribution: the target folder owner's effective TIER, default none
  */
-export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBot = false, ownerApproved = false, ownerPaid = false, tier = TIER.none, ownerTier = TIER.none }) {
+export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBot = false, ownerApproved = false, ownerPaid = false, tier = TIER.none, ownerTier = TIER.none, hostedContent = false }) {
   const c = classifyPaths(paths, ownedFolder);
   // isBot is a FLOOR, not an override: it promotes an unprivileged bot to admin, but never DEMOTES a
   // bot that already holds a higher role. So an automation account that is also a superadmin (for
@@ -222,10 +222,26 @@ export function decide({ paths, role = ROLE.member, effective, ownedFolder, isBo
   }
 
   // 4. Escalation hard-fails (cannot be bypassed by the privilege short-circuit below).
-  if (c.tierS.length > 0 && effectiveRole !== ROLE.superadmin) {
+  //
+  // sow-193: `hostedContent` marks a `hosted/<id>/` CONTENT branch, the head the /membership/author endpoint
+  // opens. On one of those the governance tiers are refused REGARDLESS of role, superadmin included.
+  //
+  // Why this exists. SOW-108 lets a superadmin auto-merge any path, and rule 5 below short-circuits them to
+  // `superadmin-automerge` before any own-folder check. That is fine for a PR a superadmin opened deliberately.
+  // It was NOT fine for the content endpoint: `authorizeSuperadmin` accepts a BEARER token, so a superadmin's
+  // extension or MCP token reaches that endpoint, and the only thing standing between it and `house/roles.yml`,
+  // `CODEOWNERS` or `.github/**` was the Worker's own HOUSE_CONTENT_PREFIXES allowlist. One allowlist bug, or a
+  // future "just allow bare house/" edit, and a governance change lands auto-merged and unreviewed. The gate is
+  // a real second wall now.
+  //
+  // `hosted-admin/<id>/` branches are deliberately UNAFFECTED (parseHostedRef isolates the two kinds at
+  // scripts/pr-gate.mjs:181-184): the sow-161 admin surface legitimately writes house/**, and refusing it here
+  // would break every admin mutation. Ordinary PRs are unaffected too, so SOW-108 is intact.
+  const governanceLocked = hostedContent; // a content branch may never touch Tier S or Tier A
+  if (c.tierS.length > 0 && (governanceLocked || effectiveRole !== ROLE.superadmin)) {
     return fail('rejected-escalation', `superadmin-owned paths require superadmin: ${c.tierS.join(', ')}`);
   }
-  if (c.tierA.length > 0 && !isAdminPlus) {
+  if (c.tierA.length > 0 && (governanceLocked || !isAdminPlus)) {
     return fail('rejected-escalation', `admin-owned paths require admin: ${c.tierA.join(', ')}`);
   }
 

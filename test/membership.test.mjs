@@ -341,6 +341,39 @@ test('SOW-108: a superadmin auto-merges any path they touch, including house/** 
   assert.equal(sup(['.github/workflows/x.yml']).autoMerge, true);
 });
 
+test('sow-193: a hosted CONTENT branch cannot reach a governance path, superadmin included', () => {
+  // Before this, SOW-108 skipped the Tier S hard-fail for a superadmin, so the Worker's HOUSE_CONTENT_PREFIXES
+  // allowlist was the ONLY wall between the content-authoring endpoint and roles.yml / CODEOWNERS / .github.
+  // The gate is a real second wall now: the SAME superadmin touching the SAME path is allowed from an ordinary
+  // branch and refused from a hosted/<id>/ content branch.
+  const fromContentBranch = (paths) => decide({ paths, role: ROLE.superadmin, effective: PAID, hostedContent: true });
+  const fromOrdinaryBranch = (paths) => decide({ paths, role: ROLE.superadmin, effective: PAID });
+
+  for (const p of ['house/roles.yml', 'CODEOWNERS', '.github/workflows/x.yml']) {
+    const blocked = fromContentBranch([p]);
+    assert.equal(blocked.check, 'fail', `${p} must be refused from a content branch`);
+    assert.equal(blocked.label, 'rejected-escalation');
+    assert.equal(blocked.autoMerge, false);
+    // The control: SOW-108 is untouched for an ordinary superadmin PR.
+    assert.equal(fromOrdinaryBranch([p]).autoMerge, true, `${p} must still auto-merge from an ordinary branch`);
+  }
+
+  // Tier A (the rest of house/**) is refused from a content branch too.
+  assert.equal(fromContentBranch(['house/quotes.yml']).check, 'fail');
+  assert.equal(fromOrdinaryBranch(['house/quotes.yml']).autoMerge, true);
+
+  // ALL of house/** is refused from a content branch, house/posts/** included, because isTierA covers
+  // everything under house/ except roles.yml. That is deliberate rather than a rough edge: the owner decided
+  // (2026-08-08) that house CONTENT moves to members/gbtilabs/ and house/ keeps only settings and config, so
+  // a content-authoring branch has no legitimate reason to reach house/** at all. Shipping this strict costs
+  // nothing today either, since hosted house authoring is already refused client-side at operations.mjs:625.
+  assert.equal(fromContentBranch(['house/posts/x/index.md']).check, 'fail');
+
+  // A member publishing their OWN content from a hosted branch is completely unaffected.
+  const own = decide({ paths: ['members/alice/posts/x/index.md'], role: ROLE.member, effective: PAID, ownedFolder: 'alice', tier: TIER.creator, hostedContent: true });
+  assert.equal(own.check, 'pass');
+});
+
 test('SOW-108: an admin house edit still needs review; a non-privileged Tier/house PR still hard-fails', () => {
   const admin = decide({ paths: ['house/quotes.yml'], role: ROLE.admin, effective: PAID });
   assert.equal(admin.check, 'pass');

@@ -102,9 +102,11 @@ export function shouldAutoMerge(decision, paths) {
  * @param {object}        a.stripe    a client with findCustomerByGithubId(githubId) (may throw).
  * @param {string|number|null} [a.botId]  the reconcile bot's github_id (treated as admin).
  * @param {Date}          [a.now]     clock injection for trial/grandfather windows.
+ * @param {boolean}       [a.hostedContent] sow-193: the head is a `hosted/<id>/` CONTENT branch, so the
+ *                                    Tier S + Tier A hard-fails apply even to a superadmin.
  * @returns {Promise<{check:'pass'|'fail', autoMerge:boolean, label:string, reasons:string[], status:string, role:string, ownedFolder:(string|null)}>}
  */
-export async function evaluatePR({ author, paths, overrides, stripe, botId = null, now = new Date(), resolveOwner = null, priceTierMap = null }) {
+export async function evaluatePR({ author, paths, overrides, stripe, botId = null, now = new Date(), resolveOwner = null, priceTierMap = null, hostedContent = false }) {
   const { roles, bans, grandfathers, membersIndex } = overrides;
   const authorId = String(author);
 
@@ -135,7 +137,7 @@ export async function evaluatePR({ author, paths, overrides, stripe, botId = nul
     ownerTier = isTier(r?.ownerTier) ? r.ownerTier : TIER.none;
   }
 
-  const d = decide({ paths, role, effective, ownedFolder, isBot, ownerApproved, ownerPaid, tier, ownerTier });
+  const d = decide({ paths, role, effective, ownedFolder, isBot, ownerApproved, ownerPaid, tier, ownerTier, hostedContent });
   return { ...d, status: effective.status, tier, role, ownedFolder, contributionTarget: target };
 }
 
@@ -168,6 +170,7 @@ export function parseEvent(event, botId = null) {
   const baseRepoId = pr.base?.repo?.id ?? null;
   const sameRepoHead = headRepoId != null && String(headRepoId) === String(baseRepoId);
   let author;
+  let hostedContent = false;
   if (botOpened && sameRepoHead) {
     // A bot-opened canonical-head PR carries the requesting id in the branch: `hosted/<id>/...` (own-folder
     // member content, SOW-156) or `hosted-admin/<id>/...` (a sow-161 admin mutation). Either resolves the
@@ -175,6 +178,10 @@ export function parseEvent(event, botId = null) {
     // then re-checks that id's git-native role against the touched paths, so an admin branch cannot merge
     // beyond the id's actual role.
     author = parseHostedRef(pr.head?.ref) ?? parseAdminHostedRef(pr.head?.ref);
+    // sow-193: remember WHICH kind it was. A `hosted/<id>/` CONTENT branch (the /membership/author endpoint)
+    // must never reach a governance path, even for a superadmin; a `hosted-admin/<id>/` branch legitimately
+    // writes house/** for the sow-161 admin surface and is therefore exempt.
+    hostedContent = parseHostedRef(pr.head?.ref) != null;
   } else if (botOpened) {
     author = pr.head?.repo?.owner?.id ?? pr.head?.user?.id ?? null; // fork head: the fork owner is the author
   } else {
@@ -185,6 +192,7 @@ export function parseEvent(event, botId = null) {
     author,
     headSha: pr.head?.sha,
     botOpened,
+    hostedContent, // sow-193: gate input, see decide()
   };
 }
 
@@ -206,7 +214,7 @@ async function main() {
 
   // Resolve PR metadata first so that even an early failure can be reported against the head sha. SOW-026:
   // botId lets the gate resolve the member from the PR head when GBTI's App opens the PR on their behalf.
-  const { number, author, headSha } = readEvent(process.env.GITHUB_EVENT_PATH, botId);
+  const { number, author, headSha, hostedContent } = readEvent(process.env.GITHUB_EVENT_PATH, botId);
   if (!headSha) throw new Error('could not resolve pull_request.head.sha from the event');
 
   try {
@@ -256,7 +264,7 @@ async function main() {
       return { ownerApproved, ownerPaid: ownerEff.status === 'paid', ownerTier };
     };
 
-    const d = await evaluatePR({ author, paths, overrides, stripe, botId, resolveOwner, priceTierMap });
+    const d = await evaluatePR({ author, paths, overrides, stripe, botId, resolveOwner, priceTierMap, hostedContent });
 
     await gh.setStatus(headSha, {
       state: d.check === 'pass' ? 'success' : 'failure',
