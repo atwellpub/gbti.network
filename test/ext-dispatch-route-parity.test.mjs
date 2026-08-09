@@ -59,3 +59,49 @@ test('route parity: ext-dispatch and api.mjs expose the same /api routes, except
   for (const r of API_ONLY.keys()) assert.ok(api.has(r) && !ext.has(r), `stale API_ONLY entry ${r}: it is no longer api-only. Remove it from the allowlist.`);
   for (const r of EXT_ONLY.keys()) assert.ok(ext.has(r) && !api.has(r), `stale EXT_ONLY entry ${r}: it is no longer ext-only. Remove it from the allowlist.`);
 });
+
+// sow-200 (option 1, owner-elected 2026-08-09): the SOW proposed a full shared route manifest so that pre-auth
+// status stops being encoded by LINE ORDER. The owner elected the lighter path instead: keep the two dispatchers
+// as-is (their difference is a load-bearing auth boundary, not a style inconsistency, see the SOW caution) and
+// convert the line-order invariant into a TESTED one here, closing the full-manifest scope. This is the one
+// hazard the route-parity guard above does not touch.
+//
+// In ext-dispatch.mjs, POSITION ENCODES AUTHORIZATION: a route handled ABOVE the `if (!username)` identity gate
+// runs pre-auth (public); a `case` in the switch below the gate runs only for a signed-in caller. A public route
+// placed below the gate breaks signed-out users, which actually happened (ext-dispatch :87-91: a signed-out
+// member got a 409 and the onboarding wizard dead-ended). This test pins which routes are public.
+const PRE_AUTH = new Set([
+  '/api/status',              // the identity/membership probe that DRIVES the sign-in state
+  '/api/onboarding-status',   // SOW-026: drives the first-run sign-in step; must answer before sign-in
+  // SOW-079/087: the admin MANAGER reads are public git-native data (house/*.yml), so they load tokenless.
+  '/api/taxonomy', '/api/news-source-pool', '/api/quote-pool',
+  '/api/content-channel-pool', '/api/moderation-flag-pool', '/api/syndication-template-pool',
+  '/api/coupon-pool', '/api/news-engagement', '/api/content-engagement', '/api/syndication-settings',
+]);
+
+test('pre-auth positioning: the routes above the ext-dispatch identity gate are EXACTLY the declared pre-auth set', () => {
+  const src = readFileSync(join(ROOT, 'extension/src/ext-dispatch.mjs'), 'utf8');
+  const lines = src.split('\n');
+  const gate = lines.findIndex((l) => /if\s*\(\s*!username\s*\)/.test(l));
+  assert.ok(gate > 0, 'could not locate the identity gate (if (!username)) in ext-dispatch.mjs');
+
+  // Pre-auth handlers use `if (pathname === '/api/x')`; gated routes use `case '/api/x'` in the switch below the
+  // gate. Match the handler form (not a bare literal), so a comment that merely names a route path above the gate
+  // is not counted as a handler.
+  const handlers = [];
+  lines.forEach((line, i) => {
+    const m = line.match(/pathname === ['"](\/api\/[a-zA-Z0-9/_-]+)['"]/);
+    if (m) handlers.push({ route: m[1], line: i });
+  });
+  const above = [...new Set(handlers.filter((h) => h.line < gate).map((h) => h.route))].sort();
+  const below = handlers.filter((h) => h.line > gate).map((h) => h.route);
+
+  // A pre-auth-style handler below the gate is the exact :87-91 defect: a route meant to be public that a
+  // signed-out caller can no longer reach.
+  assert.deepEqual(below, [], `pathname=== handlers found BELOW the identity gate: [${below.join(', ')}]. A public route placed below the gate breaks signed-out users (ext-dispatch :87-91). Move it above the gate.`);
+
+  // The set above the gate must be EXACTLY the declared pre-auth set. Adding a route above without declaring it,
+  // or dropping a declared pre-auth route below the gate, fails here, so "public vs gated" is a written, tested
+  // decision instead of an implicit line number.
+  assert.deepEqual(above, [...PRE_AUTH].sort(), 'the routes above the ext-dispatch identity gate no longer match the declared PRE_AUTH set. If you intend to change what is public, update PRE_AUTH deliberately (with a reason); never move a route across the gate as a side effect of a refactor.');
+});
