@@ -1,5 +1,5 @@
 ---
-displayName: gbtilabs
+displayName: GBTI Network
 forHire: false
 directory: false
 skills: []

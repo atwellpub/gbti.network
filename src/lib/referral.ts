@@ -35,14 +35,22 @@ function usernameToGithubId(): Map<string, string> {
   return map;
 }
 
+// sow-195: the network's own content identity. `gbtilabs` joined this set when house content moved into
+// members/gbtilabs/: it IS in the members index (github_id 125175036), so without this every one of the 35
+// moved items would suddenly carry ?ref and attribute conversions to the network's own account. Keeping
+// network content ref-free preserves exactly the behaviour house content had. Whether the network should
+// ever earn a commission on its own writing is a revenue-model question that belongs to sow-059, not to a
+// folder move. `house` and the retired `gbti` pseudo-author stay for content written before the move.
+const NETWORK_ACCOUNTS = new Set(['gbti', 'gbtilabs', 'house']);
+
 /**
- * The referral code for a content author = their immutable github_id. Returns undefined for the house
- * account ('gbti'/'house') and for any author not yet in the members index, so the CTA omits ?ref
- * rather than attributing a conversion to the wrong person (or to no real member).
+ * The referral code for a content author = their immutable github_id. Returns undefined for the network's
+ * OWN accounts and for any author not yet in the members index, so the CTA omits ?ref rather than
+ * attributing a conversion to the wrong person (or to no real member).
  */
 export function refCodeForAuthor(username?: string): string | undefined {
   if (!username) return undefined;
   const u = username.toLowerCase();
-  if (u === 'gbti' || u === 'house') return undefined;
+  if (NETWORK_ACCOUNTS.has(u)) return undefined;
   return usernameToGithubId().get(u);
 }
