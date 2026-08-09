@@ -19475,6 +19475,7 @@ function validateContent(ctx, { type, input, body } = {}) {
   }
 }
 var RENAME_URL_BASE = { post: "/articles", product: "/products", prompt: "/prompts" };
+var SLUG_RE2 = /^[a-z0-9][a-z0-9-]*$/;
 function renameOriginOf({ path, username, type }) {
   const m = OWN_STATUS_PATH_RE.exec(String(path || ""));
   if (!m) return null;
@@ -19493,6 +19494,79 @@ async function introMoveFiles(ctx, { username, type, oldSlug, newSlug }) {
     { path: `members/${username}/comments/intro-${newSlug}.md`, content: serializeContentFile(introFm, intro.body) },
     { path: oldIntro, content: null }
   ];
+}
+async function renameContent(ctx, { path: rel, newSlug } = {}) {
+  const id = requireIdentity(ctx);
+  const repo = requireRepo(ctx);
+  const m = OWN_STATUS_PATH_RE.exec(String(rel || ""));
+  if (!m) throw new OperationError("bad-request", "path must be members/<you>/(posts|products|prompts)/<slug>/index.md");
+  if (m[1] !== String(id.username).toLowerCase()) {
+    throw new OperationError("forbidden", "you may only rename your own content");
+  }
+  const type = m[2].slice(0, -1);
+  const oldSlug = m[3];
+  const slug = String(newSlug || "").trim();
+  if (!SLUG_RE2.test(slug)) throw new OperationError("bad-request", "the new permalink must be lowercase letters, digits, and hyphens");
+  if (slug === oldSlug) return { ok: true, noop: true, slug };
+  const membership = await membershipOf(ctx);
+  if (isBlockedFromPublishing(membership)) {
+    throw new OperationError("membership-required", "Renaming a published item requires a paid membership.", { membership });
+  }
+  const hosted = isHostedCtx(ctx);
+  if (!hosted) {
+    const fork2 = await repo.ensureFork();
+    for (const s of [oldSlug, slug]) {
+      const branch2 = branchName(type, s);
+      const staged = await repo.getBranchSha(fork2.full_name, branch2).catch(() => null);
+      if (staged) throw new OperationError("bad-request", `a staged draft exists for "${s}" — publish or discard it first`);
+      const pull = await repo.findOpenPull({ head: `${fork2.owner}:${branch2}` }).catch(() => null);
+      if (pull) throw new OperationError("bad-request", `an open pull request exists for "${s}" — wait for it to merge or close it first`);
+    }
+  }
+  const newPath = contentPath(type, id.username, slug);
+  const collision = await repo.getFileContent(newPath).catch(() => null);
+  if (collision != null) throw new OperationError("bad-request", `the permalink "${slug}" is already taken`);
+  const oldText = await ctx.reader?.readFile?.(rel);
+  if (oldText == null) throw new OperationError("not-found", `no such file: ${rel}`);
+  const { frontmatter, body } = parseContentFile(oldText);
+  const fm = { ...frontmatter ?? {} };
+  const oldUrl = `${RENAME_URL_BASE[type]}/${oldSlug}/`;
+  fm.slug = slug;
+  fm.redirectFrom = [.../* @__PURE__ */ new Set([...Array.isArray(fm.redirectFrom) ? fm.redirectFrom : [], oldUrl])];
+  fm.updatedAt = ctx.now?.() ?? (/* @__PURE__ */ new Date()).toISOString();
+  const files = [];
+  if (typeof fm.encryptedBody === "string" && fm.encryptedBody) {
+    const oldEnc = fm.encryptedBody;
+    const encText = await ctx.reader?.readFile?.(oldEnc);
+    if (encText == null) throw new OperationError("not-found", `the encrypted body is missing: ${oldEnc}`);
+    const { path: newEnc } = encAssetFor(type, id.username, slug);
+    fm.encryptedBody = newEnc;
+    files.push({ path: newEnc, content: encText }, { path: oldEnc, content: null });
+  }
+  files.push({ path: newPath, content: serializeContentFile(fm, body) }, { path: rel, content: null });
+  files.push(...await introMoveFiles(ctx, { username: id.username, type, oldSlug, newSlug: slug }));
+  const branch = `gbti/rename-${type}-${oldSlug}`;
+  if (hosted) {
+    const pr2 = await hostedPublishFiles(ctx, { branch, files, title: `Rename: ${oldSlug} -> ${slug}` });
+    return { ...pr2, ok: true, type, oldSlug, slug, path: newPath };
+  }
+  await syncForkIfCreatingBranch(ctx, repo, branch);
+  const fork = await repo.ensureFork();
+  const base3 = await repo.getDefaultBranch(repo.upstream);
+  const baseSha = await repo.getBranchSha(fork.full_name, base3).catch(() => null);
+  const oldOnBase = baseSha ? await repo.getFileSha(fork.full_name, rel, base3).catch(() => null) : null;
+  if (!oldOnBase) {
+    throw new OperationError("bad-request", "the rename needs your fork to sync with the network first (the publisher app needs its updated permissions approved) — try again later or contact the co-op");
+  }
+  const pr = await publishFiles({
+    repo,
+    branch,
+    files,
+    message: `Rename ${type} ${oldSlug} -> ${slug}`,
+    title: `Rename: ${oldSlug} -> ${slug}`,
+    body: `Permalink rename (SOW-112). ${oldUrl} redirects to ${RENAME_URL_BASE[type]}/${slug}/ after the next deploy.`
+  });
+  return { ...pr, ok: true, type, oldSlug, slug, path: newPath };
 }
 var OWN_STATUS_PATH_RE = /^members\/([a-z0-9][a-z0-9-]*)\/(posts|products|prompts)\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
 async function setOwnContentStatus(ctx, { path: rel, status } = {}) {
@@ -20249,6 +20323,38 @@ async function publishComment(ctx, { targetType, targetSlug, body, authorNote, p
     });
   }
   return out;
+}
+async function deleteComment(ctx, { id } = {}) {
+  const identity = requireIdentity(ctx);
+  const repo = requireRepo(ctx);
+  const cid = String(id || "").trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(cid)) throw new OperationError("bad-request", "a comment id is required");
+  const membership = await membershipOf(ctx);
+  if (isBlockedFromPublishing(membership)) {
+    throw new OperationError("membership-required", "Managing comments on the network requires a paid membership.", { membership });
+  }
+  const rel = `members/${identity.username}/comments/${cid}.md`;
+  const text = await ctx.reader?.readFile?.(rel);
+  if (text == null) throw new OperationError("not-found", `no such comment: ${cid}`);
+  const fm = parseContentFile(text).frontmatter ?? {};
+  if (String(fm.author || "").toLowerCase() !== String(identity.username).toLowerCase()) {
+    throw new OperationError("forbidden", "you may only delete your own comments");
+  }
+  const branch = `gbti/comment-delete-${cid}`;
+  if (isHostedCtx(ctx)) {
+    const pr2 = await hostedPublishFiles(ctx, { branch, files: [{ path: rel, content: null }], title: `Delete comment: ${cid}` });
+    return { ...pr2, ok: true, id: cid, path: rel };
+  }
+  await syncForkIfCreatingBranch(ctx, repo, branch);
+  const pr = await publishFiles({
+    repo,
+    branch,
+    files: [{ path: rel, content: null }],
+    message: `Delete comment ${cid}`,
+    title: `Delete comment: ${cid}`,
+    body: "The author removed their own comment."
+  });
+  return { ...pr, ok: true, id: cid, path: rel };
 }
 async function getComment(ctx, { id } = {}) {
   const idn = requireIdentity(ctx);
@@ -22891,6 +22997,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
       // reader-free (uses content-ops + the repo client)
       case "/api/content/status":
         return ok(await setOwnContentStatus(ctx, body ?? {}));
+      case "/api/content/rename":
+        return ok(await renameContent(ctx, body ?? {}));
       // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
       case "/api/drafts":
         return ok(await listDrafts(ctx, { type: query.type }));
@@ -22917,6 +23025,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
       case "/api/comment/edit":
         return ok(await editComment(ctx, body));
       // SOW-027: re-publish with updatedAt set
+      case "/api/comment/delete":
+        return ok(await deleteComment(ctx, body ?? {}));
       case "/api/member-decrypt":
         return ok(await decryptMemberAsset(ctx, body));
       // SOW-016: reads the .enc via the reader, decrypts via the Worker

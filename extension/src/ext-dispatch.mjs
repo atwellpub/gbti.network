@@ -132,6 +132,8 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
         return ok(await publish(ctx, body)); // reader-free (uses content-ops + the repo client)
       case '/api/content/status': // SOW-106 Phase B: member self-unpublish/republish (a reversible own-folder status flip via the gated PR). The route landed in client/src/api.mjs but was never added here, so the extension WorkBench's Unpublish/Republish row actions fell to default: not_found (404). This brings the extension host to parity with the website + npm hosts.
         return ok(await setOwnContentStatus(ctx, body ?? {}));
+      case '/api/content/rename': // SOW-112: the permalink rename op. Latent today (rename is folded into the publish event, and renameContent has no UI call site), routed here for parity so it cannot 404 in the extension host if a caller ever returns. Mirrors client/src/api.mjs.
+        return ok(await renameContent(ctx, body ?? {}));
       // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
       case '/api/drafts':
         return ok(await listDrafts(ctx, { type: query.type }));
@@ -153,6 +155,8 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
         return ok(method === 'POST' ? await publishComment(ctx, body) : await getComment(ctx, { id: query.id }));
       case '/api/comment/edit':
         return ok(await editComment(ctx, body)); // SOW-027: re-publish with updatedAt set
+      case '/api/comment/delete': // SOW-112 QA: a member deletes their OWN comment. LIVE fix: gbti-discussion's delete button (mounted in the extension reader via gbti-reader) calls client.deleteComment, which 404'd because ext-dispatch had no case. Mirrors client/src/api.mjs.
+        return ok(await deleteComment(ctx, body ?? {}));
       case '/api/member-decrypt':
         return ok(await decryptMemberAsset(ctx, body)); // SOW-016: reads the .enc via the reader, decrypts via the Worker
       case '/api/activity': // SOW-024: member activity (favorites + collections) in the deletable edge store, via the Worker

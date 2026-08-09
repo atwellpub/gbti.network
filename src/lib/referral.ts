@@ -39,8 +39,10 @@ function usernameToGithubId(): Map<string, string> {
 // members/gbtilabs/: it IS in the members index (github_id 125175036), so without this every one of the 35
 // moved items would suddenly carry ?ref and attribute conversions to the network's own account. Keeping
 // network content ref-free preserves exactly the behaviour house content had. Whether the network should
-// ever earn a commission on its own writing is a revenue-model question that belongs to sow-059, not to a
-// folder move. `house` and the retired `gbti` pseudo-author stay for content written before the move.
+// ever earn a commission on its own writing was the open sow-059 question; the owner SETTLED it 2026-08-09:
+// NO, network content stays ref-free, because the network has no Stripe Connect payout account to receive a
+// commission (a self-referral with no payee). `house` and the retired `gbti` pseudo-author stay for content
+// written before the move.
 const NETWORK_ACCOUNTS = new Set(['gbti', 'gbtilabs', 'house']);
 
 /**

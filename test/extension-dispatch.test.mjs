@@ -96,6 +96,15 @@ test('SOW-106 Phase B: /api/content/status is ROUTED in the extension host (was 
   assert.notEqual(foreign.json.error, 'not_found');
 });
 
+test('SOW-112 QA: /api/comment/delete is ROUTED in the extension host (was a 404 route miss; gbti-discussion deletes 404d)', async () => {
+  const ctx = ctxFor({ repo: {} });
+  // deleteComment rejects an empty id with bad-request; before the fix ext-dispatch had no case, so this returned
+  // the router's not_found (404). bad-request proves the request REACHED the op, i.e. the route is now wired.
+  const r = await dispatch(ctx, { method: 'POST', pathname: '/api/comment/delete', body: {} });
+  assert.equal(r.json.error, 'bad-request');
+  assert.notEqual(r.json.error, 'not_found');
+});
+
 test('SOW-185 Phase 2: /api/status surfaces the resolved paidTier (fail-closed to none)', async () => {
   const base = ctxFor({ files: { 'house/roles.yml': '' } });
   assert.equal((await dispatch(base, { pathname: '/api/status' })).json.paidTier, 'none'); // no ctx.paidTier accessor -> fail-closed
