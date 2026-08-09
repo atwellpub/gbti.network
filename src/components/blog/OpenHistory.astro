@@ -44,11 +44,20 @@ function roleOf(login: string | null): 'author' | 'contributor' | 'maintainer' {
 }
 const ROLE_LABEL: Record<string, string> = { author: 'author', contributor: 'accepted contribution', maintainer: 'maintainer' };
 
-// Correct avatar for a committer: a network member's profile avatar (gravatar) when their GitHub login
-// maps to a member, otherwise the committer's canonical GitHub avatar (github.com/<login>.png). Every
+// Correct name + avatar for a committer: a network member's profile when their commit login maps to a
+// member, otherwise the committer's canonical GitHub avatar (github.com/<login>.png) and raw name. Every
 // avatar renders round, including the house/automation accounts.
+//
+// Resolve by LOGIN then by USERNAME, because a commit login does not always equal the login parsed from a
+// profile's links.github, and when the lookup misses, the raw commit login is what renders as visible text.
+// It missed for every commit in the repository: automation and owner commits are authored as `gbtilabs`,
+// while that profile's links.github points at github.com/gbti-network, so `byLogin` is keyed 'gbti-network'
+// and never matched. The username IS 'gbtilabs', so the second lookup resolves it. This mirrors the
+// resolution chain the reconcile already needed for the same reason (scripts/reconcile.mjs resolveUsername,
+// where folder 'hudson' has login 'atwellpub'), and it fixes the general case rather than one account.
 function who(login: string | null, name: string) {
-  const member = login ? index.byLogin.get(login.toLowerCase()) : null;
+  const l = login ? login.toLowerCase() : null;
+  const member = l ? (index.byLogin.get(l) ?? index.byUsername.get(l)) : null;
   return { name: member?.name ?? name, avatar: member?.avatar ?? githubAvatarUrl(login) };
 }
 
@@ -89,7 +98,10 @@ const memberCount = distinct.length;
 const acceptedRecentCommit = commits.find((c) => roleOf(c.authorLogin) === 'contributor');
 const recent = acceptedRecentCommit ? friendlyDate(acceptedRecentCommit.date) : '';
 const plur = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`;
-const houseItem = { name: 'GBTI Network', avatar: GBTI_AVATAR };
+// The network's own identity for the empty state. Prefer the gbtilabs profile now that house content lives
+// in a real member folder (sow-195), so this cannot drift from the byline the way a second hardcoded copy
+// would; the literal stays as the fallback for a build where that profile is absent.
+const houseItem = index.byUsername.get('gbtilabs') ?? { name: 'GBTI Network', avatar: GBTI_AVATAR };
 const n = commits.length; // commits shown as history
 ---
 {show && (
