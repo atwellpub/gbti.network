@@ -22,6 +22,7 @@ import {
   gatherMembers,
   gatherOverrideOnlyMembers,
   parseDiscordUserMap,
+  shouldSyncCreatorRole,
 } from '../scripts/reconcile.mjs';
 import { buildRepoIndex, githubLoginFromUrl, githubLoginFromProfile } from '../scripts/lib/repo-content.mjs';
 import { createResendClient } from '../clients/resend.mjs';
@@ -858,4 +859,13 @@ test('enactPlan reports no failures on a clean plan', async () => {
     { github: null, discord, resend: null }, env,
   );
   assert.deepEqual(failures, []);
+});
+
+test('sow-185: shouldSyncCreatorRole gates the Content-Creator badge on a POPULATED price map, not the role id alone', () => {
+  // The whole safety: with an EMPTY price map, tierForPrice runs legacy mode and resolves EVERY paid member to
+  // creator, so the badge must NOT sync on the role id alone (that would stamp @Creator on everyone in the guild).
+  assert.equal(shouldSyncCreatorRole({}), false);                                                          // nothing set
+  assert.equal(shouldSyncCreatorRole({ DISCORD_CREATOR_ROLE_ID: '1536102140802633788' }), false);          // role id but EMPTY price map -> inert (the guard)
+  assert.equal(shouldSyncCreatorRole({ STRIPE_PRICE_CREATOR_ANNUAL: 'price_c' }), false);                  // price map but no role id
+  assert.equal(shouldSyncCreatorRole({ DISCORD_CREATOR_ROLE_ID: '1536102140802633788', STRIPE_PRICE_CREATOR_ANNUAL: 'price_c' }), true); // both -> sync
 });

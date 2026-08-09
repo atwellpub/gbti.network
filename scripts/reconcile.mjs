@@ -389,6 +389,20 @@ export async function resolveDiscordRoles(discord, guildId, discordUserId, env) 
  * folder does NOT resolve is logged as a WARNING so the owner can add them to members-index.yml (we
  * never silently skip a lapse).
  */
+/**
+ * sow-185: whether reconcile should sync the Content-Creator Discord badge this run. BOTH conditions are
+ * required: (1) the owner has provisioned DISCORD_CREATOR_ROLE_ID, and (2) reconcile's env actually carries a
+ * Stripe price map (buildEnvPriceTierMap non-empty). Condition 2 is the load-bearing guard: with an EMPTY price
+ * map, tierForPrice runs in legacy single-price mode and resolves EVERY paid member to creator
+ * (membership/tiers.mjs), so enabling the badge on the role id alone would stamp @Creator on every paid AND
+ * grandfathered member in the live guild. Tying it to a populated price map keeps the badge inert until the
+ * prices are wired into reconcile's env, so the role id can be committed now and stays correctly dormant until
+ * then. reconcile.yml passes no price env today, so this is false in production until that changes. Pure.
+ */
+export function shouldSyncCreatorRole(env = {}) {
+  return !!env.DISCORD_CREATOR_ROLE_ID && buildEnvPriceTierMap(env).size > 0;
+}
+
 export async function gatherMembers(stripe, overrides, now, { repoIndex = null, discord = null, env = {} } = {}) {
   const members = [];
   const guildId = env.DISCORD_GUILD_ID ?? null;
@@ -567,10 +581,12 @@ async function main() {
     }
   }
 
-  // sow-185: only sync the Content-Creator badge once the owner has provisioned DISCORD_CREATOR_ROLE_ID.
-  // Until then the axis emits nothing (pre-provision every paid member resolves to creator via the inert price
-  // map, which would otherwise flood the plan with no-op creator adds that enactDiscord skips).
-  const actions = planReconcile({ members, repoIndex: repoIndex.byUsername, now, creatorRoleEnabled: !!env.DISCORD_CREATOR_ROLE_ID });
+  // sow-185: only sync the Content-Creator badge when BOTH the role id is provisioned AND reconcile's Stripe
+  // price map is populated (shouldSyncCreatorRole). The price-map condition is load-bearing: with an empty map,
+  // tierForPrice runs in legacy mode and resolves EVERY paid member to creator, so enabling the badge on the
+  // role id alone would stamp @Creator on every paid + grandfathered member in the live guild. So the role id
+  // is committed but stays inert until the prices are wired into reconcile's env.
+  const actions = planReconcile({ members, repoIndex: repoIndex.byUsername, now, creatorRoleEnabled: shouldSyncCreatorRole(env) });
 
   console.log(`reconcile: ${members.length} membership customer(s), ${actions.length} action(s) planned.`);
   for (const action of actions) console.log('  ' + describe(action));
