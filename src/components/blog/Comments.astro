@@ -165,14 +165,22 @@ const avatarOf = (username: string) => authorAvatar(username, profileAvatar.get(
     // Only mount the WEBSITE client for a real cookie session. An extension-only member (a display signal but no
     // gbti_csrf cookie) is upgraded by the extension itself; a web client would have no session to authenticate.
     if (!readCookie('gbti_csrf')) return;
-    if (!document.querySelector('gbti-comment-box')) return; // no composer on this page
+    if (!document.querySelector('gbti-comment-box, gbti-locked-content')) return; // no composer or gated body/comment here
     mounted = true;
     const signupBase = document.documentElement.dataset.signupBase || '';
     const { createWorkbenchClient } = await import('../../lib/workbench-client');
     const { setClient } = await import('../../../client-ui/src/base.mjs');
     setClient(createWorkbenchClient({ signupBase, login: String(signal.login), githubId: signal.githubId != null ? String(signal.githubId) : null }));
-    // Defining the element upgrades every baked <gbti-comment-box>; it renders per membership on the client fan-out.
-    await import('../../../client-ui/src/elements/gbti-comment-box.mjs');
+    // Defining the elements upgrades every baked tag on the page: the composer (<gbti-comment-box>) and every
+    // member-only placeholder (<gbti-locked-content> — a member-only comment body, and the SOW-016 content
+    // body/section on this same page). Each renders per membership on the setClient subscriber fan-out; a
+    // member-only body/comment decrypts via the injected client's decrypt() (the AES key stays in the Worker,
+    // a non-authorized reader gets the locked message). This is the wiring the extension host already has, now
+    // on the web, so a signed-in member reads member-only content on the site instead of being sent away.
+    await Promise.all([
+      import('../../../client-ui/src/elements/gbti-comment-box.mjs'),
+      import('../../../client-ui/src/elements/gbti-locked-content.mjs'),
+    ]);
   }
 
   mountComments(currentIdentity(readMemberSignal())); // extension signal, if present, before the cookie resolves

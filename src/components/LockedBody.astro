@@ -29,7 +29,7 @@ const noun = kind === 'comment' ? 'comment' : kind === 'share' ? 'Share' : 'cont
         <p class="locked-title">{heading}</p>
         <p class="locked-sub for-visitor">This {noun} is for members. <a href="/membership/">Become a member</a>, then open it in the GBTI client to unlock.</p>
         <p class="locked-sub for-paid">
-          You are signed in as a member — this {noun} unlocks in the GBTI extension.
+          You are signed in. Unlocking this {noun} now.
           {readerHash && <button type="button" class="open-ext" data-gbti-open-reader data-hash={readerHash}>Open in the extension</button>}
         </p>
       </div>
