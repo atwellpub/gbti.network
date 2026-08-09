@@ -1,0 +1,85 @@
+# Purge specific URLs from the Cloudflare edge cache.
+#
+# WHY THIS EXISTS. Taking a page down at the origin does NOT take it off the site. A page that was public
+# even briefly can be held at the edge and served from its canonical URL long after the source is drafted
+# or deleted, because the cached object is returned without consulting the origin. Confirmed on
+# 2026-08-09: /articles/vscode-terminal-gpu-acceleration/ returned 200 with the full text of a retracted
+# article whose source file had been deleted, while the same path with a query string returned 404. The
+# origin was correct the whole time. Only the cache was wrong, and it had roughly six days left to run.
+#
+# That gap sits under several things that assume a status flip removes a public page: the SOW-197 ban path
+# (a deplatformed member's work stays readable), the SOW-194 draft review, the moderation/deplatform
+# actions in admin-ops, and the SOW-024 erasure runbook. This workflow is the missing primitive they need.
+#
+# TOKEN. Purging needs a token with the ZONE-scoped "Cache Purge" permission. The deploy and KV tokens do
+# NOT have it: a Pages token can read the zone but purge_cache answers "Authentication error". Provision a
+# token with Zone.Cache Purge on the gbti.network zone and store it as CF_PURGE_TOKEN. Until then this
+# workflow reports the gap clearly rather than failing silently.
+#
+# USAGE. Actions -> Purge cache -> Run workflow, and paste one or more full URLs separated by spaces or
+# newlines. Purge by URL rather than purge-everything: a full purge would evict the whole site and cost a
+# cold cache for every visitor to fix one page.
+
+name: Purge cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Full URLs to purge, space or newline separated (e.g. https://gbti.network/articles/foo/)'
+        required: true
+        type: string
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge the named URLs
+        env:
+          PURGE_TOKEN: ${{ secrets.CF_PURGE_TOKEN }}
+          FALLBACK_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ALT_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          URLS: ${{ inputs.urls }}
+        run: |
+          set -euo pipefail
+          ZONE_NAME=gbti.network
+
+          # Normalise the input into a JSON array. Cloudflare takes at most 30 files per call, which is far
+          # more than any single retraction needs.
+          FILES=$(printf '%s' "$URLS" | tr ' \n\r\t' '\n\n\n\n' | grep -E '^https?://' | head -30 \
+            | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "purging: $FILES"
+
+          # Try the purpose-made token first, then the two that exist today, so this works the moment a
+          # correctly scoped token is provisioned without needing an edit here. Each token is tried in turn
+          # and the first success wins.
+          purged=0
+          for name in PURGE_TOKEN FALLBACK_TOKEN ALT_TOKEN; do
+            tok="${!name:-}"
+            [ -z "$tok" ] && { echo "· $name is unset, skipping"; continue; }
+
+            zone=$(curl -sS -H "Authorization: Bearer $tok" \
+              "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["result"][0]["id"] if d.get("success") and d.get("result") else "")')
+            if [ -z "$zone" ]; then echo "· $name cannot read the zone, skipping"; continue; fi
+
+            resp=$(curl -sS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+              --data "{\"files\": $FILES}" \
+              "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache")
+            ok=$(printf '%s' "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("success"))')
+            if [ "$ok" = "True" ]; then echo "✓ purged with $name"; purged=1; break; fi
+            echo "· $name could not purge: $(printf '%s' "$resp" | python3 -c 'import json,sys; print([e.get("message") for e in json.load(sys.stdin).get("errors",[])])')"
+          done
+
+          if [ "$purged" -ne 1 ]; then
+            echo "::error::No available token carries the zone Cache Purge permission. Provision one with"
+            echo "::error::Zone.Cache Purge on $ZONE_NAME and store it as the CF_PURGE_TOKEN secret."
+            exit 1
+          fi
+
+          # Prove it rather than trust the API's success flag: a purged URL must now answer from the origin.
+          for u in $(printf '%s' "$FILES" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))'); do
+            sleep 3
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$u")
+            echo "after purge: $u -> $code"
+          done
