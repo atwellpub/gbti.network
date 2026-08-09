@@ -2045,7 +2045,7 @@ export function itemImagesDir(itemPath, username) {
  * Pure: the actual write is delegated to ctx.stager (node = working copy, extension = GitHub Contents API). */
 export function stageImage(ctx, { filename, dataBase64, itemPath } = {}) {
   const id = requireIdentity(ctx);
-  if (!ctx.stager) throw new OperationError('bad-request', 'no local working copy configured');
+  if (!ctx.stager) throw new OperationError('bad-request', 'Image upload is not available in this client yet.');
   if (!filename || /[\\/]/.test(filename) || filename.includes('..')) throw new OperationError('bad-request', 'invalid filename');
   if (!IMAGE_EXT.test(filename)) throw new OperationError('bad-request', 'unsupported image type (png/jpg/gif/webp/svg)');
   if (!dataBase64) throw new OperationError('bad-request', 'no image data');

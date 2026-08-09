@@ -20875,6 +20875,33 @@ async function reviewContribution(ctx, { number: number4, decision, message } = 
       throw new OperationError("bad-request", `unknown decision "${decision}" (approve | request-changes | decline)`);
   }
 }
+var IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
+function itemImagesDir(itemPath, username) {
+  const p = String(itemPath || "").replace(/^\/+/, "");
+  if (!p || p.includes("..") || p.includes("\\")) return null;
+  const folder = p.replace(/\/[^/]*$/, "");
+  if (!folder || folder === p) return null;
+  const inOwn = !!username && folder.startsWith(`members/${username}/`);
+  const inHouse = folder === "house" || folder.startsWith("house/");
+  if (!inOwn && !inHouse) return null;
+  return `${folder}/images`;
+}
+function stageImage(ctx, { filename, dataBase64, itemPath } = {}) {
+  const id = requireIdentity(ctx);
+  if (!ctx.stager) throw new OperationError("bad-request", "Image upload is not available in this client yet.");
+  if (!filename || /[\\/]/.test(filename) || filename.includes("..")) throw new OperationError("bad-request", "invalid filename");
+  if (!IMAGE_EXT.test(filename)) throw new OperationError("bad-request", "unsupported image type (png/jpg/gif/webp/svg)");
+  if (!dataBase64) throw new OperationError("bad-request", "no image data");
+  const dir = itemImagesDir(itemPath, id.username);
+  if (dir) {
+    const rel2 = `${dir}/${filename}`;
+    ctx.stager.writeImage(rel2, dataBase64);
+    return { ok: true, path: `./images/${filename}`, repoPath: rel2 };
+  }
+  const rel = `members/${id.username}/images/${filename}`;
+  ctx.stager.writeImage(rel, dataBase64);
+  return { ok: true, path: rel, repoPath: rel };
+}
 
 // client/src/account-ops.mjs
 var SITE_BASE = globalThis.process?.env?.GBTI_SITE_BASE || "https://gbti.network";
@@ -22999,6 +23026,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
         return ok(await setOwnContentStatus(ctx, body ?? {}));
       case "/api/content/rename":
         return ok(await renameContent(ctx, body ?? {}));
+      case "/api/image":
+        return ok(await stageImage(ctx, body ?? {}));
       // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
       case "/api/drafts":
         return ok(await listDrafts(ctx, { type: query.type }));
