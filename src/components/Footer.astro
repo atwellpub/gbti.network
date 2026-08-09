@@ -2,6 +2,7 @@
 // Shared site footer (SOW-010 V3). The V3 dark footer (dark in both light + dark mode, by design), with
 // the brand, real social links, and link columns. Classes from gbti-v3.css.
 import { SOCIAL_LINKS } from '../lib/social';
+import { FOOTER_FEED_LINKS } from '../lib/site-nav'; // sow-187: the one consolidated feed-nav source (omits Network)
 
 const year = new Date().getFullYear();
 // Owner QA 2026-07-22: three columns. Feeds (leftmost) carries the feed views; Pages keeps the
@@ -9,7 +10,7 @@ const year = new Date().getFullYear();
 const columns = [
   {
     title: 'Feeds',
-    links: [['All', '/feeds/'], ['News', '/feeds/news/'], ['Articles', '/feeds/articles/'], ['Products', '/feeds/products/'], ['Prompts', '/feeds/prompts/'], ['Shares', '/feeds/shares/']],
+    links: [...FOOTER_FEED_LINKS], // sow-187: consolidated (All / News / Articles / Products / Prompts / Shares)
   },
   {
     title: 'Pages',

@@ -5,16 +5,14 @@
 // sow-131: the top nav is compressed to Feeds (a dropdown over the six feed views) + the two
 // standalone pages. The directories (/articles/, /products/, /prompts/) keep their URLs and footer
 // links; the feed views are the primary browse surface.
-const feedsMenu = [
-  { label: 'All', href: '/feeds/' },
-  { label: 'News', href: '/feeds/news/' },
-  { label: 'Network', href: '/feeds/network/' },
-  { label: 'Articles', href: '/feeds/articles/' },
-  { label: 'Products', href: '/feeds/products/' },
-  { label: 'Prompts', href: '/feeds/prompts/' },
-  { label: 'Shares', href: '/feeds/shares/' },
-];
-const nav = [
+// sow-187: the feed list is now the ONE consolidated source (src/lib/site-nav.ts), shared with the FeedView
+// tab strip + the footer. SIGNED_IN_NAV is the flat member nav that REPLACES the Feeds dropdown once identity
+// resolves (swapped in applyHeaderIdentity, mirroring the account-menu swap). Both navs ship in the static
+// HTML to everyone (labels + public hrefs only, nothing gated), so a signed-in member sees a brief flash.
+import { FEED_NAV, SIGNED_IN_NAV } from '../lib/site-nav';
+const feedsMenu = FEED_NAV;
+// The signed-out standalone pages (kept out of the signed-in nav per the owner: only the five feed items there).
+const signedOutExtra = [
   { label: 'Revenue Model', href: '/revenue-model/' },
   { label: 'Get Extension', href: '/extension/' },
 ];
@@ -26,17 +24,25 @@ const nav = [
       <span class="brand-word">GBTI</span>
     </a>
 
+    {/* sow-187: two navs baked into the static HTML; applyHeaderIdentity reveals the signed-in one and hides
+        the signed-out one once identity resolves (same swap the account menu uses). Default = signed-out, so a
+        visitor and a no-JS load both get the correct nav. */}
     <nav class="nav" aria-label="Primary">
-      <div class="nav-drop" data-dropdown>
-        <button type="button" class="nav-drop-btn" data-dropdown-btn aria-haspopup="true" aria-expanded="false">
-          Feeds
-          <svg class="nav-drop-caret" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        </button>
-        <div class="head-menu nav-drop-menu" data-dropdown-menu role="menu" hidden>
-          {feedsMenu.map((i) => <a class="hm-item" role="menuitem" href={i.href}>{i.label}</a>)}
+      <div class="nav-set" data-nav-set="out">
+        <div class="nav-drop" data-dropdown>
+          <button type="button" class="nav-drop-btn" data-dropdown-btn aria-haspopup="true" aria-expanded="false">
+            Feeds
+            <svg class="nav-drop-caret" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+          <div class="head-menu nav-drop-menu" data-dropdown-menu role="menu" hidden>
+            {feedsMenu.map((i) => <a class="hm-item" role="menuitem" href={i.href}>{i.label}</a>)}
+          </div>
         </div>
+        {signedOutExtra.map((i) => <a href={i.href}>{i.label}</a>)}
       </div>
-      {nav.map((i) => <a href={i.href}>{i.label}</a>)}
+      <div class="nav-set" data-nav-set="in" hidden>
+        {SIGNED_IN_NAV.map((i) => <a href={i.href}>{i.label}</a>)}
+      </div>
     </nav>
 
     <div class="head-cta">
@@ -71,8 +77,7 @@ const nav = [
           <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=prs" hidden>My pull requests</a>
           <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=saved" hidden>Saved</a>
           <a class="hm-item hm-member" role="menuitem" href="/workbench/#tab=subs" hidden>Following</a>
-          <a class="hm-item hm-member" role="menuitem" href="/news/" hidden>News</a>
-          <a class="hm-item hm-member" role="menuitem" href="/feeds/" hidden>Browse the network</a>
+          {/* sow-187: News + "Browse the network" moved to the primary signed-in nav, so they are dropped here. */}
           <a class="hm-item hm-member" role="menuitem" href="/account/" hidden>Account</a>
           <a class="hm-item hm-member hm-admin" role="menuitem" href="/admin/" hidden>Admin tools</a>
           <div class="hm-sep" role="separator"></div>
@@ -87,10 +92,17 @@ const nav = [
 
   <nav class="head-mobile" data-mobile-menu hidden aria-label="Mobile">
     <div class="wrap">
-      <span class="m-group">Feeds</span>
-      {feedsMenu.map((i) => <a href={i.href} class="m-sub">{i.label}</a>)}
-      {nav.map((i) => <a href={i.href}>{i.label}</a>)}
-      <a href="/login/" class="m-join">Sign in / Join</a>
+      {/* sow-187: mirror the two nav modes on mobile too. Signed-out = the Feeds group + standalone pages +
+          Sign in; signed-in = the flat member list, no group heading. Swapped by identity (script below). */}
+      <div data-mnav-set="out">
+        <span class="m-group">Feeds</span>
+        {feedsMenu.map((i) => <a href={i.href} class="m-sub">{i.label}</a>)}
+        {signedOutExtra.map((i) => <a href={i.href}>{i.label}</a>)}
+        <a href="/login/" class="m-join">Sign in / Join</a>
+      </div>
+      <div data-mnav-set="in" hidden>
+        {SIGNED_IN_NAV.map((i) => <a href={i.href}>{i.label}</a>)}
+      </div>
     </div>
   </nav>
 </header>
@@ -111,7 +123,10 @@ const nav = [
   .head-mobile .m-sub { padding-left: 14px; }
   /* sow-131: the Feeds nav dropdown. Reuses the account menu's panel/item styles (.head-menu/.hm-item,
      below) with a left-anchored panel; the trigger matches the flat .nav link typography. */
-  .nav-drop { position: relative; }
+  /* sow-187: center the button in its wrapper too, not just the wrapper in the row. Verifying rather than
+     assuming (per the SOW) showed align-items on .nav alone left a ~1.5px offset, the inline-flex button sat on
+     a line box inside the block wrapper. display:flex here zeroes it. The absolute dropdown menu is unaffected. */
+  .nav-drop { position: relative; display: flex; align-items: center; }
   .nav-drop-btn { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0;
     padding: 0; cursor: pointer; font: inherit; font-size: 15.5px; font-weight: 500; color: var(--fg-soft);
     transition: color .15s; white-space: nowrap; }
@@ -119,6 +134,13 @@ const nav = [
   .nav-drop-caret { color: var(--fg-mute); transition: transform .15s ease; }
   .nav-drop-btn[aria-expanded="true"] .nav-drop-caret { transform: rotate(180deg); }
   .nav-drop-menu { left: 0; right: auto; min-width: 170px; }
+  /* sow-187: the two primary-nav sets. Each is a flex row inheriting the .nav gap; one shows at a time. The
+     explicit [hidden] override is required, an explicit display beats the UA [hidden]{display:none}. */
+  .nav-set { display: flex; align-items: center; gap: inherit; }
+  .nav-set[hidden] { display: none; }
+  /* Mobile: display:contents so each set's anchors stack as direct children of the flex column. */
+  .head-mobile [data-mnav-set] { display: contents; }
+  .head-mobile [data-mnav-set][hidden] { display: none; }
   /* SOW-030/036: the signed-in account control (avatar + @login + caret) and its dropdown menu. Hidden until the
      extension signal arrives; when shown it replaces the "Sign in" button (toggled in the script below). */
   .head-me-wrap { position: relative; }
@@ -166,6 +188,16 @@ const nav = [
   const meProfile = document.querySelector('[data-head-me-profile]');
   const headMenu = document.querySelector('[data-head-menu]');
   const adminItem = document.querySelector('.hm-admin');
+  // sow-187: the two primary-nav sets (desktop + mobile). Swap them on the same identity resolution as the
+  // account menu: a resolved/hint login shows the flat member nav, otherwise the Feeds-dropdown nav. Both are
+  // in the static HTML (public hrefs only), so this is presentation, and the default is signed-out.
+  const navSets = document.querySelectorAll('[data-nav-set]');
+  const mnavSets = document.querySelectorAll('[data-mnav-set]');
+  function setNav(signedIn) {
+    const want = signedIn ? 'in' : 'out';
+    navSets.forEach((el) => { (el as HTMLElement).hidden = el.getAttribute('data-nav-set') !== want; });
+    mnavSets.forEach((el) => { (el as HTMLElement).hidden = el.getAttribute('data-mnav-set') !== want; });
+  }
 
   function closeMenu() {
     if (!headMenu || !me) return;
@@ -210,6 +242,7 @@ const nav = [
     if (!wrap || !signin) return;
     const eff = (s && s.login) ? s : readHint(); // the extension signal wins; else the display-only signup hint
     const login = eff && eff.login;
+    setNav(!!login); // sow-187: signed-in flat nav vs the Feeds-dropdown nav
     if (login) {
       const folder = eff.username || login;
       if (meName) meName.textContent = '@' + login;

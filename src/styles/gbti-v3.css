@@ -281,7 +281,7 @@ section { position: relative; }
 .site-head .brand-mark { background-color: var(--ink); }
 [data-theme="dark"] .site-head .brand-mark { background-color: var(--fg); }
 .brand-word { font-family: var(--f-display); font-weight: 700; font-size: 20px; color: #fff; white-space: nowrap; }
-.nav { display: flex; gap: 30px; }
+.nav { display: flex; align-items: center; gap: 30px; }
 .nav a { font-size: 15.5px; font-weight: 500; color: var(--fg-soft); transition: color .15s; white-space: nowrap; }
 .nav a:hover { color: var(--ink); }
 .head-cta { display: flex; align-items: center; gap: 18px; }
