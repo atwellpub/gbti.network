@@ -94,6 +94,10 @@ NEWS_SOURCES_URL = "https://gbti.network/news-sources.json"
 # KV namespace: github_id -> customer_id index, per-IP rate-limit records, and webhook event dedupe.
 # Bind one namespace; the code namespaces keys by prefix (gh:, rl:signup:, evt:). Replace the id with
 # the real namespace id from `npx wrangler kv namespace create SIGNUP_KV`.
+STRIPE_PRICE_MEMBER_MONTHLY = "price_1U2cohBFxyhSkuibgPPLQwcZ"
+STRIPE_PRICE_MEMBER_ANNUAL = "price_1U2cohBFxyhSkuibd0LmS1pk"
+STRIPE_PRICE_CREATOR_MONTHLY = "price_1U2coiBFxyhSkuib4ZtpT0wA"
+STRIPE_PRICE_CREATOR_ANNUAL = "price_1U2coiBFxyhSkuibudmNv19m"
 [[kv_namespaces]]
 binding = "SIGNUP_KV"
 id = "49432379e11844ac81b6fdaf22d3937a"
@@ -229,6 +233,10 @@ DISCORD_CHANNEL_SHARES = "1084632127657746452"
 # Custom domain: attach signup.gbti.network to this production worker. wrangler provisions the domain + the
 # managed DNS record on the gbti.network zone (same account) on deploy. This is the host the client/extension
 # call (SIGNUP_BASE = https://signup.gbti.network).
+STRIPE_PRICE_MEMBER_MONTHLY = "price_1U2d31BFxyhSkuibpiaNGku5"
+STRIPE_PRICE_MEMBER_ANNUAL = "price_1U2d31BFxyhSkuibfNpQKcX0"
+STRIPE_PRICE_CREATOR_MONTHLY = "price_1U2d32BFxyhSkuibQJHXnU3F"
+STRIPE_PRICE_CREATOR_ANNUAL = "price_1U2d32BFxyhSkuibPBqOdOZs"
 [[env.production.routes]]
 pattern = "signup.gbti.network"
 custom_domain = true

@@ -56,6 +56,12 @@ export function modeFromKey(key) {
   return m ? m[2] : null;
 }
 
+/** The wrangler.toml section a mode's price vars belong in. Wrangler nests per-environment vars under
+ *  [env.<name>.vars], NOT [env.<name>], so live -> [env.production.vars]; the default/dev env is top-level [vars]. */
+export function sectionForMode(mode) {
+  return mode === 'live' ? '[env.production.vars]' : '[vars]';
+}
+
 /** Insert/replace `NAME = "value"` lines inside a named TOML section ([vars] or [env.production]), leaving the
  *  rest of the file otherwise untouched. PURE + unit-tested: editing near the existing live-price line must not
  *  corrupt it. Throws if the section is absent. */
@@ -156,7 +162,7 @@ async function main() {
   if (write) {
     if (!apply) { console.error('\n--write needs --apply (nothing to write in a dry run).'); process.exit(2); }
     if (!allResolved) { console.error('\nNot writing wrangler.toml: some ids did not resolve.'); process.exit(1); }
-    const section = mode === 'live' ? '[env.production]' : '[vars]';
+    const section = sectionForMode(mode);
     const file = path.join(ROOT, 'workers/signup/wrangler.toml');
     fs.writeFileSync(file, patchWranglerVars(fs.readFileSync(file, 'utf8'), section, mapping));
     console.log(`\nWrote ${Object.keys(mapping).length} vars into wrangler.toml ${section}. Review the diff, then: npm run deploy:worker`);

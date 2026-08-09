@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { parseTierDisplay } from '../membership/tiers-display.mjs';
-import { desiredPricesFromTiers, matchPrice, modeFromKey, patchWranglerVars, provision } from '../scripts/provision-stripe-prices.mjs';
+import { desiredPricesFromTiers, matchPrice, modeFromKey, sectionForMode, patchWranglerVars, provision } from '../scripts/provision-stripe-prices.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -73,6 +73,11 @@ test('modeFromKey reads test|live from the key prefix, null on anything else (fa
   assert.equal(modeFromKey(''), null);
 });
 
+test('sectionForMode targets the right wrangler section (env vars nest under [env.<name>.vars])', () => {
+  assert.equal(sectionForMode('test'), '[vars]');
+  assert.equal(sectionForMode('live'), '[env.production.vars]'); // NOT [env.production]; that miss lost a live write once
+});
+
 test('provision dry-run plans everything and mutates nothing', async () => {
   const stripe = fakeStripe();
   const { mapping, actions } = await provision({ stripe, desired: desiredPricesFromTiers(TIERS), apply: false });
@@ -102,12 +107,12 @@ test('provision is idempotent: an existing matching price is REUSED, not recreat
 });
 
 test('patchWranglerVars inserts + replaces within one section and leaves other sections intact', () => {
-  const toml = ['[vars]', 'STRIPE_PRICE_ID = "price_sandbox"', '', '[env.production]', 'STRIPE_PRICE_ID = "price_live"', ''].join('\n');
+  const toml = ['[vars]', 'STRIPE_PRICE_ID = "price_sandbox"', '', '[env.production.vars]', 'STRIPE_PRICE_ID = "price_live"', ''].join('\n');
   const out = patchWranglerVars(toml, '[vars]', { STRIPE_PRICE_MEMBER_MONTHLY: 'price_mm', STRIPE_PRICE_ID: 'price_sandbox2' });
   assert.match(out, /\[vars\][\s\S]*STRIPE_PRICE_ID = "price_sandbox2"/);          // existing replaced in [vars]
   assert.match(out, /\[vars\][\s\S]*STRIPE_PRICE_MEMBER_MONTHLY = "price_mm"/);     // new inserted in [vars]
-  const prod = out.slice(out.indexOf('[env.production]'));
-  assert.match(prod, /STRIPE_PRICE_ID = "price_live"/);                            // [env.production] untouched
-  assert.ok(!prod.includes('STRIPE_PRICE_MEMBER_MONTHLY'), 'the new var must not bleed into [env.production]');
+  const prod = out.slice(out.indexOf('[env.production.vars]'));
+  assert.match(prod, /STRIPE_PRICE_ID = "price_live"/);                            // the other section untouched
+  assert.ok(!prod.includes('STRIPE_PRICE_MEMBER_MONTHLY'), 'the new var must not bleed into [env.production.vars]');
   assert.throws(() => patchWranglerVars(toml, '[missing]', { X: 'y' }), /section \[missing\] not found/);
 });
