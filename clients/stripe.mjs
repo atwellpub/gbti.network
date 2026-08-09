@@ -108,6 +108,42 @@ export function createStripeClient({ apiKey, fetch = globalThis.fetch, baseUrl =
       return req('DELETE', `/customers/${customerId}`);
     },
 
+    // ----- Catalog (products + prices): SETUP-ONLY. These MUTATE the account catalog, so they need a key with
+    // Products + Prices WRITE scope, which the runtime restricted key deliberately lacks (least privilege). Used
+    // by scripts/provision-stripe-prices.mjs, never by the Worker. The account MODE (test vs live) is the key's.
+    async createProduct({ name, metadata } = {}) {
+      return req('POST', '/products', { name, ...(metadata ? { metadata } : {}) });
+    },
+    /** Every product (active + archived), so a re-run reuses a product it created before by name. */
+    async *listProducts({ limit = 100 } = {}) {
+      let startingAfter;
+      for (;;) {
+        const page = await req('GET', '/products', { limit, ...(startingAfter ? { starting_after: startingAfter } : {}) });
+        for (const p of page.data ?? []) yield p;
+        if (!page.has_more || !page.data?.length) break;
+        startingAfter = page.data[page.data.length - 1].id;
+      }
+    },
+    /** A recurring price. Stripe prices are IMMUTABLE, so a re-run must reuse a match (see listPrices) rather
+     *  than edit; this only ever creates. unitAmount is in the currency's minor unit (cents). */
+    async createPrice({ product, unitAmount, currency = 'usd', interval, nickname, metadata } = {}) {
+      return req('POST', '/prices', {
+        product, currency, unit_amount: unitAmount, recurring: { interval },
+        ...(nickname ? { nickname } : {}),
+        ...(metadata ? { metadata } : {}),
+      });
+    },
+    /** Active prices under a product, so provisioning can find an existing match and stay idempotent. */
+    async *listPrices({ product, limit = 100 } = {}) {
+      let startingAfter;
+      for (;;) {
+        const page = await req('GET', '/prices', { active: true, ...(product ? { product } : {}), limit, ...(startingAfter ? { starting_after: startingAfter } : {}) });
+        for (const p of page.data ?? []) yield p;
+        if (!page.has_more || !page.data?.length) break;
+        startingAfter = page.data[page.data.length - 1].id;
+      }
+    },
+
     async createCheckoutSession({ customer, priceId, successUrl, cancelUrl, clientReferenceId, couponId }) {
       // SOW-119: couponId applies a STRIPE coupon to the session (a card-first discount path). The live
       // coupon flow (the no-card free year) never uses this; it exists for future card-first promotions.
