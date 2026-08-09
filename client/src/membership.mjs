@@ -142,18 +142,21 @@ export function isBlockedFromPublishing(membership) {
  * client fails OPEN to the gate rather than wrongly blocking a paid member when the oracle is unreachable.
  */
 export async function fetchStripeStatus({ token, signupBase, fetch = globalThis.fetch } = {}) {
-  if (!token || !signupBase) return { status: 'unknown', couponUntil: null };
+  if (!token || !signupBase) return { status: 'unknown', couponUntil: null, paidTier: 'none' };
   try {
     const res = await fetch(`${String(signupBase).replace(/\/$/, '')}/membership/status`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return { status: 'unknown', couponUntil: null };
+    if (!res.ok) return { status: 'unknown', couponUntil: null, paidTier: 'none' };
     const data = await res.json();
     // SOW-119 QA: couponUntil is the grant end date the oracle emits ONLY when the paid signal is a coupon
     // grant (never for a real subscription); it drives the extension expiry countdown.
-    return { status: data?.status ?? 'unknown', couponUntil: data?.couponUntil ?? null };
+    // sow-185: paidTier (none|member|creator) is the Worker's authoritative, override-aware tier for this
+    // caller (resolveEffectiveTier over the KV mirror). The client TRUSTS it and never re-derives the tier
+    // itself (that needs the Stripe price map, held server-side); fail closed to 'none' for an older Worker.
+    return { status: data?.status ?? 'unknown', couponUntil: data?.couponUntil ?? null, paidTier: typeof data?.paidTier === 'string' ? data.paidTier : 'none' };
   } catch {
-    return { status: 'unknown', couponUntil: null };
+    return { status: 'unknown', couponUntil: null, paidTier: 'none' };
   }
 }
 
@@ -173,7 +176,7 @@ async function readSafe(readFile, p) {
  * injected fetch + readFile, so it is unit-tested with fakes.
  */
 export async function resolveMembership({ githubId, token, signupBase, readFile, fetch = globalThis.fetch, now = Date.now() } = {}) {
-  const { status: stripeStatus, couponUntil: workerCouponUntil } = await fetchStripeStatus({ token, signupBase, fetch });
+  const { status: stripeStatus, couponUntil: workerCouponUntil, paidTier: workerPaidTier } = await fetchStripeStatus({ token, signupBase, fetch });
   const roles = rolesFromText(await readSafe(readFile, 'house/roles.yml'));
   const banned = bannedIdsFromText(await readSafe(readFile, 'house/bans.yml'));
   const grandfathers = grandfathersFromText(await readSafe(readFile, 'house/grandfathered.yml'));
@@ -191,5 +194,10 @@ export async function resolveMembership({ githubId, token, signupBase, readFile,
       if (!Number.isNaN(until.getTime()) && now < until.getTime()) couponUntil = until.toISOString();
     }
   }
-  return { stripeStatus, membership, couponUntil };
+  // sow-185: carry the Worker's authoritative paid TIER through for the host status builders + the page
+  // signal. It is presentation state (the real creator gate is authorizeCreator server-side), so it fails
+  // closed to 'none': a ban outranks everything here exactly as it does for couponUntil, and any error
+  // already resolved workerPaidTier to 'none' in fetchStripeStatus.
+  const paidTier = membership === 'banned' ? 'none' : (workerPaidTier ?? 'none');
+  return { stripeStatus, membership, couponUntil, paidTier };
 }

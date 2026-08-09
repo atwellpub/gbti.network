@@ -96,6 +96,7 @@ export function getStatus(ctx) {
     mcpEnabled: ctx.store?.get('mcpEnabled') ?? null,
     membership,
     couponUntil: ctx.store?.get('couponUntil') ?? null, // SOW-119 QA: the coupon-grant end date (the expiry countdown)
+    paidTier: ctx.store?.get('paidTier') ?? 'none', // sow-185: the resolved paid TIER (presentation-only; authorizeCreator is the real gate)
     canPublish: canPublish(membership),
     canStageDrafts: canStageDrafts(membership), // SOW-082: Save-draft is trial+paid (broader than canPublish)
     // SOW-060: the free-tier perks (browse / news / save / follow) need only a signed-in identity, not paid.

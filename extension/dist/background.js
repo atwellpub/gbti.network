@@ -18180,16 +18180,16 @@ function isBlockedFromPublishing(membership) {
   return NON_PUBLISHABLE.has(membership);
 }
 async function fetchStripeStatus({ token, signupBase, fetch: fetch2 = globalThis.fetch } = {}) {
-  if (!token || !signupBase) return { status: "unknown", couponUntil: null };
+  if (!token || !signupBase) return { status: "unknown", couponUntil: null, paidTier: "none" };
   try {
     const res = await fetch2(`${String(signupBase).replace(/\/$/, "")}/membership/status`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) return { status: "unknown", couponUntil: null };
+    if (!res.ok) return { status: "unknown", couponUntil: null, paidTier: "none" };
     const data = await res.json();
-    return { status: data?.status ?? "unknown", couponUntil: data?.couponUntil ?? null };
+    return { status: data?.status ?? "unknown", couponUntil: data?.couponUntil ?? null, paidTier: typeof data?.paidTier === "string" ? data.paidTier : "none" };
   } catch {
-    return { status: "unknown", couponUntil: null };
+    return { status: "unknown", couponUntil: null, paidTier: "none" };
   }
 }
 async function readSafe(readFile, p) {
@@ -18201,7 +18201,7 @@ async function readSafe(readFile, p) {
   }
 }
 async function resolveMembership({ githubId, token, signupBase, readFile, fetch: fetch2 = globalThis.fetch, now = Date.now() } = {}) {
-  const { status: stripeStatus, couponUntil: workerCouponUntil } = await fetchStripeStatus({ token, signupBase, fetch: fetch2 });
+  const { status: stripeStatus, couponUntil: workerCouponUntil, paidTier: workerPaidTier } = await fetchStripeStatus({ token, signupBase, fetch: fetch2 });
   const roles = rolesFromText(await readSafe(readFile, "house/roles.yml"));
   const banned = bannedIdsFromText(await readSafe(readFile, "house/bans.yml"));
   const grandfathers = grandfathersFromText(await readSafe(readFile, "house/grandfathered.yml"));
@@ -18214,7 +18214,8 @@ async function resolveMembership({ githubId, token, signupBase, readFile, fetch:
       if (!Number.isNaN(until.getTime()) && now < until.getTime()) couponUntil = until.toISOString();
     }
   }
-  return { stripeStatus, membership, couponUntil };
+  const paidTier = membership === "banned" ? "none" : workerPaidTier ?? "none";
+  return { stripeStatus, membership, couponUntil, paidTier };
 }
 
 // membership/devlog-core.mjs
@@ -18333,6 +18334,12 @@ function buildExtContext(store) {
     couponUntil() {
       return store.get("couponUntil") ?? null;
     },
+    /** sow-185: the resolved paid TIER (none|member|creator) cached at resolution. Presentation-only (the
+     *  real creator gate is authorizeCreator server-side); drives the page signal + any creator-tier UI.
+     *  Fail-closed to 'none' when unresolved, matching the Worker's own default. */
+    paidTier() {
+      return store.get("paidTier") ?? "none";
+    },
     /** SOW-089 fix: membership was resolved ONLY at login, so one failed resolution left the session
      *  'unknown' FOREVER and every fail-closed gate (member comment bodies, the members-only thread,
      *  shares) locked a paid member out until a re-login. This self-heals: an unknown cache with a live
@@ -18352,8 +18359,8 @@ function buildExtContext(store) {
       }
       if (!membershipFlight) {
         devlog("membership", "resolving via oracle + house overrides");
-        membershipFlight = resolveMembership({ githubId: String(id.githubId), token: t, signupBase: SIGNUP_BASE, readFile: (p) => this.reader.readFile(p) }).then(({ stripeStatus, membership, couponUntil }) => {
-          store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null });
+        membershipFlight = resolveMembership({ githubId: String(id.githubId), token: t, signupBase: SIGNUP_BASE, readFile: (p) => this.reader.readFile(p) }).then(({ stripeStatus, membership, couponUntil, paidTier }) => {
+          store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null, paidTier: paidTier ?? "none" });
           devlog("membership", "resolved", { stripeStatus, membership: membership ?? "unknown" });
           return membership ?? "unknown";
         }).catch((e) => {
@@ -22833,6 +22840,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
         membership,
         couponUntil: ctx.couponUntil?.() ?? null,
         // SOW-119 QA: the coupon-grant end date (the expiry countdown)
+        paidTier: ctx.paidTier?.() ?? "none",
+        // sow-185: the resolved paid TIER, for buildMemberSignal's page signal + any creator-tier UI (presentation only; authorizeCreator is the real gate)
         canPublish: membership === "paid",
         canStageDrafts: canStageDrafts(membership),
         // SOW-082: Save-draft is trial+paid (broader than canPublish)
@@ -22880,6 +22889,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
       case "/api/publish":
         return ok(await publish(ctx, body));
       // reader-free (uses content-ops + the repo client)
+      case "/api/content/status":
+        return ok(await setOwnContentStatus(ctx, body ?? {}));
       // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
       case "/api/drafts":
         return ok(await listDrafts(ctx, { type: query.type }));
@@ -23151,8 +23162,8 @@ async function handleLogin(store) {
   }
   try {
     const reader = createGithubReader({ upstream: UPSTREAM, token: accessToken });
-    const { stripeStatus, membership, couponUntil } = await resolveMembership({ githubId: String(u.id), token: accessToken, signupBase: SIGNUP_BASE2, readFile: (p) => reader.readFile(p) });
-    store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null });
+    const { stripeStatus, membership, couponUntil, paidTier } = await resolveMembership({ githubId: String(u.id), token: accessToken, signupBase: SIGNUP_BASE2, readFile: (p) => reader.readFile(p) });
+    store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null, paidTier: paidTier ?? "none" });
   } catch {
   }
   try {

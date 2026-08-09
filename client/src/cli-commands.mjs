@@ -56,8 +56,8 @@ export async function cmdLogin(deps) {
           }
         }
       : undefined;
-    const { stripeStatus, membership, couponUntil } = await resolveMembership({ githubId: user.id, token: accessToken, signupBase, readFile: readLocal, fetch: fetchImpl });
-    store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null });
+    const { stripeStatus, membership, couponUntil, paidTier } = await resolveMembership({ githubId: user.id, token: accessToken, signupBase, readFile: readLocal, fetch: fetchImpl });
+    store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null, paidTier: paidTier ?? 'none' });
   } catch {
     // leave membership unset (treated as 'unknown')
   }

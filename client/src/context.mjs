@@ -79,7 +79,7 @@ export function buildContext(store) {
       if (!token || !id?.githubId) return 'unknown';
       if (!membershipFlight) {
         membershipFlight = resolveMembership({ githubId: String(id.githubId), token, signupBase: SIGNUP_BASE, readFile: (p) => reader.readFile(p) })
-          .then(({ stripeStatus, membership, couponUntil }) => { store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null }); return membership ?? 'unknown'; })
+          .then(({ stripeStatus, membership, couponUntil, paidTier }) => { store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null, paidTier: paidTier ?? 'none' }); return membership ?? 'unknown'; })
           .catch(() => 'unknown')
           .finally(() => { membershipFlight = null; });
       }

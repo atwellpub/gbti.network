@@ -72,6 +72,7 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
         authenticated: live,
         membership,
         couponUntil: ctx.couponUntil?.() ?? null, // SOW-119 QA: the coupon-grant end date (the expiry countdown)
+        paidTier: ctx.paidTier?.() ?? 'none', // sow-185: the resolved paid TIER, for buildMemberSignal's page signal + any creator-tier UI (presentation only; authorizeCreator is the real gate)
         canPublish: membership === 'paid',
         canStageDrafts: canStageDrafts(membership), // SOW-082: Save-draft is trial+paid (broader than canPublish)
         // SOW-060: free-tier perks (browse / news / save / follow) need only a signed-in identity, not paid.
@@ -129,6 +130,8 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
         return ok(validateContent(ctx, body)); // reader-free
       case '/api/publish':
         return ok(await publish(ctx, body)); // reader-free (uses content-ops + the repo client)
+      case '/api/content/status': // SOW-106 Phase B: member self-unpublish/republish (a reversible own-folder status flip via the gated PR). The route landed in client/src/api.mjs but was never added here, so the extension WorkBench's Unpublish/Republish row actions fell to default: not_found (404). This brings the extension host to parity with the website + npm hosts.
+        return ok(await setOwnContentStatus(ctx, body ?? {}));
       // SOW-082: universal draft staging (Save to the fork without a PR; review; Publish from the staged branch).
       case '/api/drafts':
         return ok(await listDrafts(ctx, { type: query.type }));

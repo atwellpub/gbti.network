@@ -401,6 +401,9 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
         canPublish: canPublish(membership),
         canStageDrafts: canStageDrafts(membership),
         couponUntil: payload?.couponUntil ?? null,
+        // sow-185: the Worker's authoritative paid TIER (none|member|creator), fail-closed to 'none' for an
+        // older Worker. Presentation-only; the WorkBench editor reads it for any creator-tier affordance.
+        paidTier: typeof payload?.paidTier === 'string' ? payload.paidTier : 'none',
         identity: { login: lg, githubId: gid },
         login: lg,
         username: lg,

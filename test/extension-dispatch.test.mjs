@@ -82,6 +82,27 @@ test('content + item: lists + reads via the async reader, own-folder scoped', as
   assert.equal(other.status, 404);
 });
 
+test('SOW-106 Phase B: /api/content/status is ROUTED in the extension host (was a 404 route miss)', async () => {
+  const ctx = ctxFor({ repo: {}, files: { 'members/alice/posts/hello/index.md': POST } }); // POST is status: published
+  // Republishing an already-published item is a no-op flip, so it reaches setOwnContentStatus and returns WITHOUT
+  // needing a live repo publish. Before the fix, ext-dispatch had no case, so this fell to `default: 404 not_found`.
+  const r = await dispatch(ctx, { method: 'POST', pathname: '/api/content/status', body: { path: 'members/alice/posts/hello/index.md', status: 'published' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.noop, true);
+  assert.equal(r.json.status, 'published');
+  // A foreign folder is refused by the OP (forbidden), not by a missing route (not_found): proves the route is wired.
+  const foreign = await dispatch(ctx, { method: 'POST', pathname: '/api/content/status', body: { path: 'members/bob/posts/x/index.md', status: 'draft' } });
+  assert.equal(foreign.json.error, 'forbidden');
+  assert.notEqual(foreign.json.error, 'not_found');
+});
+
+test('SOW-185 Phase 2: /api/status surfaces the resolved paidTier (fail-closed to none)', async () => {
+  const base = ctxFor({ files: { 'house/roles.yml': '' } });
+  assert.equal((await dispatch(base, { pathname: '/api/status' })).json.paidTier, 'none'); // no ctx.paidTier accessor -> fail-closed
+  const creatorCtx = { ...base, paidTier: () => 'creator' };
+  assert.equal((await dispatch(creatorCtx, { pathname: '/api/status' })).json.paidTier, 'creator');
+});
+
 test('validate + preview + form-fields: reader-free routes work', async () => {
   const ctx = ctxFor();
   const good = await dispatch(ctx, { pathname: '/api/validate', body: { type: 'post', input: { title: 'T', slug: 'ok' } } });

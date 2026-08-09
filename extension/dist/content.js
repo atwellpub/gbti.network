@@ -17665,6 +17665,10 @@ From the author:
       username: typeof id.username === "string" ? id.username : null,
       role: typeof status.role === "string" ? status.role : "member",
       membership: typeof status.membership === "string" ? status.membership : "unknown",
+      // sow-185: the resolved paid TIER (none|member|creator), so the page can gate creator-only chrome without
+      // re-deriving it. Fail-closed to 'none'. Presentation only, exactly like membership; the real creator gate
+      // is authorizeCreator server-side. (Allowlisted by name, never spread, per the security contract above.)
+      paidTier: typeof status.paidTier === "string" ? status.paidTier : "none",
       canPublish: status.canPublish === true,
       // SOW-060: the free-tier capability flags (signed-in perks), so the page can render them without re-deriving.
       canSeeNews: status.canSeeNews === true,

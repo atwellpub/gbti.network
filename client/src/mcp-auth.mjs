@@ -112,8 +112,8 @@ export async function confirmDeviceLogin(ctx, {
   const overridesReadable = readFile && readFile('house/roles.yml') != null;
   if (overridesReadable) {
     try {
-      const { stripeStatus, membership, couponUntil } = await resolveMembershipImpl({ githubId: user.id, token, signupBase, readFile, fetch });
-      ctx.store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null });
+      const { stripeStatus, membership, couponUntil, paidTier } = await resolveMembershipImpl({ githubId: user.id, token, signupBase, readFile, fetch });
+      ctx.store.set({ stripeStatus, membership, couponUntil: couponUntil ?? null, paidTier: paidTier ?? 'none' });
     } catch { ctx.store.set({ membership: 'unknown' }); }
   } else {
     ctx.store.set({ membership: 'unknown' });
