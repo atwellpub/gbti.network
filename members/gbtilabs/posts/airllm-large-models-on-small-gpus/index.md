@@ -25,6 +25,8 @@ Most advice about running a large language model locally starts with the same ga
 
 AirLLM takes a different position. It argues the gate is an artifact of how models are loaded, not a law of the hardware.[^1]
 
+![Memory modules and a processor laid out on a workbench](./images/memory-and-motherboard.webp)
+
 ## The idea
 
 A transformer runs one layer at a time. Layer 1 produces an output, that output feeds layer 2, and so on to the end. At the moment layer 40 is computing, layers 1 through 39 have already done their work and layers 41 onward have not started. Nothing requires all of them to be sitting in VRAM simultaneously. It is simply convenient, and until recently there was little reason to arrange things otherwise.
@@ -42,6 +44,8 @@ This is where a careful reading matters, because the framing invites a misunders
 AirLLM does not make a 70B model fast on a 4GB card. It makes a 70B model possible on a 4GB card. Every layer crosses the disk-to-GPU boundary on every forward pass, which as one write-up puts it converts a memory bottleneck into a disk bottleneck, feasible only because an NVMe drive reading at several gigabytes per second can keep the GPU fed at reduced throughput.[^3]
 
 The most useful framing we found comes from Umesh Malik, who points out that the floor is arithmetic rather than opinion. A 70B model in half precision is roughly 140GB, and every token has to pull all of it past the GPU, so the storage bandwidth alone sets a minimum: about 20 seconds per token on a 7GB/s Gen4 NVMe, about 40 on Gen3, and around 255 seconds on a SATA SSD. Those are pure transfer floors that assume zero compute and zero overhead. Quantizing to 4-bit cuts the bytes per token to roughly 35GB and the Gen4 floor to about 5 seconds.[^4]
+
+![An NVMe SSD beside mechanical hard drives and an optical disc](./images/storage-tiers.webp)
 
 Reported speeds from people who ran it vary enough that the spread is itself the finding, which is a good reason to read several accounts rather than one:
 
@@ -112,4 +116,10 @@ Leave a comment on this article, or bring it to Discord if it turns into a longe
 
 [^11]: Hacker News discussion, "AirLLM 70B inference with single 4GB GPU": [news.ycombinator.com](https://news.ycombinator.com/item?id=49154228)
 
+Photographs by Sergei Starostin[^13] and Andrey Matveev[^14], both on Pexels.
+
 [^12]: Bright Coding, "AirLLM: Run 70B Models on 4GB GPUs Without Compromise," February 27, 2026: [blog.brightcoding.dev](https://www.blog.brightcoding.dev/2026/02/27/airllm-run-70b-models-on-4gb-gpus-without-compromise)
+
+[^13]: Memory modules photograph by Sergei Starostin on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/6636474](https://www.pexels.com/photo/green-and-black-computer-ram-stick-6636474/)
+
+[^14]: Storage media photograph by Andrey Matveev on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/35147150](https://www.pexels.com/photo/modern-and-vintage-data-storage-solutions-35147150/)
