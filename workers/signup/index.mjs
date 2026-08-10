@@ -363,21 +363,36 @@ async function handleDiscordLinkInit(request, env) {
 // member into Discord, never back to the site), then polls THIS endpoint until it reports linked and auto-advances.
 // Read-only + fail-closed: it verifies the member's GitHub token -> github_id, looks up the Customer, and reports
 // whether discord_user_id is attached. Any error / no token -> { linked: false } (never blocks, never opens).
+// sow-207: the WEBSITE welcome flow polls this too, but it carries no bearer token. When the bearer is absent,
+// resolve the member from the httpOnly session cookie and answer with credentialed CORS (a reflected, allow-listed
+// Origin). The extension bearer path stays byte-for-byte unchanged (wildcard CORS). Read-only + fail-closed to
+// { linked: false } on every branch, so a poll never blocks the wizard and a cross-site read learns nothing.
 async function handleDiscordLinkStatus(request, env) {
-  const cors = { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' };
   const auth = request.headers.get('Authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return json({ linked: false }, 200, cors);
-  let id = null;
-  try { id = await githubFetchUser(token, globalThis.fetch); } catch { id = null; }
-  if (!id || !id.githubId) return json({ linked: false }, 200, cors);
-  let linked = false;
+  if (token) {
+    const cors = { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' };
+    let id = null;
+    try { id = await githubFetchUser(token, globalThis.fetch); } catch { id = null; }
+    if (!id || !id.githubId) return json({ linked: false }, 200, cors);
+    return json({ linked: await discordLinkedFor(env, id.githubId) }, 200, cors);
+  }
+  // Website path: identity from the signed session cookie; credentialed CORS so the browser may read the response.
+  const cors = { ...corsHeaders(request, env, { credentials: true }), 'Cache-Control': 'no-store' };
+  const session = await verifySession(readSessionCookie(request.headers.get('Cookie')), env.SESSION_SECRET);
+  const githubId = session && session.github_id ? String(session.github_id) : null;
+  if (!githubId) return json({ linked: false }, 200, cors);
+  return json({ linked: await discordLinkedFor(env, githubId) }, 200, cors);
+}
+
+// sow-207: shared read behind the link-status poll — is a discord_user_id attached to this github_id's Stripe
+// Customer? Fail-closed to false on any error (no customer, Stripe hiccup) so the poll never falsely reports linked.
+async function discordLinkedFor(env, githubId) {
   try {
     const { stripe } = clientsFromEnv(env);
-    const customer = await stripe.findCustomerByGithubId(String(id.githubId));
-    linked = Boolean(customer?.metadata?.discord_user_id);
-  } catch { linked = false; }
-  return json({ linked }, 200, cors);
+    const customer = await stripe.findCustomerByGithubId(String(githubId));
+    return Boolean(customer?.metadata?.discord_user_id);
+  } catch { return false; }
 }
 
 async function handleDiscordLinkStart(request, env) {

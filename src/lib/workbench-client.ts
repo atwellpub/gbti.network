@@ -605,6 +605,15 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     getPrefs() { return workerGet('/membership/prefs'); }, // { categories, followedChannels }
     setPrefs(patch: any) { return workerPost('/membership/prefs', patch); },
 
+    // ----- sow-207: the welcome flow's Discord step, over the cookie session -----
+    // The member is already authenticated by the httpOnly session cookie, so the connect URL points straight at the
+    // Worker's /discord/link/start (it resolves identity from the cookie). Opening it in a new tab is a same-site
+    // top-level navigation, so the session cookie rides along; no token, no round-trip to mint the URL.
+    async discordLinkUrl() { return { url: `${base}/discord/link/start` }; },
+    // The welcome poll: has this member's Discord been linked yet? Read-only; the Worker answers over the cookie
+    // session (credentialed CORS + a cookie fallback) and fails closed to { linked: false }, so a poll never blocks.
+    discordLinkStatus() { return workerGet('/discord/link/status'); },
+
     // ----- SOW-027/044: comments — read (public + own decrypt) + post/edit (members-encrypted) + own delete -----
     listComments(a: any = {}) { return listCommentsLocal(a); },
     listShareComments({ targetSlug, limit }: any = {}) { return listCommentsLocal({ targetType: 'share', targetSlug, limit }); },

@@ -848,6 +848,32 @@ test('SOW: /discord/link/status reports the Customer Discord-link state, fail-cl
   assert.deepEqual(await res.json(), { linked: false });
 });
 
+test('sow-207: /discord/link/status resolves the WEBSITE cookie session with credentialed CORS, fail-closed', async () => {
+  const env = fakeEnv({ CORS_ALLOWED_ORIGINS: 'https://gbti.test' });
+  const session = await signSession({ githubId: '777', githubLogin: 'octocat' }, env.SESSION_SECRET);
+  // A cookie member whose Customer has a linked Discord -> { linked: true } + credentialed CORS for the site origin.
+  const linkedFetch = (url) => {
+    if (url.includes('api.stripe.com/v1/customers/search')) return { status: 200, body: { data: [{ id: 'cus_x', metadata: { github_id: '777', discord_user_id: 'd-1' } }] } };
+    return { status: 200, body: '' };
+  };
+  await withFetch(linkedFetch, async () => {
+    const res = await worker.fetch(req('GET', '/discord/link/status', { headers: { Cookie: 'gbti_session=' + session, Origin: 'https://gbti.test' } }), env, {});
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { linked: true });
+    assert.equal(res.headers.get('Access-Control-Allow-Origin'), 'https://gbti.test', 'reflects the allow-listed site origin');
+    assert.equal(res.headers.get('Access-Control-Allow-Credentials'), 'true', 'credentialed so the browser can read the cookie response');
+  });
+  // A forged/invalid session cookie -> fail closed to not-linked, and it must NOT reach Stripe.
+  let stripeHit = false;
+  const guardFetch = (url) => { if (url.includes('api.stripe.com')) stripeHit = true; return { status: 200, body: '' }; };
+  await withFetch(guardFetch, async () => {
+    const res = await worker.fetch(req('GET', '/discord/link/status', { headers: { Cookie: 'gbti_session=not-a-real-token', Origin: 'https://gbti.test' } }), env, {});
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { linked: false });
+  });
+  assert.equal(stripeHit, false, 'a forged session never triggers a Stripe lookup');
+});
+
 test('SOW Part C: the Discord-link callback REJECTS a state with no matching nonce cookie', async () => {
   const env = fakeEnv();
   const startState = await packState({ githubId: '5', githubLogin: 'octocat', nonce: 'n1', link: true }, env);
