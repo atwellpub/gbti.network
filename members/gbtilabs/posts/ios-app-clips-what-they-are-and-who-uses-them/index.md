@@ -1,12 +1,12 @@
 ---
-title: 'App Clips let a website hand someone a piece of an app that almost nobody uses'
+title: 'App Clips hand someone a working piece of your app before they ever install it'
 slug: ios-app-clips-what-they-are-and-who-uses-them
 status: draft
 visibility: public
 publicStub: false
 excerpt: >-
   An App Clip runs part of an iOS app with no install, launched from a link, a QR code, or an NFC tag.
-  The technology works. Whether it fits your next project, and who has actually shipped one, are the
+  The technology works. Whether it fits your next project, and who has shipped one, are the
   harder questions.
 categories:
   - design
@@ -24,11 +24,11 @@ type: post
 author: gbtilabs
 ---
 
-Someone taps a link on your site, and instead of a page telling them to install your app, part of your app opens. No App Store visit, no download, no account. They do the one thing they came to do and move on, and the software removes itself later without being asked.
+Someone taps a link on your site, and instead of a page telling them to install your app, part of your app opens. They never visit the App Store, download anything, or create an account. They do the one thing they came to do and move on, and the software removes itself later without being asked.
 
-That is an App Clip, and it has existed since iOS 14 in 2020. Apple is still adding to it, most recently in June 2025.[^1] What has not happened in six years is adoption.
+That is an **App Clip**, and it has existed since iOS 14 in 2020. Apple is still adding to it, most recently in June 2025.[^1]
 
-## What an App Clip actually is
+## What an App Clip is
 
 A lightweight build of an existing app, offering a slice of its functionality. Apple's own example is a donut shop: the full app handles favorites, rewards, and offers, and the App Clip does one thing, order a donut.[^5]
 
@@ -50,7 +50,7 @@ Outside those three, the constraint list gets expensive fast. No background acti
 
 If the project needs identity, needs to run in the background, needs attribution, or the task is long enough that installing was never really the imposition, an App Clip is the wrong shape for it.
 
-## Who has actually shipped one
+## Who has shipped one
 
 The public record here is thin, but named deployments exist, and they sort into three groups more useful than a list of logos.
 
@@ -62,15 +62,15 @@ The third group is a single early example: Elloveo, a free trial of a children's
 
 What every one of them shares is a task that finishes in about a minute.
 
-No source gives a number. No install lift, no conversion rate, no completion figure, from any of them. We looked specifically for outcomes: a search for App Clip campaign results returns marketing case studies about other things entirely, and a search for App Clip business results returns mobile-ordering and micromobility material with no App Clips in it. We would rather report that absence than dress up unrelated statistics as evidence.
+No source reports an install lift, a conversion rate, or a completion figure for any of them. We looked specifically for outcomes: a search for App Clip campaign results returns marketing case studies about other things entirely, and a search for App Clip business results returns mobile-ordering and micromobility material with no App Clips in it. We would rather report that absence than dress up unrelated statistics as evidence.
 
-The teardown collection above is from March 2021, the assessment below is from December 2022,[^6][^4] and nothing comparable has been written since. The most direct explanation on record: the feature launched mid-pandemic, built for standing in front of a physical thing when nobody was standing in front of physical things. Apple's Wiley Hodges described early developer interest evaporating, developers waiting because, in his words, "it turns out everybody is inside now."[^4] The same piece argues the deeper problem is incentive mismatch: the user gets speed and less data collection, the developer gives up the install and the engagement.[^4]
+Both sources are dated: the Heady teardown is from March 2021 and the AppleInsider piece is from December 2022.[^6][^4] Nothing comparable has surfaced since, which is itself worth knowing if you go looking for more.
 
 ## We have not shipped one
 
 Nobody at GBTI Network has built an App Clip. Everything above comes from Apple's documentation and from published third-party accounts, cited as such, and none of it has been checked against a real deployment by us. Treat it as a map, not a review.
 
-That is exactly where members come in. If you have shipped an App Clip, or scoped one and decided against it, tell us the part documentation never captures: what App Store Connect was actually like, whether people found the thing, whether it moved installs or replaced them, and what you would not do again. A report that it was not worth it is as useful as one that it was.
+That is exactly where members come in. If you have shipped an App Clip, or scoped one and decided against it, tell us the part documentation never captures: what App Store Connect was like, whether people found the thing, whether it moved installs or replaced them, and what you would not do again. A report that it was not worth it is as useful as one that it was.
 
 Leave a comment, or bring it to Discord if it turns into a longer conversation.
 
@@ -82,7 +82,7 @@ Cover photograph by iam hogir on Pexels.[^7]
 
 [^3]: Apple, "Configuring App Clip experiences," Apple Developer Documentation, read August 10, 2026. Source of the eight invocation methods: [developer.apple.com](https://developer.apple.com/documentation/appclip/configuring-the-launch-experience-of-your-app-clip)
 
-[^4]: William Gallagher, "What happened to Apple's App Clips," AppleInsider, December 11, 2022. Source of the ExxonMobil, Apple Store, and Panera Bread examples, the Wiley Hodges quotation, and the incentive-mismatch argument: [appleinsider.com](https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips)
+[^4]: William Gallagher, "What happened to Apple's App Clips," AppleInsider, December 11, 2022. Source of the ExxonMobil, Apple Store, and Panera Bread examples: [appleinsider.com](https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips)
 
 [^5]: Apple, "App Clips," Apple Developer Documentation, read August 10, 2026. Source of the donut shop example and the inactivity-removal behavior: [developer.apple.com](https://developer.apple.com/documentation/appclip)
 
