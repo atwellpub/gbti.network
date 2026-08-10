@@ -1,30 +1,13 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import MembershipTiers from '../components/membership/MembershipTiers.astro';
-import { getCollection } from 'astro:content';
-import { isPublic } from '../lib/content';
 import { REF_COOKIE, REF_VIA_COOKIE, REF_COOKIE_DAYS } from '../lib/referral';
 import { FIRST_TOUCH_PCT, LAST_TOUCH_PCT, COLLAB_POOL_PCT, INVITE_PCT, HOLD_DAYS } from '../lib/membership';
 
-// sow-201: the membership page on the three-tier model (Free / Network Member / Content Creator). Prices,
-// labels, taglines, and benefit bullets are NOT written here: they come from house/membership-tiers.yml via
-// MembershipTiers (the legal single source of truth). Account creation goes through /login/ (GitHub + the
-// Turnstile gate live there); a paid CTA carries its tier + period to the Worker's POST /checkout. The
-// 90-day trial is RETIRED (owner decision, sow-201): the $0 Free tier is the no-card entry.
-const perks = [
-  { icon: 'pencil', title: 'Publish under your name', body: 'Articles, products, prompts, and a creator profile, on a Content Creator plan.' },
-  { icon: 'chat', title: 'Join the conversation', body: 'Comment across the network and take part in the community, from Network Member up.' },
-  { icon: 'users', title: 'Community and coaching', body: 'A private Discord and weekly build sessions with other developers.' },
-  { icon: 'chart', title: 'Grow visibly', body: 'A public profile, real feedback, and proof of what you ship.' },
-  { icon: 'coin', title: 'Share the revenue', body: 'Earn when your invites and the content you publish bring members in.' },
-];
-
-// Real trust numbers, from the published content collections (no hardcoded counts to drift).
-const members = (await getCollection('profile')).filter(isPublic).filter((p) => p.data.username !== 'gbti');
-const memberCount = members.length;
-const productCount = (await getCollection('product')).filter(isPublic).length;
-const postCount = (await getCollection('post')).filter(isPublic).length;
-
+// sow-201: the membership page is the plans + the FAQ, nothing else (owner, 2026-08-10). The three tiers ARE
+// the hero. Every price, label, tagline, and benefit bullet still comes from house/membership-tiers.yml via
+// MembershipTiers (the legal single source of truth). The 90-day trial is retired; the $0 Free tier is the
+// no-card entry, and account creation goes through /login/ (Turnstile + GitHub live there).
 const faqs = [
   {
     q: 'Do I need a credit card to start?',
@@ -53,70 +36,10 @@ const faqs = [
 ];
 ---
 <BaseLayout title="Membership" description="Join the GBTI Network. Reading is free; Network Member and Content Creator plans add comments, community, publishing, and revenue share.">
-  <!-- ============ HERO ============ -->
-  <section class="band dark tcenter">
+  <!-- ============ HERO = THE PLANS ============ -->
+  <section class="band tint" id="join">
     <div class="wrap">
-      <div class="chip" style="display:inline-flex"><span class="chip-dot"></span> Membership</div>
-      <h1 class="h1 mt20" style="color:#fff">One network. Three ways to take part.</h1>
-      <p class="lead" style="max-width:640px;margin:18px auto 0">
-        Reading is free for everyone. Become a Network Member to join the conversation, or a Content Creator
-        to publish and earn. Start with a free account, no card required.
-      </p>
-      <div class="hero-c-cta">
-        <a href="/login/" class="btn btn-primary btn-lg">Create a free account</a>
-        <a href="#join" class="btn btn-ghost btn-lg">See the plans</a>
-      </div>
-      {memberCount > 0 && (
-        <p class="body-sm mt16" style="color:var(--on-dark-soft)">
-          Join <strong style="color:#fff">{memberCount} member{memberCount === 1 ? '' : 's'}</strong> who have shipped
-          {' '}{productCount} product{productCount === 1 ? '' : 's'} and {postCount} article{postCount === 1 ? '' : 's'}, all public.
-        </p>
-      )}
-    </div>
-  </section>
-
-  <!-- ============ WHAT THE NETWORK IS FOR ============ -->
-  <section class="band tint">
-    <div class="wrap">
-      <div class="sec-head center">
-        <p class="eyebrow">Why join</p>
-        <h2 class="h2 mt12">A place to publish, build, and earn</h2>
-        <p class="lead mt16" style="max-width:600px;margin-left:auto;margin-right:auto">Pick the tier that fits how you want to take part. Upgrade anytime.</p>
-      </div>
-      <div class="perk-grid mt32">
-        {perks.map((p) => (
-          <div class="card cap-card">
-            <span class="itile"><svg viewBox="0 0 24 24"><use href={`#ico-${p.icon}`}/></svg></span>
-            <h3 class="h3">{p.title}</h3>
-            <p class="body-sm muted mt12">{p.body}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ COMMUNITY ============ -->
-  <section class="band" id="community">
-    <div class="wrap">
-      <div class="comm-grid">
-        <img class="comm-shot card" src="/stock/weekly-build-session.jpg" alt="GBTI members on a weekly build call" width="1280" height="900" loading="lazy" decoding="async" style="display:block;width:100%;object-fit:cover" />
-        <div>
-          <h2 class="h2">Come for the opportunity.<br/>Stay for the coaching and networking.</h2>
-          <div class="comm-pills">
-            <div class="comm-pill"><span class="itile" style="width:44px;height:44px;border-radius:8px"><svg viewBox="0 0 24 24" style="width:22px;height:22px"><use href="#ico-chat"/></svg></span><div><h3 class="h4">Private Discord</h3><p class="body-sm muted">Meet and collaborate with builders.</p></div></div>
-            <div class="comm-pill"><span class="itile" style="width:44px;height:44px;border-radius:8px"><svg viewBox="0 0 24 24" style="width:22px;height:22px"><use href="#ico-calendar"/></svg></span><div><h3 class="h4">Weekly build calls</h3><p class="body-sm muted">Two-hour sessions and hands-on coaching.</p></div></div>
-            <div class="comm-pill"><span class="itile" style="width:44px;height:44px;border-radius:8px"><svg viewBox="0 0 24 24" style="width:22px;height:22px"><use href="#ico-heart"/></svg></span><div><h3 class="h4">Feedback &amp; networking</h3><p class="body-sm muted">A network of developers shipping real things together.</p></div></div>
-          </div>
-          <a href="#join" class="btn btn-primary">See the plans <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ THE TIERS (single source of truth: house/membership-tiers.yml) ============ -->
-  <section id="join" class="band tint">
-    <div class="wrap">
-      <MembershipTiers />
+      <MembershipTiers headingLevel="h1" />
     </div>
   </section>
 
@@ -139,11 +62,6 @@ const faqs = [
   </section>
 
   <style>
-    /* Five benefit cards: a centered flex grid so the last row (2 cards) centers under the first (3 cards). */
-    .perk-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; }
-    .perk-grid .cap-card { flex: 1 1 280px; max-width: 352px; margin: 0; }
-    @media (max-width: 760px) { .perk-grid .cap-card { flex-basis: 100%; max-width: none; } }
-
     /* FAQ accordion (native details/summary, no JS) */
     .faq { max-width: 760px; margin-left: auto; margin-right: auto; }
     .faq-item { border-bottom: 1.5px solid var(--line); padding: 6px 0; }

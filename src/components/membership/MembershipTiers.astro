@@ -22,12 +22,35 @@
 import { TIER_DISPLAY } from '../../lib/tiers';
 import { SIGNUP_BASE } from '../../lib/membership';
 
+interface Props {
+  /** The heading tag for the block title. 'h1' when the plans are the page hero, else 'h2'. */
+  headingLevel?: 'h1' | 'h2';
+}
+const { headingLevel = 'h2' } = Astro.props;
+const Heading = headingLevel;
+
 // Annual leads (owner decision, sow-201 oq1); the toggle switches to monthly.
 const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMonthly === 0 && t.priceAnnual === 0;
+
+// A revenue line may carry ONE inline [text](url) link (the copy still lives in the yml, the single source of
+// truth). Split it into ordered fragments so the phrase renders as a real anchor, no raw HTML from the yml.
+function revenueFragments(s: string): { text: string; href?: string }[] {
+  const out: { text: string; href?: string }[] = [];
+  const re = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push({ text: s.slice(last, m.index) });
+    out.push({ text: m[1], href: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push({ text: s.slice(last) });
+  return out;
+}
 ---
 <section class="mtiers" data-signup-base={SIGNUP_BASE} aria-labelledby="mtiers-h">
   <div class="mtiers-head">
-    <h2 id="mtiers-h" class="h2">Choose how you take part</h2>
+    <Heading id="mtiers-h" class:list={[headingLevel === 'h1' ? 'h1' : 'h2']}>Choose how you take part</Heading>
     <p class="lead mtiers-sub">
       Reading is free for everyone. A <strong>Network Member</strong> joins the conversation with comments and
       the community. A <strong>Content Creator</strong> publishes to the network: articles, products, prompts,
@@ -74,7 +97,9 @@ const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMont
         </ul>
 
         {t.revenue && (
-          <p class="mt-rev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg><span>{t.revenue}</span></p>
+          <p class="mt-rev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg><span>{revenueFragments(t.revenue).map((f) => (
+            f.href ? <a href={f.href} class="mt-rev-link">{f.text}</a> : <Fragment>{f.text}</Fragment>
+          ))}</span></p>
         )}
 
         <div class="mt-cta-wrap">
@@ -133,6 +158,8 @@ const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMont
 
   .mt-rev { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.45; color: var(--fg-mute); background: var(--tint); border-radius: 10px; padding: 12px 14px; margin: 0 0 22px; }
   .mt-rev svg { width: 18px; height: 18px; flex: none; color: var(--green-600); margin-top: 1px; }
+  .mt-rev-link { color: var(--green-700); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+  .mt-rev-link:hover { color: var(--green-600); }
 
   .mt-cta-wrap { margin-top: auto; }
   .mt-cta { width: 100%; justify-content: center; }
