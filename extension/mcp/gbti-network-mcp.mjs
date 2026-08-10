@@ -17378,8 +17378,9 @@ function stripTrackingParams(input) {
 // client/src/content-ops.mjs
 var SUBDIR = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var MAX_BODY_BYTES = 1e6;
+var NETWORK_CONTENT_OWNER = "gbtilabs";
 function resolveTarget({ scope = "member", username } = {}) {
-  if (scope === "house") return { scope: "house", folder: "house", author: "gbti" };
+  if (scope === "house") return { scope: "house", folder: `members/${NETWORK_CONTENT_OWNER}`, author: NETWORK_CONTENT_OWNER };
   if (!username) throw new Error("resolveTarget: username is required for the member scope");
   return { scope: "member", folder: `members/${username}`, author: username };
 }
@@ -18986,7 +18987,8 @@ async function requireSuperadminForHouse(ctx2) {
   if (role !== "superadmin") throw new OperationError("forbidden", `house content is superadmin-only (you are ${role})`);
   return { id, role };
 }
-var HOUSE_CONTENT_PATH_RE = /^house\/(posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+var NETWORK_CONTENT_PATH_RE = new RegExp(`^members/${NETWORK_CONTENT_OWNER}/(posts|products|prompts)/[a-z0-9][a-z0-9-]*/index\\.md$`);
+var isNetworkContentPath = (p) => String(p || "").startsWith(`members/${NETWORK_CONTENT_OWNER}/`);
 function getStatus(ctx2) {
   const id = ctx2.identity?.() ?? null;
   const membership = ctx2.membership?.() ?? "unknown";
@@ -19018,7 +19020,7 @@ async function listContent(ctx2, { type, scope = "member" } = {}) {
   const id = requireIdentity(ctx2);
   if (scope === "house") {
     await requireSuperadminForHouse(ctx2);
-    return { items: await ctx2.reader.list(null, type || void 0, "house") };
+    return { items: await ctx2.reader.list(NETWORK_CONTENT_OWNER, type || void 0, "member") };
   }
   return { items: await ctx2.reader.list(id.username, type || void 0, "member") };
 }
@@ -19081,11 +19083,11 @@ async function listComments(ctx2, { targetType, targetSlug, limit, aliases } = {
 async function getContentItem(ctx2, { path: path4 } = {}) {
   const id = requireIdentity(ctx2);
   if (!path4) throw new OperationError("bad-request", "path is required");
-  if (String(path4).startsWith("house/")) {
-    if (!HOUSE_CONTENT_PATH_RE.test(path4)) throw new OperationError("bad-request", "invalid house content path");
+  if (isNetworkContentPath(path4) && id.username !== NETWORK_CONTENT_OWNER) {
+    if (!NETWORK_CONTENT_PATH_RE.test(path4)) throw new OperationError("bad-request", "invalid network content path");
     await requireSuperadminForHouse(ctx2);
     const text = await ctx2.reader?.readFile?.(path4);
-    if (text == null) throw new OperationError("not-found", "no such house item");
+    if (text == null) throw new OperationError("not-found", "no such network content item");
     const { frontmatter, body } = parseContentFile(text);
     return { path: path4, frontmatter, body };
   }
@@ -19137,10 +19139,10 @@ async function setOwnContentStatus(ctx2, { path: rel, status } = {}) {
   if (status !== "published" && status !== "draft") {
     throw new OperationError("bad-request", 'status must be "published" or "draft"');
   }
-  const houseTarget = String(rel || "").startsWith("house/");
+  const houseTarget = isNetworkContentPath(rel);
   let type, slug, branch;
   if (houseTarget) {
-    const hm = HOUSE_CONTENT_PATH_RE.exec(String(rel || ""));
+    const hm = NETWORK_CONTENT_PATH_RE.exec(String(rel || ""));
     if (!hm) throw new OperationError("bad-request", "invalid house content path");
     await requireSuperadminForHouse(ctx2);
     type = hm[1].slice(0, -1);
@@ -19202,7 +19204,7 @@ async function syncForkIfCreatingBranch(ctx2, repo, branch, { sync = workerSyncF
 async function publish(ctx2, { type, input, body, message, title, prBody, authorNote, path: path4, scope } = {}) {
   const id = requireIdentity(ctx2);
   const repo = requireRepo(ctx2);
-  const houseTarget = scope === "house" || String(path4 || "").startsWith("house/");
+  const houseTarget = scope === "house" || isNetworkContentPath(path4);
   const targetScope = houseTarget ? "house" : "member";
   if (houseTarget) await requireSuperadminForHouse(ctx2);
   const membership = await membershipOf(ctx2);
@@ -19284,7 +19286,7 @@ async function publish(ctx2, { type, input, body, message, title, prBody, author
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
   if (isHostedCtx(ctx2)) {
-    if (targetScope === "house") throw new OperationError("bad-request", "house content publishes through fork mode");
+    if (targetScope === "house") throw new OperationError("bad-request", "the network's own content publishes through fork mode, not from the website yet");
     const hostedRenameFiles = [];
     if (renaming) {
       const onMain = await ctx2.reader?.readFile?.(origin.oldPath) != null;

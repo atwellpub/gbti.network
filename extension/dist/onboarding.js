@@ -13984,7 +13984,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .lc-filter { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:3px; }
   .lc-f { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:6px; cursor:pointer; }
   .lc-f.on { background:var(--hover); color:var(--accent); }
-  /* SOW-145: the superadmin content-scope switch (My content / House content). */
+  /* SOW-145: the superadmin content-scope switch (My content / Network content). sow-195 repointed the
+     second scope from the old house/ folder to members/gbtilabs/, so the label names the network, not a folder. */
   .lc-scopes { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:3px; margin-right:auto; }
   .lc-scope { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:6px; cursor:pointer; }
   .lc-scope.on { background:var(--accent); color:#fff; }
@@ -14583,14 +14584,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       return 0;
     }
     // SOW-085: the shared list-controls bar (sort + published/draft filter). Rendered above every content list.
-    // SOW-145: a superadmin also gets a scope switch (My content / House content) on the far left; a non-superadmin
+    // SOW-145: a superadmin also gets a scope switch (My content / Network content) on the far left; a non-superadmin
     // never sees it (and the server re-checks the house gate regardless).
     _listControls() {
       const f = (v, label) => `<button class="lc-f ${this._statusFilter === v ? "on" : ""}" data-filter="${v}" type="button">${label}</button>`;
       const opt = (v, label) => `<option value="${v}"${this._sort === v ? " selected" : ""}>${label}</option>`;
       const now = this._scopeNow();
       const scopeBtn = (v, label) => `<button class="lc-scope ${now === v ? "on" : ""}" data-scope="${v}" type="button" aria-pressed="${now === v}">${label}</button>`;
-      const scopeSwitch = this._canScope() ? `<div class="lc-scopes" role="group" aria-label="Content scope">${scopeBtn("member", "My content")}${scopeBtn("house", "House content")}</div>` : "";
+      const scopeSwitch = this._canScope() ? `<div class="lc-scopes" role="group" aria-label="Content scope">${scopeBtn("member", "My content")}${scopeBtn("house", "Network content")}</div>` : "";
       return `<div class="lc-bar">` + scopeSwitch + `<div class="lc-filter" role="group" aria-label="Filter by status">${f("all", "All")}${f("published", "Published")}${f("draft", "Drafts")}</div><label class="lc-sort"><span class="lc-sl">Sort</span><select data-sort aria-label="Sort">${opt("newest", "Newest")}${opt("oldest", "Oldest")}${opt("updated", "Recently updated")}${opt("title-asc", "Title A-Z")}${opt("title-desc", "Title Z-A")}</select></label></div>`;
     }
     // SOW-145: switch the content scope (My content <-> House content), persist it, reset the page + status filter,

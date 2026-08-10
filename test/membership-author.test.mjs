@@ -241,13 +241,15 @@ const freshMirror = (overrides = {}) => ({
   ...overrides,
 });
 
-test('sow-183: a superadmin reassigns a house item to another member\'s folder (write new + delete old)', async () => {
+// sow-195: the source is members/gbtilabs/ rather than house/, because the network's content is an ordinary
+// member folder now and house/ is refused outright for a hosted content write.
+test('sow-183: a superadmin reassigns a network item to another member\'s folder (write new + delete old)', async () => {
   const rec = [];
   const superMirror = freshMirror({ roles: { superadmins: [{ github_id: '2002207' }], admins: [], moderators: [] } });
   const envSuper = { ...env, SIGNUP_KV: { get: async () => superMirror } };
   const fetchImpl = async (url, init = {}) => {
     const method = init.method || 'GET';
-    if (/\/contents\/house\/posts\/reassigned-post\/index\.md\?ref=/.test(url) && method === 'GET') {
+    if (/\/contents\/members\/gbtilabs\/posts\/reassigned-post\/index\.md\?ref=/.test(url) && method === 'GET') {
       return { ok: true, status: 200, async json() { return { sha: 'oldsha' }; } };
     }
     return ghFetch(rec)(url, init);
@@ -256,7 +258,7 @@ test('sow-183: a superadmin reassigns a house item to another member\'s folder (
     itemId: 'reassigned-post', title: 'Reassigned post',
     files: [
       { path: 'members/rfilipo/posts/reassigned-post/index.md', content: '---\ntitle: x\nauthor: rfilipo\n---\nbody' },
-      { path: 'house/posts/reassigned-post/index.md', content: null },
+      { path: 'members/gbtilabs/posts/reassigned-post/index.md', content: null },
     ],
   };
   const r = await membershipAuthor(req(body), envSuper, { ...deps(rec), fetchImpl });
@@ -265,8 +267,8 @@ test('sow-183: a superadmin reassigns a house item to another member\'s folder (
   assert.equal(r.body.branch, 'hosted/2002207/reassigned-post', 'branch stays keyed to the ACTING superadmin, not the target folder');
   const put = rec.find((c) => c.method === 'PUT' && /\/contents\/members\/rfilipo\/posts\/reassigned-post\/index\.md$/.test(c.url));
   assert.ok(put, 'the new-location file is committed to ANOTHER member\'s folder');
-  const del = rec.find((c) => c.method === 'DELETE' && /\/contents\/house\/posts\/reassigned-post\/index\.md$/.test(c.url));
-  assert.ok(del, 'the old house-scope file is deleted');
+  const del = rec.find((c) => c.method === 'DELETE' && /\/contents\/members\/gbtilabs\/posts\/reassigned-post\/index\.md$/.test(c.url));
+  assert.ok(del, 'the old network-folder file is deleted');
 });
 
 test('sow-183: a plain member (mirror present, no superadmin grant) is still rejected out-of-folder', async () => {

@@ -31,25 +31,28 @@ test('contentPath: per-type folder layout', () => {
 });
 
 // SOW-145: the house content target (superadmin-only surface, gated by the caller).
-test('resolveTarget: member vs house scope', () => {
+test('resolveTarget: member scope, and the network scope resolving to the gbtilabs member folder', () => {
   assert.deepEqual(resolveTarget({ scope: 'member', username: 'alice' }), {
     scope: 'member',
     folder: 'members/alice',
     author: 'alice',
   });
-  assert.deepEqual(resolveTarget({ scope: 'house' }), { scope: 'house', folder: 'house', author: 'gbti' });
-  assert.deepEqual(resolveTarget({ scope: 'house', username: 'alice' }), { scope: 'house', folder: 'house', author: 'gbti' });
+  // sow-195: the network's content is an ordinary member folder now, not the old non-member house/ with its
+  // 'gbti' pseudo-author. The scope KEY stays 'house' because it is persisted in the WorkBench preference.
+  assert.deepEqual(resolveTarget({ scope: 'house' }), { scope: 'house', folder: 'members/gbtilabs', author: 'gbtilabs' });
+  // The actor's own username never leaks into the network target: a superadmin editing it stays gbtilabs.
+  assert.deepEqual(resolveTarget({ scope: 'house', username: 'alice' }), { scope: 'house', folder: 'members/gbtilabs', author: 'gbtilabs' });
   // Default scope is member; a member scope without a username is a programming error.
   assert.deepEqual(resolveTarget({ username: 'bob' }), { scope: 'member', folder: 'members/bob', author: 'bob' });
   assert.throws(() => resolveTarget({ scope: 'member' }), /username is required/);
 });
 
-test('contentPath: house scope emits house/<sub>/<slug>/index.md', () => {
-  assert.equal(contentPath('post', 'gbtilabs', 'welcome', 'house'), 'house/posts/welcome/index.md');
-  assert.equal(contentPath('product', 'gbtilabs', 'hue', 'house'), 'house/products/hue/index.md');
-  assert.equal(contentPath('prompt', 'gbtilabs', 'seo', 'house'), 'house/prompts/seo/index.md');
+test('contentPath: the network scope emits members/gbtilabs/<sub>/<slug>/index.md', () => {
+  assert.equal(contentPath('post', 'gbtilabs', 'welcome', 'house'), 'members/gbtilabs/posts/welcome/index.md');
+  assert.equal(contentPath('product', 'gbtilabs', 'hue', 'house'), 'members/gbtilabs/products/hue/index.md');
+  assert.equal(contentPath('prompt', 'gbtilabs', 'seo', 'house'), 'members/gbtilabs/prompts/seo/index.md');
   // The actor's username never leaks into a house path.
-  assert.equal(contentPath('post', undefined, 'welcome', 'house'), 'house/posts/welcome/index.md');
+  assert.equal(contentPath('post', undefined, 'welcome', 'house'), 'members/gbtilabs/posts/welcome/index.md');
   // Profiles are member-only regardless of scope.
   assert.equal(contentPath('profile', 'gbtilabs', null, 'house'), 'members/gbtilabs/profile.md');
 });
@@ -102,8 +105,9 @@ test('buildContentFile: valid post is scoped, author-forced, system-stripped', (
   assert.match(out.markdown, /Body text\./);
 });
 
-// SOW-145: a house publish writes house/<sub>/<slug>/ but keeps author 'gbti', never the editing superadmin.
-test('buildContentFile: house scope writes house/ with author gbti', () => {
+// SOW-145 + sow-195: a network publish writes members/gbtilabs/<sub>/<slug>/ and keeps author 'gbtilabs',
+// never the editing superadmin. The point of the scope is that the ACTOR and the TARGET stay separate.
+test('buildContentFile: the network scope writes members/gbtilabs/ with author gbtilabs', () => {
   const out = buildContentFile({
     type: 'post',
     username: 'gbtilabs',
@@ -111,9 +115,9 @@ test('buildContentFile: house scope writes house/ with author gbti', () => {
     body: 'House body.',
     scope: 'house',
   });
-  assert.equal(out.path, 'house/posts/house-post/index.md');
+  assert.equal(out.path, 'members/gbtilabs/posts/house-post/index.md');
   assert.equal(out.scope, 'house');
-  assert.equal(out.frontmatter.author, 'gbti'); // never the editing superadmin
+  assert.equal(out.frontmatter.author, 'gbtilabs'); // never the editing superadmin
   assert.equal(out.username, 'gbtilabs'); // the actor stays on the result (fork/commit context)
   assert.match(out.markdown, /author: gbti/);
 });
@@ -181,26 +185,28 @@ test('planAuthorshipMove: member -> member, deletes the old path and writes the 
   assert.equal(deleted.content, null);
 });
 
-test('planAuthorshipMove: member -> house sets author to gbti and writes under house/', () => {
+test('planAuthorshipMove: member -> network sets author to gbtilabs and writes under members/gbtilabs/', () => {
   const r = planAuthorshipMove({
     type: 'post', slug: 'hello',
     from: { scope: 'member', username: 'alice' }, to: { scope: 'house' },
     oldFrontmatter: { type: 'post', title: 'T', slug: 'hello', author: 'alice' }, oldBody: 'x',
   });
-  assert.equal(r.path, 'house/posts/hello/index.md');
-  assert.equal(r.frontmatter.author, 'gbti');
-  assert.deepEqual(r.files.map((f) => f.path), ['house/posts/hello/index.md', 'members/alice/posts/hello/index.md']);
+  assert.equal(r.path, 'members/gbtilabs/posts/hello/index.md');
+  assert.equal(r.frontmatter.author, 'gbtilabs');
+  assert.deepEqual(r.files.map((f) => f.path), ['members/gbtilabs/posts/hello/index.md', 'members/alice/posts/hello/index.md']);
 });
 
-test('planAuthorshipMove: house -> member sets author to the new username and writes under members/', () => {
+// The destination is a DIFFERENT member on purpose. Since sow-195 the network scope resolves to
+// members/gbtilabs, so a move to 'gbtilabs' would be a move to the same folder and would assert nothing.
+test('planAuthorshipMove: network -> member sets author to the new username and relocates the file', () => {
   const r = planAuthorshipMove({
     type: 'prompt', slug: 'seo',
-    from: { scope: 'house' }, to: { scope: 'member', username: 'gbtilabs' },
-    oldFrontmatter: { type: 'prompt', title: 'SEO', slug: 'seo', author: 'gbti' }, oldBody: 'x',
+    from: { scope: 'house' }, to: { scope: 'member', username: 'alice' },
+    oldFrontmatter: { type: 'prompt', title: 'SEO', slug: 'seo', author: 'gbtilabs' }, oldBody: 'x',
   });
-  assert.equal(r.path, 'members/gbtilabs/prompts/seo/index.md');
-  assert.equal(r.frontmatter.author, 'gbtilabs');
-  assert.deepEqual(r.files.map((f) => f.path), ['members/gbtilabs/prompts/seo/index.md', 'house/prompts/seo/index.md']);
+  assert.equal(r.path, 'members/alice/prompts/seo/index.md');
+  assert.equal(r.frontmatter.author, 'alice');
+  assert.deepEqual(r.files.map((f) => f.path), ['members/alice/prompts/seo/index.md', 'members/gbtilabs/prompts/seo/index.md']);
 });
 
 test('planAuthorshipMove: from and to resolve to the same path -> a noop, no files', () => {
@@ -267,16 +273,17 @@ test('planAuthorshipMove: a product/prompt intro comment moves + re-stamps autho
   assert.equal(movedFm.targetSlug, 'thing');
 });
 
-test('planAuthorshipMove: house <-> member intro comment paths follow house/comments/, not members/gbti/comments/', () => {
-  const introText = serializeContentFile({ id: 'intro-seo', targetType: 'prompt', targetSlug: 'seo', author: 'gbti', authorNote: true, visibility: 'public' }, 'Why we built this.');
+// The SOW-014 intro comment travels with its item, so it must follow the same folders the item does.
+test('planAuthorshipMove: the intro comment follows the item out of members/gbtilabs/comments/', () => {
+  const introText = serializeContentFile({ id: 'intro-seo', targetType: 'prompt', targetSlug: 'seo', author: 'gbtilabs', authorNote: true, visibility: 'public' }, 'Why we built this.');
   const r = planAuthorshipMove({
     type: 'prompt', slug: 'seo',
-    from: { scope: 'house' }, to: { scope: 'member', username: 'gbtilabs' },
-    oldFrontmatter: { type: 'prompt', slug: 'seo', author: 'gbti' }, oldBody: 'x',
+    from: { scope: 'house' }, to: { scope: 'member', username: 'alice' },
+    oldFrontmatter: { type: 'prompt', slug: 'seo', author: 'gbtilabs' }, oldBody: 'x',
     introText,
   });
-  assert.ok(r.files.some((f) => f.path === 'house/comments/intro-seo.md' && f.content === null));
-  assert.ok(r.files.some((f) => f.path === 'members/gbtilabs/comments/intro-seo.md' && f.content));
+  assert.ok(r.files.some((f) => f.path === 'members/gbtilabs/comments/intro-seo.md' && f.content === null));
+  assert.ok(r.files.some((f) => f.path === 'members/alice/comments/intro-seo.md' && f.content));
 });
 
 test('planAuthorshipMove: a post has no intro-comment concept, introText is ignored even if provided', () => {

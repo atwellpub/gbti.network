@@ -283,3 +283,59 @@ test('sow-194 seam: a genuine FORK draft still discards (the guard is not over-b
   assert.notEqual(res.result.isError, true, textOf(res)?.error ?? 'expected success');
   assert.deepEqual(deleted, ['gbti/post-real-fork-draft']);
 });
+
+// ---- sow-195 regression: the WorkBench network scope must reach members/gbtilabs/ ----
+// sow-195 moved the network's 35 content items out of house/ into members/gbtilabs/ but left the WorkBench
+// "House content" scope pointing at house/<sub>, which no longer exists. The live result was an empty list
+// and "Could not open that draft." on every network item. These pin both halves so the scope cannot be left
+// pointing at a folder the migration emptied.
+
+/** A ctx whose reader is a stub: enough for the two scope branches, no filesystem needed. */
+function networkCtx({ username = 'atwellpub', role = 'superadmin', files = {} } = {}) {
+  const roles = `superadmins:\n  - github_id: '${role === 'superadmin' ? '1' : '999'}'\n`;
+  return {
+    identity: () => ({ login: username, githubId: '1', username }),
+    reader: {
+      list: async (user, type, scope) => [{ path: `members/${user}/posts/x/index.md`, scope, type }],
+      get: async (user, rel) => (rel.startsWith(`members/${user}/`) ? { path: rel, frontmatter: {}, body: '' } : null),
+      readFile: async (rel) => (rel === 'house/roles.yml' ? roles : (files[rel] ?? null)),
+    },
+  };
+}
+
+test('sow-195: the network scope lists members/gbtilabs, not the emptied house/ folder', async () => {
+  const { listContent } = await import('../client/src/operations.mjs');
+  const out = await listContent(networkCtx(), { type: 'post', scope: 'house' });
+  assert.equal(out.items[0].path, 'members/gbtilabs/posts/x/index.md');
+  assert.equal(out.items[0].scope, 'member', 'it goes through the ordinary member reader now');
+});
+
+test('sow-195: a superadmin can OPEN a network item from another folder (the "Could not open that draft" bug)', async () => {
+  const { getContentItem } = await import('../client/src/operations.mjs');
+  const p = 'members/gbtilabs/posts/airllm/index.md';
+  const ctx = networkCtx({ files: { [p]: '---\ntype: post\nslug: airllm\nauthor: gbtilabs\n---\n\nbody\n' } });
+  const item = await getContentItem(ctx, { path: p });
+  assert.equal(item.path, p);
+  assert.equal(item.frontmatter.author, 'gbtilabs');
+});
+
+test('sow-195: a NON-superadmin still cannot open network content', async () => {
+  const { getContentItem } = await import('../client/src/operations.mjs');
+  const p = 'members/gbtilabs/posts/airllm/index.md';
+  const ctx = networkCtx({ role: 'member', files: { [p]: '---\ntype: post\n---\n\nx\n' } });
+  await assert.rejects(() => getContentItem(ctx, { path: p }), /superadmin-only/);
+});
+
+test('sow-195: the retargeted path regex still rejects traversal and governance files', async () => {
+  const { getContentItem } = await import('../client/src/operations.mjs');
+  const ctx = networkCtx();
+  for (const bad of [
+    'members/gbtilabs/../roles.yml',
+    'members/gbtilabs/roles.yml',
+    'members/gbtilabs/posts/x/secrets.md',
+  ]) {
+    // Only the regex error is acceptable: a 'no such item' would mean the path slipped past this branch
+    // into the own-folder member reader, which is the failure mode the anchored pattern exists to prevent.
+    await assert.rejects(() => getContentItem(ctx, { path: bad }), /invalid network content path/, bad);
+  }
+});

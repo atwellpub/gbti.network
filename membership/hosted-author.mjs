@@ -117,11 +117,13 @@ function utf8Bytes(s) {
 // the hosted-authoring endpoint's own shape check, same rigor as its existing own-folder-only pattern.
 const ANY_MEMBER_FOLDER_RE = /^members\/[a-z0-9][a-z0-9-]{0,63}\//;
 // EXPLICIT house CONTENT subdirectories only -- never a bare 'house/' prefix. house/ also holds Tier-S/A
-// governance (roles.yml, bans.yml, grandfathered.yml, members-index.yml, taxonomy.yml, ...), and a bare
-// prefix match would treat 'house/roles.yml' as a valid content path too. Mirrors reviewFileContent's own
-// HOUSE_CONTENT allowlist (workers/signup/github-app.mjs) for the read side, plus the two sidecar dirs a
-// content write also needs: comments/ (the from-the-author intro) and _enc/ (an encrypted body envelope).
-const HOUSE_CONTENT_PREFIXES = ['house/posts/', 'house/products/', 'house/prompts/', 'house/comments/', 'house/_enc/'];
+// sow-195 REMOVED the house content allowlist that used to sit here. house/posts, house/products and
+// house/prompts no longer exist: the network's content moved into members/gbtilabs/, which the
+// ANY_MEMBER_FOLDER_RE arm below already covers for a superadmin. This TIGHTENS the surface rather
+// than loosening it. All of house/** is now uniformly governance (roles.yml, bans.yml, taxonomy.yml
+// and the rest), so no hosted CONTENT write can target house/ at all, and one of the two allowlists
+// that had to be kept in sync with the gate is gone. The admin config surface writes house YAML
+// through membership-admin-author.mjs, a different module on a different route, and is unaffected.
 
 /**
  * Validate a hosted author request against the caller's OWNED folder (resolved by the caller from the
@@ -129,9 +131,9 @@ const HOUSE_CONTENT_PREFIXES = ['house/posts/', 'house/products/', 'house/prompt
  * { ok: true, paths } or { ok: false, error, status } with a member-safe error string. Fail closed:
  * any doubt rejects the whole request.
  *
- * sow-183: `allowAnyFolder` additionally permits the house CONTENT subdirectories (HOUSE_CONTENT_PREFIXES,
- * never house/roles.yml or any other governance file) or ANY OTHER member's folder, for a content
- * authorship reassignment. The CALLER (membershipAuthor) sets this ONLY after an independent superadmin
+ * sow-183: `allowAnyFolder` additionally permits ANY OTHER member's folder, for a content authorship
+ * reassignment and (since sow-195) for the network's own content in members/gbtilabs/. It never
+ * permits house/ at all any more, governance or otherwise. The CALLER (membershipAuthor) sets this ONLY after an independent superadmin
  * check (authorizeSuperadmin, resolved from the SIGNUP_KV roles mirror) -- never from anything in the
  * request body itself, so a non-superadmin cannot self-grant it by simply asking. Every other check
  * (clean paths, size caps, file count, duplicates) is unchanged and applies identically either way.
@@ -157,15 +159,11 @@ export function validateHostedRequest({ files, itemId, folder, allowAnyFolder = 
     let matchedPrefix = null;
     if (inOwnFolder) matchedPrefix = ownPrefix;
     else if (allowAnyFolder) {
-      const housePrefix = HOUSE_CONTENT_PREFIXES.find((p) => f.path.startsWith(p) && f.path.length > p.length);
-      if (housePrefix) matchedPrefix = housePrefix;
-      else {
-        const m = ANY_MEMBER_FOLDER_RE.exec(f.path);
-        if (m) matchedPrefix = m[0];
-      }
+      const m = ANY_MEMBER_FOLDER_RE.exec(f.path);
+      if (m) matchedPrefix = m[0];
     }
     if (!matchedPrefix) {
-      return bad(allowAnyFolder ? 'every file must live under a member folder or house/' : 'every file must live inside your own member folder');
+      return bad(allowAnyFolder ? 'every file must live under a member folder' : 'every file must live inside your own member folder');
     }
     if (seen.has(f.path)) return bad('duplicate file path');
     seen.add(f.path);

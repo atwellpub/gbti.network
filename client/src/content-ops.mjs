@@ -21,11 +21,23 @@ export function resolveUsername(githubId, membersIndex) {
   return null;
 }
 
+/**
+ * The username that owns the NETWORK's own content (sow-195). It is a real member folder now, not a
+ * pseudo-folder: `house/posts`, `house/products` and `house/prompts` no longer exist. One exported constant
+ * so the client core has a single source of truth, the way src/lib/authors.ts does for the rendered byline.
+ */
+export const NETWORK_CONTENT_OWNER = 'gbtilabs';
+
 // SOW-145: the content TARGET, decoupled from the ACTOR. A member scope writes members/<username>/ with the
-// member as author; a house scope writes the non-member house/ folder with the fixed pseudo-author 'gbti'
-// (rendered "GBTI Network"). The actor's identity (for the fork + the superadmin gate) is separate. Pure.
+// member as author. The 'house' scope is the NETWORK's own content and, since sow-195, resolves to an
+// ordinary member folder (members/gbtilabs, author gbtilabs) rather than the old non-member house/ folder
+// with its 'gbti' pseudo-author. The actor's identity (for the fork + the superadmin gate) is separate. Pure.
+//
+// The scope KEY is still 'house' deliberately: it is persisted in the WorkBench scope preference and is
+// carried by in-flight callers, so renaming the key would silently drop a superadmin back to member scope.
+// What changed is only what it resolves TO.
 export function resolveTarget({ scope = 'member', username } = {}) {
-  if (scope === 'house') return { scope: 'house', folder: 'house', author: 'gbti' };
+  if (scope === 'house') return { scope: 'house', folder: `members/${NETWORK_CONTENT_OWNER}`, author: NETWORK_CONTENT_OWNER };
   if (!username) throw new Error('resolveTarget: username is required for the member scope');
   return { scope: 'member', folder: `members/${username}`, author: username };
 }

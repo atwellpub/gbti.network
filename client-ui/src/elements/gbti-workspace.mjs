@@ -70,7 +70,8 @@ const CSS = `
   .lc-filter { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:3px; }
   .lc-f { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:6px; cursor:pointer; }
   .lc-f.on { background:var(--hover); color:var(--accent); }
-  /* SOW-145: the superadmin content-scope switch (My content / House content). */
+  /* SOW-145: the superadmin content-scope switch (My content / Network content). sow-195 repointed the
+     second scope from the old house/ folder to members/gbtilabs/, so the label names the network, not a folder. */
   .lc-scopes { display:inline-flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:3px; margin-right:auto; }
   .lc-scope { border:0; background:transparent; color:var(--muted); font:inherit; font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:6px; cursor:pointer; }
   .lc-scope.on { background:var(--accent); color:#fff; }
@@ -135,7 +136,7 @@ class GbtiWorkspace extends GbtiElement {
     this._sort = sortModeFor(typeof localStorage !== 'undefined' ? localStorage.getItem(WORKSPACE_SORT_KEY) : null);
     this._statusFilter = 'all';
     this._viewList = [];
-    // SOW-145: the content SCOPE (My content / House content), superadmin-only. Unresolved (null) until the
+    // SOW-145: the content SCOPE (My content / Network content), superadmin-only. Unresolved (null) until the
     // Overview arrives with the caller's role + personal counts; treated as 'member' until then (so a
     // non-superadmin, and the pre-overview paint, always list the member folder). `scopeFor` then resolves it
     // (an empty-personal superadmin defaults to house). Persisted device-local like the sort pref.
@@ -687,7 +688,7 @@ class GbtiWorkspace extends GbtiElement {
   }
 
   // SOW-085: the shared list-controls bar (sort + published/draft filter). Rendered above every content list.
-  // SOW-145: a superadmin also gets a scope switch (My content / House content) on the far left; a non-superadmin
+  // SOW-145: a superadmin also gets a scope switch (My content / Network content) on the far left; a non-superadmin
   // never sees it (and the server re-checks the house gate regardless).
   _listControls() {
     const f = (v, label) => `<button class="lc-f ${this._statusFilter === v ? 'on' : ''}" data-filter="${v}" type="button">${label}</button>`;
@@ -695,7 +696,7 @@ class GbtiWorkspace extends GbtiElement {
     const now = this._scopeNow();
     const scopeBtn = (v, label) => `<button class="lc-scope ${now === v ? 'on' : ''}" data-scope="${v}" type="button" aria-pressed="${now === v}">${label}</button>`;
     const scopeSwitch = this._canScope()
-      ? `<div class="lc-scopes" role="group" aria-label="Content scope">${scopeBtn('member', 'My content')}${scopeBtn('house', 'House content')}</div>`
+      ? `<div class="lc-scopes" role="group" aria-label="Content scope">${scopeBtn('member', 'My content')}${scopeBtn('house', 'Network content')}</div>`
       : '';
     return `<div class="lc-bar">`
       + scopeSwitch

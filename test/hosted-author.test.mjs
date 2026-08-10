@@ -221,9 +221,12 @@ test('validateHostedRequest: allowAnyFolder=false (the default) is byte-for-byte
   }
 });
 
-test('validateHostedRequest: allowAnyFolder=true permits house/ and another member\'s folder', () => {
+test('validateHostedRequest: allowAnyFolder=true permits another member\'s folder, and NO LONGER house/', () => {
+  // sow-195 removed the house content allowlist: those folders no longer exist and the network's content is
+  // an ordinary member folder. This TIGHTENS the surface, so house/ is now refused even for a superadmin.
   const house = validateHostedRequest({ files: [{ path: 'house/posts/welcome/index.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
-  assert.equal(house.ok, true);
+  assert.equal(house.ok, false, 'no hosted CONTENT write may target house/ any more');
+  // The network's own content, which is where that content actually lives now.
   const other = validateHostedRequest({ files: [{ path: 'members/gbtilabs/posts/welcome/index.md', content: 'x' }], itemId: 'x', folder: 'atwellpub', allowAnyFolder: true });
   assert.equal(other.ok, true);
   // still own-folder-friendly too (a superadmin editing their OWN content is unaffected)

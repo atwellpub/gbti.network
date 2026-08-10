@@ -6,7 +6,7 @@
 // Errors are typed OperationError(code, ...) so each transport can map a code to its own shape (HTTP status
 // or MCP isError). Codes: no-identity | not-authenticated | not-found | bad-request | invalid-content.
 
-import { buildContentFile, flipContentStatus, buildShareFile, shareId as makeShareId, buildCommentFile, commentId as makeCommentId, serializeContentFile, parseContentFile, contentPath, ContentValidationError, byCommentOldest } from './content-ops.mjs';
+import { buildContentFile, flipContentStatus, buildShareFile, shareId as makeShareId, buildCommentFile, commentId as makeCommentId, serializeContentFile, parseContentFile, contentPath, ContentValidationError, byCommentOldest, NETWORK_CONTENT_OWNER } from './content-ops.mjs';
 import { publishContent, publishFiles, commitToBranchOnFork, branchName } from './publish.mjs';
 import { canPublish, canStageDrafts, isBlockedFromPublishing, canSeeNews, canFollow, canSave, canBrowse, canSeeShares, fetchStripeStatus } from './membership.mjs';
 import { splitMemberMarkdown, encAssetFor, encryptViaWorker, decryptViaWorker, MemberContentLockedError } from './member-content.mjs';
@@ -78,9 +78,15 @@ async function requireSuperadminForHouse(ctx) {
   return { id, role };
 }
 
-// SOW-145: a valid house content path (superadmin surface). Posts/products/prompts only, one nested item folder,
-// no traversal (the leading-anchored, char-classed pattern rejects `house/../`, `house/roles.yml`, etc.).
-const HOUSE_CONTENT_PATH_RE = /^house\/(posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+// SOW-145, retargeted by sow-195: a valid NETWORK content path (the superadmin surface). Posts/products/
+// prompts only, one nested item folder, no traversal. The leading-anchored, char-classed pattern is what
+// rejects `members/gbtilabs/../roles.yml` and anything else that is not a content item, so keep that shape.
+// It used to match `house/<sub>/...`; those folders no longer exist, which is why the WorkBench network
+// scope listed nothing and opening an item failed until this moved.
+const NETWORK_CONTENT_PATH_RE = new RegExp(`^members/${NETWORK_CONTENT_OWNER}/(posts|products|prompts)/[a-z0-9][a-z0-9-]*/index\\.md$`);
+
+/** True for a path inside the network's own content folder (the superadmin-gated target). */
+const isNetworkContentPath = (p) => String(p || '').startsWith(`members/${NETWORK_CONTENT_OWNER}/`);
 
 export function getStatus(ctx) {
   const id = ctx.identity?.() ?? null;
@@ -109,13 +115,16 @@ export function getStatus(ctx) {
 }
 
 // SOW-145: `scope` selects which folder the WorkBench lists. 'member' (default) lists the caller's own
-// members/<username>/; 'house' lists the non-member house/ folder (a superadmin surface, re-checked). Async so
-// the one op serves the sync npm reader and the async extension reader (await passes a sync value through).
+// members/<username>/; 'house' lists the NETWORK's own folder, members/gbtilabs/ since sow-195 (a superadmin
+// surface, re-checked). Async so the one op serves the sync npm reader and the async extension reader.
 export async function listContent(ctx, { type, scope = 'member' } = {}) {
   const id = requireIdentity(ctx);
   if (scope === 'house') {
     await requireSuperadminForHouse(ctx);
-    return { items: await ctx.reader.list(null, type || undefined, 'house') };
+    // sow-195: the network's content is an ORDINARY member folder now, so it lists through the ordinary
+    // member reader with gbtilabs as the username. The readers' old 'house' scope pointed at house/<sub>,
+    // which no longer exists, so this branch returned an empty list and the WorkBench showed "No articles yet".
+    return { items: await ctx.reader.list(NETWORK_CONTENT_OWNER, type || undefined, 'member') };
   }
   return { items: await ctx.reader.list(id.username, type || undefined, 'member') };
 }
@@ -262,13 +271,16 @@ export async function readContent(ctx, { path } = {}) {
 export async function getContentItem(ctx, { path } = {}) {
   const id = requireIdentity(ctx);
   if (!path) throw new OperationError('bad-request', 'path is required');
-  // SOW-145: a house/ item opens for a superadmin (re-checked) via the general readFile; the member reader.get
-  // is own-folder-scoped so it would reject a house path. Async so both readers (sync npm / async ext) work.
-  if (String(path).startsWith('house/')) {
-    if (!HOUSE_CONTENT_PATH_RE.test(path)) throw new OperationError('bad-request', 'invalid house content path');
+  // SOW-145, retargeted by sow-195: a NETWORK content item opens for a superadmin (re-checked) via the
+  // general readFile, because reader.get is own-folder-scoped (it requires members/<caller>/) and would
+  // reject members/gbtilabs/ for anyone who is not gbtilabs. That rejection is what surfaced in the
+  // WorkBench as "Could not open that draft." once sow-195 moved the content out of house/.
+  // A superadmin editing their OWN folder never reaches here; this branch is only the network folder.
+  if (isNetworkContentPath(path) && id.username !== NETWORK_CONTENT_OWNER) {
+    if (!NETWORK_CONTENT_PATH_RE.test(path)) throw new OperationError('bad-request', 'invalid network content path');
     await requireSuperadminForHouse(ctx);
     const text = await ctx.reader?.readFile?.(path);
-    if (text == null) throw new OperationError('not-found', 'no such house item');
+    if (text == null) throw new OperationError('not-found', 'no such network content item');
     const { frontmatter, body } = parseContentFile(text);
     return { path, frontmatter, body };
   }
@@ -450,13 +462,13 @@ export async function setOwnContentStatus(ctx, { path: rel, status } = {}) {
   }
   // SOW-145: a house/ status flip is superadmin-only (re-checked); the house branch is prefixed so it cannot
   // collide with a member item of the same slug. Otherwise the path must be the caller's own member folder.
-  const houseTarget = String(rel || '').startsWith('house/');
+  const houseTarget = isNetworkContentPath(rel);
   let type, slug, branch;
   if (houseTarget) {
     // Validate the content-path shape BEFORE the role gate: a non-content house path (house/roles.yml, a
     // traversal) is a plain bad-request for everyone, and only a well-formed house item reaches the superadmin
     // check, so a non-superadmin cannot probe which house paths exist via the error.
-    const hm = HOUSE_CONTENT_PATH_RE.exec(String(rel || ''));
+    const hm = NETWORK_CONTENT_PATH_RE.exec(String(rel || ''));
     if (!hm) throw new OperationError('bad-request', 'invalid house content path');
     await requireSuperadminForHouse(ctx);
     type = hm[1].slice(0, -1);
@@ -532,7 +544,10 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   // by the caller (a NEW house item) or inferred from `path` (editing an existing house item). It is
   // superadmin-only, RE-CHECKED here server-side (never trust the client); the SOW-108 gate auto-merges a
   // superadmin house/** PR, and a forged non-superadmin one is Tier A -> rejected + closed by the gate.
-  const houseTarget = scope === 'house' || String(path || '').startsWith('house/');
+  // sow-195: infer the network target from the members/gbtilabs/ prefix. Without this an edit loaded from
+  // the network scope would publish into the ACTOR's own folder, silently misfiling the item instead of
+  // failing visibly, so it has to move in the same change as the read side.
+  const houseTarget = scope === 'house' || isNetworkContentPath(path);
   const targetScope = houseTarget ? 'house' : 'member';
   if (houseTarget) await requireSuperadminForHouse(ctx);
   // SOW-011: publishing to the canonical repo is paid-only. Block a KNOWN non-paid (trial / lapsed) member
@@ -638,7 +653,12 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   // ALWAYS fresh-based on live main), so it is just the old-path deletes + the intro move in the same
   // files[] — every path is own-folder, verified against the canonical reader.
   if (isHostedCtx(ctx)) {
-    if (targetScope === 'house') throw new OperationError('bad-request', 'house content publishes through fork mode');
+    // Publishing the NETWORK's content from a hosted host has never worked: this refusal predates sow-195
+    // (SOW-157, 2026-07-25) and no house content publish has ever run (zero gbti/house-* branches across
+    // every PR). sow-195 changed the TARGET, not this, so it stays until someone verifies the hosted leg
+    // properly: the Worker would admit it via allowAnyFolder, but the hosted validator's flat-image rule
+    // and the co-located images this content actually uses have never been exercised together.
+    if (targetScope === 'house') throw new OperationError('bad-request', "the network's own content publishes through fork mode, not from the website yet");
     const hostedRenameFiles = [];
     if (renaming) {
       const onMain = (await ctx.reader?.readFile?.(origin.oldPath)) != null;
@@ -2027,8 +2047,10 @@ export function itemImagesDir(itemPath, username) {
   const folder = p.replace(/\/[^/]*$/, ''); // strip the trailing index.md (or any filename), like the resolvers
   if (!folder || folder === p) return null; // no slash means it is not an item path: nothing to co-locate into
   const inOwn = !!username && folder.startsWith(`members/${username}/`);
-  const inHouse = folder === 'house' || folder.startsWith('house/');
-  if (!inOwn && !inHouse) return null;
+  // sow-195: the network's content moved from house/ into members/gbtilabs/, so co-located images resolve
+  // there now. The old house/ arm is kept for anything still pointing at the pre-migration layout.
+  const inNetwork = folder.startsWith(`members/${NETWORK_CONTENT_OWNER}/`) || folder === 'house' || folder.startsWith('house/');
+  if (!inOwn && !inNetwork) return null;
   return `${folder}/images`;
 }
 

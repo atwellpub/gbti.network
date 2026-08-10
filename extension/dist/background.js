@@ -17321,8 +17321,9 @@ function stripTrackingParams(input) {
 // client/src/content-ops.mjs
 var SUBDIR = Object.freeze({ post: "posts", product: "products", prompt: "prompts" });
 var MAX_BODY_BYTES = 1e6;
+var NETWORK_CONTENT_OWNER = "gbtilabs";
 function resolveTarget({ scope = "member", username } = {}) {
-  if (scope === "house") return { scope: "house", folder: "house", author: "gbti" };
+  if (scope === "house") return { scope: "house", folder: `members/${NETWORK_CONTENT_OWNER}`, author: NETWORK_CONTENT_OWNER };
   if (!username) throw new Error("resolveTarget: username is required for the member scope");
   return { scope: "member", folder: `members/${username}`, author: username };
 }
@@ -19360,12 +19361,13 @@ async function requireSuperadminForHouse(ctx) {
   if (role !== "superadmin") throw new OperationError("forbidden", `house content is superadmin-only (you are ${role})`);
   return { id, role };
 }
-var HOUSE_CONTENT_PATH_RE = /^house\/(posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+var NETWORK_CONTENT_PATH_RE = new RegExp(`^members/${NETWORK_CONTENT_OWNER}/(posts|products|prompts)/[a-z0-9][a-z0-9-]*/index\\.md$`);
+var isNetworkContentPath = (p) => String(p || "").startsWith(`members/${NETWORK_CONTENT_OWNER}/`);
 async function listContent(ctx, { type, scope = "member" } = {}) {
   const id = requireIdentity(ctx);
   if (scope === "house") {
     await requireSuperadminForHouse(ctx);
-    return { items: await ctx.reader.list(null, type || void 0, "house") };
+    return { items: await ctx.reader.list(NETWORK_CONTENT_OWNER, type || void 0, "member") };
   }
   return { items: await ctx.reader.list(id.username, type || void 0, "member") };
 }
@@ -19452,11 +19454,11 @@ async function readContent(ctx, { path } = {}) {
 async function getContentItem(ctx, { path } = {}) {
   const id = requireIdentity(ctx);
   if (!path) throw new OperationError("bad-request", "path is required");
-  if (String(path).startsWith("house/")) {
-    if (!HOUSE_CONTENT_PATH_RE.test(path)) throw new OperationError("bad-request", "invalid house content path");
+  if (isNetworkContentPath(path) && id.username !== NETWORK_CONTENT_OWNER) {
+    if (!NETWORK_CONTENT_PATH_RE.test(path)) throw new OperationError("bad-request", "invalid network content path");
     await requireSuperadminForHouse(ctx);
     const text = await ctx.reader?.readFile?.(path);
-    if (text == null) throw new OperationError("not-found", "no such house item");
+    if (text == null) throw new OperationError("not-found", "no such network content item");
     const { frontmatter, body } = parseContentFile(text);
     return { path, frontmatter, body };
   }
@@ -19575,10 +19577,10 @@ async function setOwnContentStatus(ctx, { path: rel, status } = {}) {
   if (status !== "published" && status !== "draft") {
     throw new OperationError("bad-request", 'status must be "published" or "draft"');
   }
-  const houseTarget = String(rel || "").startsWith("house/");
+  const houseTarget = isNetworkContentPath(rel);
   let type, slug, branch;
   if (houseTarget) {
-    const hm = HOUSE_CONTENT_PATH_RE.exec(String(rel || ""));
+    const hm = NETWORK_CONTENT_PATH_RE.exec(String(rel || ""));
     if (!hm) throw new OperationError("bad-request", "invalid house content path");
     await requireSuperadminForHouse(ctx);
     type = hm[1].slice(0, -1);
@@ -19640,7 +19642,7 @@ async function syncForkIfCreatingBranch(ctx, repo, branch, { sync = workerSyncFo
 async function publish(ctx, { type, input, body, message, title, prBody: prBody2, authorNote, path, scope } = {}) {
   const id = requireIdentity(ctx);
   const repo = requireRepo(ctx);
-  const houseTarget = scope === "house" || String(path || "").startsWith("house/");
+  const houseTarget = scope === "house" || isNetworkContentPath(path);
   const targetScope = houseTarget ? "house" : "member";
   if (houseTarget) await requireSuperadminForHouse(ctx);
   const membership = await membershipOf(ctx);
@@ -19722,7 +19724,7 @@ async function publish(ctx, { type, input, body, message, title, prBody: prBody2
   const ttl = title ?? desc.title;
   const bdy = prBody2 ?? desc.body;
   if (isHostedCtx(ctx)) {
-    if (targetScope === "house") throw new OperationError("bad-request", "house content publishes through fork mode");
+    if (targetScope === "house") throw new OperationError("bad-request", "the network's own content publishes through fork mode, not from the website yet");
     const hostedRenameFiles = [];
     if (renaming) {
       const onMain = await ctx.reader?.readFile?.(origin.oldPath) != null;
@@ -20882,8 +20884,8 @@ function itemImagesDir(itemPath, username) {
   const folder = p.replace(/\/[^/]*$/, "");
   if (!folder || folder === p) return null;
   const inOwn = !!username && folder.startsWith(`members/${username}/`);
-  const inHouse = folder === "house" || folder.startsWith("house/");
-  if (!inOwn && !inHouse) return null;
+  const inNetwork = folder.startsWith(`members/${NETWORK_CONTENT_OWNER}/`) || folder === "house" || folder.startsWith("house/");
+  if (!inOwn && !inNetwork) return null;
   return `${folder}/images`;
 }
 function stageImage(ctx, { filename, dataBase64, itemPath } = {}) {
