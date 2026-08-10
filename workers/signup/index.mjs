@@ -272,19 +272,17 @@ async function handleGithubCallback(request, env) {
   });
 
   const session = await signSession({ githubId, githubLogin }, env.SESSION_SECRET);
-  // SOW: after a GitHub-only trial signup, send the new member to the extension DOWNLOAD page (the trial is usable
-  // only via the extension). ?welcome=trial drives the welcome ribbon; u=<login> is a DISPLAY-ONLY hint (the public
-  // github_login, NOT auth) the site header reads into localStorage to show the signed-in avatar before the
-  // extension is installed -- once the extension is in, its SOW-030 signal takes over.
-  // SOW-119: &coupon=applied lets the welcome surfaces confirm the free period without another round-trip.
-  const couponParam = signup?.couponApplied ? '&coupon=applied' : '';
+  // sow-207: a fresh signup (a trial OR a SOW-119 coupon invitee) lands on the WEBSITE welcome flow (/welcome/).
+  // It hydrates the signed-in state from the session cookie just set below and walks the member through connecting
+  // Discord, following members and channels, adding socials, and picking topics. The extension is now a reader,
+  // not the forced post-signup destination (sow-204). The coupon needs no query param: the /welcome/ phase banner
+  // reads the effective status (couponUntil) from the oracle and shows the free period on its own.
   // sow-158 Phase 2: a website login carries a validated same-site return_to in the signed state; land the member
-  // back there (the header hydrates the signed-in state from the cookie). Re-validate defense-in-depth. Otherwise
-  // this is a fresh signup -> the extension welcome page (with the ?u= display hint + welcome ribbon).
+  // back there (the header hydrates the signed-in state from the cookie). Re-validate defense-in-depth.
   const returnTo = safeReturnTo(state.returnTo);
   const dest = returnTo
     ? `${env.SITE_BASE_URL}${returnTo}`
-    : `${env.SITE_BASE_URL}/extension/?welcome=trial&u=${encodeURIComponent(githubLogin || '')}${couponParam}`;
+    : `${env.SITE_BASE_URL}/welcome/`;
   // sow-158 Phase 1b: mint the CSRF token cookie alongside the session so the website client can make
   // credentialed writes (double-submit). Both are set here as two Set-Cookie headers via the cookies array.
   return redirect(dest, {}, [sessionCookieHeader(session), csrfCookieHeader(generateCsrfToken(), { domain: env.COOKIE_DOMAIN })]);
@@ -422,8 +420,9 @@ async function handleDiscordLinkStart(request, env) {
     if (session && session.github_id) { githubId = String(session.github_id); githubLogin = session.github_login || ''; }
   }
   if (!githubId) {
-    // No identity (no/expired link token AND no session) -> land on the download page; they can retry from the welcome.
-    return redirect(`${env.SITE_BASE_URL}/extension/?welcome=trial`);
+    // sow-207: no identity (no/expired link token AND no session) -> land on the website welcome flow, where they
+    // can sign in and retry the Discord step.
+    return redirect(`${env.SITE_BASE_URL}/welcome/`);
   }
   const nonce = crypto.randomUUID();
   const state = await packState({ githubId, githubLogin, nonce, link: true }, env);

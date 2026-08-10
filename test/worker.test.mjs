@@ -527,7 +527,7 @@ test('GET /signup/github/callback completes the trial signup on GitHub ALONE (Di
       );
       assert.equal(res.status, 302);
       const location = res.headers.get('Location');
-      assert.ok(location.includes('/extension/') && location.includes('welcome=trial'), 'completes signup -> the extension download page with the welcome flag, not a Discord redirect');
+      assert.ok(location.includes('/welcome/'), 'sow-207: completes signup -> the website welcome flow, not the extension page or a Discord redirect');
       assert.ok(!location.includes('discord.com'), 'no Discord hop in the signup flow');
       assert.ok(res.headers.get('Set-Cookie'), 'a session cookie is set (signup completed on GitHub alone)');
       // sow-158 Phase 1b: the callback now mints BOTH the HttpOnly session cookie and the readable CSRF cookie.
@@ -788,12 +788,12 @@ test('SOW Part C: /discord/link/start with a session -> Discord OAuth carrying t
   assert.match(res.headers.get('Set-Cookie') || '', new RegExp('gbti_oauth_nonce=' + state.nonce));
 });
 
-test('SOW Part C: /discord/link/start with NO session -> no Discord OAuth, lands on the extension page', async () => {
+test('SOW Part C: /discord/link/start with NO session -> no Discord OAuth, lands on the welcome flow', async () => {
   const env = fakeEnv();
   const res = await worker.fetch(req('GET', '/discord/link/start'), env, {});
   assert.equal(res.status, 302);
   const loc = res.headers.get('Location') || '';
-  assert.ok(loc.includes('/extension/'), 'lands on the download page');
+  assert.ok(loc.includes('/welcome/'), 'sow-207: lands on the website welcome flow');
   assert.ok(!loc.includes('discord.com'), 'never starts Discord OAuth without a verified identity');
 });
 
@@ -930,7 +930,7 @@ test('SOW Part C: a REPLAYED link token (same jti, second use) is rejected -> no
   const res2 = await worker.fetch(req('GET', '/discord/link/start?lt=' + encodeURIComponent(lt)), env, {});
   assert.equal(res2.status, 302);
   const loc = res2.headers.get('Location') || '';
-  assert.ok(loc.includes('/extension/'), 'a replayed lt lands on the download page, not Discord');
+  assert.ok(loc.includes('/welcome/'), 'sow-207: a replayed lt lands on the website welcome flow, not Discord');
   assert.ok(!loc.includes('discord.com'), 'a replayed lt never starts Discord OAuth');
 });
 
