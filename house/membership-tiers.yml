@@ -54,6 +54,7 @@ tiers:
       annual: STRIPE_PRICE_CREATOR_ANNUAL
     benefits:
       - Publish articles, products, and prompts
+      - Post to the member Shares stream
       - Your creator profile and unified portfolio
       - Reshare and syndicate your work
       - Weekly product-development shop talk

@@ -9,12 +9,10 @@
 import { TIER_DISPLAY } from '../../lib/tiers';
 
 const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMonthly === 0 && t.priceAnnual === 0;
+// Annual pricing only (owner decision, 2026-08-10): no monthly price is advertised.
 function priceLabel(t: { priceMonthly: number; priceAnnual: number }): string {
   if (isFree(t)) return '$0';
-  const parts: string[] = [];
-  if (t.priceMonthly) parts.push(`$${t.priceMonthly}/mo`);
-  if (t.priceAnnual) parts.push(`$${t.priceAnnual}/yr`);
-  return parts.join(' · ');
+  return `$${t.priceAnnual}/yr`;
 }
 function cta(t: { key: string; priceMonthly: number; priceAnnual: number }) {
   if (isFree(t)) return { href: '/login/', label: 'Create a free account', primary: true };

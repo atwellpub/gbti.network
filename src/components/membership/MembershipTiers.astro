@@ -12,9 +12,12 @@
 //
 // The honest spine, from the ENFORCED gate (membership/classify-pr.mjs requiredTierFor), not from marketing:
 // a Network Member authors comments; a Content Creator authors public presence (articles, products, prompts,
-// and their profile). The caption states exactly that.
+// their profile, and Shares). The caption states exactly that.
 //
-// CHECKOUT: a paid CTA carries the tier + the selected period to the signup Worker's POST /checkout as a
+// PRICING: annual only (owner decision, 2026-08-10). No monthly toggle; every paid CTA checks out at the
+// annual price. The monthly Stripe price ids still exist in the Worker allowlist but the UI never offers them.
+//
+// CHECKOUT: a paid CTA carries the tier (period is always annual) to the signup Worker's POST /checkout as a
 // same-site top-level form POST, so the httpOnly Lax session cookie rides and the Worker's 302 lands the
 // member on Stripe. A signed-out visitor creates a free account first (/login/), then returns pre-selected.
 // The member signal (paidTier) is UNTRUSTED presentation only; the Worker and the gate are authoritative.
@@ -29,7 +32,6 @@ interface Props {
 const { headingLevel = 'h2' } = Astro.props;
 const Heading = headingLevel;
 
-// Annual leads (owner decision, sow-201 oq1); the toggle switches to monthly.
 const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMonthly === 0 && t.priceAnnual === 0;
 
 // A revenue line may carry ONE inline [text](url) link (the copy still lives in the yml, the single source of
@@ -56,14 +58,6 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
       the community. A <strong>Content Creator</strong> publishes to the network: articles, products, prompts,
       and a public profile.
     </p>
-
-    <!-- Monthly / annual toggle. Annual is the default; no JS still shows the annual price. -->
-    <div class="mt-toggle" role="group" aria-label="Billing period">
-      <button type="button" class="mt-toggle-btn" data-period="monthly" aria-pressed="false">Monthly</button>
-      <button type="button" class="mt-toggle-btn is-on" data-period="annual" aria-pressed="true">
-        Annual <span class="mt-toggle-note">2 months free</span>
-      </button>
-    </div>
   </div>
 
   <div class="mt-grid">
@@ -77,8 +71,8 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
               <span class="mt-amt">$0</span>
             ) : (
               <Fragment>
-                <span class="mt-amt" data-monthly={t.priceMonthly} data-annual={t.priceAnnual}>${t.priceAnnual}</span>
-                <span class="mt-per" data-per-monthly="/ month" data-per-annual="/ year">/ year</span>
+                <span class="mt-amt">${t.priceAnnual}</span>
+                <span class="mt-per">/ year</span>
               </Fragment>
             )}
           </div>
@@ -107,11 +101,11 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
             <a href="/login/" class="btn btn-primary mt-cta" data-mt-cta data-key={t.key}>Create a free account</a>
           ) : (
             <a
-              href={`/login/?return_to=${encodeURIComponent(`/membership/?plan=${t.key}&period=annual`)}`}
+              href={`/login/?return_to=${encodeURIComponent(`/membership/?plan=${t.key}`)}`}
               class:list={['btn', t.key === 'creator' ? 'btn-primary' : 'btn-ghost', 'mt-cta']}
               data-mt-cta
               data-key={t.key}
-            >Get {t.label}</a>
+            >Join as {t.label}</a>
           )}
         </div>
       </article>
@@ -119,26 +113,19 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
   </div>
 
   <p class="mt-foot body-sm muted">
-    Prices in USD. Cancel anytime and keep access through the end of your paid period. Publishing, comments,
-    and community access are enforced by the network, not by this page.
+    Prices in USD, billed annually. Cancel anytime and keep access through the end of your paid period.
+    Publishing, comments, and community access are enforced by the network, not by this page.
   </p>
 </section>
 
 <style>
   .mtiers { max-width: 1040px; margin: 0 auto; }
-  .mtiers-head { text-align: center; max-width: 680px; margin: 0 auto; }
+  .mtiers-head { text-align: center; max-width: 680px; margin: 0 auto 36px; }
   .mtiers-sub { margin: 16px auto 0; }
   .mtiers-sub strong { color: var(--fg); }
 
-  /* Period toggle */
-  .mt-toggle { display: inline-flex; gap: 4px; margin: 28px auto 0; padding: 5px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--surface); }
-  .mt-toggle-btn { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer; padding: 9px 18px; border-radius: 999px; font-family: var(--f-body); font-weight: 600; font-size: 14px; color: var(--fg-mute); transition: background .15s ease, color .15s ease; }
-  .mt-toggle-btn.is-on { background: var(--green-600); color: #fff; }
-  .mt-toggle-note { font-family: var(--f-mono); font-size: 11px; opacity: .85; }
-  .mt-toggle-btn:not(.is-on) .mt-toggle-note { color: var(--green-600); opacity: 1; }
-
   /* Grid */
-  .mt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 36px; align-items: start; }
+  .mt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: start; }
   @media (max-width: 860px) { .mt-grid { grid-template-columns: 1fr; max-width: 460px; margin-left: auto; margin-right: auto; } }
 
   .mt-card { display: flex; flex-direction: column; background: var(--surface); border: 1.5px solid var(--line); border-radius: 16px; padding: 30px 26px; height: 100%; }
@@ -169,46 +156,22 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
 </style>
 
 <script>
-  // sow-201: the period toggle + the tier CTAs. PRESENTATION + a same-site checkout hand-off only. Every real
-  // permission (who may publish, comment, or read member content) stays server-side in the Worker + the gate;
-  // this script reads the UNTRUSTED member signal purely to choose which CTA to show. Fail closed.
+  // sow-201: the tier CTAs. PRESENTATION + a same-site checkout hand-off only. Every real permission (who may
+  // publish, comment, or read member content) stays server-side in the Worker + the gate; this script reads the
+  // UNTRUSTED member signal purely to choose which CTA to show. Fail closed. Pricing is annual only.
   import { onMemberSignal, readMemberSignal } from '../../lib/member-signal';
 
-  type Period = 'monthly' | 'annual';
+  const PERIOD = 'annual';
   const RANK: Record<string, number> = { none: 0, member: 1, creator: 2 };
 
   const root = document.currentScript?.closest('.mtiers') as HTMLElement | null
     ?? document.querySelector<HTMLElement>('.mtiers');
   if (root) {
     const signupBase = root.dataset.signupBase || document.documentElement.dataset.signupBase || '';
-    let period: Period = 'annual';
-
-    // The visitor's requested plan from ?plan= (set when they return signed-in from creating a free account).
-    const q = new URLSearchParams(location.search);
-    const wantPlan = q.get('plan');
-    const wantPeriod = q.get('period');
-    if (wantPeriod === 'monthly' || wantPeriod === 'annual') period = wantPeriod;
-
-    const toggleBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.mt-toggle-btn'));
     const cards = Array.from(root.querySelectorAll<HTMLElement>('.mt-card'));
 
-    function applyPeriod() {
-      for (const b of toggleBtns) {
-        const on = b.dataset.period === period;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-pressed', String(on));
-      }
-      for (const card of cards) {
-        const amt = card.querySelector<HTMLElement>('.mt-amt[data-annual]');
-        const per = card.querySelector<HTMLElement>('.mt-per');
-        if (amt) {
-          const v = period === 'monthly' ? amt.dataset.monthly : amt.dataset.annual;
-          if (v != null) amt.textContent = `$${v}`;
-        }
-        if (per) per.textContent = period === 'monthly' ? (per.dataset.perMonthly || '/ month') : (per.dataset.perAnnual || '/ year');
-      }
-      rewireCtas();
-    }
+    // The visitor's requested plan from ?plan= (set when they return signed-in from creating a free account).
+    const wantPlan = new URLSearchParams(location.search).get('plan');
 
     // Redraw each paid CTA from the resolved tier. Signed-out -> create a free account (carrying the plan).
     // Signed-in below the card tier -> checkout for it. At or above the card tier -> a disabled state.
@@ -234,12 +197,12 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
         } else if (signedIn && myRank > rank) {
           setCta(cta, `Included in ${myTier === 'creator' ? 'Content Creator' : 'your plan'}`, null, true);
         } else if (signedIn) {
-          // A real, same-site checkout hand-off for the selected tier + period.
-          setCta(cta, myRank > 0 ? `Upgrade to ${label}` : `Get ${label}`, () => startCheckout(key), false);
+          // A real, same-site checkout hand-off for this tier at the annual price.
+          setCta(cta, myRank > 0 ? `Upgrade to ${label}` : `Join as ${label}`, () => startCheckout(key), false);
         } else {
           // Signed out: create a free account, then return here pre-selected to finish checkout.
-          const ret = encodeURIComponent(`/membership/?plan=${key}&period=${period}`);
-          setCta(cta, `Get ${label}`, `/login/?return_to=${ret}`, false, key === 'creator');
+          const ret = encodeURIComponent(`/membership/?plan=${key}`);
+          setCta(cta, `Join as ${label}`, `/login/?return_to=${ret}`, false, key === 'creator');
         }
       }
     }
@@ -266,24 +229,21 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
     }
 
     // A top-level same-site form POST to the Worker: the Lax httpOnly session cookie rides (same registrable
-    // domain), the Worker resolves the customer + price and 302s to Stripe, the browser follows the redirect.
+    // domain), the Worker resolves the customer + annual price and 302s to Stripe, the browser follows.
     function startCheckout(tier: string) {
       if (!signupBase) { location.href = '/login/'; return; }
       const form = document.createElement('form');
       form.method = 'POST';
-      form.action = `${signupBase}/checkout?tier=${encodeURIComponent(tier)}&period=${encodeURIComponent(period)}`;
+      form.action = `${signupBase}/checkout?tier=${encodeURIComponent(tier)}&period=${PERIOD}`;
       form.style.display = 'none';
       document.body.appendChild(form);
       form.submit();
     }
 
-    for (const b of toggleBtns) {
-      b.addEventListener('click', () => { period = (b.dataset.period as Period) || 'annual'; applyPeriod(); });
-    }
     // Live sign-in changes re-resolve the CTAs (cookie hydration + a late extension signal both land here).
     onMemberSignal(() => rewireCtas());
+    rewireCtas();
 
-    applyPeriod();
     // Pre-select the tier the visitor asked for before creating their account.
     if (wantPlan) {
       const target = cards.find((c) => c.dataset.tier === wantPlan);
