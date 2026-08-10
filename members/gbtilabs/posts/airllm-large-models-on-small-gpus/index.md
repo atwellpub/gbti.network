@@ -1,12 +1,12 @@
 ---
-title: 'AirLLM runs a 70B model on a 4GB GPU by refusing to load it all at once'
+title: AirLLM runs a 70B model on a 4GB GPU by refusing to load it all at once
 slug: airllm-large-models-on-small-gpus
-status: draft
+status: published
 visibility: public
 publicStub: false
 excerpt: >-
-  AirLLM streams a model layer by layer instead of resident in VRAM, so hardware decides speed rather
-  than whether a model runs at all. We have not run it. Tell us if you have.
+  AirLLM streams a model layer by layer instead of resident in VRAM, so hardware decides speed
+  rather than whether a model runs at all. We have not run it. Tell us if you have.
 categories:
   - ai
   - llms
@@ -16,9 +16,10 @@ tags:
   - open-source
   - gpu
 layout: journal
-coverImage: "./images/memory-and-motherboard.webp"
+coverImage: ./images/memory-and-motherboard.webp
 coverAlt: Memory modules and a processor laid out on a workbench
 featured: false
+updatedAt: '2026-08-10T02:43:03.949Z'
 type: post
 author: gbtilabs
 ---
@@ -50,7 +51,7 @@ The most useful framing we found comes from Umesh Malik, who points out that the
 Reported speeds from people who ran it vary enough that the spread is itself the finding, which is a good reason to read several accounts rather than one:
 
 | Source | Reported speed |
-|---|---|
+| --- | --- |
 | Dashen Tech | typically 1 to 3 tokens per second[^5] |
 | explainx.ai | 0.5 to 2 tokens per second, against 10 to 20 for a resident-in-memory setup[^6] |
 | Nerd Level Tech | about 0.7 tokens per second for Llama 2 70B on NVMe with a dedicated GPU, and about 0.07 on an M2 MacBook Pro, roughly 50 tokens in 12 minutes[^7] |
