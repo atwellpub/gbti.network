@@ -74,6 +74,39 @@ test('hosted author: happy path commits to hosted/<github_id>/<itemId> on canoni
   assert.equal(pr.body.maintainer_can_modify, false);
 });
 
+// sow-203: this drives the REAL Worker handler, not the pure validator, because that distinction is what hid
+// the last failure here. sow-165's review records that its two pure unit tests never touched the Worker path,
+// so the build stayed green while production returned a 400 on the first co-located image and killed the whole
+// rename. A pattern test alone would pass again today and prove nothing about this leg.
+test('sow-203: a CO-LOCATED item image survives the whole Worker path, not just the validator', async () => {
+  const rec = [];
+  const imgB64 = Buffer.from('a fake co-located image').toString('base64');
+  const body = {
+    itemId: 'post-hello', title: 'Publish article: Hello',
+    files: [
+      { path: 'members/atwellpub/posts/hello/index.md', content: '---\ntitle: Hello\ncoverImage: ./images/fig.webp\n---\nbody' },
+      { path: 'members/atwellpub/posts/hello/images/fig.webp', contentBase64: imgB64 },
+    ],
+  };
+  const r = await membershipAuthor(req(body), env, deps(rec));
+  assert.equal(r.status, 200, 'the Worker must accept a co-located image, not 400 the whole request');
+  const imgPut = rec.find((c) => c.method === 'PUT' && /\/posts\/hello\/images\/fig\.webp$/.test(c.url));
+  assert.ok(imgPut, 'the co-located image is committed beside its item');
+  assert.equal(imgPut.body.content, imgB64, 'committed as its RAW base64');
+});
+
+test('sow-203: the Worker still 400s a co-located path that is not a real item image', async () => {
+  const rec = [];
+  const b64 = Buffer.from('x').toString('base64');
+  const body = {
+    itemId: 'post-hello', title: 'Publish article: Hello',
+    files: [{ path: 'members/atwellpub/roles/x/images/a.png', contentBase64: b64 }],
+  };
+  const r = await membershipAuthor(req(body), env, deps(rec));
+  assert.equal(r.status, 400, 'only posts/products/prompts may carry a co-located image');
+  assert.equal(rec.length, 0, 'nothing is committed on a rejected request');
+});
+
 test('sow-158 image upload: a binary { contentBase64 } entry PUTs the raw base64 (no re-encode), text unchanged', async () => {
   const rec = [];
   const imgB64 = Buffer.from('a fake image payload').toString('base64');

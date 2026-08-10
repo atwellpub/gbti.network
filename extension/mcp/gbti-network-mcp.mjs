@@ -19286,7 +19286,6 @@ async function publish(ctx2, { type, input, body, message, title, prBody, author
   const ttl = title ?? desc.title;
   const bdy = prBody ?? desc.body;
   if (isHostedCtx(ctx2)) {
-    if (targetScope === "house") throw new OperationError("bad-request", "the network's own content publishes through fork mode, not from the website yet");
     const hostedRenameFiles = [];
     if (renaming) {
       const onMain = await ctx2.reader?.readFile?.(origin.oldPath) != null;

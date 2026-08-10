@@ -653,12 +653,12 @@ export async function publish(ctx, { type, input, body, message, title, prBody, 
   // ALWAYS fresh-based on live main), so it is just the old-path deletes + the intro move in the same
   // files[] — every path is own-folder, verified against the canonical reader.
   if (isHostedCtx(ctx)) {
-    // Publishing the NETWORK's content from a hosted host has never worked: this refusal predates sow-195
-    // (SOW-157, 2026-07-25) and no house content publish has ever run (zero gbti/house-* branches across
-    // every PR). sow-195 changed the TARGET, not this, so it stays until someone verifies the hosted leg
-    // properly: the Worker would admit it via allowAnyFolder, but the hosted validator's flat-image rule
-    // and the co-located images this content actually uses have never been exercised together.
-    if (targetScope === 'house') throw new OperationError('bad-request', "the network's own content publishes through fork mode, not from the website yet");
+    // sow-203: the NETWORK's content publishes from a hosted host like any other member folder. The refusal
+    // that used to sit here (SOW-157, 2026-07-25) predated sow-195 and was broader than the rule it guarded.
+    // Nothing special is needed: the Worker authorises a superadmin to write any member folder
+    // (allowAnyFolder, sow-183) and the SOW-108 gate auto-merges the PR. The hosted image rule does not apply
+    // either, because it is checked only against BINARY entries and a website upload is staged flat under the
+    // acting caller's own folder (src/lib/workbench-client.ts stageImage), which that rule already accepts.
     const hostedRenameFiles = [];
     if (renaming) {
       const onMain = (await ctx.reader?.readFile?.(origin.oldPath)) != null;

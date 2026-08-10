@@ -19,9 +19,23 @@ export const HOSTED_BRANCH_PREFIX = 'hosted/';
 // check-media.mjs MAX_BYTES cap, so an uploaded image never fails media-check on the auto-merged PR.
 export const HOSTED_MAX_IMAGE_BYTES = 1_048_576; // 1 MB per image (== check-media MAX_BYTES)
 export const HOSTED_MAX_IMAGE_TOTAL_BYTES = 4_194_304; // 4 MB of images per request (a hard abuse bound)
-// A binary image must be an own-folder images/ file with a WEB-IMAGE extension. NO svg (an uploaded svg is a
-// navigation-XSS vector when opened directly); the web upload is raster-only, the extension host keeps svg.
-const IMAGE_PATH_TAIL_RE = /^images\/[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp|gif)$/i;
+// A binary image must be a WEB-IMAGE file under the matched folder's images/ directory, either the flat
+// per-member `images/<name>` or, since sow-203, an item's own `<type>/<slug>/images/<name>`. NO svg (an
+// uploaded svg is a navigation-XSS vector when opened directly); the web upload is raster-only, the
+// extension host keeps svg.
+//
+// The optional item segment exists because content items CO-LOCATE their images beside index.md, which is
+// the layout the Astro build resolves natively (the flat per-user path could not be resolved by image() and
+// broke the site build, which is why the client moved to co-location on 2026-08-04). Only this validator was
+// left on the flat-only rule, so a rename that had to carry co-located images was rejected outright and the
+// attempt was reverted (sow-165, 2026-08-06).
+//
+// Every other property is deliberately unchanged, because this pattern is one of the few things standing
+// between a hosted write and an arbitrary repo path: anchored at BOTH ends, matched against the tail AFTER
+// the caller's folder prefix is stripped so it stays folder-scoped, the type restricted to the three content
+// subdirectories, and the slug restricted to the same charset ANY_MEMBER_FOLDER_RE uses. Neither the slug
+// nor the filename class admits `/`, and the slug admits no `.` either, so no traversal is expressible.
+const IMAGE_PATH_TAIL_RE = /^(?:(?:posts|products|prompts)\/[a-z0-9][a-z0-9-]{0,63}\/)?images\/[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp|gif)$/i;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /** The exact decoded byte length of a base64 string, or -1 if it is not well-formed base64. Node-free (no atob):

@@ -4,7 +4,7 @@
 // lives here so `node --test` (which has no TS loader) can exercise it. Node-free: it imports only the shared pure
 // builders. Mirrors the member-signal.ts / member-signal-core.mjs split.
 
-import { serializeContentFile, parseContentFile, byCommentOldest } from '../../client/src/content-ops.mjs';
+import { serializeContentFile, parseContentFile, byCommentOldest, NETWORK_CONTENT_OWNER } from '../../client/src/content-ops.mjs';
 import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/src/member-content.mjs';
 
 // SOW-027: the valid comment targets (mirrors operations.listComments' COMMENT_TARGET_TYPES).
@@ -17,26 +17,34 @@ export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share
 export const IMAGE_FIELD_KEYS = ['coverImage', 'image', 'banner', 'featuredImage', 'icon'];
 const WEB_IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/;
 
-// sow-182: a house-authored index item, matched by PATH rather than by author string. 'gbti' (the shared house
-// pseudo-author) is not an individual to filter by the way memberContent (client-ui/src/member-view-core.mjs)
-// filters a real member's username; house content is identified by living under house/, not by who "owns" it.
-const HOUSE_PATH_RE = /^house\/(posts|products|prompts)\/[a-z0-9][a-z0-9-]*\/index\.md$/;
+// sow-182: a NETWORK-authored index item, matched by PATH rather than by author string, because the network's
+// content is not an individual to filter by the way memberContent (client-ui/src/member-view-core.mjs) filters a
+// real member's username.
+//
+// sow-195 retargeted it. This used to match `house/<sub>/...`, and those folders no longer exist, so it filtered
+// to nothing and the website WorkBench showed "No articles yet" under the network scope. That was the half of the
+// regression the first fix missed: client/src/operations.mjs is the client core the EXTENSION and npm hosts use,
+// while the website has this parallel implementation, and only the former was repaired.
+//
+// The owner name comes from content-ops.mjs rather than a second literal here, because a duplicated constant is
+// precisely how the two halves drifted apart.
+const NETWORK_PATH_RE = new RegExp(`^members/${NETWORK_CONTENT_OWNER}/(posts|products|prompts)/[a-z0-9][a-z0-9-]*/index\\.md$`);
 
-export function isHousePath(path) {
-  return HOUSE_PATH_RE.test(String(path || ''));
+export function isNetworkPath(path) {
+  return NETWORK_PATH_RE.test(String(path || ''));
 }
 
 /**
- * Filter a per-type public index item list to house-authored content, newest-first, capped. Pure. Mirrors
+ * Filter a per-type public index item list to NETWORK-authored content, newest-first, capped. Pure. Mirrors
  * memberContent's sort/cap shape exactly (dateless items sink to the bottom rather than producing NaN
  * comparisons; the cap applies after the sort so the newest survive), so House content and My content page
  * identically in the WorkBench list; only the selection predicate differs.
  * @param {Array} items  raw index items ({ path, publishedAt, title, ... })
  * @param {number} [cap=24]
  */
-export function houseContent(items, cap = 24) {
+export function networkContent(items, cap = 24) {
   if (!Array.isArray(items)) return [];
-  const mine = items.filter((it) => it && isHousePath(it.path));
+  const mine = items.filter((it) => it && isNetworkPath(it.path));
   mine.sort((a, b) => {
     const av = Number.isFinite(a?.publishedAt) ? a.publishedAt : -Infinity;
     const bv = Number.isFinite(b?.publishedAt) ? b.publishedAt : -Infinity;
@@ -216,7 +224,9 @@ export function mergedRedirectFrom({ oldFm, inputRedirectFrom, renaming, type, o
 
 /** The comments folder for a { scope, username }: house's is fixed; a member's is their own folder. */
 export function introFolderFor({ scope, username } = {}) {
-  return scope === 'house' ? 'house' : `members/${username}`;
+  // sow-195: the 'house' scope key is retained (it is persisted in the WorkBench preference) but resolves to the
+  // network's real member folder, so an intro comment lands beside its item instead of in a folder that is gone.
+  return scope === 'house' ? `members/${NETWORK_CONTENT_OWNER}` : `members/${username}`;
 }
 
 // The from-the-author intro-comment MOVE files for a rename or reassignment (product/prompt only): read

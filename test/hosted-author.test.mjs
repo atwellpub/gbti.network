@@ -184,6 +184,36 @@ test('validateHostedRequest: a binary image is gated to own-folder images/ + a r
   assert.equal(reject('members/atwellpub/images/../../house/x.png').ok, false, 'no traversal out of the folder');
 });
 
+// sow-203: content items co-locate their images beside index.md, which is what the Astro build resolves. This
+// validator was the only piece still on the flat-only rule, so a rename that had to carry co-located images was
+// rejected outright (sow-165, reverted 2026-08-06). The widened tail admits the item segment and NOTHING else.
+test('validateHostedRequest: a CO-LOCATED item image passes, for all three content types', () => {
+  const b64 = Buffer.from('a fake png payload').toString('base64');
+  const ok = (path, folder = 'atwellpub') => validateHostedRequest({ files: [{ path, contentBase64: b64 }], itemId: 'x', folder }).ok;
+  assert.equal(ok('members/atwellpub/posts/hello/images/fig.webp'), true);
+  assert.equal(ok('members/atwellpub/products/thing/images/shot.jpg'), true);
+  assert.equal(ok('members/atwellpub/prompts/p/images/a.gif'), true);
+  // the flat per-member form still passes: the item segment is OPTIONAL, not a replacement
+  assert.equal(ok('members/atwellpub/images/cover.png'), true);
+});
+
+test('validateHostedRequest: the widened image tail admits ONLY the item segment, nothing else', () => {
+  const b64 = Buffer.from('x').toString('base64');
+  const reject = (path, folder = 'atwellpub') => validateHostedRequest({ files: [{ path, contentBase64: b64 }], itemId: 'x', folder });
+  // not a content subdirectory: 'roles' must not become a path segment just because the shape matches
+  assert.equal(reject('members/atwellpub/roles/x/images/a.png').ok, false, 'only posts/products/prompts');
+  // exactly ONE item segment, never an arbitrary depth
+  assert.equal(reject('members/atwellpub/posts/my/deep/images/a.png').ok, false, 'no extra nesting');
+  // svg stays refused in the co-located form too, not just the flat one
+  assert.equal(reject('members/atwellpub/posts/hello/images/evil.svg').ok, false, 'svg is still refused when co-located');
+  // traversal through the new segment
+  assert.equal(reject('members/atwellpub/posts/../../house/images/a.png').ok, false, 'no traversal via the item segment');
+  // house/ is not a member folder at all any more
+  assert.equal(reject('house/posts/x/images/a.png').ok, false, 'house/ is refused outright');
+  // still another member's folder, widening the tail must not widen the FOLDER scope
+  assert.equal(reject('members/other/posts/hello/images/a.png').ok, false, 'cannot write another member co-located either');
+});
+
 test('validateHostedRequest: an image rejects bad base64, empty, and >1 MB; text + binary cannot co-carry', () => {
   const img = (contentBase64) => validateHostedRequest({ files: [{ path: 'members/a/images/x.png', contentBase64 }], itemId: 'x', folder: 'a' });
   assert.equal(img('not*base64!').ok, false, 'invalid base64 rejected');

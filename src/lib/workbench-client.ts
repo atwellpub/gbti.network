@@ -28,7 +28,7 @@ import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, houseContent } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, networkContent } from './workbench-client-core.mjs';
 import { mergeRepoDrafts } from '../../client/src/repo-drafts-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
@@ -423,7 +423,7 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       let raw: any = null;
       try { raw = await sameOriginJson('/' + json); } catch { return { items: [] }; }
       const rawItems: any[] = Array.isArray(raw?.items) ? raw.items : [];
-      const selected = scope === 'house' ? houseContent(rawItems, 9999) : memberContent(rawItems, user, 9999);
+      const selected = scope === 'house' ? networkContent(rawItems, 9999) : memberContent(rawItems, user, 9999);
       const items = selected.map((it: any) => ({ ...it, status: 'published' }));
       return { items };
     },
