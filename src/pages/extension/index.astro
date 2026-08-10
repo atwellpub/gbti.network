@@ -16,7 +16,7 @@ const faqs = [
   { q: 'How do I update it?', a: 'If you installed from the Chrome Web Store, updates happen on their own, there is nothing to do. If you loaded the unpacked ZIP, download the latest ZIP, unzip it over the old folder, and click Reload on the extensions page.' },
   { q: 'Is my GitHub sign-in safe?', a: 'Yes. Sign-in happens between your browser and GitHub. Your token is stored locally by the extension and never sent to GBTI servers.' },
   { q: 'It did not load, what went wrong?', a: 'Two things to check: Developer mode needs to be on, and you need to select the unzipped folder, not the ZIP file itself. If the folder has a manifest.json at its top level, you picked the right one.' },
-  { q: 'Do I need to be a member?', a: 'The extension is free to install, and anyone can browse. But active GBTI membership is required to participate: publishing articles, products, and prompts, sharing URLs that earn referral revenue, commenting, joining the member directory, reading member-only content, and the other network benefits all require it. Without the right privileges, the gate blocks those actions. The trial lets you read the community and stage drafts; a paid membership unlocks publishing and the rest.' },
+  { q: 'Do I need to be a member?', a: 'The extension is free to install, and anyone can browse. But active GBTI membership is required to participate: publishing articles, products, and prompts, sharing URLs that earn referral revenue, commenting, joining the member directory, reading member-only content, and the other network benefits all require it. Without the right privileges, the gate blocks those actions. A free account lets you read the community; a paid membership unlocks publishing and the rest.' },
   { q: 'Can my AI agent publish for me?', a: 'Yes. The extension folder ships a GBTI MCP server, so an agent like Claude Code can draft, publish, and maintain your content through the same gated flow. Publishing still requires an active paid membership.' },
 ];
 
@@ -56,7 +56,7 @@ const mcpPrompt = [
   <div class="trial-ribbon" data-trial-ribbon hidden>
     <div class="wrap trial-ribbon-row">
       <span class="trial-ribbon-dot" aria-hidden="true">&#127881;</span>
-      <p data-trial-copy>Welcome to your GBTI Network trial. Download and install the extension below to start authoring and join the community.</p>
+      <p data-trial-copy>Welcome to GBTI Network. Download and install the extension below to start authoring and join the community.</p>
       <button type="button" class="trial-ribbon-x" data-trial-close aria-label="Dismiss welcome">&times;</button>
     </div>
   </div>

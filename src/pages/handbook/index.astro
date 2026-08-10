@@ -8,8 +8,6 @@
 // for perks, not secrecy).
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import {
-  MEMBERSHIP_PRICE_LABEL,
-  BILLING_PERIOD,
   TRIAL_DAYS_SITE,
   FIRST_TOUCH_PCT,
   LAST_TOUCH_PCT,
@@ -77,14 +75,14 @@ const sections = [
               <li><strong>Give access.</strong> Install the GBTI GitHub App scoped to that one forked
                 repository, so the workbench can stage and publish for you.</li>
             </ol></div>
-          <div class="blk" data-blk><p>Access comes in four tiers. Signed out, you can browse the public
+          <div class="blk" data-blk><p>Access comes in four levels. Signed out, you can browse the public
             site. <strong>Free</strong> (signed in with any GitHub account, no card) adds the reading
             perks: follow the news feed, save favorites, build collections, follow members and topics.
-            The <strong>trial</strong> ({TRIAL_DAYS_SITE} days, no card) adds the member Shares stream,
-            draft authoring on your own fork, and read-only Discord. <strong>Paid</strong>
-            ({MEMBERSHIP_PRICE_LABEL} per {BILLING_PERIOD}) unlocks publishing, contributions, comments,
-            member-only content, and the full Discord community. The
-            <a href="/membership/">membership page</a> has the complete comparison.</p></div>
+            <strong>Network Member</strong> adds commenting across the network, the full Discord community,
+            member-only content, and the member Shares stream. <strong>Content Creator</strong> unlocks
+            publishing your articles, products, and prompts, your creator profile, syndication, and posting
+            to Shares. The <a href="/membership/">membership page</a> has pricing and the complete
+            comparison.</p></div>
           <div class="blk" data-blk><p>After setup, a welcome view walks you through the first two moves:
             join the Discord (your invite is minted on demand) and discover members to follow. Following
             gives you a feed of what those members publish.</p></div>
@@ -115,7 +113,7 @@ const sections = [
         <!-- 3. REVENUE MODEL -->
         <section class="hb-sec" id="revenue" data-sec>
           <h2>Revenue Model</h2>
-          <div class="blk" data-blk><p>Membership is {MEMBERSHIP_PRICE_LABEL} per {BILLING_PERIOD}. When a
+          <div class="blk" data-blk><p>When a
             visitor becomes a paid member, the content that brought them in shares the revenue:</p>
             <ul>
               <li><strong>{FIRST_TOUCH_PCT} first touch</strong>: the author of the earliest member item
@@ -151,8 +149,8 @@ const sections = [
             authority on what merges; the tools handle the git motions for you. Your content lives in
             your own folder (<code>members/&lt;username&gt;/</code>) with posts, products, prompts, and
             images, and your pull requests auto-merge only inside that folder.</p></div>
-          <div class="blk" data-blk><p>During the trial, drafts stay on your fork; nothing you stage
-            reaches the canonical repository. Publishing is for paid members. The moment you upgrade, the
+          <div class="blk" data-blk><p>Until you have a paid membership, drafts stay on your fork; nothing you
+            stage reaches the canonical repository. Publishing is for paid members. The moment you upgrade, the
             workbench publishes your staged drafts.</p></div>
           <div class="blk" data-blk><p>Paid members can also contribute to one another member's folder.
             That pull request waits until the folder owner approves it with a GitHub review, then merges
