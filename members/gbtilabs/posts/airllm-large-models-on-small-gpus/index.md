@@ -16,6 +16,8 @@ tags:
   - open-source
   - gpu
 layout: journal
+coverImage: "./images/memory-and-motherboard.webp"
+coverAlt: Memory modules and a processor laid out on a workbench
 featured: false
 type: post
 author: gbtilabs
@@ -24,8 +26,6 @@ author: gbtilabs
 Most advice about running a large language model locally starts with the same gate: check your VRAM, then pick a model that fits inside it. A 70B model in half precision wants roughly 140GB, so the usual answer is to quantize it down, distill it, prune it, or accept a smaller model.
 
 AirLLM takes a different position. It argues the gate is an artifact of how models are loaded, not a law of the hardware.[^1]
-
-![Memory modules and a processor laid out on a workbench](./images/memory-and-motherboard.webp)
 
 ## The idea
 
