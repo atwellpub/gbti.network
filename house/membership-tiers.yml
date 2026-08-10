@@ -38,7 +38,6 @@ tiers:
       monthly: STRIPE_PRICE_MEMBER_MONTHLY
       annual: STRIPE_PRICE_MEMBER_ANNUAL
     benefits:
-      - Everything in Free
       - Post comments across the network
       - Full Discord access
       - Read members-only content and comment bodies
@@ -54,7 +53,6 @@ tiers:
       monthly: STRIPE_PRICE_CREATOR_MONTHLY
       annual: STRIPE_PRICE_CREATOR_ANNUAL
     benefits:
-      - Everything in Network Member
       - Publish articles, products, and prompts
       - Your creator profile and unified portfolio
       - Reshare and syndicate your work

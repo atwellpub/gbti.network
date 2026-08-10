@@ -12,8 +12,8 @@
 import { FEED_NAV, SIGNED_IN_NAV } from '../lib/site-nav';
 const feedsMenu = FEED_NAV;
 // The signed-out standalone pages (kept out of the signed-in nav per the owner: only the five feed items there).
+// sow-201 (owner decision): Revenue Model comes OUT of the header nav and stays in the footer (Footer.astro).
 const signedOutExtra = [
-  { label: 'Revenue Model', href: '/revenue-model/' },
   { label: 'Get Extension', href: '/extension/' },
 ];
 ---

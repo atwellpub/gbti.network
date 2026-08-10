@@ -10,7 +10,7 @@ import FeedList from './FeedList.astro';
 import { matchesNarrow, sortByNewest } from '../../lib/home-feed.mjs';
 import type { FeedItem } from '../../lib/feed-items';
 import type { AvatarIndex } from '../../lib/avatars';
-import { FIRST_TOUCH_PCT, TRIAL_DAYS_SITE, SIGNUP_BASE } from '../../lib/membership';
+import { FIRST_TOUCH_PCT, SIGNUP_BASE } from '../../lib/membership';
 import { FEED_NAV } from '../../lib/site-nav'; // sow-187: the one consolidated feed-nav source
 
 interface Props {
@@ -77,8 +77,8 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
           <p class="fc-d">Become a member to read the gated articles, products, prompts, and shares across the network.</p>
         </div>
         <div class="fc-a">
-          <a href="/membership/" class="btn btn-primary">Start your free trial</a>
-          <span class="fc-n">{TRIAL_DAYS_SITE}-day trial · no card required</span>
+          <a href="/membership/" class="btn btn-primary">Become a member</a>
+          <span class="fc-n">Reading is free · membership unlocks the rest</span>
         </div>
       </div>
     </aside>
@@ -107,7 +107,7 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
           editorial review it joins the stream, putting your writing in front of the whole network
           without publishing it here by hand.</p>
         <div class="nsc-cta-actions mt24">
-          <a href="/membership/" class="btn btn-primary btn-lg">Start your free trial <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+          <a href="/membership/" class="btn btn-primary btn-lg">Become a member <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
           <a href="/handbook/" class="btn btn-ghost btn-lg">Read the member handbook</a>
         </div>
         <p class="mono muted" style="font-size:12.5px;margin-top:16px">Sources must be valid RSS, owned by
@@ -122,8 +122,8 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
           <p class="fc-d">Publish articles, products &amp; prompts, build with peers in a private Discord, and earn up to {FIRST_TOUCH_PCT} from members your work brings in.</p>
         </div>
         <div class="fc-a">
-          <a href="/membership/" class="btn btn-primary">Start your free trial</a>
-          <span class="fc-n">{TRIAL_DAYS_SITE}-day trial · no card required</span>
+          <a href="/membership/" class="btn btn-primary">Become a member</a>
+          <span class="fc-n">Reading is free · membership unlocks the rest</span>
         </div>
       </div>
     </FeedList>

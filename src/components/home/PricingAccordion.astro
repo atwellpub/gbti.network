@@ -18,7 +18,8 @@ function priceLabel(t: { priceMonthly: number; priceAnnual: number }): string {
 }
 function cta(t: { key: string; priceMonthly: number; priceAnnual: number }) {
   if (isFree(t)) return { href: '/login/', label: 'Create a free account', primary: true };
-  return { href: '/membership/', label: t.key === 'creator' ? 'Become a creator' : 'Become a member', primary: false };
+  // sow-201: carry ?plan=<tier> so /membership/ opens pre-selected on this tier (its checkout CTA reads it).
+  return { href: `/membership/?plan=${t.key}`, label: t.key === 'creator' ? 'Become a creator' : 'Become a member', primary: false };
 }
 ---
 <details class="price-acc" data-home-joincard>

@@ -19,7 +19,7 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
   </button>
   <dialog class="subscribe-modal" data-subscribe-modal aria-label="Subscribe to member activity">
     <div class="sm-card">
-      {/* State 1 (default): no identity at all -> the become-a-member/join-trial nudge. */}
+      {/* State 1 (default): no identity at all -> the become-a-member nudge. */}
       <div data-sub-state="join">
         <p class="eyebrow" style="color:var(--green-700)">Member feature</p>
         <h3 class="h3 mt8" data-subscribe-title>Subscribe to {name}</h3>
@@ -28,7 +28,7 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
           their latest posts, products, prompts, and shares in your feed.
         </p>
         <div class="sm-actions mt24">
-          <a href="/membership/" class="btn btn-primary">Start your free trial</a>
+          <a href="/membership/" class="btn btn-primary">Become a member</a>
           <a href="/extension/" class="btn btn-ghost">Already a member? Sign in</a>
           <button type="button" class="btn btn-ghost" data-subscribe-close>Maybe later</button>
         </div>

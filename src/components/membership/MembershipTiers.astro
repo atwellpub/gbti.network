@@ -1,0 +1,266 @@
+---
+// sow-201: the three-tier membership comparison. This is the FOUNDATION a designer restyles, so DATA
+// (src/lib/tiers.ts, from house/membership-tiers.yml), COPY (the yml), and LAYOUT (this file) are kept
+// separable: a visual pass changes only the markup and the scoped styles below, never a price or a bullet.
+//
+// LEGAL, and it outranks everything else here: benefit copy on a paid page is a legal line. Every price,
+// label, tagline, benefit bullet, and revenue line is rendered VERBATIM from TIER_DISPLAY. This component
+// NEVER writes its own benefit copy and NEVER filters a bullet. To add, soften, reposition, or remove a
+// benefit, edit house/membership-tiers.yml (superadmin-CODEOWNED) and it flows here on the next build. The
+// yml header + sow-185 section 7 (the offerings register) hold the exclusion list of benefits deliberately
+// not yet advertised, and the standing rule: a tier must never advertise a benefit that does not exist.
+//
+// The honest spine, from the ENFORCED gate (membership/classify-pr.mjs requiredTierFor), not from marketing:
+// a Network Member authors comments; a Content Creator authors public presence (articles, products, prompts,
+// and their profile). The caption states exactly that.
+//
+// CHECKOUT: a paid CTA carries the tier + the selected period to the signup Worker's POST /checkout as a
+// same-site top-level form POST, so the httpOnly Lax session cookie rides and the Worker's 302 lands the
+// member on Stripe. A signed-out visitor creates a free account first (/login/), then returns pre-selected.
+// The member signal (paidTier) is UNTRUSTED presentation only; the Worker and the gate are authoritative.
+// Fail closed: an unknown tier resolves DOWN, never up.
+import { TIER_DISPLAY } from '../../lib/tiers';
+import { SIGNUP_BASE } from '../../lib/membership';
+
+// Annual leads (owner decision, sow-201 oq1); the toggle switches to monthly.
+const isFree = (t: { priceMonthly: number; priceAnnual: number }) => t.priceMonthly === 0 && t.priceAnnual === 0;
+---
+<section class="mtiers" data-signup-base={SIGNUP_BASE} aria-labelledby="mtiers-h">
+  <div class="mtiers-head">
+    <h2 id="mtiers-h" class="h2">Choose how you take part</h2>
+    <p class="lead mtiers-sub">
+      Reading is free for everyone. A <strong>Network Member</strong> joins the conversation with comments and
+      the community. A <strong>Content Creator</strong> publishes to the network: articles, products, prompts,
+      and a public profile.
+    </p>
+
+    <!-- Monthly / annual toggle. Annual is the default; no JS still shows the annual price. -->
+    <div class="mt-toggle" role="group" aria-label="Billing period">
+      <button type="button" class="mt-toggle-btn" data-period="monthly" aria-pressed="false">Monthly</button>
+      <button type="button" class="mt-toggle-btn is-on" data-period="annual" aria-pressed="true">
+        Annual <span class="mt-toggle-note">2 months free</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mt-grid">
+    {TIER_DISPLAY.map((t, i) => (
+      <article class:list={['mt-card', t.key === 'creator' && 'mt-card-hl']} data-tier={t.key}>
+        <header class="mt-card-head">
+          <h3 class="mt-label">{t.label}</h3>
+          <p class="mt-tag">{t.tagline}</p>
+          <div class="mt-price">
+            {isFree(t) ? (
+              <span class="mt-amt">$0</span>
+            ) : (
+              <Fragment>
+                <span class="mt-amt" data-monthly={t.priceMonthly} data-annual={t.priceAnnual}>${t.priceAnnual}</span>
+                <span class="mt-per" data-per-monthly="/ month" data-per-annual="/ year">/ year</span>
+              </Fragment>
+            )}
+          </div>
+        </header>
+
+        {i > 0 && (
+          <p class="mt-inherits">Everything in {TIER_DISPLAY[i - 1].label}, plus:</p>
+        )}
+        <ul class="mt-benefits">
+          {t.benefits.map((b) => (
+            <li>
+              <svg class="mt-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+
+        {t.revenue && (
+          <p class="mt-rev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg><span>{t.revenue}</span></p>
+        )}
+
+        <div class="mt-cta-wrap">
+          {isFree(t) ? (
+            <a href="/login/" class="btn btn-primary mt-cta" data-mt-cta data-key={t.key}>Create a free account</a>
+          ) : (
+            <a
+              href={`/login/?return_to=${encodeURIComponent(`/membership/?plan=${t.key}&period=annual`)}`}
+              class:list={['btn', t.key === 'creator' ? 'btn-primary' : 'btn-ghost', 'mt-cta']}
+              data-mt-cta
+              data-key={t.key}
+            >Get {t.label}</a>
+          )}
+        </div>
+      </article>
+    ))}
+  </div>
+
+  <p class="mt-foot body-sm muted">
+    Prices in USD. Cancel anytime and keep access through the end of your paid period. Publishing, comments,
+    and community access are enforced by the network, not by this page.
+  </p>
+</section>
+
+<style>
+  .mtiers { max-width: 1040px; margin: 0 auto; }
+  .mtiers-head { text-align: center; max-width: 680px; margin: 0 auto; }
+  .mtiers-sub { margin: 16px auto 0; }
+  .mtiers-sub strong { color: var(--fg); }
+
+  /* Period toggle */
+  .mt-toggle { display: inline-flex; gap: 4px; margin: 28px auto 0; padding: 5px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--surface); }
+  .mt-toggle-btn { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer; padding: 9px 18px; border-radius: 999px; font-family: var(--f-body); font-weight: 600; font-size: 14px; color: var(--fg-mute); transition: background .15s ease, color .15s ease; }
+  .mt-toggle-btn.is-on { background: var(--green-600); color: #fff; }
+  .mt-toggle-note { font-family: var(--f-mono); font-size: 11px; opacity: .85; }
+  .mt-toggle-btn:not(.is-on) .mt-toggle-note { color: var(--green-600); opacity: 1; }
+
+  /* Grid */
+  .mt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 36px; align-items: start; }
+  @media (max-width: 860px) { .mt-grid { grid-template-columns: 1fr; max-width: 460px; margin-left: auto; margin-right: auto; } }
+
+  .mt-card { display: flex; flex-direction: column; background: var(--surface); border: 1.5px solid var(--line); border-radius: 16px; padding: 30px 26px; height: 100%; }
+  .mt-card-hl { border-color: var(--green-600); box-shadow: 0 0 0 1.5px var(--green-600); }
+
+  .mt-card-head { border-bottom: 1.5px solid var(--line); padding-bottom: 20px; margin-bottom: 20px; }
+  .mt-label { font-family: var(--f-display); font-weight: 800; font-size: 22px; color: var(--fg); }
+  .mt-tag { font-size: 14px; line-height: 1.5; color: var(--fg-mute); margin-top: 8px; min-height: 42px; }
+  .mt-price { display: flex; align-items: baseline; gap: 7px; margin-top: 16px; }
+  .mt-amt { font-family: var(--f-display); font-weight: 800; font-size: 46px; line-height: 1; letter-spacing: -0.02em; color: var(--fg); }
+  .mt-per { font-family: var(--f-mono); font-size: 14px; color: var(--fg-mute); }
+
+  .mt-inherits { font-size: 13px; font-weight: 600; color: var(--fg-mute); margin: 0 0 14px; }
+  .mt-benefits { list-style: none; padding: 0; margin: 0 0 22px; display: flex; flex-direction: column; gap: 13px; flex: 1; }
+  .mt-benefits li { display: flex; align-items: flex-start; gap: 11px; font-size: 15px; line-height: 1.45; color: var(--fg); }
+  .mt-check { width: 20px; height: 20px; flex: none; color: var(--green-600); margin-top: 1px; }
+
+  .mt-rev { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.45; color: var(--fg-mute); background: var(--tint); border-radius: 10px; padding: 12px 14px; margin: 0 0 22px; }
+  .mt-rev svg { width: 18px; height: 18px; flex: none; color: var(--green-600); margin-top: 1px; }
+
+  .mt-cta-wrap { margin-top: auto; }
+  .mt-cta { width: 100%; justify-content: center; }
+  .mt-cta[aria-disabled='true'] { opacity: .6; pointer-events: none; }
+
+  .mt-foot { text-align: center; margin-top: 26px; max-width: 640px; margin-left: auto; margin-right: auto; font-size: 13px; }
+</style>
+
+<script>
+  // sow-201: the period toggle + the tier CTAs. PRESENTATION + a same-site checkout hand-off only. Every real
+  // permission (who may publish, comment, or read member content) stays server-side in the Worker + the gate;
+  // this script reads the UNTRUSTED member signal purely to choose which CTA to show. Fail closed.
+  import { onMemberSignal, readMemberSignal } from '../../lib/member-signal';
+
+  type Period = 'monthly' | 'annual';
+  const RANK: Record<string, number> = { none: 0, member: 1, creator: 2 };
+
+  const root = document.currentScript?.closest('.mtiers') as HTMLElement | null
+    ?? document.querySelector<HTMLElement>('.mtiers');
+  if (root) {
+    const signupBase = root.dataset.signupBase || document.documentElement.dataset.signupBase || '';
+    let period: Period = 'annual';
+
+    // The visitor's requested plan from ?plan= (set when they return signed-in from creating a free account).
+    const q = new URLSearchParams(location.search);
+    const wantPlan = q.get('plan');
+    const wantPeriod = q.get('period');
+    if (wantPeriod === 'monthly' || wantPeriod === 'annual') period = wantPeriod;
+
+    const toggleBtns = Array.from(root.querySelectorAll<HTMLButtonElement>('.mt-toggle-btn'));
+    const cards = Array.from(root.querySelectorAll<HTMLElement>('.mt-card'));
+
+    function applyPeriod() {
+      for (const b of toggleBtns) {
+        const on = b.dataset.period === period;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-pressed', String(on));
+      }
+      for (const card of cards) {
+        const amt = card.querySelector<HTMLElement>('.mt-amt[data-annual]');
+        const per = card.querySelector<HTMLElement>('.mt-per');
+        if (amt) {
+          const v = period === 'monthly' ? amt.dataset.monthly : amt.dataset.annual;
+          if (v != null) amt.textContent = `$${v}`;
+        }
+        if (per) per.textContent = period === 'monthly' ? (per.dataset.perMonthly || '/ month') : (per.dataset.perAnnual || '/ year');
+      }
+      rewireCtas();
+    }
+
+    // Redraw each paid CTA from the resolved tier. Signed-out -> create a free account (carrying the plan).
+    // Signed-in below the card tier -> checkout for it. At or above the card tier -> a disabled state.
+    function rewireCtas() {
+      const sig = readMemberSignal();
+      const signedIn = !!sig || document.documentElement.classList.contains('is-gbti-member');
+      const myTier = document.documentElement.dataset.gbtiTier || (sig ? sig.paidTier : '') || 'none';
+      const myRank = RANK[myTier] ?? 0;
+
+      for (const card of cards) {
+        const key = card.dataset.tier || 'none';
+        const cta = card.querySelector<HTMLElement>('[data-mt-cta]');
+        if (!cta || key === 'none') continue; // the Free CTA is a static "create a free account" link
+        const rank = RANK[key] ?? 99;
+        const label = card.querySelector('.mt-label')?.textContent?.trim() || key;
+
+        cta.removeAttribute('aria-disabled');
+        cta.classList.remove('btn-ghost');
+        (cta as HTMLElement).style.pointerEvents = '';
+
+        if (signedIn && myRank === rank) {
+          setCta(cta, 'Your current plan', null, true);
+        } else if (signedIn && myRank > rank) {
+          setCta(cta, `Included in ${myTier === 'creator' ? 'Content Creator' : 'your plan'}`, null, true);
+        } else if (signedIn) {
+          // A real, same-site checkout hand-off for the selected tier + period.
+          setCta(cta, myRank > 0 ? `Upgrade to ${label}` : `Get ${label}`, () => startCheckout(key), false);
+        } else {
+          // Signed out: create a free account, then return here pre-selected to finish checkout.
+          const ret = encodeURIComponent(`/membership/?plan=${key}&period=${period}`);
+          setCta(cta, `Get ${label}`, `/login/?return_to=${ret}`, false, key === 'creator');
+        }
+      }
+    }
+
+    function setCta(el: HTMLElement, text: string, action: string | (() => void) | null, disabled: boolean, primary = true) {
+      el.textContent = text;
+      el.classList.toggle('btn-primary', primary && !disabled);
+      el.classList.toggle('btn-ghost', !primary || disabled); // a disabled "current plan" reads as a ghost button
+      if (disabled) {
+        el.setAttribute('aria-disabled', 'true');
+        el.removeAttribute('href');
+        (el as any).onclick = (e: Event) => e.preventDefault();
+        return;
+      }
+      if (typeof action === 'string') {
+        el.setAttribute('href', action);
+        (el as any).onclick = null;
+      } else if (typeof action === 'function') {
+        el.removeAttribute('href');
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        (el as any).onclick = (e: Event) => { e.preventDefault(); action(); };
+      }
+    }
+
+    // A top-level same-site form POST to the Worker: the Lax httpOnly session cookie rides (same registrable
+    // domain), the Worker resolves the customer + price and 302s to Stripe, the browser follows the redirect.
+    function startCheckout(tier: string) {
+      if (!signupBase) { location.href = '/login/'; return; }
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = `${signupBase}/checkout?tier=${encodeURIComponent(tier)}&period=${encodeURIComponent(period)}`;
+      form.style.display = 'none';
+      document.body.appendChild(form);
+      form.submit();
+    }
+
+    for (const b of toggleBtns) {
+      b.addEventListener('click', () => { period = (b.dataset.period as Period) || 'annual'; applyPeriod(); });
+    }
+    // Live sign-in changes re-resolve the CTAs (cookie hydration + a late extension signal both land here).
+    onMemberSignal(() => rewireCtas());
+
+    applyPeriod();
+    // Pre-select the tier the visitor asked for before creating their account.
+    if (wantPlan) {
+      const target = cards.find((c) => c.dataset.tier === wantPlan);
+      if (target) { target.classList.add('mt-card-hl'); target.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    }
+  }
+</script>

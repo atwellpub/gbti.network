@@ -6,7 +6,13 @@ import { TRIAL_DAYS } from '../../membership/derive-status.mjs';
 import { DEFAULT_REFERRAL_CONFIG } from '../../membership/referral-config.mjs';
 
 /** Annual membership price in USD. Canonical money lives in Stripe (STRIPE_PRICE_ID, see
- *  membership-and-access.md / workers/signup/wrangler.toml); keep this equal to it. */
+ *  membership-and-access.md / workers/signup/wrangler.toml); keep this equal to it.
+ *
+ *  DEPRECATED (sow-201): the site moved to the three-tier model. The membership page + homepage now bind to
+ *  src/lib/tiers.ts (TIER_DISPLAY, from house/membership-tiers.yml), which is the single source of truth for
+ *  every price and label. This single-price constant (== the legacy Content Creator annual price) survives
+ *  only for the out-of-scope surfaces that still reference it (codeable-invite, handbook). Do NOT add new
+ *  consumers: bind to TIER_DISPLAY instead. */
 export const MEMBERSHIP_PRICE_USD = 150;
 export const MEMBERSHIP_PRICE_LABEL = `$${MEMBERSHIP_PRICE_USD}`;
 export const BILLING_PERIOD = 'year';
