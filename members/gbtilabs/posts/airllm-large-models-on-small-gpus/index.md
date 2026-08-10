@@ -37,13 +37,13 @@ For sparse mixture-of-experts models the same reasoning goes further. A token ro
 
 ## What it costs
 
-This is where an honest reading matters, because the framing invites a misunderstanding.
+This is where a careful reading matters, because the framing invites a misunderstanding.
 
 AirLLM does not make a 70B model fast on a 4GB card. It makes a 70B model possible on a 4GB card. Every layer crosses the disk-to-GPU boundary on every forward pass, which as one write-up puts it converts a memory bottleneck into a disk bottleneck, feasible only because an NVMe drive reading at several gigabytes per second can keep the GPU fed at reduced throughput.[^3]
 
 The most useful framing we found comes from Umesh Malik, who points out that the floor is arithmetic rather than opinion. A 70B model in half precision is roughly 140GB, and every token has to pull all of it past the GPU, so the storage bandwidth alone sets a minimum: about 20 seconds per token on a 7GB/s Gen4 NVMe, about 40 on Gen3, and around 255 seconds on a SATA SSD. Those are pure transfer floors that assume zero compute and zero overhead. Quantizing to 4-bit cuts the bytes per token to roughly 35GB and the Gen4 floor to about 5 seconds.[^4]
 
-Reported real-world speeds vary enough that the spread is itself the finding, which is a good reason to read several accounts rather than one:
+Reported speeds from people who ran it vary enough that the spread is itself the finding, which is a good reason to read several accounts rather than one:
 
 | Source | Reported speed |
 |---|---|
@@ -54,9 +54,9 @@ Reported real-world speeds vary enough that the spread is itself the finding, wh
 
 Abrarqasim frames the comparison bluntly: a response that a 4-bit quantized 70B under llama.cpp returns in 20 to 90 seconds can take 5 to 20 minutes through AirLLM, putting it somewhere between 50 and 200 times slower than either a paid API or a quantized local model.[^8] Nerd Level Tech reaches the same conclusion from the other direction, calling it a genuine accessibility achievement but not a replacement for production inference tools like llama.cpp or vLLM.[^7]
 
-That is not a defect. It is the deal being offered, and it is a reasonable one for a batch job, an overnight evaluation, or simply finding out how a large model behaves before renting hardware to run it properly. It is a poor deal for anything interactive.
+Those are the terms the project is offering, and they suit a batch job or an overnight evaluation, where the work can run unattended and the wait costs nothing. They suit anything interactive very poorly.
 
-One cost that is easy to miss, and that we have not seen the project address: Abrarqasim notes that streaming an entire model off the drive for every token puts serious mileage on consumer SSDs, which are typically rated somewhere between 600 and 1200 terabytes written. Sustained use is a real claim on that budget.[^8] If you plan to leave a job running for days, that is worth thinking about before you start.
+One cost that is easy to miss, and that we have not seen the project address: Abrarqasim notes that streaming an entire model off the drive for every token puts serious mileage on consumer SSDs, which are typically rated somewhere between 600 and 1200 terabytes written. Sustained use draws down a measurable share of that budget.[^8] If you plan to leave a job running for days, that is worth thinking about before you start.
 
 The project does offer a speed lever: optional block-wise quantization compression, which it reports at up to three times faster inference with what it describes as almost ignorable accuracy loss.[^9] Note that turning it on means the run is quantized, which trades away the specific thing that makes the unquantized claim interesting. Dashen Tech adds a fair counterpoint here: because the bottleneck is disk throughput rather than compute, only the weights need compressing, which is an easier thing to do without hurting accuracy than quantizing an entire inference path.[^5]
 
@@ -88,7 +88,7 @@ To be plain about it: nobody at GBTI Network has used AirLLM. Everything above c
 
 That gap is exactly where the network is useful. If you have run AirLLM, we would like to hear the specifics that documentation never captures: what card and what storage, which model, what token rate you actually saw, whether the compression option was worth enabling, and what broke on the way. A report that it did not work is as useful as one that it did.
 
-Leave a comment on this article, or bring it to Discord if it turns into a longer conversation. If enough real numbers come in, we will write them up as a follow-up and credit the members who supplied them.
+Leave a comment on this article, or bring it to Discord if it turns into a longer conversation. If enough measurements come in, we will write them up as a follow-up and credit the members who supplied them.
 
 [^1]: AirLLM project README, accessed August 7, 2026: [lyogavin/airllm](https://github.com/lyogavin/airllm)
 
