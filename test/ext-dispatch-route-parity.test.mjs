@@ -12,6 +12,15 @@
 //
 // The allowlist is the point of the guard, not an afterthought: an intentional host asymmetry MUST be written
 // down here WITH a reason, or the guard turns the next silent divergence into a red build.
+//
+// TRANSITIONAL (sow-204, sequenced with sow-200): the "route parity" test below is valid ONLY while the two
+// hosts are meant to match. sow-204 deliberately makes authoring website-only and removes ~27 authoring routes
+// from the extension, so parity STOPS being the invariant. When that lands, this diff test must be reshaped
+// into a host-responsibility MANIFEST (a declared per-host route set with a reason for each, rather than a
+// symmetry check with a 27-entry allowlist, which would assert nothing). Do that reshape in sow-204's plan
+// mode with the owner; do NOT read the parity assertion here as a permanent contract. The SECOND test in this
+// file, the pre-auth positioning invariant, is NOT transitional: it is the removal-safety guardrail that must
+// keep holding as routes are deleted, because ext-dispatch encodes authorization by position.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
