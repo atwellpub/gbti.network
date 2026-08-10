@@ -24,9 +24,9 @@ type: post
 author: gbtilabs
 ---
 
-Someone taps a link on your site, and instead of a page telling them to install your app, part of your app opens. They never visit the App Store, download anything, or create an account. They do the one thing they came to do and move on, and the software removes itself later without being asked.
+We came across **App Clips** recently and realized how little we knew about them beyond the name. An App Clip runs part of an iOS app with no install: the person never visits the App Store, downloads anything, or creates an account. They do the one thing they came to do and move on, and the software removes itself later without being asked.
 
-That is an **App Clip**, and it has existed since iOS 14 in 2020. Apple is still adding to it, most recently in June 2025.[^1]
+App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, most recently in June 2025.[^1]
 
 ## What an App Clip is
 
