@@ -154,6 +154,8 @@ const labelOf = CATEGORY_LABELS;
       const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
+      const { ARTICLE_SHELL, articleShell, buildArticleLeadHtml, ARTICLE_LAYOUTS } = await import('../../lib/article-page.mjs');
+
       const CDN = 'https://cdn.jsdelivr.net/gh/gbti-network/gbti.network@main';
       // Mirrors resolveContentAsset (client-ui/src/assets.mjs): a repo-relative path resolves against the
       // item's folder over jsDelivr, because a draft's images may not be on the site yet.
@@ -256,6 +258,38 @@ const labelOf = CATEGORY_LABELS;
       const grid = document.querySelector('.pd-grid');
       if (grid) grid.setAttribute('data-side', fm.sidebarPosition === 'right' ? 'right' : 'left');
       setImg('[data-pv-hero]', hero.image, hero.alt || fm.title || '');
+
+      // sow-214: an ARTICLE is not a product, and until now the preview rendered it as one. The published
+      // page picks ArticleJournal / ArticleEditorial / ArticleCard from `layout`; this preview rendered every
+      // type through the product Doc Shell, so an article preview was a different page from the article and
+      // the editor's layout picker changed nothing on screen.
+      //
+      // Reshaped rather than rebuilt: the rail, the body injection, the contents scroll-spy and the
+      // as-a-member toggle are already wired to these elements, so replacing the document would break
+      // working behaviour to share markup that is not where the drift hurt. What made the two look like
+      // different pages was the LEAD (a full-bleed hero with the title over it, versus a heading followed by
+      // an inset cover and caption) and the grid geometry. Both now come from the shared contract in
+      // article-page.mjs, which ArticleJournal.astro is held to by the drift test in test/article-page.test.mjs.
+      if (type === 'post') {
+        const layout = ARTICLE_LAYOUTS.includes(fm.layout) ? fm.layout : 'journal';
+        const shell = articleShell(layout);
+        // The product chrome has no article equivalent: no hero band, no sticky spec bar.
+        (document.querySelector('.pd-hero') as HTMLElement | null)?.setAttribute('hidden', '');
+        (document.querySelector('.pd-bar') as HTMLElement | null)?.setAttribute('hidden', '');
+        // Adopt the real article geometry. These classes already ship on this page: .art-* lives in
+        // gbti-v3.css, which global.css imports and BaseLayout loads, so this needs no new CSS.
+        const grid = document.querySelector('.pd-grid');
+        const rail = document.querySelector('.pd-rail');
+        const col = document.querySelector('.pd-col');
+        if (grid) grid.className = shell.grid;
+        if (rail) rail.className = shell.rail;
+        if (col) (col as HTMLElement).className = shell.column;
+        // The lead, built from the shared helper so its order cannot diverge from the published layout.
+        const coverHtml = hero.image ? `<img src="${esc(asset(hero.image, itemPath))}" alt="${esc(hero.alt || fm.title || '')}" />` : '';
+        const lead = buildArticleLeadHtml({ layout, title: fm.title || slug, coverHtml, caption: hero.alt || '' });
+        const article = document.getElementById('pd-overview');
+        if (article && lead) article.insertAdjacentHTML('beforebegin', lead);
+      }
       setImg('[data-pv-mark]', fm.iconLarge || fm.icon);
       setImg('[data-pv-barmark]', fm.icon);
 
