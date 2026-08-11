@@ -125,19 +125,47 @@ function renderGrantBlock(a, stamp) {
 }
 
 /**
- * Pure: remove one member's entry block (the `  - github_id: ...` list-item line plus its 4-space
- * continuation lines) from the file text. Comments outside the block are untouched. Throws when the
- * block cannot be found (a replacement must never silently no-op into a duplicate).
+ * Pure: locate one member's entry block (the `  - github_id: ...` list-item line plus its 4-space
+ * continuation lines) in the split file text. Returns { start, end } (end exclusive) or null.
+ * ONE place owns the block-matching regex, so the throwing and non-throwing removals below can never
+ * disagree about what an entry block is.
+ */
+function findGrantEntryBlock(lines, githubId) {
+  const startRe = new RegExp(`^  - github_id: "?${githubId}"?(\\s|$)`);
+  const start = lines.findIndex((l) => startRe.test(l));
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length && /^    \S/.test(lines[end])) end++;
+  return { start, end };
+}
+
+/**
+ * Pure: remove one member's entry block from the file text. Comments outside the block are untouched.
+ * Throws when the block cannot be found (a replacement must never silently no-op into a duplicate).
  */
 export function removeGrantEntry(text, githubId) {
   const lines = text.split('\n');
-  const startRe = new RegExp(`^  - github_id: "?${githubId}"?(\\s|$)`);
-  const start = lines.findIndex((l) => startRe.test(l));
-  if (start === -1) throw new Error(`coupon-grants: cannot find the entry block for ${githubId} to replace`);
-  let end = start + 1;
-  while (end < lines.length && /^    \S/.test(lines[end])) end++;
-  lines.splice(start, end - start);
+  const at = findGrantEntryBlock(lines, githubId);
+  if (!at) throw new Error(`coupon-grants: cannot find the entry block for ${githubId} to replace`);
+  lines.splice(at.start, at.end - at.start);
   return lines.join('\n');
+}
+
+/**
+ * Pure: the non-throwing removal, for callers where an ABSENT entry is a normal outcome rather than a
+ * bug (SOW-024 erasure and the sow-212 test reset both run against members who may hold no grant at
+ * all). Returns { text, removed }. Deliberately a sibling of removeGrantEntry rather than a second
+ * implementation: an entry block is defined once, in findGrantEntryBlock.
+ *
+ * Text-based on purpose. A yaml.dump round-trip would reformat the whole file and destroy the
+ * per-person `# github.com/<login>` comments and the header, so every removal here is a line splice.
+ */
+export function removeGrantEntryIfPresent(text, githubId) {
+  const lines = text.split('\n');
+  const at = findGrantEntryBlock(lines, String(githubId));
+  if (!at) return { text, removed: false };
+  lines.splice(at.start, at.end - at.start);
+  return { text: lines.join('\n'), removed: true };
 }
 
 /**

@@ -7,7 +7,9 @@ import assert from 'node:assert/strict';
 import {
   deleteKvKey, eraseActivity, eraseFollows, eraseLookupCache, eraseShareVotes, eraseNewsOpens, planErasure, runErasure,
   eraseDiscordRoles, eraseContent, eraseStripeCustomer, ACTIVITY_KEY, FOLLOWS_KEY, LOOKUP_KEY, MEMBERS_INDEX_PATH,
+  eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY,
 } from '../scripts/lib/erase-member.mjs';
+import { GRANDFATHERED_PATH } from '../scripts/lib/coupon-grants.mjs';
 import { parseArgs } from '../scripts/erase-member.mjs';
 
 const CF = { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
@@ -139,9 +141,145 @@ test('eraseContent is a no-op (no branch, no PR) when there is nothing to change
   assert.equal(github.seen.pull, null, 'no PR opened');
 });
 
-test('eraseContent skips without a github client or a username', async () => {
+test('eraseContent skips without a github client', async () => {
   assert.match((await eraseContent({ github: null, githubId: '9', username: 'alice' })).reason, /no GitHub client/);
-  assert.match((await eraseContent({ github: {}, githubId: '9', username: null })).reason, /no member folder/);
+});
+
+// Rewritten 2026-08-11, not deleted: this used to assert that a missing username SKIPPED the whole step.
+// That guard was removed deliberately. A username is needed only for the CONTENT flip; the two house-record
+// removals (members-index and the grandfather grant) are keyed on github_id alone, and a member with no
+// content folder is precisely the one most likely to hold a grant and no folder. Skipping on a missing
+// username left their public records in place, which is the gap SecurityMaster adjudicated.
+const GRANTS_YML = [
+  '# Grandfathered github_ids (ADMIN-owned). Header comment that must survive a removal.',
+  'grandfathered:',
+  '  - github_id: "9"       # github.com/alice',
+  '    login: alice',
+  '    reason: coupon:CODEABLEYEAR',
+  '    until: "2027-01-01T00:00:00.000Z"',
+  '  - github_id: "10"      # github.com/bob',
+  '    login: bob',
+  '    reason: complimentary access (grandfathered co-op member)',
+  '    until: null',
+  '',
+].join('\n');
+
+test('eraseContent still strips house records for a member with no folder (no username)', async () => {
+  const github = fakeGithub({
+    contents: { [GRANDFATHERED_PATH]: { sha: 'sg', content: b64(GRANTS_YML) } },
+  });
+  const res = await eraseContent({ github, githubId: '9', username: null, files: [] });
+  assert.equal(res.skipped, undefined, 'must not skip: there is a grant to remove');
+  assert.equal(res.grantRemoved, true);
+  assert.equal(res.flipped, 0);
+  const put = github.seen.puts.find((p) => p.path === GRANDFATHERED_PATH);
+  assert.ok(put, 'the grant file was committed');
+  assert.equal(put.branch, github.seen.branch, 'committed on the erase branch, not base');
+  assert.equal(put.sha, 'sg', 'used the blob sha read from the branch (TOCTOU-safe)');
+  assert.doesNotMatch(put.text, /github_id: "9"/, "the erased member's block is gone");
+  assert.match(put.text, /github_id: "10"/, "every other member's block survives");
+  assert.match(put.text, /# github\.com\/bob/, 'per-person comments survive (a line splice, not a yaml re-dump)');
+  assert.match(put.text, /^# Grandfathered github_ids/m, 'the file header survives');
+});
+
+test('eraseContent removes the grandfather grant in the SAME PR as the content flip and the index entry', async () => {
+  const post = '---\ntitle: x\nstatus: published\n---\nbody\n';
+  const github = fakeGithub({
+    contents: {
+      'members/alice/posts/x/index.md': { sha: 's1', content: b64(post) },
+      [MEMBERS_INDEX_PATH]: { sha: 'si', content: b64('members:\n  "9": alice\n  "10": bob\n') },
+      [GRANDFATHERED_PATH]: { sha: 'sg', content: b64(GRANTS_YML) },
+    },
+  });
+  const res = await eraseContent({
+    github, githubId: '9', username: 'alice',
+    files: [{ path: 'members/alice/posts/x/index.md', status: 'published' }],
+  });
+  assert.equal(res.flipped, 1);
+  assert.equal(res.indexRemoved, true);
+  assert.equal(res.grantRemoved, true);
+  assert.equal(github.seen.pull.head, github.seen.branch, 'all three changes ride one PR');
+  assert.equal(github.seen.puts.filter((p) => p.branch === github.seen.branch).length, 3);
+  assert.match(github.seen.pull.body, /grandfather grant/);
+});
+
+test('eraseContent refuses to commit a grant removal that does not actually remove the member', async () => {
+  // A splice that leaves the id resolvable means the removal silently did nothing. The step must ERROR
+  // rather than open a PR that claims a removal it did not perform.
+  const twice = GRANTS_YML + '  - github_id: "9"\n    reason: a duplicate block\n    until: null\n';
+  const github = fakeGithub({ contents: { [GRANDFATHERED_PATH]: { sha: 'sg', content: b64(twice) } } });
+  const res = await eraseContent({ github, githubId: '9', username: null, files: [] });
+  assert.match(res.error, /still resolves a grant for 9/);
+  assert.equal(github.seen.pull, null, 'no PR opened');
+  assert.equal(github.seen.puts.length, 0, 'nothing committed');
+});
+
+// --- Coupon grant + redemptions (SOW-119 / sow-212) ----------------------------------------------------------
+
+test('eraseCouponGrant targets coupon-grant:<github_id> and requires an id', async () => {
+  let key;
+  await eraseCouponGrant({ githubId: 7, env: CF, fetchImpl: async (url) => { key = decodeURIComponent(url.split('/values/')[1]); return { ok: true }; } });
+  assert.equal(key, COUPON_GRANT_KEY('7'));
+  assert.equal(key, 'coupon-grant:7');
+  await assert.rejects(() => eraseCouponGrant({ githubId: '' }), /github_id is required/);
+});
+
+/** Fake CF KV REST for the redemption sweep: a key list, per-key value GETs, DELETEs and counter PUTs. */
+function fakeKvFetch({ keys, values }) {
+  const calls = { deleted: [], put: [] };
+  const fetchImpl = async (url, init = {}) => {
+    if (init.method === 'DELETE') {
+      calls.deleted.push(decodeURIComponent(url.split('/values/')[1]));
+      return { ok: true };
+    }
+    if (init.method === 'PUT') {
+      calls.put.push({ key: decodeURIComponent(url.split('/values/')[1]), body: init.body });
+      return { ok: true };
+    }
+    if (url.includes('/keys?')) {
+      return { ok: true, json: async () => ({ result: keys.map((name) => ({ name })), result_info: {} }) };
+    }
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    const v = values[key];
+    if (v === undefined) return { ok: false };
+    return { ok: true, json: async () => (typeof v === 'string' ? JSON.parse(v) : v), text: async () => String(v) };
+  };
+  return { fetchImpl, calls };
+}
+
+test('eraseCouponRedemptions deletes only THIS member\'s records and decrements the shared counter', async () => {
+  const { fetchImpl, calls } = fakeKvFetch({
+    keys: ['redemption:CODEABLEYEAR:9', 'redemption:CODEABLEYEAR:10', 'redemption:OTHER:9'],
+    values: {
+      'redemption:CODEABLEYEAR:9': { code: 'CODEABLEYEAR', until: '2027-01-01T00:00:00.000Z' },
+      'redemption:CODEABLEYEAR:10': { code: 'CODEABLEYEAR', until: '2027-01-01T00:00:00.000Z' },
+      'redemption:OTHER:9': { code: 'OTHER', until: '2027-01-01T00:00:00.000Z' },
+      'redemptions:CODEABLEYEAR': '5',
+      'redemptions:OTHER': '2',
+    },
+  });
+  const res = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(res.scrubbed, 2, 'both of member 9 codes');
+  assert.deepEqual(calls.deleted.sort(), ['redemption:CODEABLEYEAR:9', 'redemption:OTHER:9']);
+  assert.ok(!calls.deleted.includes('redemption:CODEABLEYEAR:10'), "another member's redemption is untouched");
+  // The counter is SHARED: decremented, never deleted, or every other member's redemption is un-burned.
+  const counters = Object.fromEntries(calls.put.map((p) => [p.key, p.body]));
+  assert.equal(counters['redemptions:CODEABLEYEAR'], '4', '5 -> 4');
+  assert.equal(counters['redemptions:OTHER'], '1', '2 -> 1');
+  assert.ok(!calls.deleted.some((k) => k.startsWith('redemptions:')), 'the counter is never deleted');
+});
+
+test('eraseCouponRedemptions clamps the counter at zero and is a reported no-op without CF creds', async () => {
+  const { fetchImpl, calls } = fakeKvFetch({
+    keys: ['redemption:ABC:9'],
+    values: { 'redemption:ABC:9': { code: 'ABC', until: '2027-01-01T00:00:00.000Z' }, 'redemptions:ABC': '0' },
+  });
+  await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(calls.put.find((p) => p.key === 'redemptions:ABC').body, '0', 'never goes negative on a repeat run');
+
+  const r = await eraseCouponRedemptions({ githubId: '9', env: {}, fetchImpl: async () => { throw new Error('should not fetch'); } });
+  assert.equal(r.skipped, true);
+  await assert.rejects(() => eraseCouponRedemptions({ githubId: '' }), /github_id is required/);
 });
 
 // --- Stripe delete (opt-in) ---------------------------------------------------------------------------------
