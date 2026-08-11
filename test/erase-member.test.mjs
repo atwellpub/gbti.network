@@ -312,7 +312,7 @@ test('minimizeCouponGrant writes the hashed lock BEFORE deleting the raw record'
     if (init.method === 'DELETE') { order.push(`del:${key}`); return { ok: true }; }
     return { ok: true, text: async () => JSON.stringify({ code: 'CODEABLEYEAR', until: '2027-01-01T00:00:00.000Z' }) };
   };
-  const env = { ...CF, COUPON_LOCK_SALT: 's3cret' };
+  const env = { ...CF, COUPON_LOCK_KEY: 's3cret' };
   const res = await minimizeCouponGrant({ githubId: '9', env, fetchImpl });
   assert.equal(res.deleted, true);
   const lockKey = await couponLockKey('s3cret', '9');
@@ -325,7 +325,7 @@ test('minimizeCouponGrant KEEPS the raw record when no salt is configured (fail 
   const fetchImpl = async (url, init = {}) => { calls.push(init.method ?? 'GET'); return { ok: true, text: async () => '{}' }; };
   const res = await minimizeCouponGrant({ githubId: '9', env: CF, fetchImpl });
   assert.equal(res.skipped, true);
-  assert.match(res.reason, /COUPON_LOCK_SALT/);
+  assert.match(res.reason, /COUPON_LOCK_KEY/);
   assert.match(res.reason, /KEPT/, 'says plainly that the raw record was left in place');
   assert.equal(calls.length, 0, 'nothing is deleted: losing the lock would restore the coupon exploit');
 });

@@ -225,8 +225,8 @@ export async function eraseCouponGrant({ githubId, env = process.env, fetchImpl 
 /** sow-212: delete the MINIMIZED lock too. Test-reset only, for an account erased before it was reset. */
 export async function eraseCouponLock({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
-  const key = await couponLockKey(env.COUPON_LOCK_SALT, githubId);
-  if (!key) return { skipped: true, reason: 'COUPON_LOCK_SALT not set (cannot compute the lock key)' };
+  const key = await couponLockKey(env.COUPON_LOCK_KEY, githubId);
+  if (!key) return { skipped: true, reason: 'COUPON_LOCK_KEY not set (cannot compute the lock key)' };
   return deleteKvKey({ key, env, fetchImpl });
 }
 
@@ -242,16 +242,16 @@ export async function eraseCouponLock({ githubId, env = process.env, fetchImpl =
  * between the two, the failure mode is a duplicated lock (harmless, both deny) rather than no lock at all
  * (which silently restores the abuse the owner asked us to prevent).
  *
- * FAIL CLOSED WITHOUT THE SALT: with no COUPON_LOCK_SALT there is no way to write a lock that redeemCoupon
+ * FAIL CLOSED WITHOUT THE SALT: with no COUPON_LOCK_KEY there is no way to write a lock that redeemCoupon
  * could later find, so this does NOT delete the raw record. Reported as skipped with the reason, never a
  * silent pass: leaving identifying data in place is the lesser harm against restoring a coupon exploit, and
- * an operator who sees the skip can provision the salt and re-run.
+ * an operator who sees the skip can provision the key and re-run.
  */
 export async function minimizeCouponGrant({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
-  const lockKey = await couponLockKey(env.COUPON_LOCK_SALT, githubId);
+  const lockKey = await couponLockKey(env.COUPON_LOCK_KEY, githubId);
   if (!lockKey) {
-    return { skipped: true, reason: 'COUPON_LOCK_SALT not set: raw coupon-grant KEPT rather than delete the one-per-member lock' };
+    return { skipped: true, reason: 'COUPON_LOCK_KEY not set: raw coupon-grant KEPT rather than delete the one-per-member lock' };
   }
   const existing = await readKvValue({ key: couponGrantKey(String(githubId)), env, fetchImpl });
   if (existing === null) return { skipped: true, reason: 'no coupon grant to minimize' };
@@ -325,7 +325,7 @@ export function planErasure({ githubId, username } = {}) {
   const who = username ? `members/${username}/` : "the member's";
   return [
     { step: 'content', auto: true, tool: 'erase-member.mjs --apply', action: `Flip ${who} content status -> draft via an auto-merged PR (reversible; history persists), and remove their house/grandfathered.yml grant in the same PR.` },
-    { step: 'coupon-grant', auto: true, tool: 'erase-member.mjs --apply', action: `MINIMIZE ${COUPON_GRANT_KEY(githubId)}: write a keyed-hash lock, then delete the raw-id record. The one-coupon-per-member lock SURVIVES erasure (owner ruling 2026-08-11); needs COUPON_LOCK_SALT.` },
+    { step: 'coupon-grant', auto: true, tool: 'erase-member.mjs --apply', action: `MINIMIZE ${COUPON_GRANT_KEY(githubId)}: write a keyed-hash lock, then delete the raw-id record. The one-coupon-per-member lock SURVIVES erasure (owner ruling 2026-08-11); needs COUPON_LOCK_KEY.` },
     { step: 'coupon-redemptions', auto: true, tool: 'erase-member.mjs --apply', action: `Delete every redemption:<CODE>:${githubId} record (the id is in the key name) and decrement each shared redemptions:<CODE> counter.` },
     { step: 'activity', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the edge-store keys ${ACTIVITY_KEY(githubId)} (favorites + collections) and ${FOLLOWS_KEY(githubId)} (the follow graph).` },
     { step: 'lookup-cache', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the lookup-cache key ${LOOKUP_KEY(githubId)} (github_id -> Stripe customer_id).` },

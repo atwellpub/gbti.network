@@ -115,7 +115,7 @@ export function planReset({ githubId, withContent = false } = {}) {
   const id = String(githubId);
   return [
     { step: 'coupon-grant', action: `Delete coupon-grant:${id} (the one-coupon-per-member lock). This is what blocks re-redeeming.` },
-    { step: 'coupon-lock', action: 'Delete the minimized (hashed) lock left by a prior erasure, if any. Needs COUPON_LOCK_SALT.' },
+    { step: 'coupon-lock', action: 'Delete the minimized (hashed) lock left by a prior erasure, if any. Needs COUPON_LOCK_KEY.' },
     { step: 'coupon-redemptions', action: `Delete every redemption:<CODE>:${id} and DECREMENT each shared redemptions:<CODE> counter.` },
     { step: 'lookup-cache', action: `Delete gh:${id} (the github_id -> Stripe customer lookup cache).` },
     { step: 'conv-snapshot', action: `Delete conv:${id} (the frozen conversion attribution snapshot).` },

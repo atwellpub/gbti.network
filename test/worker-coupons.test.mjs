@@ -87,14 +87,14 @@ test('redeemCoupon REFUSES a member holding only the minimized (post-erasure) lo
   const lockKey = await couponLockKey(SALT, '42');
   const kv = fakeKv({ 'coupons:config': MIRROR, [lockKey]: COUPON_LOCK_VALUE });
 
-  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW, lockSalt: SALT });
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW, lockSecret: SALT });
   assert.equal(r, null, 'no redemption: the erased account cannot use the coupon again');
   assert.equal(kv.store.has(couponGrantKey('42')), false, 'no new grant was written');
   assert.equal(kv.store.has(redemptionKey('CODEABLEYEAR', '42')), false);
   assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), undefined, 'the shared counter did not move');
 
   // A DIFFERENT member is unaffected by someone else's lock.
-  const other = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '43', now: NOW, lockSalt: SALT });
+  const other = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '43', now: NOW, lockSecret: SALT });
   assert.equal(other.already, false, 'an unlocked member still redeems normally');
 });
 
@@ -105,7 +105,7 @@ test('the minimized lock is only consulted when a salt is configured', async () 
   const SALT = 's3cret-test-salt';
   const lockKey = await couponLockKey(SALT, '42');
   const kv = fakeKv({ 'coupons:config': MIRROR, [lockKey]: COUPON_LOCK_VALUE });
-  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW }); // no lockSalt
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW }); // no lockSecret
   assert.equal(r.already, false, 'redeems, because the lock key is not computable');
 });
 

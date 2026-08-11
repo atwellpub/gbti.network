@@ -49,7 +49,7 @@ export async function validateCouponParam(kv, code, now = new Date()) {
  * Redeem `code` for `githubId`. Returns { code, redeemedAt, until, already } on success (already = an
  * existing grant was found, nothing new written), or null when no redemption happened (fail closed).
  */
-export async function redeemCoupon({ kv, code, githubId, login = null, now = new Date(), lockSalt = null } = {}) {
+export async function redeemCoupon({ kv, code, githubId, login = null, now = new Date(), lockSecret = null } = {}) {
   if (!kv || !code || !githubId) return null;
   try {
     // One coupon per member, ever: an existing grant is the idempotency lock (retries, GitHub-then-Discord
@@ -61,8 +61,8 @@ export async function redeemCoupon({ kv, code, githubId, login = null, now = new
     // the github_id, because the owner ruled the one-per-member lock survives erasure while the identifying
     // record does not. Without this check the lock would be silently unenforced for exactly those accounts,
     // which is the abuse the ruling exists to prevent. Returns null: no redemption, and signup continues.
-    if (lockSalt) {
-      const lockKey = await couponLockKey(lockSalt, githubId);
+    if (lockSecret) {
+      const lockKey = await couponLockKey(lockSecret, githubId);
       if (lockKey && (await kv.get(lockKey))) return null;
     }
 

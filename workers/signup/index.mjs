@@ -265,7 +265,7 @@ async function handleGithubCallback(request, env) {
     discord,
     kv: env.SIGNUP_KV,
     config: discordConfig(env),
-    couponLockSalt: env.COUPON_LOCK_SALT ?? null, // sow-212: enforce the post-erasure minimized coupon lock
+    couponLockSecret: env.COUPON_LOCK_KEY ?? null, // sow-212: enforce the post-erasure minimized coupon lock
     refCode: state.ref,
     via: state.via,
     touchSession: state.sid, // SOW-059: bind the touch session to this new Customer (new-customer-only)
@@ -325,7 +325,7 @@ async function handleDiscordCallback(request, env) {
     discord,
     kv: env.SIGNUP_KV,
     config: discordConfig(env),
-    couponLockSalt: env.COUPON_LOCK_SALT ?? null, // sow-212: enforce the post-erasure minimized coupon lock
+    couponLockSecret: env.COUPON_LOCK_KEY ?? null, // sow-212: enforce the post-erasure minimized coupon lock
     refCode: state.ref,
     via: state.via,
     touchSession: state.sid, // SOW-059 P1c: bind the touch session to this new Customer (new-customer-only)
