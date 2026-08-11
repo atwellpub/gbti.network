@@ -61,6 +61,20 @@ jobs:
           # GITHUB_CONTENT_REPO is a non-secret constant (and could not be a GITHUB_-prefixed secret anyway):
           GITHUB_CONTENT_REPO: gbti-network/gbti.network
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          # sow-185 FAIL-OPEN FIX (2026-08-11, SecurityMaster). These price ids were provisioned in
+          # workers/signup/wrangler.toml [env.production.vars] but were NEVER passed to this workflow, so
+          # buildEnvPriceTierMap(process.env) built an EMPTY map here and tierForPrice() fell through to its
+          # legacy single-price branch, returning `creator` for EVERY paid subscriber. meetsTier() then passed,
+          # so a $5 Network Member was admitted wherever Content Creator was required. Reconcile was unaffected
+          # because shouldSyncCreatorRole() guards on the map being non-empty; this gate had no such guard.
+          # These are PUBLIC, non-secret Stripe price ids (they already sit in a committed wrangler.toml), so
+          # they are inlined here rather than held as secrets, exactly like STRIPE_PRICE_ID's siblings.
+          # Keep in sync with wrangler.toml [env.production.vars].
+          STRIPE_PRICE_ID: price_1Tg5NHBFxyhSkuibXFrQyqaN
+          STRIPE_PRICE_MEMBER_MONTHLY: price_1U2d31BFxyhSkuibpiaNGku5
+          STRIPE_PRICE_MEMBER_ANNUAL: price_1U2d31BFxyhSkuibfNpQKcX0
+          STRIPE_PRICE_CREATOR_MONTHLY: price_1U2d32BFxyhSkuibQJHXnU3F
+          STRIPE_PRICE_CREATOR_ANNUAL: price_1U2d32BFxyhSkuibPBqOdOZs
           # BOT_GITHUB_ID = the GBTI App bot (gbti-network-publisher[bot]) that opens member authoring PRs on the
           # member's behalf (SOW-026). The gate uses it to detect an App-opened PR and resolve the REAL author from
           # the head-fork owner (a member can only open a PR from their own fork). It is NOT a superadmin id, so the

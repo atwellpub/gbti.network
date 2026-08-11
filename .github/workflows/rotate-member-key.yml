@@ -46,15 +46,29 @@ jobs:
           MEMBER_CONTENT_KEY: ${{ secrets.MEMBER_CONTENT_KEY }}          # the CURRENT (old) epoch key
           MEMBER_CONTENT_KEY_NEW: ${{ secrets.MEMBER_CONTENT_KEY_NEW }}  # the NEW epoch key (pre-generated)
 
+      # MEMBER_CONTENT_KID appears TWICE in wrangler.toml: under [vars] and under [env.production.vars].
+      # Production runs the [env.production] environment (the deploy is --env production), so the second one
+      # is the live value. A NON-global replace rewrites only the FIRST, inert, occurrence and leaves
+      # production on the old epoch; after the secret swap every member-only decrypt then fails in production.
+      # Hence /gm, plus an assertion that it actually matched: a silent no-op on a regex miss is how this
+      # class of defect hides, because the step stays green and the damage only appears after the
+      # irreversible key destruction. Fixed 2026-08-11 (SecurityMaster); see
+      # .data/ops/encryption-ops/rotation-runbook.md.
       - name: Bump MEMBER_CONTENT_KID in wrangler.toml
         run: |
           node -e '
             const fs = require("fs");
             const p = "workers/signup/wrangler.toml";
             const kid = process.argv[1];
-            let t = fs.readFileSync(p, "utf8");
-            t = t.replace(/^MEMBER_CONTENT_KID = ".*"$/m, `MEMBER_CONTENT_KID = "${kid}"`);
-            fs.writeFileSync(p, t);
+            const before = fs.readFileSync(p, "utf8");
+            const after = before.replace(/^MEMBER_CONTENT_KID = ".*"$/gm, `MEMBER_CONTENT_KID = "${kid}"`);
+            if (after === before) {
+              console.error("rotate: MEMBER_CONTENT_KID not found in " + p + "; refusing to continue.");
+              process.exit(1);
+            }
+            const n = (after.match(/^MEMBER_CONTENT_KID = /gm) || []).length;
+            console.log("rotate: set MEMBER_CONTENT_KID to " + kid + " in " + n + " location(s)");
+            fs.writeFileSync(p, after);
           ' "${{ inputs.new_kid }}"
 
       # Open a PR for review (NOT auto-merge): a human verifies the rotation before the Worker secret is swapped.
