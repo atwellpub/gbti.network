@@ -8794,14 +8794,17 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     async _loadStatus() {
       if (!this.client) {
         this._membership = null;
+        this._tier = null;
         this.render();
         return;
       }
       try {
         const s = await this.client.status();
         this._membership = s?.membership ?? "unknown";
+        this._tier = typeof s?.paidTier === "string" ? s.paidTier : null;
       } catch {
         this._membership = "unknown";
+        this._tier = null;
       }
       this.render();
     }
@@ -8811,6 +8814,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (m === void 0) return this.set(this.css(CSS21) + `<div class="card"><p class="sub">Loading…</p></div>`);
       if (LOCKED3.has(m)) return this._renderLocked();
       if (m === "trialing") return this._renderTrial();
+      if (this._tier && this._tier !== "creator") return this._renderNotCreator();
       return this._renderComposer();
     }
     _noticeHtml(title, body, glyph) {
@@ -8821,6 +8825,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         "Your access is locked",
         'Your membership has lapsed, so Shares are locked. <a href="https://gbti.network/membership/">Renew your membership</a> to read and post in the community stream again.',
         "🔒"
+      ));
+    }
+    // sow-218: a paid member on a tier below Content Creator. Named for what they ARE rather than what they lack,
+    // and it states the tier plainly, because "your PR was rejected" after writing a Share is the experience this
+    // exists to prevent.
+    _renderNotCreator() {
+      this.set(this.css(CSS21) + this._noticeHtml(
+        "Posting Shares is a Content Creator perk",
+        'Your membership covers reading the community stream. Posting Shares, articles, products and prompts is part of Content Creator membership. <a href="https://gbti.network/membership/">See the membership tiers</a> to upgrade.',
+        "✍️"
       ));
     }
     _renderTrial() {

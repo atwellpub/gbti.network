@@ -137,8 +137,8 @@ function discordConfig(env) {
     guildId: env.DISCORD_GUILD_ID,
     trialRoleId: env.DISCORD_TRIAL_ROLE_ID,
     memberRoleId: env.DISCORD_MEMBER_ROLE_ID,
-    // The role a FRESH signup receives. Since the trial was retired a new member derives `none`, and
-    // discordRoleTarget maps `none` -> locked, so this is what reconcile would assign them anyway.
+    // sow-218: all three ids are now needed, because signup RESOLVES which one to assign (resolveSignupRole)
+    // rather than hardcoding one. `locked` is the fail-closed fallback, not the default.
     lockedRoleId: env.DISCORD_LOCKED_ROLE_ID,
     signupSource: 'signup-worker',
   };

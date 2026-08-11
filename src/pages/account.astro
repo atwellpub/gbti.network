@@ -92,6 +92,20 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
             <p class="hub-sub">Everything the network is shipping and sharing. Filter by kind, or narrow to member content.</p>
             <FeedView narrow="all" items={[...contentItems, ...shareItems]} avatarIndex={avatarIndex} membersShareCount={membersShareCount} />
           </div>
+          {/* sow-218: the LIVE co-op stream, kept alongside Latest Activity rather than replaced by it.
+              FeedView is rendered at build time from repository content, so on its own it shows public items,
+              members-only shares as an aggregate locked COUNT, and nothing newer than the last deploy. This
+              element reads the stream from the Worker at load, so a paid member still sees members-only shares
+              in full and within seconds of posting. Two different jobs: the network view above, the member view
+              here. Hidden until the client mounts, so a non-paid member never sees an empty shell. */}
+          <div class="hub-card" data-stream-card hidden>
+            <h2 class="hub-h">Member stream</h2>
+            <p class="hub-sub">The live co-op stream, including members-only shares. Load older to page back through it.</p>
+            <div data-feed-mount>
+              <p class="hub-load">Loading the stream&hellip;</p>
+              <gbti-shares-feed></gbti-shares-feed>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -108,6 +122,7 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
     const profileTile = document.querySelector('[data-account-profile]') as HTMLAnchorElement | null;
     const adminTile = document.querySelector('[data-account-admin]') as HTMLElement | null;
     const shareCard = document.querySelector('[data-share-card]') as HTMLElement | null; // sow-218: creator-only
+    const streamCard = document.querySelector('[data-stream-card]') as HTMLElement | null; // sow-218: live member stream
     const LABELS: Record<string, string> = { paid: 'Paid member', trialing: 'Free trial', expired: 'Expired', cancelled: 'Cancelled', none: 'No active membership', banned: 'Suspended', unknown: 'Signed in' };
     const RANK: Record<string, number> = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
 
@@ -129,13 +144,20 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
       // This is a presentational gate. The Worker share endpoint remains the real boundary (sow-218 Phase 2).
       const isCreator = s.paidTier === 'creator';
       if (shareCard) shareCard.hidden = !isCreator;
-      mountHub(s, isCreator);
+      // sow-218: the live member stream is for members who can actually SEE members-only shares, which is the
+      // paid tiers. The Worker re-checks per caller and serves a free or banned account public shares only, so
+      // this is presentation; hiding it from the tiers that would see a public-only duplicate of the feed
+      // directly above is the point, not a security boundary.
+      const showStream = s.membership === 'paid' || s.membership === 'trialing';
+      if (streamCard) streamCard.hidden = !showStream;
+      mountHub(s, isCreator, showStream);
     }
 
-    // sow-218: only the composer needs the client now. Latest Activity is the server-rendered FeedView, so the
-    // shares-feed element is no longer imported here, and a non-creator loads no client-ui bundle at all.
-    async function mountHub(s: any, isCreator: boolean) {
-      if (mounted || !isCreator) return;
+    // sow-218: mount only what this member can actually use. Latest Activity is the server-rendered FeedView and
+    // needs no client at all, so a signed-in member who is neither a creator nor paid loads no client-ui bundle
+    // on this page. Each element is imported only when its card is shown.
+    async function mountHub(s: any, isCreator: boolean, showStream: boolean) {
+      if (mounted || (!isCreator && !showStream)) return;
       mounted = true;
       const signupBase = document.documentElement.dataset.signupBase || '';
       const { createWorkbenchClient } = await import('../lib/workbench-client');
@@ -143,8 +165,11 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
       const adapter = createWorkbenchClient({ signupBase, login: String(s.login), githubId: s.githubId != null ? String(s.githubId) : null });
       setClient(adapter);
       document.querySelectorAll('.hub-load').forEach((el) => el.setAttribute('hidden', ''));
-      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
-      await import('../../client-ui/src/elements/gbti-share-composer.mjs');
+      // Defining an element upgrades its static tag; each renders on the setClient subscriber fan-out.
+      await Promise.all([
+        isCreator ? import('../../client-ui/src/elements/gbti-share-composer.mjs') : null,
+        showStream ? import('../../client-ui/src/elements/gbti-shares-feed.mjs') : null,
+      ].filter(Boolean));
     }
 
     av?.addEventListener('error', () => { if (av) av.src = '/favicon-32x32.png'; });

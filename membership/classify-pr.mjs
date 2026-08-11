@@ -128,7 +128,26 @@ export function isContributionToFolder(paths, ownerFolder) {
   });
 }
 
-/** Which content types an own-folder PR publishes (for labelling/notification). */
+/**
+ * The type this function reports for an own-folder path it cannot classify: a share, a favorites file, anything
+ * outside CONTENT_DIRS. It exists because SILENCE WAS A FAIL-OPEN (sow-218, 2026-08-11).
+ *
+ * This function used to drop such a path entirely. requiredTierFor then read only the types that DID land, so a
+ * share alone produced an empty set and got creator by the empty-set default, which looked correct and was the
+ * reason nobody noticed. Bundle that same share with one comment and the set became exactly ['comment'], the
+ * "comments only" branch fired, and a Network Member published a Share on the member floor. The share was
+ * invisible to the decision rather than argued about.
+ *
+ * Reporting the unclassifiable makes requiredTierFor's stated intent ("a type we cannot cleanly classify as
+ * comments-only never publishes on the member floor") true for the first time, and it fails in the safe
+ * direction by construction: a path we do not understand raises the bar rather than vanishing from it.
+ */
+export const TYPE_OTHER = 'other';
+
+/**
+ * Which content types an own-folder PR publishes (for labelling/notification, and the sow-185 tier floor).
+ * Any own-folder path that is not profile.md and not under a CONTENT_DIRS dir reports as TYPE_OTHER; see above.
+ */
 export function contentTypesTouched(paths, ownedFolder) {
   const types = new Set();
   const prefix = ownedFolder ? `members/${ownedFolder}/` : null;
@@ -139,6 +158,7 @@ export function contentTypesTouched(paths, ownedFolder) {
       else {
         const dir = rest.split('/')[0];
         if (CONTENT_DIRS.includes(dir)) types.add(dir.replace(/s$/, ''));
+        else types.add(TYPE_OTHER); // never silently drop it: an unclassified own-folder path requires creator
       }
     }
   }

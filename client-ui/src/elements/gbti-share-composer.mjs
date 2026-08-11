@@ -1,7 +1,8 @@
 // <gbti-share-composer> (SOW-018): the extension-only authoring surface for member "Shares" (status updates).
 // Shares are NOT a public website experience; this composer lives in the GBTI client/extension. It encodes the
 // access model directly from client.status().membership:
-//   - paid           -> the full composer (note + optional link + visibility), posts via client.postShare()
+//   - paid + Content Creator tier -> the full composer (note + optional link + visibility), via client.postShare()
+//   - paid on a LOWER tier (sow-218) -> an upgrade notice, because a share PR needs creator at the gate
 //   - trialing       -> read-only notice: a trial may READ the community Shares stream but posting is paid
 //   - expired/cancelled/none/banned (Locked) -> a lock splash (renew to rejoin); no composer
 //   - unknown        -> show the composer optimistically (the oracle is down; publishShare + the gate are the
@@ -131,12 +132,16 @@ class GbtiShareComposer extends GbtiElement {
   }
 
   async _loadStatus() {
-    if (!this.client) { this._membership = null; this.render(); return; }
+    if (!this.client) { this._membership = null; this._tier = null; this.render(); return; }
     try {
       const s = await this.client.status();
       this._membership = s?.membership ?? 'unknown';
+      // sow-218: also read the sow-185 paid TIER. `paid` alone is no longer enough to post a Share, and the
+      // oracle already returns this, so it costs no extra call.
+      this._tier = typeof s?.paidTier === 'string' ? s.paidTier : null;
     } catch {
       this._membership = 'unknown';
+      this._tier = null;
     }
     this.render();
   }
@@ -147,7 +152,14 @@ class GbtiShareComposer extends GbtiElement {
     if (m === undefined) return this.set(this.css(CSS) + `<div class="card"><p class="sub">Loading…</p></div>`);
     if (LOCKED.has(m)) return this._renderLocked();
     if (m === 'trialing') return this._renderTrial();
-    return this._renderComposer(); // paid or unknown
+    // sow-218: paid is necessary but no longer sufficient. Posting a Share is Content Creator work at the PR
+    // gate (a share PR reports TYPE_OTHER, so requiredTierFor demands creator), and without this check a
+    // Network Member would compose a whole Share and only meet that wall AFTER submitting, as a rejected PR.
+    // Fail-closed the other way here though: an ABSENT tier still shows the composer, matching the existing
+    // `unknown` behaviour. A down oracle must not silently strip posting from a real Content Creator, and the
+    // gate remains the authority either way.
+    if (this._tier && this._tier !== 'creator') return this._renderNotCreator();
+    return this._renderComposer(); // paid creator, or an unresolved tier
   }
 
   _noticeHtml(title, body, glyph) {
@@ -159,6 +171,17 @@ class GbtiShareComposer extends GbtiElement {
       'Your access is locked',
       'Your membership has lapsed, so Shares are locked. <a href="https://gbti.network/membership/">Renew your membership</a> to read and post in the community stream again.',
       '🔒',
+    ));
+  }
+
+  // sow-218: a paid member on a tier below Content Creator. Named for what they ARE rather than what they lack,
+  // and it states the tier plainly, because "your PR was rejected" after writing a Share is the experience this
+  // exists to prevent.
+  _renderNotCreator() {
+    this.set(this.css(CSS) + this._noticeHtml(
+      'Posting Shares is a Content Creator perk',
+      'Your membership covers reading the community stream. Posting Shares, articles, products and prompts is part of Content Creator membership. <a href="https://gbti.network/membership/">See the membership tiers</a> to upgrade.',
+      '✍️',
     ));
   }
 

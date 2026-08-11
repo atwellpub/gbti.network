@@ -21,30 +21,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const REMINDER_DAY = 87; // day-87 trial reminder window opens here and closes at TRIAL_DAYS (90)
 const COUPON_REMINDER_DAYS = 14; // SOW-119: the coupon-expiry reminder window opens 14 days before `until`
 
-// Which effective statuses grant the full member Discord role. sow-197: this no longer governs CONTENT
-// (a lapse leaves published work alone); it is the access-role axis only.
-// A grandfather grant resolves to effective.status === 'paid' (source 'grandfather'), so it is covered.
-const PUBLISHED_STATUSES = new Set(['paid']);
-// Which effective statuses grant the trial (not full member) Discord role.
-const TRIAL_STATUSES = new Set(['trialing']);
-
 // The three managed Discord roles. A known member holds EXACTLY ONE of these at a time; the reconcile
-// swaps between them and never kicks, so a lapsed or banned account is locked out (the Locked role's
-// channel overwrites, owner-configured) while staying in the guild (SOW-011).
+// swaps between them and never kicks, so a lapsed or banned account loses the member role while staying in
+// the guild (SOW-011). Verified 2026-08-11: this guild is ALLOW-based, so losing the member role is what
+// removes access; the Locked role denies nothing anywhere and is a label.
 export const MANAGED_DISCORD_ROLES = ['member', 'trial', 'locked'];
 
-/**
- * Discord role target for an effective status. Every known member maps to EXACTLY ONE managed role.
- *   paid / grandfather                  -> 'member'
- *   trialing                            -> 'trial'
- *   banned / expired / cancelled / none -> 'locked' (locked out of the channels, NOT kicked)
- * Returns one of 'member' | 'trial' | 'locked'.
- */
-export function discordRoleTarget(effectiveStatus) {
-  if (PUBLISHED_STATUSES.has(effectiveStatus)) return 'member';
-  if (TRIAL_STATUSES.has(effectiveStatus)) return 'trial';
-  return 'locked';
-}
+// sow-218: the status -> role rule MOVED to membership/discord-roles.mjs (node-free) so the signup Worker can
+// apply the same rule instead of hardcoding one role for everybody. Imported AND re-exported, because this
+// module uses all three itself (below) and reconcile's tests have always imported them from here. A bare
+// `export ... from` re-exports without binding them locally, which is a silent ReferenceError at the use sites.
+// Keep exactly one definition; two drifted once already.
+import { discordRoleTarget, PUBLISHED_STATUSES, TRIAL_STATUSES } from '../../membership/discord-roles.mjs';
+export { discordRoleTarget, PUBLISHED_STATUSES, TRIAL_STATUSES };
 
 // sow-185: the Content-Creator Discord badge is a SEPARATE, STACKABLE axis from the exclusive access role above.
 // A Content Creator holds @Member (access) AND @Creator (badge); a Network Member holds @Member only. It is kept

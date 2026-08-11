@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveReferral, normalizeRefCode } from '../workers/signup/referral.mjs';
-import { decideCustomer, buildNewCustomerMetadata, buildRefreshMetadata, runSignup, normalizeVia } from '../workers/signup/signup.mjs';
+import { decideCustomer, buildNewCustomerMetadata, buildRefreshMetadata, runSignup, normalizeVia, resolveSignupRole } from '../workers/signup/signup.mjs';
 import { discordRoleTarget } from '../scripts/lib/reconcile-plan.mjs'; // the steady state signup must agree with
 import { signSession, verifySession } from '../workers/signup/session.mjs';
 import { sessionCookieHeader } from '../workers/signup/session.mjs';
@@ -281,7 +281,7 @@ const IDENTITY = {
 // lockedRoleId is what a FRESH signup receives since the trial retirement (2026-08-11). trialRoleId stays in
 // the fixture deliberately: if signup ever reaches for it again, these tests must fail rather than pass by
 // its absence.
-const CONFIG = { guildId: 'guild-1', trialRoleId: 'role-trial', lockedRoleId: 'role-locked', signupSource: 'signup-worker' };
+const CONFIG = { guildId: 'guild-1', trialRoleId: 'role-trial', memberRoleId: 'role-member', lockedRoleId: 'role-locked', signupSource: 'signup-worker' };
 
 test('signup with an existing customer reuses it and does NOT rewrite trial_started_at', async () => {
   const existing = {
@@ -1301,4 +1301,77 @@ test('POST /auth/refresh: 401 when GitHub rejects the refresh token (expired/rev
     const res = await worker.fetch(refreshReq({ refresh_token: 'dead' }), REFRESH_ENV, {});
     assert.equal(res.status, 401);
   } finally { globalThis.fetch = realFetch; }
+});
+
+// --- sow-218: signup resolves the Discord role instead of hardcoding one -----------------------------------
+//
+// Two earlier versions of this handed ONE fixed role to everybody (first trial, then locked), which is right for
+// exactly one kind of member and wrong for every other, with reconcile correcting it only on its next DAILY run.
+// These pin the resolution, and in particular the two directions that must never swap: a banned member whose
+// Stripe still says paid gets NOTHING, and an unreadable mirror withholds rather than grants.
+
+const NOW = new Date('2026-08-11T12:00:00.000Z');
+const mirrorKv = (mirror) => ({ get: async (k, t) => (k === 'overrides:mirror' ? mirror : null), put: async () => {} });
+const freshMirror = (over = {}) => ({
+  generatedAt: NOW.toISOString(), bans: { bans: [] }, roles: { roles: [] }, grandfathered: { grandfathered: [] }, ...over,
+});
+const paidCustomer = { id: 'cus_1', metadata: { github_id: '12345' }, subscriptions: { data: [{ status: 'active', items: { data: [{ price: { id: 'price_x' } }] } }] } };
+
+test('sow-218: a LIVE coupon grant resolves to the member role, before any fold has landed', async () => {
+  // The invitee case. The grant is authoritative here precisely because house/grandfathered.yml does not carry
+  // it yet: reconcile folds it AFTER computing roles, so waiting for the mirror meant up to two daily cycles.
+  const role = await resolveSignupRole({
+    kv: mirrorKv(freshMirror()), githubId: '12345', customer: null,
+    couponGrant: { until: '2027-08-11T00:00:00.000Z' }, now: NOW,
+  });
+  assert.equal(role, 'member');
+});
+
+test('sow-218: an EXPIRED coupon grant does not grant anything', async () => {
+  const role = await resolveSignupRole({
+    kv: mirrorKv(freshMirror()), githubId: '12345', customer: null,
+    couponGrant: { until: '2020-01-01T00:00:00.000Z' }, now: NOW,
+  });
+  assert.equal(role, 'locked');
+});
+
+test('sow-218: a paying subscriber linking Discord gets the MEMBER role, not locked', async () => {
+  const role = await resolveSignupRole({ kv: mirrorKv(freshMirror()), githubId: '12345', customer: paidCustomer, now: NOW });
+  assert.equal(role, 'member');
+});
+
+test('sow-218: a BANNED member whose Stripe still says paid gets locked (ban outranks)', async () => {
+  // The fail-open this mirror read exists to prevent. Deriving from Stripe alone would hand them the member
+  // role, which is worse than the bug being fixed.
+  const mirror = freshMirror({ bans: { bans: [{ github_id: '12345', reason: 'test' }] } });
+  const role = await resolveSignupRole({ kv: mirrorKv(mirror), githubId: '12345', customer: paidCustomer, now: NOW });
+  assert.equal(role, 'locked');
+});
+
+test('sow-218: a grandfathered member with NO Stripe subscription still gets the member role', async () => {
+  const mirror = freshMirror({ grandfathered: { grandfathered: [{ github_id: '12345', reason: 'comp' }] } });
+  const role = await resolveSignupRole({ kv: mirrorKv(mirror), githubId: '12345', customer: null, now: NOW });
+  assert.equal(role, 'member');
+});
+
+test('sow-218: a STALE, absent or unreadable mirror withholds the grant (degrades to the old behaviour)', async () => {
+  const stale = freshMirror({ generatedAt: '2026-08-01T00:00:00.000Z' }); // older than the 48h bound
+  assert.equal(await resolveSignupRole({ kv: mirrorKv(stale), githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+  assert.equal(await resolveSignupRole({ kv: mirrorKv(null), githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+  const throwingKv = { get: async () => { throw new Error('kv down'); } };
+  assert.equal(await resolveSignupRole({ kv: throwingKv, githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+  assert.equal(await resolveSignupRole({ kv: null, githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+});
+
+test('sow-218: runSignup ASSIGNS the resolved role, not a hardcoded one', async () => {
+  const discord = fakeDiscord();
+  const result = await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  assert.equal(result.discordLinked, true);
+  assert.deepEqual(discord.calls.addRole, [{ guildId: 'guild-1', userId: 'd-987', roleId: 'role-member' }], 'a paying member gets @Member');
+  // The join `roles` and the explicit addRole must stay symmetric: Discord ignores the join roles for a user
+  // already in the guild, so the pair is what makes this work for both new and returning members.
+  assert.deepEqual(discord.calls.addGuildMember[0].opts.roles, ['role-member'], 'and the join carries the same role');
 });

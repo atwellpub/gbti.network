@@ -17,6 +17,47 @@
 import { resolveReferral } from './referral.mjs';
 import { SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1c: validate the bound touch-session shape
 import { redeemCoupon } from './coupons.mjs'; // SOW-119
+import { discordRoleTarget } from '../../membership/discord-roles.mjs'; // sow-218: the SHARED status -> role rule
+import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs';
+import { effectiveStatus } from '../../membership/overrides-core.mjs';
+import { overridesFromMirror } from '../../membership/usage-bucket.mjs';
+import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs';
+
+/**
+ * sow-218: WHICH managed Discord role this member should hold, resolved from what they actually are.
+ *
+ * Signup used to hand every linking member ONE hardcoded role. That is wrong for everyone it does not describe,
+ * and the correction only arrived on the next daily reconcile: a paying subscriber, a grandfathered member, a
+ * superadmin and a Codeable invitee all got Locked, and because a coupon grant folds into grandfathered.yml
+ * AFTER roles are computed in the same run, an invitee waited up to TWO daily cycles.
+ *
+ * Costs one KV read. The Stripe derivation is free: runSignup already fetched the customer with its
+ * subscriptions expanded (clients/stripe.mjs expands them on searchCustomerByGithubId), and
+ * deriveMembershipFromCustomer is pure over that object.
+ *
+ * The mirror read is REQUIRED, not a nicety. Without folding ban > staff > grandfather, a banned member whose
+ * Stripe still says paid would be handed the member role, which is a worse fail-open than the bug being fixed.
+ * A stale, absent or unreadable mirror therefore resolves to `locked`, which is exactly the previous behaviour,
+ * so every failure path degrades into the status quo rather than into something new.
+ *
+ * A live coupon grant counts as paid here. It is the whole point of the invite, and it is authoritative before
+ * the fold lands: the same fast path membership-status.mjs uses to report a fresh redeemer as paid.
+ */
+export async function resolveSignupRole({ kv, githubId, customer, couponGrant = null, now = new Date() }) {
+  try {
+    if (couponGrant?.until && new Date(couponGrant.until).getTime() > now.getTime()) return 'member';
+    const { status } = deriveMembershipFromCustomer(customer, { now });
+    const mirror = await kv?.get(OVERRIDES_KV_KEY, 'json');
+    if (!mirror?.generatedAt) return 'locked';
+    const ageMs = now.getTime() - new Date(mirror.generatedAt).getTime();
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) return 'locked';
+    const overrides = overridesFromMirror(mirror);
+    if (!overrides) return 'locked';
+    return discordRoleTarget(effectiveStatus(String(githubId), status, overrides, now).status);
+  } catch {
+    return 'locked'; // any failure withholds the grant rather than handing one out
+  }
+}
 
 /**
  * Decide whether to reuse an existing Stripe Customer or create a new one for this github_id.
@@ -182,21 +223,28 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
   // Only when Discord was linked. A GitHub-only signup skips this; reconcile keeps roles in sync once
   // discord_user_id exists, and the deferred welcome link runs this same join.
   //
-  // THE ROLE IS `locked`, NOT `trial` (2026-08-11). The 90-day trial is retired, so a fresh signup derives
-  // `none`, and reconcile's discordRoleTarget maps `none` -> locked. Assigning trial here handed a free
-  // member read-only community access the tier model does not give them, until the DAILY reconcile
-  // corrected it, so a signup just after 07:17 UTC held it for nearly 24 hours. This assigns what the
-  // steady state already is, which closes that window rather than deciding anything new: whether Free
-  // should eventually have its OWN role with deliberate access is a separate, additive question.
+  // THE ROLE IS RESOLVED, NOT HARDCODED (sow-218, 2026-08-11). Two earlier versions of this block assigned one
+  // fixed role to everybody: first `trial`, then `locked`. Each was right for exactly one kind of member and
+  // wrong for every other, and reconcile only corrected it on its next DAILY run. So a paying subscriber, any
+  // grandfathered member, a superadmin and a Codeable coupon invitee all linked Discord and were handed Locked.
+  // For an invitee it was worse still: a coupon grant folds into grandfathered.yml AFTER roles are computed in
+  // the same reconcile run, so the correction took up to two daily cycles.
   //
-  // HONEST LIMIT: the Locked role DENIES only through its channel permission overwrites, which the owner
-  // configures and this code cannot see. If those are unset, Locked denies nothing and this change aligns
-  // signup to the steady state without closing an access gap. It still cannot be worse than granting trial.
+  // resolveSignupRole applies the SAME rule reconcile applies, from the same shared module
+  // (membership/discord-roles.mjs), so the two cannot drift again. That drift is the whole bug: a hardcoded
+  // role at one call site can only ever be right for one kind of member.
+  //
+  // Verified 2026-08-11: this guild is ALLOW-based. Across 157 channels the Locked role denies VIEW_CHANNEL
+  // nowhere and the member role allows it on 12, so access comes from HOLDING the member role rather than from
+  // any deny. That is why resolving this correctly matters, and why every failure path returns `locked`:
+  // withholding the grant is the safe direction and needs no channel overwrite to exist.
   if (hasDiscord) {
+    const target = await resolveSignupRole({ kv, githubId, customer: existing, couponGrant, now });
+    const roleIdFor = { member: config.memberRoleId, trial: config.trialRoleId, locked: config.lockedRoleId };
     // Fail safe on an unset id rather than sending `undefined` to Discord: join with NO role instead of a
     // malformed one. Sending [undefined] is the shape that turns a missing config value into an API error
     // (or worse, a silent partial success) instead of a visible no-op.
-    const signupRoleId = config.lockedRoleId || null;
+    const signupRoleId = roleIdFor[target] || null;
     await discord.addGuildMember(config.guildId, discordUserId, {
       accessToken: discordAccessToken,
       ...(signupRoleId ? { roles: [signupRoleId] } : {}),
