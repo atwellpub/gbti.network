@@ -1,5 +1,5 @@
 ---
-title: 'App Clips hand someone a working piece of your app before they ever install it'
+title: 'App Clips let someone use part of your iOS app without installing it'
 slug: ios-app-clips-what-they-are-and-who-uses-them
 status: draft
 visibility: public
@@ -29,17 +29,15 @@ App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, 
 
 ## How it works
 
-An App Clip is an additional target, a second build product inside the same Xcode project as the full app, rather than a separate SDK or framework, and it shares code with that app directly.[^8] The usual ways to keep that code shared: give individual files target membership in both, or put the shared logic in its own Swift package that both targets depend on. Copying files between the two works too, but is discouraged, because it is the fastest way for the clip and the full app to quietly drift apart.[^8]
+An App Clip is a second, smaller build of an app that already exists, made from the same project and sharing that app's code.[^8]
 
-That target compiles down to its own small binary, which is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5]
+That smaller build compiles down to its own binary, and that is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5]
 
-The size ceiling depends on iOS version and how the clip is invoked: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier. iOS 17 raises it to 100 MB, but only for digital invocations, a website or Spotlight, never for an App Clip Code, a QR code, or an NFC tag; the one route that keeps those physical invocations at 100 MB is the demo link App Store Connect generates.[^2] Whichever applies, everything the App Clip needs, code and assets both, has to fit inside it.
+Everything depends on that binary staying small, so the size limit is the constraint that decides what an App Clip can be. It varies by iOS version and by how the clip is launched: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier. iOS 17 raises the ceiling to 100 MB, but only for clips launched digitally, from a website or Spotlight, and never from an App Clip Code, a QR code, or an NFC tag. The one route that keeps those physical launches at 100 MB is the demo link App Store Connect generates.[^2]
 
-Every app, App Clip included, goes through Apple's App Review process once, at submission, before it can ship at all.[^10] What stops a random link from launching someone else's App Clip is a separate mechanism, checked every time someone taps rather than once at submission: domain verification, configured well ahead of that moment. A developer adds the Associated Domains capability with an `appclips:<domain>` entry, then hosts a file named `apple-app-site-association` in a `.well-known` folder on that domain, declaring which App Clip is authorized to launch from it.[^9] The system checks that file before it will launch the clip at all, the same mechanism Universal Links use to send a web link straight into an app instead of a browser, extended with one more key. A link cannot stand in for someone else's App Clip without first controlling their domain.
+If a tapped link can run part of an app, it is fair to wonder what stops any link from running anything. App Clips go through Apple's review at submission like any other app.[^10] Launching one is governed separately and checked every time: a developer has to prove they own the domain a link points at, by publishing a file on it that names the App Clip allowed to launch from there.[^9] It is the same mechanism behind a link that opens an app instead of a browser page.
 
-Maintaining one is two ongoing obligations rather than a checklist finished once: keep the shared code, ideally the package, in sync as the full app changes, and keep the association file live and correct on your own server. If that file goes missing or gets misconfigured, the clip stops launching.
-
-None of this is a way to avoid building the full app. Every App Clip has to ship inside one and include the same functionality it offers, so it is a way to give someone the useful part of an app before they commit to the rest.[^2] People reach a clip eight different ways, from a QR code or an NFC tag to a link shared in Messages.[^3] A project built around App Clips has to pick how many of those doors it wants open.
+Which leaves the question of whether a clip is a substitute for an app or an addition to one. Apple settles it by requiring the full app to contain everything the clip offers, so a clip is a way to hand someone the useful part of an app before they commit to the rest.[^2] People can reach one eight different ways, from a QR code or an NFC tag to a link shared in Messages.[^3]
 
 ## How it is used in the real world
 
@@ -65,13 +63,15 @@ Both sources are dated: the Heady teardown is from March 2021 and the AppleInsid
 
 ## Where it might fit next
 
-Picture the same kind of task wherever it lands next: a diner ordering without installing anything, a driver tapping to pay at the pump, someone trying one level of a game before deciding whether to buy the rest. An App Clip fits a task that small and that self-contained, on a website, at a location, or as a demo, and stops fitting the moment the task needs to remember who you are or run while nobody is looking, both hard platform limits.
+Picture the same kind of task wherever it lands next: a diner ordering without installing anything, a driver tapping to pay at the pump, someone trying one level of a game before deciding whether to buy the rest. An App Clip fits a task that small and that self-contained, and stops fitting the moment it needs to remember who you are or run while nobody is looking, both hard platform limits.
 
-## We have not shipped one
+The case worth watching is try before you buy on the devices carrying a LiDAR scanner. Furniture retailers already do this inside full apps: point the camera at the room and the sofa appears at true scale, sitting behind the coffee table rather than floating in front of it. As an App Clip the same thing would run straight from the product page, with nothing installed and nothing left behind once the decision is made.
 
-Nobody at GBTI Network has built an App Clip. Everything above comes from Apple's documentation and from published third-party accounts, cited as such, and none of it has been checked by us against something running in production. Treat it as a map, not a review.
+Two constraints decide where that works. LiDAR narrows the audience to the devices that have it, so accurate placement is an enhancement rather than the whole experience. And while putting a sofa in your living room sounds like the in-person scenario App Clips were sold on, the 100 MB ceiling belongs to clips launched digitally, and a 3D model is heavy. The door that fits is the product page rather than a code printed on a showroom tag, which caps at 15 MB.
 
-That is exactly where members come in. If you have shipped an App Clip, or scoped one and decided against it, tell us the part documentation never captures: what App Store Connect was like, whether people found the thing, whether it moved installs or replaced them, and what you would not do again. A report that it was not worth it is as useful as one that it was.
+## Tell us what it was like
+
+If you have built an App Clip, or scoped one and decided against it, the useful part is what documentation never captures: what App Store Connect was like to configure, whether people found the thing at all, whether it moved installs or replaced them, and what you would not do again. A report that it was not worth building is as useful as one that it was.
 
 Leave a comment, or bring it to Discord if it turns into a longer conversation.
 
