@@ -29,7 +29,7 @@ App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, 
 
 ## How it works
 
-Not a separate SDK. An App Clip is an additional target inside the same Xcode project as the full app, sharing code with it rather than shipping as its own framework.[^8] The usual ways to keep that code shared: give individual files target membership in both, or put the shared logic in its own Swift package that both targets depend on. Copying files between the two works too, but is actively discouraged, because it is the fastest way for the clip and the full app to quietly drift apart.[^8]
+An App Clip is an additional target inside the same Xcode project as the full app, rather than a separate SDK or framework, and it shares code with that app directly.[^8] The usual ways to keep that code shared: give individual files target membership in both, or put the shared logic in its own Swift package that both targets depend on. Copying files between the two works too, but is actively discouraged, because it is the fastest way for the clip and the full app to quietly drift apart.[^8]
 
 That target compiles down to its own small binary, which is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5] The size ceiling exists for exactly this reason: everything the App Clip needs, code and assets both, has to fit inside that one download.
 
