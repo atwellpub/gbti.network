@@ -107,8 +107,15 @@ async function authoringCycle() {
 
   const cr = await reg.cleanup(console.log);
   // branchGone must be a REAL 404, not any error (a 403/5xx after a failed delete must not read as "gone").
+  // The ref delete is eventually consistent: getRef can still 200 for a beat after deleteRef, so a single
+  // check flakes to branchGone=false on the timing race (the admin-cycle test already polls for this exact
+  // reason). Poll for the REAL 404 up to ~5s; a 403/5xx keeps looping and, after 6 tries, still reads as
+  // not-gone so a genuinely stuck branch is not masked.
   let branchGone = false;
-  try { await gh.getRef(`heads/${branch}`); } catch (e) { branchGone = e?.status === 404; }
+  for (let i = 0; i < 6 && !branchGone; i++) {
+    try { await gh.getRef(`heads/${branch}`); } catch (e) { if (e?.status === 404) { branchGone = true; break; } }
+    if (!branchGone) await new Promise((r) => setTimeout(r, 1000));
+  }
   // verify the PR is actually closed (a swallowed close would otherwise leak an open draft PR).
   let prClosed = !prNumber;
   if (prNumber) { try { const pr = await gh.getPull(prNumber); prClosed = pr?.state === 'closed'; } catch (e) { prClosed = false; } }
