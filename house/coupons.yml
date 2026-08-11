@@ -17,12 +17,24 @@
 # MANUAL moderation over an artificial cap, reasoning that a cap set below the real cohort silently breaks
 # the campaign.
 #
-# THE CONTROL IS THEREFORE THE NOTIFICATION, WHICH MAKES IT LOAD-BEARING. Every redemption must notify
-# opportunities@gbti.network with enough detail to spot an abusive pattern. If that notification fails
-# silently there is NO remaining control on this offer, and abuse becomes invisible rather than merely
-# unmoderated. So the notification must fail LOUDLY (log plus a surfaced failure) rather than being
-# best-effort in the way a nice-to-have email would be. That is the security condition attached to keeping
-# these uncapped.
+# THE CONTROL IS THE NOTIFICATION, AND AS OF 2026-08-11 THAT NOTIFICATION DOES NOT EXIST.
+#
+# Corrected 2026-08-11 (SecurityMaster, after OnboardingMaster's pre-flight found it via SowMaster). The
+# first version of this note asked for the redemption email to be HARDENED so it fails loudly instead of
+# silently. That was wrong in the direction that matters: `opportunities@gbti.network` appears nowhere in the
+# codebase, `workers/signup/coupons.mjs` has no notification path, and `redeemCoupon` sends nothing. Every
+# redemption today is silent.
+#
+# So the state is not "a weak control". It is NO CONTROL. The owner's ruling replaced the redemption cap with
+# manual moderation, and manual moderation is impossible without the signal it depends on. Until the
+# notification is built, an uncapped, non-expiring, publicly published free-year code has nothing watching it.
+#
+# WHEN IT IS BUILT, it must fail LOUDLY (log plus a surfaced failure), not best-effort like an ordinary
+# nice-to-have email, precisely because it is the only control rather than one of several. It needs enough
+# detail to spot an abusive pattern: code, github_id, timestamp, and the running redemption count.
+#
+# Owner: this is the gap to weigh when deciding how long to leave the codes uncapped. Tracked with
+# @OnboardingMaster, who holds the build.
 #
 # TIER IS EXPLICIT, NOT INHERITED. Both invites confer Content Creator for one year. Do NOT rely on
 # `grantTier`'s creator default to deliver it: that default exists to preserve legacy flat grants, and
