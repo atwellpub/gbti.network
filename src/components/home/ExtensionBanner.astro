@@ -1,0 +1,102 @@
+---
+// sow-192 (owner-elected 2026-08-10, "GBTI Homepage" design): the logged-out extension promo banner that sits
+// between the pricing accordion and the feed. A deliberate FIXED-DARK accent (the design uses a literal near-
+// black panel in both themes), shown to signed-out visitors ONLY: it carries the shared [data-home-joincard]
+// hook, so the homepage mount script hides it for a signed-in member (same as the pricing accordion + join
+// card). The whole banner links to the live Chrome Web Store listing. Presentation only.
+import { EXTENSION } from '../../lib/extension';
+---
+<a
+  class="xbn"
+  href={EXTENSION.webStoreUrl}
+  target="_blank"
+  rel="noopener"
+  data-home-joincard
+  aria-label="Launch the Chrome Extension: add GBTI Network to Chrome"
+>
+  <span class="xbn-chip" aria-hidden="true">
+    <span class="xbn-prompt">&gt;_</span><span class="xbn-word">gbti</span>
+  </span>
+  <span class="xbn-copy">
+    <span class="xbn-title">Launch the Chrome Extension</span>
+    <span class="xbn-eyebrow">Thanks for paying attention</span>
+  </span>
+  <span class="xbn-cta">
+    <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+      <circle cx="24" cy="24" r="23" fill="none" stroke="#fff" stroke-width="3"/>
+      <circle cx="24" cy="24" r="9.4" fill="none" stroke="#fff" stroke-width="3"/>
+      <path d="M43.9 12.6H24M13.9 18.7L4 35.9M34.1 29.4L24.2 46.6" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+    Add to Chrome
+  </span>
+</a>
+
+<style>
+  /* A fixed-dark promo banner (intentional in both light and dark themes, per the design). */
+  .xbn {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin: 18px 0;
+    padding: 20px 26px;
+    background: #141218;
+    border: 1.5px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+  }
+  .xbn:hover { border-color: rgba(31, 158, 95, 0.55); }
+  .xbn[hidden] { display: none !important; } /* explicit display beats the UA [hidden] rule */
+
+  /* Skewed terminal chip: >_ gbti */
+  .xbn-chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    background: #232029;
+    border-radius: 6px;
+    transform: skewX(-11deg);
+  }
+  .xbn-prompt { font: 600 19px var(--f-mono); color: #5fd49a; transform: skewX(11deg); }
+  .xbn-word { font: 500 15px var(--f-mono); color: #847f8d; transform: skewX(11deg); }
+
+  .xbn-copy { flex: 1; min-width: 0; }
+  .xbn-title {
+    display: block;
+    font: 700 26px/1.1 var(--f-display);
+    letter-spacing: -0.02em;
+    color: #f3f2f0;
+  }
+  .xbn-eyebrow {
+    display: block;
+    margin-top: 6px;
+    font: 500 10px var(--f-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #847f8d;
+  }
+
+  .xbn-cta {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 13px 24px;
+    background: #1f9e5f;
+    border-radius: 8px;
+    color: #fff;
+    font: 700 14px var(--f-body);
+    white-space: nowrap;
+    transition: background 0.15s ease;
+  }
+  .xbn:hover .xbn-cta { background: #23b06b; }
+  .xbn-cta svg { display: block; flex: none; }
+
+  @media (max-width: 640px) {
+    .xbn { flex-wrap: wrap; gap: 16px; }
+    .xbn-copy { flex-basis: calc(100% - 90px); }
+    .xbn-cta { width: 100%; justify-content: center; }
+  }
+</style>

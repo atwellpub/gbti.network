@@ -14,6 +14,7 @@ import ArticleTeaser from '../components/blog/ArticleTeaser.astro';
 import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
 import PricingAccordion from '../components/home/PricingAccordion.astro';
+import ExtensionBanner from '../components/home/ExtensionBanner.astro';
 import PersonalizeModal from '../components/home/PersonalizeModal.astro';
 import HomeShareModal from '../components/home/HomeShareModal.astro';
 import { authorItem } from '../lib/avatars';
@@ -133,6 +134,11 @@ const SHOPTALK = {
   <!-- sow-192 Phase F: the pricing accordion (signed-out). Bound to src/lib/tiers.ts (TIER_DISPLAY); hidden
        for a signed-in member via the shared [data-home-joincard] hook. -->
   <PricingAccordion />
+
+  <!-- "GBTI Homepage" design (owner-elected 2026-08-10): the logged-out Chrome-extension promo banner, between
+       the pricing accordion and the feed. Carries [data-home-joincard], so the mount script hides it for a
+       signed-in member. -->
+  <ExtensionBanner />
 
   <!-- sow-192 Phase D: the Personalize modal + its build-time candidate lists (members/categories/tags). The
        modal itself is a fixed <dialog>, inert until the signed-in Personalize button opens it. -->
