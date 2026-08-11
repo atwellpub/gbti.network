@@ -3,27 +3,96 @@
 // (free/trial/paid) reads the classified feed, follows news channels, opens the reader, and joins the discussion,
 // all over the httpOnly-cookie session with NO extension and NO GitHub token in the page. The public news LIST
 // stays at /feeds/news/; this is the gated interactive layer. noindex: a per-member surface.
+//
+// sow-205 (owner request 2026-08-10): /news/ now RESKINS onto the homepage feed shell. It keeps its URL and its
+// interactive gbti-news app (prefs / follows / hearts / discussion untouched); the reskin is page chrome only.
+// The mount is wrapped in the shared two-column feedwrap: the feed-lab + the shared feed-tabs nav (FEED_NAV,
+// News current) + a contextual rail (grow-the-stream, members worth following, trending tags), all reusing the
+// global .feed-* / .side / .side-card classes from gbti-v3.css. No gbti-news change, so no bundle rebuild.
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import Avatar from '../../components/Avatar.astro';
+import { loadFeedItems } from '../../lib/feed-items';
+import { sortByNewest, aggregateTags } from '../../lib/home-feed.mjs';
+import { authorHref } from '../../lib/authors';
+import { FEED_NAV } from '../../lib/site-nav';
+
+// The rail reuses the homepage's real, build-time data (the same loadFeedItems the homepage + /feeds/ use).
+const { contentItems, shareItems, profiles } = await loadFeedItems();
+const feed = sortByNewest([...contentItems, ...shareItems]);
+
+// Members worth following: directory opt-ins, ranked by their most recent published activity (homepage parity).
+const latestByAuthor = new Map<string, number>();
+for (const it of feed) if (it.date) latestByAuthor.set(it.author, Math.max(latestByAuthor.get(it.author) ?? 0, it.date));
+const follow = profiles
+  .filter((p) => p.data.directory)
+  .sort((a, b) => (latestByAuthor.get(b.data.username) ?? 0) - (latestByAuthor.get(a.data.username) ?? 0))
+  .slice(0, 5);
+function roleLine(p: any): string {
+  return p.data.headline || [...(p.data.roles ?? []), ...(p.data.skills ?? [])].slice(0, 2).join(' · ') || 'GBTI member';
+}
+
+// Trending tags drill into the feed tag view (sow-131): /feeds/?tag=<tag>.
+const tags = aggregateTags([...contentItems, ...shareItems], 9);
 ---
 <BaseLayout title="News" description="GBTI Network members news feed." noindex={true}>
   <section class="band">
-    <div class="wrap news-wrap">
-      <div class="news-head">
-        <h1 class="h1">News</h1>
-        <p class="lead">The classified developer news feed. Follow channels to tune it, open a story to read the summary, and discuss it with the co-op.</p>
-      </div>
+    <div class="wrap feedwrap">
+      <div class="feed-layout">
+        <main class="feed-page" aria-label="News">
+          <h1 class="sr-only">News</h1>
+          <div class="feed-lab"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><span class="more">The curated developer news stream</span></div>
 
-      {/* Signed-OUT prompt (also the pre-hydration state; static SSG has no request-time cookie). */}
-      <div class="news-signin" data-news-signedout hidden>
-        <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-mega"/></svg></span>
-        <h2 class="h2 mt16">Sign in to read the news</h2>
-        <p class="lead">The news feed and channel follows are a free member perk. Sign in with GitHub to open it.</p>
-        <a href="/login/?return_to=%2Fnews%2F" class="btn btn-primary btn-lg mt16">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
-      </div>
+          <nav class="feed-tabs" aria-label="Feed views">
+            {FEED_NAV.map((t) => (
+              <a href={t.href} class:list={['feed-tab', t.key === 'news' && 'on']} aria-current={t.key === 'news' ? 'page' : undefined}>{t.label}</a>
+            ))}
+          </nav>
 
-      <div data-news-mount hidden>
-        <p class="news-load">Loading the news feed&hellip;</p>
-        <gbti-news></gbti-news>
+          {/* Signed-OUT prompt (also the pre-hydration state; static SSG has no request-time cookie). */}
+          <div class="news-signin" data-news-signedout hidden>
+            <span class="itile"><svg viewBox="0 0 24 24"><use href="#ico-mega"/></svg></span>
+            <h2 class="h2 mt16">Sign in to read the news</h2>
+            <p class="lead">The news feed and channel follows are a free member perk. Sign in with GitHub to open it.</p>
+            <a href="/login/?return_to=%2Fnews%2F" class="btn btn-primary btn-lg mt16">Sign in <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
+          </div>
+
+          <div data-news-mount hidden>
+            <p class="news-load">Loading the news feed&hellip;</p>
+            <gbti-news></gbti-news>
+          </div>
+        </main>
+
+        <aside class="side">
+          {/* Grow the stream: the SOW-140 add-a-source path, condensed for the rail. */}
+          <div class="card side-card">
+            <div class="side-h">Grow the stream</div>
+            <p class="side-sub" style="margin-top:6px">Have a source worth following? Point us at an RSS feed you own, attach it to a product in your gallery, and once it clears editorial review it joins the stream.</p>
+            <a href="/handbook/" class="btn btn-ghost" style="width:100%;justify-content:center;margin-top:14px">How it works</a>
+          </div>
+
+          {follow.length > 0 && (
+            <div class="card side-card">
+              <div class="side-h">Members worth following</div>
+              <div class="mtf">
+                {follow.map((m) => (
+                  <a class="mtf-row" href={authorHref(m.data.username)}>
+                    <Avatar item={{ name: m.data.displayName, avatar: m.data.avatar }} class="lav" size={40} />
+                    <div class="mtf-info"><div class="mtf-name">{m.data.displayName}</div><div class="mtf-role">{roleLine(m)}</div></div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tags.length > 0 && (
+            <div class="card side-card">
+              <div class="side-h">Trending tags</div>
+              <div class="tags">
+                {tags.map((t) => <a class="tag" href={`/feeds/?tag=${encodeURIComponent(t.tag)}`}>#{t.tag} <b>{t.count}</b></a>)}
+              </div>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   </section>
@@ -82,9 +151,7 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
   </script>
 
   <style>
-    .news-wrap { max-width: 1040px; }
-    .news-head { margin-bottom: 22px; }
-    .news-head .lead { max-width: 720px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .news-signin { text-align: center; padding: 24px 0; }
     .news-load { color: var(--fg-mute); padding: 16px 2px; font-size: 15px; }
     .news-load[hidden] { display: none; }
