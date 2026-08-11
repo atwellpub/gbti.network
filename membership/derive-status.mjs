@@ -56,14 +56,22 @@ export function deriveStatusFromCustomer(customer, now = new Date()) {
     if (DEAD_SUB_STATUSES.has(sub.status)) return STATUS.cancelled;
     // 'incomplete' / 'trialing' (unused) fall through to the trial-clock check below.
   }
+  // The 90-day trial is RETIRED (owner, 2026-08-11). Signup no longer writes trial_started_at, so no NEW
+  // customer reaches this branch. It stays for the members whose clocks were already running: they finish
+  // their 90 days rather than being cut mid-trial, and this is what keeps them resolving correctly until
+  // they age out. Remove it in the phase-3 cleanup, once no live account can be trialing.
   const startedRaw = customer.metadata?.trial_started_at;
   if (startedRaw) {
     const started = new Date(startedRaw);
     if (!Number.isNaN(started.getTime()) && now.getTime() < started.getTime() + TRIAL_MS) {
       return STATUS.trialing;
     }
+    return STATUS.expired; // their trial ran out: `expired` is the honest word for it
   }
-  return STATUS.expired;
+  // No subscription and no trial clock: a FREE member. Nothing expired, because they never had anything, so
+  // `expired` would be a lie told to every new signup (and account.astro renders it literally as "Expired").
+  // `none` already means exactly this state and is already labelled "No active membership".
+  return STATUS.none;
 }
 
 /**

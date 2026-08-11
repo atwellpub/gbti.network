@@ -66,8 +66,24 @@ test('incomplete sub within trial falls through to trialing', () => {
   const c = customer({ metadata: { trial_started_at: daysAgo(5) }, subscriptions: { data: [sub('incomplete')] } });
   assert.equal(deriveStatusFromCustomer(c, NOW), STATUS.trialing);
 });
-test('missing trial_started_at and no sub = expired (fail toward unpaid)', () => {
-  assert.equal(deriveStatusFromCustomer({ id: 'c', metadata: {}, subscriptions: { data: [] } }, NOW), STATUS.expired);
+// --- The 90-day trial is RETIRED (owner, 2026-08-11) -----------------------------------------------------
+// Signup no longer writes trial_started_at, so no NEW customer can ever be trialing. The four tests above
+// keep the clock's behaviour pinned because members whose clocks were already running finish their 90 days
+// rather than being cut; they are the reason that branch still exists.
+
+// Rewritten, not deleted. This used to assert 'expired'. A customer with no subscription and no trial clock
+// is now the shape of EVERY new signup, and telling a member who joined ten seconds ago that they expired is
+// a lie the account page renders literally. Nothing expired: they never had anything. The property the test
+// actually guards (fail toward unpaid) is unchanged, since `none` is not paid either.
+test('no trial_started_at and no sub = none, the FREE member (fail toward unpaid)', () => {
+  assert.equal(deriveStatusFromCustomer({ id: 'c', metadata: {}, subscriptions: { data: [] } }, NOW), STATUS.none);
+});
+
+test('a RUN-OUT trial clock still says expired, which is the honest word there', () => {
+  // The distinction the retirement introduces: `expired` now means something actually ended, and is reserved
+  // for the draining trial population and dead subscriptions. It is no longer the catch-all.
+  assert.equal(deriveStatusFromCustomer(customer({ metadata: { trial_started_at: daysAgo(120) } }), NOW), STATUS.expired);
+  assert.equal(deriveStatusFromCustomer(customer({ subscriptions: { data: [sub('canceled')] } }), NOW), STATUS.cancelled);
 });
 test('null customer = none', () => {
   assert.equal(deriveStatusFromCustomer(null, NOW), STATUS.none);

@@ -481,7 +481,10 @@ test('memberEntryFor resolves the folder via repoIndex byGithubLogin (login != f
   };
   const entry = memberEntryFor(customer, overrides, NOW, { repoIndex });
   assert.equal(entry.username, 'frankfolder'); // resolved through the login -> folder map, not the raw login
-  assert.equal(entry.effective.status, 'expired'); // no sub, no trial start -> expired (fail closed: not paid)
+  // 2026-08-11: no sub AND no trial clock now resolves 'none', not 'expired'. The assertion the test
+  // actually cares about is unchanged (NOT paid, fail closed); only the word for it moved, because the trial
+  // is retired and nothing expired for a member who never had anything.
+  assert.equal(entry.effective.status, 'none');
 });
 
 test('memberEntryFor leaves username null when no folder resolves (fail closed, warning path)', () => {
@@ -557,7 +560,7 @@ test('FIX 1: a member whose login != folder name (hudson/atwellpub) still resolv
   const customer = { id: 'cus_h', metadata: { github_id: '5000', github_login: 'atwellpub' } };
   const entry = memberEntryFor(customer, noOverrides(), NOW, { repoIndex });
   assert.equal(entry.username, 'hudson'); // resolved despite login != folder
-  assert.equal(entry.effective.status, 'expired'); // no sub, no trial -> not paid
+  assert.equal(entry.effective.status, 'none'); // no sub, no trial clock -> not paid (see the note above)
 
   // Plan against the SAME byUsername the production main() passes to the planner.
   // Lapsed: access changes, content does not (sow-197).

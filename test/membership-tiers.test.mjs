@@ -143,11 +143,16 @@ test('a subscription with no discoverable price fails closed once a map exists',
 // The two axes together.
 // ---------------------------------------------------------------------------------------------------
 
-test('deriveStatus is UNCHANGED: the existing fixtures still resolve exactly as before', () => {
+test('deriveStatus is unchanged BY THE TIER WORK: the existing fixtures still resolve as before', () => {
   // The inertness guarantee that lets phase 1 land before any Stripe work. These fixtures carry no price id,
   // matching every pre-existing test in the suite.
+  //
+  // 2026-08-11: the no-sub fixture moved from `expired` to `none`, and NOT because of anything on the tier
+  // axis, which is what this guard is actually about. The 90-day trial was retired, so a customer with no
+  // subscription and no trial clock is now the shape of every new FREE signup rather than a lapsed trialist.
+  // The guard still holds in the sense it was written for: adding a tier does not perturb status derivation.
   assert.equal(deriveStatusFromCustomer(customer({ subscriptions: { data: [{ status: 'active', created: 1 }] } }), NOW), STATUS.paid);
-  assert.equal(deriveStatusFromCustomer(customer(), NOW), STATUS.expired);
+  assert.equal(deriveStatusFromCustomer(customer(), NOW), STATUS.none);
   assert.equal(deriveStatusFromCustomer(null, NOW), STATUS.none);
 });
 

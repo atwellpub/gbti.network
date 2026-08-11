@@ -46,15 +46,33 @@ export function normalizeVia(via) {
 }
 
 /**
- * Build the metadata for a brand-new Customer. trial_started_at is set HERE and only here.
+ * Build the metadata for a brand-new Customer.
  * referred_by is included only when a valid (non-self) referral resolved. via is the landed-on content.
+ *
+ * THE 90-DAY TRIAL IS RETIRED (owner, 2026-08-11): "trialing is completely retired now, except for who we
+ * manually give 1-year off invites to like Codeable experts." A new signup is a FREE member, not a trialist.
+ *
+ * `trial_started_at` is the one and only thing that ever produced the `trialing` status
+ * (membership/derive-status.mjs reads this metadata key and nothing else), and this function was the one and
+ * only place it was ever written. So NOT writing it here is the entire retirement: no account created from
+ * this point forward can be `trialing`.
+ *
+ * The owner's EXCEPTION needs nothing here. The Codeable-style 1-year invites are coupons, not trials: they
+ * resolve to effective PAID through the `coupon-grant:` fast path and then the house/grandfathered.yml fold.
+ * The two mechanisms never touched, so retiring the trial leaves the invites exactly as they were.
+ *
+ * `trialStartedAt` is still ACCEPTED as a parameter and still written when passed, deliberately. Existing
+ * mid-trial members must keep resolving correctly while their clocks run out (owner-approved: they finish
+ * their 90 days rather than being cut), and keeping the path exercisable is what lets the tests pin that
+ * boundary. runSignup no longer passes it. Remove the parameter in the phase-3 cleanup, once no live account
+ * can be trialing.
  */
 export function buildNewCustomerMetadata({ githubId, githubLogin, discordUserId, trialStartedAt, signupSource, referredBy, via, touchSession, coupon }) {
   const metadata = {
     github_id: String(githubId),
     github_login: githubLogin ? String(githubLogin) : '',
-    trial_started_at: trialStartedAt,
   };
+  if (trialStartedAt) metadata.trial_started_at = trialStartedAt;
   // SOW: Discord is DEFERRED -> discord_user_id is set only when the member linked Discord (at signup or via the
   // extension-welcome link). Omit it entirely for a GitHub-only signup; the deferred link + reconcile fill it later.
   if (discordUserId) metadata.discord_user_id = String(discordUserId);
@@ -131,7 +149,8 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
       githubId,
       githubLogin,
       discordUserId,
-      trialStartedAt: now.toISOString(),
+      // No trialStartedAt: the 90-day trial is RETIRED (owner, 2026-08-11). A new signup is a FREE member.
+      // This one omission is the whole retirement; see buildNewCustomerMetadata for why.
       signupSource: config?.signupSource,
       referredBy,
       via,

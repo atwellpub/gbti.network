@@ -159,6 +159,53 @@ test('runSignup redeems a coupon for a new customer and reports it', async () =>
   assert.ok(kv.store.has(couponGrantKey('4242')));
 });
 
+// --- The trial retirement must not touch the owner's 1-year invites (2026-08-11) ---------------------------
+// "trialing is completely retired now, EXCEPT for who we manually give 1-year off invites to like Codeable
+// experts." Those invites are coupons, not trials: they resolve to effective PAID through the coupon grant
+// and then the house/grandfathered.yml fold, on a completely separate axis from the trial clock. This is the
+// single most important test in the retirement, because it is the owner's stated exception.
+test('a coupon signup grants a full year and mints NO trial clock', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR });
+  const stripe = fakeStripeCreate();
+  const out = await runSignup({
+    identity: { githubId: '4244', githubLogin: 'codeable-expert', discordUserId: null, email: 'e@example.com', discordAccessToken: null },
+    stripe,
+    discord: fakeDiscord,
+    kv,
+    config: { trialRoleId: 'r', guildId: 'g' },
+    refCode: '', via: '', touchSession: '',
+    coupon: 'CODEABLEYEAR',
+    now: NOW,
+  });
+
+  // The invite still works, unchanged: a full free year recorded as the grant the fold reads.
+  assert.equal(out.couponApplied, true);
+  assert.equal(out.couponUntil, '2027-07-15T12:00:00.000Z');
+  assert.ok(kv.store.has(couponGrantKey('4244')));
+
+  // And the retirement holds even here: no trial clock is minted, so this member is never `trialing`.
+  const md = stripe.created[0].body.metadata;
+  assert.equal(md.trial_started_at, undefined, 'the trial is retired: no clock, even on the invite path');
+  assert.equal(md.coupon, 'CODEABLEYEAR', 'the arrival record survives');
+});
+
+test('an ordinary new signup mints NO trial clock (the retirement, at the one tap)', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR });
+  const stripe = fakeStripeCreate();
+  await runSignup({
+    identity: { githubId: '4245', githubLogin: 'plain', discordUserId: null, email: null, discordAccessToken: null },
+    stripe,
+    discord: fakeDiscord,
+    kv,
+    config: { trialRoleId: 'r', guildId: 'g' },
+    refCode: '', via: '', touchSession: '', coupon: '',
+    now: NOW,
+  });
+  const md = stripe.created[0].body.metadata;
+  assert.equal(md.trial_started_at, undefined);
+  assert.equal(md.github_id, '4245', 'the rest of the metadata is untouched');
+});
+
 test('runSignup with no coupon reports couponApplied false and writes no grant', async () => {
   const kv = fakeKv({ 'coupons:config': MIRROR });
   const out = await runSignup({
