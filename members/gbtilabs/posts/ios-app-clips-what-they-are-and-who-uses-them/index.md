@@ -29,15 +29,15 @@ App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, 
 
 ## How it works
 
-An App Clip is a second, smaller build of an app that already exists, made from [the same project](https://developer.apple.com/documentation/appclip/creating-an-app-clip-with-xcode) and sharing that app's code.[^8]
+An App Clip is a second, smaller build of an app that already exists, made from the same project and sharing that app's code.[^8]
 
 That smaller build compiles down to its own binary, and that is what makes an install unnecessary: someone runs the clip without installing the full app, and the system removes it from the device after a period of inactivity.[^5]
 
-Everything depends on that binary staying small, so [the size limit](https://developer.apple.com/documentation/appclip/choosing-the-right-functionality-for-your-app-clip) is the constraint that decides what an App Clip can be. It varies by iOS version and by how the clip is launched: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier. iOS 17 raises the ceiling to 100 MB, but only for clips launched digitally, from a website or Spotlight, and never from an App Clip Code, a QR code, or an NFC tag. The one route that keeps those physical launches at 100 MB is the demo link App Store Connect generates.[^2]
+Everything depends on that binary staying small, so [the size limit](https://developer.apple.com/documentation/appclip/choosing-the-right-functionality-for-your-app-clip) is the constraint that decides what an App Clip can be. It varies by iOS version and by how the clip is launched: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier. iOS 17 raises the ceiling to 100 MB, but only for clips launched digitally, from a website or Spotlight, and never from an App Clip Code, a QR code, or an NFC tag. The one route that keeps those physical launches at 100 MB is the demo link App Store Connect generates.
 
-If a tapped link can run part of an app, it is fair to wonder what stops any link from running anything. Apple reviews every app on the store, and a clip ships as part of one.[^10] Launching one is governed separately and checked every time: a developer has to prove they own the domain a link points at, by [publishing a file on it](https://developer.apple.com/documentation/xcode/supporting-associated-domains) that names the App Clip allowed to launch from there.[^9] It is the same mechanism behind a link that opens an app instead of a browser page.
+If a tapped link can run part of an app, it is fair to wonder what stops any link from running anything. Apple reviews every app on the store, and a clip ships as part of one.[^10] Launching one is governed separately and checked every time: a developer has to prove they own the domain a link points at, by publishing a file on it that names the App Clip allowed to launch from there.[^9] It is the same mechanism behind a link that opens an app instead of a browser page.
 
-Which leaves the question of whether a clip is a substitute for an app or an addition to one. Apple settles it by requiring the full app to contain everything the clip offers, so a clip is a way to hand someone the useful part of an app before they commit to the rest.[^2] People can reach one [eight different ways](https://developer.apple.com/documentation/appclip/configuring-the-launch-experience-of-your-app-clip), from a QR code or an NFC tag to a link shared in Messages.[^3]
+Which leaves the question of whether a clip is a substitute for an app or an addition to one. Apple settles it by requiring the full app to contain everything the clip offers, so a clip is a way to hand someone the useful part of an app before they commit to the rest.[^2] People can reach one eight different ways, from a QR code or an NFC tag to a link shared in Messages.[^3]
 
 ## How it is used in the real world
 
@@ -45,7 +45,7 @@ The public record here is thin, but named deployments exist, and they sort into 
 
 ### ExxonMobil
 
-<a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**ExxonMobil**</a> put tap to pay at the pump in 2020, one of the examples Apple advertised from day one. The **Apple Store** used a barcode scan in its own stores to pull up accessory details in 2021, and <a href="https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns" rel="nofollow">**ParkWhiz**</a> put an NFC tag at the spot so someone could pay without installing anything.[^4][^6] **Panera Bread** sits off to the side of this group: its ordering flow comes through Apple Maps rather than something you scan.
+<a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**ExxonMobil**</a> put tap to pay at the pump in 2020, one of the examples Apple advertised from day one. The **Apple Store** used a barcode scan in its own stores to pull up accessory details in 2021, and <a href="https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns" rel="nofollow">**ParkWhiz**</a> put an NFC tag at the spot so someone could pay without installing anything. **Panera Bread** sits off to the side of this group: its ordering flow comes through Apple Maps rather than something you scan.
 
 ### SignEasy
 
