@@ -16,8 +16,8 @@ tags:
   - app-clips
   - apple
 layout: journal
-coverImage: "./images/laptop-and-smartphone.webp"
-coverAlt: A person holding a smartphone in one hand with a laptop open in front of them
+coverImage: "./images/iphone-laptop-airpods-on-desk.webp"
+coverAlt: An iPhone, a keyboard, a laptop, and a pair of AirPods lying close together on a desk
 featured: false
 type: post
 author: gbtilabs
@@ -31,7 +31,9 @@ App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, 
 
 An App Clip is an additional target, a second build product inside the same Xcode project as the full app, rather than a separate SDK or framework, and it shares code with that app directly.[^8] The usual ways to keep that code shared: give individual files target membership in both, or put the shared logic in its own Swift package that both targets depend on. Copying files between the two works too, but is discouraged, because it is the fastest way for the clip and the full app to quietly drift apart.[^8]
 
-That target compiles down to its own small binary, which is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5] The size ceiling depends on iOS version and how the clip is invoked: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier.[^2] iOS 17 raises it to 100 MB, but only for digital invocations, a website or Spotlight, never for an App Clip Code, a QR code, or an NFC tag; the one route that keeps those physical invocations at 100 MB is the demo link App Store Connect generates.[^2] Whichever applies, everything the App Clip needs, code and assets both, has to fit inside it.
+That target compiles down to its own small binary, which is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5]
+
+The size ceiling depends on iOS version and how the clip is invoked: 10 MB on iOS 15 and earlier, 15 MB on iOS 16 and earlier. iOS 17 raises it to 100 MB, but only for digital invocations, a website or Spotlight, never for an App Clip Code, a QR code, or an NFC tag; the one route that keeps those physical invocations at 100 MB is the demo link App Store Connect generates.[^2] Whichever applies, everything the App Clip needs, code and assets both, has to fit inside it.
 
 Every app, App Clip included, goes through Apple's App Review process once, at submission, before it can ship at all.[^10] What stops a random link from launching someone else's App Clip is a separate mechanism, checked every time someone taps rather than once at submission: domain verification, configured well ahead of that moment. A developer adds the Associated Domains capability with an `appclips:<domain>` entry, then hosts a file named `apple-app-site-association` in a `.well-known` folder on that domain, declaring which App Clip is authorized to launch from it.[^9] The system checks that file before it will launch the clip at all, the same mechanism Universal Links use to send a web link straight into an app instead of a browser, extended with one more key. A link cannot stand in for someone else's App Clip without first controlling their domain.
 
@@ -45,7 +47,7 @@ The public record here is thin, but named deployments exist, and they sort into 
 
 ### ExxonMobil
 
-<a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**ExxonMobil**</a> put tap to pay at the pump in 2020, one of the examples Apple advertised from day one. The <a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**Apple Store**</a> used a barcode scan in its own stores to pull up accessory details in 2021, and <a href="https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns" rel="nofollow">**ParkWhiz**</a> put an NFC tag at the spot so someone could pay without installing anything.[^4][^6] <a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**Panera Bread**</a> sits off to the side of this group: its ordering flow comes through Apple Maps rather than something you scan.[^4]
+<a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**ExxonMobil**</a> put tap to pay at the pump in 2020, one of the examples Apple advertised from day one. The <a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**Apple Store**</a> used a barcode scan in its own stores to pull up accessory details in 2021, and <a href="https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns" rel="nofollow">**ParkWhiz**</a> put an NFC tag at the spot so someone could pay without installing anything.[^4][^6] <a href="https://appleinsider.com/articles/22/12/11/what-happened-to-apples-app-clips" rel="nofollow">**Panera Bread**</a> sits off to the side of this group: its ordering flow comes through Apple Maps rather than something you scan.
 
 ### SignEasy
 
@@ -73,7 +75,7 @@ That is exactly where members come in. If you have shipped an App Clip, or scope
 
 Leave a comment, or bring it to Discord if it turns into a longer conversation.
 
-Cover photograph by iam hogir on Pexels.[^7]
+Cover photograph by Douglas Mendes on Pexels.[^7]
 
 [^1]: Apple, "App Clips updates," Apple Developer Documentation, read August 10, 2026. The June 2025 entry covers demo App Clips, the autogenerated demo URL, and Background Assets: [developer.apple.com](https://developer.apple.com/documentation/updates/appclips)
 
@@ -87,9 +89,9 @@ Cover photograph by iam hogir on Pexels.[^7]
 
 [^6]: Heady, "The App Clips Playbook: 5 Inspiring Examples and Teardowns," March 17, 2021. Source of the ParkWhiz, SignEasy, Parcel, Elloveo, and Flash Note Cards examples. Notably it reports no outcome figures for any of them: [heady.io](https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns)
 
-[^7]: Cover photograph by iam hogir on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/17744145](https://www.pexels.com/photo/a-man-sitting-at-the-desk-and-using-a-laptop-and-smartphone-17744145/)
+[^7]: Cover photograph by Douglas Mendes on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/14666034](https://www.pexels.com/photo/close-up-of-an-iphone-keyboard-laptop-and-airpods-lying-on-a-desk-14666034/)
 
-[^8]: Apple, "Creating an App Clip with Xcode," Apple Developer Documentation, read August 10, 2026. Source of the target-based architecture and the shared-code guidance, including the recommendation against copying files directly: [developer.apple.com](https://developer.apple.com/documentation/appclip/creating-an-app-clip-with-xcode)
+[^8]: Apple, "Creating an App Clip with Xcode," Apple Developer Documentation, read August 10, 2026. Source of the target-based architecture and the guidance to share code between the App Clip and the full app rather than duplicate it, refactoring to modular, shared code "to avoid duplicating code": [developer.apple.com](https://developer.apple.com/documentation/appclip/creating-an-app-clip-with-xcode)
 
 [^9]: Apple, "Supporting associated domains," Apple Developer Documentation, read August 10, 2026. Source of the `apple-app-site-association` file format and the `appclips` key that authorizes a domain to launch a given App Clip: [developer.apple.com](https://developer.apple.com/documentation/xcode/supporting-associated-domains)
 
