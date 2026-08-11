@@ -4,11 +4,17 @@
 // stream. The composer + feed are the SAME client-ui components the extension uses, wired to the cookie-session
 // adapter (src/lib/workbench-client) -- no GitHub token in the page. noindex: a private, per-member surface.
 import BaseLayout from '../layouts/BaseLayout.astro';
+import FeedView from '../components/feeds/FeedView.astro';
+import { loadFeedItems } from '../lib/feed-items';
 
 // The membership button grid. Icons come from the site sprite (#ico-*). `#tab=` deep-links land in the WorkBench.
+//
+// sow-218 (2026-08-11): three tiles removed on owner direction. `Membership` duplicated the ghost button sitting
+// directly above it in the same view, and `Community` pointed at /membership/ rather than at anything
+// community-shaped, so both were noise rather than navigation. `Browse the co-op` went with them. `My Workspace`
+// became `My Workbench` to match its destination, which has been called the WorkBench everywhere else since sow-158.
 const GRID = [
-  { icon: 'coin', label: 'Membership', href: '/membership/' },
-  { icon: 'grid', label: 'My Workspace', href: '/workbench/' },
+  { icon: 'grid', label: 'My Workbench', href: '/workbench/' },
   { icon: 'pencil', label: 'New article', href: '/workbench/#tab=post' },
   { icon: 'box', label: 'New product', href: '/workbench/#tab=product' },
   { icon: 'terminal', label: 'New prompt', href: '/workbench/#tab=prompt' },
@@ -16,11 +22,14 @@ const GRID = [
   { icon: 'heart', label: 'Saved', href: '/workbench/#tab=saved' },
   { icon: 'users', label: 'Following', href: '/workbench/#tab=subs' },
   { icon: 'mega', label: 'News', href: '/news/' },
-  { icon: 'globe', label: 'Browse the co-op', href: '/browse/' },
   { icon: 'search', label: 'Member directory', href: '/members/' },
-  { icon: 'chat', label: 'Community', href: '/membership/' },
   { icon: 'chart', label: 'Revenue model', href: '/revenue-model/' },
 ];
+
+// sow-218: Latest Activity reuses the SHARED feed component (sow-131), the same one behind the homepage and every
+// /feeds/ narrow, so the hub shows the same cards, tabs, filters and ladder pager rather than a second bespoke list.
+// Loaded exactly as src/pages/feeds/index.astro loads it.
+const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadFeedItems();
 ---
 <BaseLayout title="Account" description="Your GBTI Network account." noindex={true}>
   <section class="band">
@@ -66,9 +75,11 @@ const GRID = [
           </a>
         </div>
 
-        {/* Share composer (members-only by default) + the community stream. Mounted on the cookie adapter. */}
+        {/* sow-218: ONE column now, composer above activity. The composer is CREATOR-ONLY and starts hidden, so the
+            fail-closed direction is the rendered default: an unresolved tier shows nothing rather than briefly
+            offering a control the server would refuse. render() reveals it only on paidTier === 'creator'. */}
         <div class="hub-cols">
-          <div class="hub-card">
+          <div class="hub-card" data-share-card hidden>
             <h2 class="hub-h">Share with the community</h2>
             <p class="hub-sub">Post a note or a link to the members stream. Members-only is the default; switch to public to share it on the site feed.</p>
             <div data-share-mount>
@@ -76,13 +87,10 @@ const GRID = [
               <gbti-share-composer></gbti-share-composer>
             </div>
           </div>
-          <div class="hub-card">
-            <h2 class="hub-h">Latest Shares</h2>
-            <p class="hub-sub">The most recent posts from the co-op. Load older to page back through the stream.</p>
-            <div data-feed-mount>
-              <p class="hub-load">Loading the stream&hellip;</p>
-              <gbti-shares-feed></gbti-shares-feed>
-            </div>
+          <div class="hub-card hub-card-feed">
+            <h2 class="hub-h">Latest Activity</h2>
+            <p class="hub-sub">Everything the network is shipping and sharing. Filter by kind, or narrow to member content.</p>
+            <FeedView narrow="all" items={[...contentItems, ...shareItems]} avatarIndex={avatarIndex} membersShareCount={membersShareCount} />
           </div>
         </div>
       </div>
@@ -99,6 +107,7 @@ const GRID = [
     const statusEl = document.querySelector('[data-account-status]');
     const profileTile = document.querySelector('[data-account-profile]') as HTMLAnchorElement | null;
     const adminTile = document.querySelector('[data-account-admin]') as HTMLElement | null;
+    const shareCard = document.querySelector('[data-share-card]') as HTMLElement | null; // sow-218: creator-only
     const LABELS: Record<string, string> = { paid: 'Paid member', trialing: 'Free trial', expired: 'Expired', cancelled: 'Cancelled', none: 'No active membership', banned: 'Suspended', unknown: 'Signed in' };
     const RANK: Record<string, number> = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
 
@@ -114,11 +123,19 @@ const GRID = [
       if (statusEl) statusEl.textContent = LABELS[s.membership] || LABELS.unknown;
       if (profileTile) { profileTile.href = '/members/' + encodeURIComponent(s.login) + '/'; profileTile.hidden = false; }
       if (adminTile) adminTile.hidden = (RANK[s.role] ?? 0) < RANK.moderator; // staff-only, role from the oracle
-      mountHub(s);
+      // sow-218: publishing a Share is a Content Creator perk (sow-185), so the composer is tier-gated. Compared
+      // to the exact string rather than a rank, and defaulting to hidden, so an absent, unknown or newly added
+      // tier hides it: the same "absent means less privilege" rule membership/tiers.mjs applies server-side.
+      // This is a presentational gate. The Worker share endpoint remains the real boundary (sow-218 Phase 2).
+      const isCreator = s.paidTier === 'creator';
+      if (shareCard) shareCard.hidden = !isCreator;
+      mountHub(s, isCreator);
     }
 
-    async function mountHub(s: any) {
-      if (mounted) return;
+    // sow-218: only the composer needs the client now. Latest Activity is the server-rendered FeedView, so the
+    // shares-feed element is no longer imported here, and a non-creator loads no client-ui bundle at all.
+    async function mountHub(s: any, isCreator: boolean) {
+      if (mounted || !isCreator) return;
       mounted = true;
       const signupBase = document.documentElement.dataset.signupBase || '';
       const { createWorkbenchClient } = await import('../lib/workbench-client');
@@ -126,11 +143,8 @@ const GRID = [
       const adapter = createWorkbenchClient({ signupBase, login: String(s.login), githubId: s.githubId != null ? String(s.githubId) : null });
       setClient(adapter);
       document.querySelectorAll('.hub-load').forEach((el) => el.setAttribute('hidden', ''));
-      // Defining the elements upgrades the static tags; they render on the setClient subscriber fan-out.
-      await Promise.all([
-        import('../../client-ui/src/elements/gbti-share-composer.mjs'),
-        import('../../client-ui/src/elements/gbti-shares-feed.mjs'),
-      ]);
+      // Defining the element upgrades the static tag; it renders on the setClient subscriber fan-out.
+      await import('../../client-ui/src/elements/gbti-share-composer.mjs');
     }
 
     av?.addEventListener('error', () => { if (av) av.src = '/favicon-32x32.png'; });
@@ -156,12 +170,17 @@ const GRID = [
     .tile-lb { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
     .tile-admin .tile-ic svg { color: var(--fg-mute); }
 
-    .hub-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 40px; align-items: start; }
+    /* sow-218: ONE column. The composer stacks above Latest Activity rather than sitting beside it. */
+    .hub-cols { display: grid; grid-template-columns: 1fr; gap: 20px; margin-top: 40px; align-items: start; }
     .hub-card { border: 1.5px solid var(--line); border-radius: 16px; background: var(--panel); padding: 20px; }
+    .hub-card[hidden] { display: none; } /* an explicit display would otherwise beat the UA [hidden] rule */
     .hub-h { font-size: 18px; margin: 0 0 4px; }
     .hub-sub { color: var(--fg-mute); font-size: 13.5px; margin: 0 0 16px; }
     .hub-load { color: var(--fg-mute); font-size: 14px; }
     .hub-load[hidden] { display: none; }
-    @media (max-width: 860px) { .hub-cols { grid-template-columns: 1fr; } }
+
+    /* FeedView ships its own .wrap padding + max-width for a full-page context. Inside this card it is already
+       inside .acct-wrap, so neutralize the doubled gutter rather than restyling the shared component. */
+    .hub-card-feed :global(.feedwrap) { padding-left: 0; padding-right: 0; max-width: none; }
   </style>
 </BaseLayout>
