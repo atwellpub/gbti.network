@@ -1,0 +1,32 @@
+---
+// sow-205: the shared feed chrome, the "The Feed" lab caption + the feed-tabs nav. Extracted from
+// FeedView so /feeds/ (FeedView) and /news/ render ONE shell instead of character-for-character copies of
+// the same markup, classes and ARIA (SowMaster's sow-205 doublecheck: the tab LIST was already shared via
+// FEED_NAV, but the markup was duplicated). Driven by the one consolidated FEED_NAV (src/lib/site-nav.ts),
+// so a label or a tab change is a single edit and the two surfaces cannot drift. Presentation only; the
+// per-view behaviour (density toggle, members filter, tag drilldown) stays in each host.
+import { FEED_NAV } from '../../lib/site-nav';
+
+interface Props {
+  narrow: 'all' | 'news' | 'network' | 'articles' | 'products' | 'prompts' | 'shares';
+}
+const { narrow } = Astro.props;
+
+// The lab caption per narrow (was FeedView's local SUB map).
+const SUB: Record<Props['narrow'], string> = {
+  all: 'Everything, including member shares',
+  news: 'The curated developer news stream',
+  network: 'Publications from across the network',
+  articles: 'Member articles',
+  products: 'Member products, tools & plugins',
+  prompts: 'Reusable AI prompts from members',
+  shares: 'Links members are sharing',
+};
+---
+<div class="feed-lab"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><span class="more">{SUB[narrow]}</span></div>
+
+<nav class="feed-tabs" aria-label="Feed views">
+  {FEED_NAV.map((t) => (
+    <a href={t.href} class:list={['feed-tab', t.key === narrow && 'on']} aria-current={t.key === narrow ? 'page' : undefined}>{t.label}</a>
+  ))}
+</nav>

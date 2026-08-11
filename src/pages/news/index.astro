@@ -14,7 +14,7 @@ import Avatar from '../../components/Avatar.astro';
 import { loadFeedItems } from '../../lib/feed-items';
 import { sortByNewest, aggregateTags } from '../../lib/home-feed.mjs';
 import { authorHref } from '../../lib/authors';
-import { FEED_NAV } from '../../lib/site-nav';
+import FeedChrome from '../../components/feeds/FeedChrome.astro'; // sow-205: the shared feed lab + tab nav
 
 // The rail reuses the homepage's real, build-time data (the same loadFeedItems the homepage + /feeds/ use).
 const { contentItems, shareItems, profiles } = await loadFeedItems();
@@ -40,13 +40,7 @@ const tags = aggregateTags([...contentItems, ...shareItems], 9);
       <div class="feed-layout">
         <main class="feed-page" aria-label="News">
           <h1 class="sr-only">News</h1>
-          <div class="feed-lab"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><span class="more">The curated developer news stream</span></div>
-
-          <nav class="feed-tabs" aria-label="Feed views">
-            {FEED_NAV.map((t) => (
-              <a href={t.href} class:list={['feed-tab', t.key === 'news' && 'on']} aria-current={t.key === 'news' ? 'page' : undefined}>{t.label}</a>
-            ))}
-          </nav>
+          <FeedChrome narrow="news" />
 
           {/* Signed-OUT prompt (also the pre-hydration state; static SSG has no request-time cookie). */}
           <div class="news-signin" data-news-signedout hidden>

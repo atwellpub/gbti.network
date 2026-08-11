@@ -12,6 +12,7 @@ import type { FeedItem } from '../../lib/feed-items';
 import type { AvatarIndex } from '../../lib/avatars';
 import { FIRST_TOUCH_PCT, SIGNUP_BASE } from '../../lib/membership';
 import { FEED_NAV } from '../../lib/site-nav'; // sow-187: the one consolidated feed-nav source
+import FeedChrome from './FeedChrome.astro'; // sow-205: the shared lab + tab nav (was inline here)
 
 interface Props {
   narrow: 'all' | 'news' | 'network' | 'articles' | 'products' | 'prompts' | 'shares';
@@ -21,18 +22,9 @@ interface Props {
 }
 const { narrow, items, avatarIndex, membersShareCount } = Astro.props;
 
-// sow-187: from the one consolidated source (src/lib/site-nav.ts), so a label change is a single edit.
-const TABS: { key: Props['narrow']; label: string; href: string }[] =
-  FEED_NAV.map((i) => ({ key: i.key as Props['narrow'], label: i.label, href: i.href }));
-const SUB: Record<Props['narrow'], string> = {
-  all: 'Everything, including member shares',
-  news: 'The curated developer news stream',
-  network: 'Publications from across the network',
-  articles: 'Member articles',
-  products: 'Member products, tools & plugins',
-  prompts: 'Reusable AI prompts from members',
-  shares: 'Links members are sharing',
-};
+// sow-205: the lab caption + the tab nav moved into the shared <FeedChrome>; FeedView keeps only the
+// current narrow's href, for the tag-clear "Clear" link. FEED_NAV stays the one consolidated source.
+const currentHref = FEED_NAV.find((i) => i.key === narrow)?.href ?? '/feeds/';
 const isNews = narrow === 'news';
 const narrowed = sortByNewest(items.filter((it) => matchesNarrow(it, narrow))) as FeedItem[];
 const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersShareCount > 0;
@@ -47,13 +39,7 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
       </button>
     </div>
   )}
-  <div class="feed-lab"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><span class="more">{SUB[narrow]}</span></div>
-
-  <nav class="feed-tabs" aria-label="Feed views">
-    {TABS.map((t) => (
-      <a href={t.href} class:list={['feed-tab', t.key === narrow && 'on']} aria-current={t.key === narrow ? 'page' : undefined}>{t.label}</a>
-    ))}
-  </nav>
+  <FeedChrome narrow={narrow} />
 
   <div class="feed-toolbar">
     <span class="feed-tb-sp"></span>
@@ -66,7 +52,7 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
 
   <div class="feed-tag-banner" data-tag-banner hidden>
     <span>Filtered by <b data-tag-label></b></span>
-    <a href={TABS.find((t) => t.key === narrow)!.href} data-tag-clear>Clear</a>
+    <a href={currentHref} data-tag-clear>Clear</a>
   </div>
 
   {!isNews && (
