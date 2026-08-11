@@ -17,6 +17,13 @@ const freshMirror = (over = {}) => ({ generatedAt: new Date().toISOString(), rol
 const kvWith = (mirror) => ({ get: async (k) => (k === OVERRIDES_KV_KEY ? mirror : null) });
 const ENV = (over = {}, mirror = freshMirror()) => ({ STRIPE_SECRET_KEY: 'rk_test', MEMBER_CONTENT_KEY: KEY, MEMBER_CONTENT_KID: '1', SIGNUP_KV: kvWith(mirror), ...over });
 const paid = { id: 'c', metadata: { github_id: '1' }, subscriptions: { data: [{ status: 'active', created: 1 }] } };
+// 2026-08-11: encrypt is authorizeCreator-gated, and tierForPrice no longer grants creator on an empty price
+// map (that default was the sow-185 fail-open). So the encrypt tests need a PRICED customer and an env that
+// maps the price, which is what production has: [env.production.vars] carries STRIPE_PRICE_ID plus the four
+// tier ids. `paid` and `ENV()` stay unpriced on purpose, so the fail-closed tests keep a genuine empty map.
+const LEGACY_PRICE = 'price_legacy150';
+const CREATOR_ENV = (over = {}, mirror = freshMirror()) => ENV({ STRIPE_PRICE_ID: LEGACY_PRICE, ...over }, mirror);
+const paidCreator = { id: 'c', metadata: { github_id: '1' }, subscriptions: { data: [{ status: 'active', created: 1, items: { data: [{ price: { id: LEGACY_PRICE } }] } }] } };
 const stripeFor = (byId) => () => ({ findCustomerByGithubId: async (id) => byId(id) });
 const userIs = (githubId) => async () => ({ githubId, githubLogin: 'u' + githubId });
 const deps = (githubId, customerById) => ({ fetchUser: userIs(githubId), makeStripe: stripeFor(customerById) });
@@ -71,7 +78,7 @@ test('decrypt: a wrong-epoch envelope (no key for that kid) is a 500 misconfig, 
 });
 
 test('encrypt: a paid author gets an envelope that the same epoch decrypts; the key is never returned', async () => {
-  const r = await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'new perk', assetId: 'post:y:body' }), ENV(), deps('1', () => paid));
+  const r = await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'new perk', assetId: 'post:y:body' }), CREATOR_ENV(), deps('1', () => paidCreator));
   assert.equal(r.status, 200);
   assert.equal(r.body.envelope.kid, '1');
   assert.equal(r.body.envelope.aad, 'post:y:body');
@@ -87,14 +94,14 @@ test('encrypt: a non-paid author cannot encrypt (403)', async () => {
 });
 
 test('encrypt: 400 when plaintext or assetId is missing', async () => {
-  assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { assetId: 'a' }), ENV(), deps('1', () => paid))).status, 400);
-  assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'x' }), ENV(), deps('1', () => paid))).status, 400);
+  assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { assetId: 'a' }), CREATOR_ENV(), deps('1', () => paidCreator))).status, 400);
+  assert.equal((await membershipEncrypt(POST('encrypt', 'Bearer g', { plaintext: 'x' }), CREATOR_ENV(), deps('1', () => paidCreator))).status, 400);
 });
 
 // sow-158 Phase 3b: encrypt is COOKIE-eligible now (a website member posts a members-only comment; the body is
 // encrypted server-side before the git write). Same authorizePaid + double-submit CSRF posture as cookie decrypt.
 const SESSION_SECRET = 'test-session-secret';
-const COOKIE_ENV = (mirror = freshMirror()) => ENV({ SESSION_SECRET, CORS_ALLOWED_ORIGINS: 'https://gbti.network' }, mirror);
+const COOKIE_ENV = (mirror = freshMirror()) => ENV({ SESSION_SECRET, CORS_ALLOWED_ORIGINS: 'https://gbti.network', STRIPE_PRICE_ID: LEGACY_PRICE }, mirror);
 async function encryptCookieReq({ csrfCookie = 'C', csrfHeader = 'C', origin = 'https://gbti.network', githubId = '1', body = { plaintext: 'members reply', assetId: 'comment:20260101-abc:body' } } = {}) {
   const session = await signSession({ githubId, githubLogin: 'u' + githubId }, SESSION_SECRET);
   const cookies = [`gbti_session=${session}`];
@@ -106,7 +113,7 @@ async function encryptCookieReq({ csrfCookie = 'C', csrfHeader = 'C', origin = '
 }
 
 test('encrypt (Phase 3b): a website COOKIE paid caller gets an envelope (no bearer, CSRF satisfied)', async () => {
-  const r = await membershipEncrypt(await encryptCookieReq(), COOKIE_ENV(), { allowCookie: true, makeStripe: stripeFor(() => paid) });
+  const r = await membershipEncrypt(await encryptCookieReq(), COOKIE_ENV(), { allowCookie: true, makeStripe: stripeFor(() => paidCreator) });
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
   assert.equal(r.body.envelope.aad, 'comment:20260101-abc:body');
@@ -280,8 +287,23 @@ test('authorizeSignedIn: a free (none) member is admitted; no token -> 401; a st
 const PRICE_ENV = { STRIPE_PRICE_MEMBER_MONTHLY: 'price_m', STRIPE_PRICE_CREATOR_MONTHLY: 'price_c' };
 const paidAt = (priceId) => ({ id: 'c', metadata: { github_id: '1' }, subscriptions: { data: [{ status: 'active', created: 1, items: { data: [{ price: { id: priceId } }] } }] } });
 
-test('authorizeCreator: today (no price env) a paid member resolves to creator and is admitted (no regression)', async () => {
+// Rewritten 2026-08-11. This asserted that with NO price env a paid member resolves to creator and is
+// admitted, calling it "no regression". That was the sow-185 fail-open: an unconfigured env granted the
+// HIGHEST tier. It has been removed from tierForPrice, so an empty price map now grants nothing.
+//
+// This is not a production behaviour change: `[env.production.vars]` in wrangler.toml carries all four tier
+// price ids plus the legacy STRIPE_PRICE_ID, so the Worker's map has never been empty. The env this test
+// described was the TEST's env, not production's.
+test('authorizeCreator: with NO price env, a paid member is DENIED rather than granted creator', async () => {
   const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(), deps('1', () => paid));
+  assert.equal(r.ok, false, 'an unconfigured price map must not confer the top tier');
+  assert.equal(r.status, 403);
+});
+
+test('authorizeCreator: with the legacy price mapped, a legacy paid member is still admitted', async () => {
+  // The real no-regression case, and the one that matters for live members: everyone on the original $150
+  // price keeps creator, because buildEnvPriceTierMap seeds STRIPE_PRICE_ID as creator.
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ STRIPE_PRICE_ID: 'price_legacy' }), deps('1', () => paidAt('price_legacy')));
   assert.equal(r.ok, true);
   assert.equal(r.tier, 'creator');
 });

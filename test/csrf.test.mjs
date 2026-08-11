@@ -3,7 +3,7 @@
 // defense). No network, no secrets.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateCsrfToken, csrfCookieHeader, readCsrfCookie, readAllCsrfCookies, requireCsrf, CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
+import { generateCsrfToken, csrfCookieHeader, readCsrfCookie, readAllCsrfCookies, requireCsrf, requireOrigin, CSRF_COOKIE, CSRF_HEADER } from '../workers/signup/csrf.mjs';
 
 const ENV = { CORS_ALLOWED_ORIGINS: 'https://gbti.network' };
 const post = ({ cookie, header, origin } = {}) => {
@@ -87,4 +87,52 @@ test('requireCsrf 403 on a bad, a sibling-subdomain, or a missing Origin (cookie
   assert.equal(requireCsrf(post({ cookie: 'T', header: 'T', origin: 'https://evil.example' }), ENV).status, 403);
   assert.equal(requireCsrf(post({ cookie: 'T', header: 'T', origin: 'https://evil.gbti.network' }), ENV).status, 403);
   assert.equal(requireCsrf(post({ cookie: 'T', header: 'T' }), ENV).status, 403); // null Origin is hostile
+});
+
+// --- requireOrigin: the form-POST routes (/checkout, /referral/connect/start) --------------------------------
+// These read the session cookie directly and cannot use requireCsrf: a top-level form POST is what lets the Lax
+// cookie ride so the Worker can 302 to Stripe, and a form cannot set X-GBTI-CSRF. Enforcing the half that IS
+// possible beats enforcing neither.
+
+test('requireOrigin accepts the real checkout shape: allow-listed Origin, NO csrf header', () => {
+  // The exact request MembershipTiers.astro produces: a cross-origin top-level form POST from the apex to the
+  // Worker, carrying the session cookie and no custom header. If this ever fails, checkout is 403ing.
+  const req = new Request('https://signup.gbti.network/checkout?tier=creator&period=annual', {
+    method: 'POST',
+    headers: { Origin: 'https://gbti.network', Cookie: 'gbti_session=abc' },
+  });
+  assert.equal(requireOrigin(req, ENV).ok, true);
+  assert.equal(requireCsrf(req, ENV).ok, false, 'and requireCsrf would have rejected it, which is why this exists');
+});
+
+test('requireOrigin rejects a missing, null, or non-allow-listed Origin (fail closed)', () => {
+  const at = (origin) => new Request('https://signup.gbti.network/checkout', {
+    method: 'POST',
+    headers: origin == null ? {} : { Origin: origin },
+  });
+  assert.equal(requireOrigin(at(null), ENV).ok, false, 'absent Origin is hostile on a state-changing request');
+  assert.equal(requireOrigin(at('null'), ENV).ok, false);
+  assert.equal(requireOrigin(at('https://evil.example'), ENV).ok, false);
+  // The residual threat this actually closes: a SAME-SITE attacker on a sibling subdomain. SameSite=Lax already
+  // blocks the cross-site case, so this is the one that was reachable.
+  assert.equal(requireOrigin(at('https://evil.gbti.network'), ENV).ok, false);
+  assert.equal(requireOrigin(at('http://gbti.network'), ENV).ok, false, 'scheme is part of the origin');
+});
+
+test('requireOrigin returns the same 403 shape as requireCsrf and shares the allow-list', () => {
+  const bad = requireOrigin(new Request('https://signup.gbti.network/checkout', { method: 'POST' }), ENV);
+  assert.equal(bad.status, 403);
+  assert.equal(bad.body.error, 'forbidden');
+  // Shared parseAllowedOrigins: a custom allow-list moves BOTH, so they can never drift about who is trusted.
+  const CUSTOM = { CORS_ALLOWED_ORIGINS: 'https://staging.gbti.network' };
+  const req = new Request('https://signup.gbti.network/checkout', { method: 'POST', headers: { Origin: 'https://staging.gbti.network' } });
+  assert.equal(requireOrigin(req, CUSTOM).ok, true);
+  assert.equal(requireOrigin(req, ENV).ok, false);
+});
+
+test('a missing CORS_ALLOWED_ORIGINS falls back to the apex, never to open', () => {
+  const ok = new Request('https://signup.gbti.network/checkout', { method: 'POST', headers: { Origin: 'https://gbti.network' } });
+  const no = new Request('https://signup.gbti.network/checkout', { method: 'POST', headers: { Origin: 'https://anything.example' } });
+  assert.equal(requireOrigin(ok, {}).ok, true);
+  assert.equal(requireOrigin(no, {}).ok, false);
 });

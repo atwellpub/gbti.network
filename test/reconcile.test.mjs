@@ -457,8 +457,12 @@ test('sow-185: memberEntryFor resolves the effective TIER override-aware (Stripe
   const ov = (over = {}) => ({ roles: new Map(), bans: new Map(), grandfathers: new Map(), membersIndex: new Map(), ...over });
   const paidCustomer = (priceId) => ({ id: 'c', metadata: { github_id: '710' }, subscriptions: { data: [{ status: 'active', created: 1, ...(priceId ? { items: { data: [{ price: { id: priceId } }] } } : {}) }] } });
   const priceMap = new Map([['price_m', 'member'], ['price_c', 'creator']]);
-  // no price map (inert): a paid sub resolves to creator (legacy single-price mode = no regression)
-  assert.equal(memberEntryFor(paidCustomer(), ov(), NOW).tier, 'creator');
+  // 2026-08-11: with NO price map, a paid sub now resolves to `none`, not `creator`. The empty-map default
+  // was the sow-185 fail-open and has been removed. This is inert for reconcile: the ONLY consumer of a
+  // member entry's tier is the Creator Discord badge (reconcile-plan.mjs:185), and that sits behind
+  // shouldSyncCreatorRole, which itself requires a NON-empty price map. Verified by execution: with the role
+  // id set and no price env it returns false, so nothing reads this value in reconcile's real env.
+  assert.equal(memberEntryFor(paidCustomer(), ov(), NOW).tier, 'none');
   // with the map: a member-priced sub -> member, a creator-priced sub -> creator
   assert.equal(memberEntryFor(paidCustomer('price_m'), ov(), NOW, { priceTierMap: priceMap }).tier, 'member');
   assert.equal(memberEntryFor(paidCustomer('price_c'), ov(), NOW, { priceTierMap: priceMap }).tier, 'creator');

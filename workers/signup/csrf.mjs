@@ -80,6 +80,34 @@ const fail = () => ({ ok: false, status: 403, body: { error: 'forbidden', messag
  * Enforce CSRF on a cookie-authenticated, state-changing request. Returns { ok:true } or a 403. Fail closed:
  * a missing header, a missing/mismatched cookie, or a missing/non-allow-listed Origin all reject.
  */
+/**
+ * Enforce ONLY the Origin allow-list on a cookie-authenticated, state-changing request. Returns { ok:true }
+ * or a 403. For routes where the double-submit half is STRUCTURALLY IMPOSSIBLE, never as a softer default.
+ *
+ * WHY THIS EXISTS (SecurityMaster finding, 2026-08-11). `POST /checkout` and `POST /referral/connect/start`
+ * read the session cookie directly and bypassed requireCsrf entirely. They cannot call it: checkout is driven
+ * as a top-level same-site FORM POST (MembershipTiers.astro) so the Lax cookie rides and the Worker can 302 to
+ * Stripe, and **a form submission cannot set a custom header**, so X-GBTI-CSRF can never be sent there.
+ * requireCsrf would 403 the entire checkout flow.
+ *
+ * But the header being impossible is no reason to drop the half that IS possible. `Origin` IS sent on a
+ * cross-origin form POST, and per csrf.mjs's own header comment the Origin allow-list is the layer that
+ * defeats cookie-tossing, "because the tossed cookie does not change the forged request's Origin". That is
+ * exactly the residual threat here: a same-site attacker on any *.gbti.network origin, which the sow-158
+ * raw-HTML history and the absence of a script-blocking CSP make non-hypothetical.
+ *
+ * Shares parseAllowedOrigins with requireCsrf deliberately, so the two can never drift about which origins
+ * are trusted.
+ *
+ * DO NOT reach for this to avoid wiring a token. A route that CAN carry X-GBTI-CSRF must use requireCsrf:
+ * this is one layer, not two, and it is the weaker configuration.
+ */
+export function requireOrigin(request, env, { allowedOrigins = parseAllowedOrigins(env) } = {}) {
+  const origin = request.headers.get('Origin');
+  if (!origin || !allowedOrigins.has(origin)) return fail();
+  return { ok: true };
+}
+
 export function requireCsrf(request, env, { allowedOrigins = parseAllowedOrigins(env) } = {}) {
   const header = request.headers.get(CSRF_HEADER);
   const cookies = readAllCsrfCookies(request.headers.get('Cookie'));

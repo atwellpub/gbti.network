@@ -99,10 +99,14 @@ test('an explicit map entry wins over the legacy seed', () => {
   assert.equal(map.get(LEGACY), TIER.member);
 });
 
-test('an entirely empty map is legacy single-price mode, granting creator', () => {
-  // Reachable only before any tier configuration exists, i.e. when exactly one price can exist.
-  assert.equal(tierForPrice('anything', new Map()), TIER.creator);
-  assert.equal(tierForPrice(null, buildPriceTierMap({})), TIER.creator);
+// Rewritten 2026-08-11. This asserted an EMPTY map grants `creator`, described as "legacy single-price mode,
+// reachable only before any tier configuration exists". It was reachable in production: the Actions env seeded
+// nothing, so the PR gate built an empty map and admitted a $5 Network Member as a Content Creator.
+test('an entirely empty map grants NOTHING (fail closed)', () => {
+  assert.equal(tierForPrice('anything', new Map()), TIER.none);
+  assert.equal(tierForPrice(null, buildPriceTierMap({})), TIER.none);
+  // The property in one line: an unconfigured system grants no tier, never the highest one.
+  assert.notEqual(tierForPrice('anything', new Map()), TIER.creator);
 });
 
 test('with a configured map, an absent or non-string price id fails closed', () => {
@@ -111,8 +115,13 @@ test('with a configured map, an absent or non-string price id fails closed', () 
 });
 
 test('a non-Map passed where a map belongs does not throw and does not grant', () => {
-  // Defensive: a caller wiring this up wrongly should get legacy behavior, not a crash inside a gate.
-  assert.equal(tierForPrice(LEGACY, { [LEGACY]: 'creator' }), TIER.creator); // treated as empty -> legacy mode
+  // The NAME is unchanged; only the assertion moved, because the name was right all along and the code never
+  // matched it. It asserted TIER.creator, with a comment calling that "legacy behavior, not a crash inside a
+  // gate" - but the alternative to granting was never a crash, it was `none`, which the test directly above
+  // already asserts for every other malformed input. A `{}` passed as the PRICE failed closed while a `{}`
+  // passed as the MAP granted creator. Every price map here is built from an object literal, so passing the
+  // object is the natural mistake, and it produced the highest privilege.
+  assert.equal(tierForPrice(LEGACY, { [LEGACY]: 'creator' }), TIER.none);
 });
 
 // ---------------------------------------------------------------------------------------------------

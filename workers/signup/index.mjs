@@ -88,7 +88,7 @@ import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phas
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
-import { generateCsrfToken, csrfCookieHeader, requireCsrf } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF
+import { generateCsrfToken, csrfCookieHeader, requireCsrf, requireOrigin } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF (+ Origin-only for form-POST routes)
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 // CORS for the membership endpoints (token-authenticated, no cookies). Covers BOTH the GET reads (status oracle,
@@ -440,6 +440,11 @@ async function handleDiscordLinkStart(request, env) {
 }
 
 async function handleCheckout(request, env) {
+  // Cookie-authenticated + state-changing, but it CANNOT use requireCsrf: the site drives this as a top-level
+  // form POST so the Lax cookie rides and we can 302 to Stripe, and a form cannot set X-GBTI-CSRF. Enforce the
+  // half that IS possible rather than neither (SecurityMaster, 2026-08-11).
+  const origin = requireOrigin(request, env);
+  if (!origin.ok) return json(origin.body, origin.status);
   const session = await verifySession(readSessionCookie(request.headers.get('Cookie')), env.SESSION_SECRET);
   if (!session) return json({ error: 'no_session' }, 401);
 
@@ -503,6 +508,9 @@ async function handleCheckoutSuccess(request, env) {
 // link for the session's own customer. Fail closed: no session or no customer means no onboarding.
 async function handleConnectOnboard(request, env) {
   if (env.REFERRAL_ENABLED !== 'true') return json({ error: 'referral_disabled' }, 403);
+  // Same shape as /checkout: cookie-authenticated, state-changing, reached without the CSRF choke point.
+  const origin = requireOrigin(request, env);
+  if (!origin.ok) return json(origin.body, origin.status);
   const session = await verifySession(readSessionCookie(request.headers.get('Cookie')), env.SESSION_SECRET);
   if (!session) return json({ error: 'no_session' }, 401);
 

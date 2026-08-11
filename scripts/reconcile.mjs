@@ -104,7 +104,8 @@ export function memberEntryFor(customer, overrides, now, { repoIndex = null, dis
   const effective = effectiveStatus(githubId, derived, overrides, now);
   // sow-185: resolve the effective TIER (override-aware) for the Content-Creator Discord badge. stripeTier comes
   // from the subscription's price id; the override source wins (staff/grandfather -> creator). INERT until the
-  // price env is mapped (a null priceTierMap is legacy single-price mode -> creator).
+  // price env is mapped. With no price env the map is empty and tierForPrice now fails closed to `none`
+  // (2026-08-11); nothing consumes this tier unless shouldSyncCreatorRole is true, which needs that same env.
   const stripeTier = deriveMembershipFromCustomer(customer, { priceTierMap, now }).tier;
   const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, stripeTier, grant: overrides.grandfathers.get(githubId) });
   const username = resolveUsername(githubId, githubLogin, overrides, repoIndex);
@@ -392,10 +393,11 @@ export async function resolveDiscordRoles(discord, guildId, discordUserId, env) 
 /**
  * sow-185: whether reconcile should sync the Content-Creator Discord badge this run. BOTH conditions are
  * required: (1) the owner has provisioned DISCORD_CREATOR_ROLE_ID, and (2) reconcile's env actually carries a
- * Stripe price map (buildEnvPriceTierMap non-empty). Condition 2 is the load-bearing guard: with an EMPTY price
- * map, tierForPrice runs in legacy single-price mode and resolves EVERY paid member to creator
- * (membership/tiers.mjs), so enabling the badge on the role id alone would stamp @Creator on every paid AND
- * grandfathered member in the live guild. Tying it to a populated price map keeps the badge inert until the
+ * Stripe price map (buildEnvPriceTierMap non-empty). Condition 2 remains load-bearing even after tierForPrice
+ * was made fail-closed (2026-08-11): an empty map now resolves every Stripe tier to `none` rather than to
+ * creator, so the badge would not flood, but a GRANDFATHER grant still resolves to creator via grantTier
+ * regardless of the price map. Enabling the badge on the role id alone would therefore still stamp @Creator on
+ * all 16 grandfathered members in the live guild. Tying it to a populated price map keeps the badge inert until the
  * prices are wired into reconcile's env, so the role id can be committed now and stays correctly dormant until
  * then. reconcile.yml passes no price env today, so this is false in production until that changes. Pure.
  */

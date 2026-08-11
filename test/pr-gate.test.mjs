@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { evaluatePR, STATUS_CONTEXT, shouldAutoClose, shouldAutoMerge, CLOSE_LABELS, CLOSE_NUDGE } from '../scripts/pr-gate.mjs';
+import { buildPriceTierMap } from '../membership/tiers.mjs';
 
 // ---- fixtures --------------------------------------------------------------
 
@@ -41,7 +42,15 @@ function fakeStripe(customers) {
 
 // Customer shapes: an active subscription = paid; a card-less customer inside the 90-day window = trialing.
 const NOW = new Date('2026-06-02T00:00:00Z');
-const paidCustomer = { id: 'cus_paid', metadata: { github_id: '100' }, subscriptions: { data: [{ status: 'active', created: 1 }] } };
+// 2026-08-11: the paid fixture now carries a PRICE ID, and the tests pass a matching PRICE_MAP.
+//
+// Before, it carried neither, and these tests passed only because tierForPrice granted `creator` on an empty
+// map. That default has been removed as a fail-open, and its removal made these tests deny. They were not
+// asserting the gate's real behaviour; they were asserting the bug. Production passes the ids via
+// pr-membership-gate.yml, so a fixture WITH a price and a map is the faithful mirror of the real gate.
+const LEGACY_PRICE = 'price_legacy150';
+const PRICE_MAP = buildPriceTierMap({ legacyCreatorPriceId: LEGACY_PRICE });
+const paidCustomer = { id: 'cus_paid', metadata: { github_id: '100' }, subscriptions: { data: [{ status: 'active', created: 1, items: { data: [{ price: { id: LEGACY_PRICE } }] } }] } };
 const trialCustomer = { id: 'cus_trial', metadata: { github_id: '200', trial_started_at: '2026-05-01T00:00:00Z' }, subscriptions: { data: [] } };
 
 // A PR-event payload fixture (the pull_request_target event shape the gate reads).
@@ -57,6 +66,7 @@ test('paid member editing only their own folder -> success + paid (auto-merge)',
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/hello/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 100: paidCustomer }),
     now: NOW,
   });
@@ -72,6 +82,7 @@ test('trial member content PR -> failure + rejected-not-paid (publishing is paid
     author: ev.pull_request.user.id,
     paths: ['members/trialer/profile.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 200: trialCustomer }),
     now: NOW,
   });
@@ -87,6 +98,7 @@ test('member touching house/roles.yml -> failure + rejected-escalation', async (
     author: ev.pull_request.user.id,
     paths: ['house/roles.yml'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 300: paidCustomer }), // paid does not matter: escalation hard-fails first
     now: NOW,
   });
@@ -100,6 +112,7 @@ test("member editing another member's folder with no owner approval -> held cont
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/steal/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 300: paidCustomer }),
     now: NOW,
   });
@@ -119,6 +132,7 @@ test('contribution merges when the folder owner approved and is paid', async () 
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/improve/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 300: paidCustomer }),
     now: NOW,
     resolveOwner,
@@ -135,6 +149,7 @@ test('contribution stays held when the owner approved but is not paid', async ()
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/improve/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 300: paidCustomer }),
     now: NOW,
     resolveOwner,
@@ -149,6 +164,7 @@ test('admin disabling another member (status flip) -> success', async () => {
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/hello/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({}), // admin has no Stripe customer; membership-exempt
     now: NOW,
   });
@@ -166,6 +182,7 @@ test('admin editing only their OWN folder -> success + auto-merge (staff own-fol
     author: ev.pull_request.user.id,
     paths,
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({}), // admin has no Stripe customer; staff is paid-equivalent
     now: NOW,
   });
@@ -181,6 +198,7 @@ test('Stripe lookup throws -> failure (fail closed, treated as unpaid)', async (
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/hello/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 100: () => { throw new Error('stripe 503'); } }),
     now: NOW,
   });
@@ -199,6 +217,7 @@ test('banned author -> failure + banned, overriding paid status', async () => {
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/hello/index.md'],
     overrides: overrides({ bans: new Map([['100', { github_id: '100' }]]) }),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({ 100: paidCustomer }),
     now: NOW,
   });
@@ -212,6 +231,7 @@ test('grandfathered author with no Stripe customer -> success + paid', async () 
     author: ev.pull_request.user.id,
     paths: ['members/octocat/profile.md'],
     overrides: overrides({ grandfathers: new Map([['100', { github_id: '100' }]]) }),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({}), // no customer; grandfather makes it paid anyway
     now: NOW,
   });
@@ -226,6 +246,7 @@ test('unmapped author (no folder, no customer) -> rejected-not-a-member, never d
     author: ev.pull_request.user.id,
     paths: ['members/someoneelse/posts/x/index.md'],
     overrides: overrides(),
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({}),
     now: NOW,
   });
@@ -283,6 +304,7 @@ test('bot author (botId) is treated as admin and is membership-exempt', async ()
     author: ev.pull_request.user.id,
     paths: ['members/octocat/posts/hello/index.md'],
     overrides: overrides({ roles: new Map() }), // bot not even in roles.yml here
+    priceTierMap: PRICE_MAP,
     stripe: fakeStripe({}),
     botId: 4242,
     now: NOW,

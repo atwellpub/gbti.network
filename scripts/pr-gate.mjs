@@ -224,8 +224,13 @@ async function main() {
     const stripe = createStripeClient({ apiKey: stripeKey });
     const overrides = loadOverrides(repoRoot);
     // sow-185: the price-id -> tier map from the provisioned env (STRIPE_PRICE_MEMBER/CREATOR_* + legacy
-    // STRIPE_PRICE_ID). Non-empty in production (the legacy $150 seeds creator), so an unmapped price fails
-    // closed to `none`; empty only in a bare env, where tierForPrice's legacy single-price mode grants creator.
+    // STRIPE_PRICE_ID), passed by pr-membership-gate.yml.
+    //
+    // This comment used to say the map was "non-empty in production ... empty only in a bare env, where
+    // tierForPrice's legacy single-price mode grants creator". Every clause was true EXCEPT the premise: the
+    // production Actions env WAS the bare env, seeding nothing, so the gate resolved every paid member to
+    // creator and admitted a $5 Network Member as a Content Creator. Fixed on both sides now: the workflow
+    // passes the ids, AND tierForPrice no longer has a branch that grants anything on an empty map.
     const priceTierMap = buildEnvPriceTierMap(process.env);
 
     // METADATA ONLY: changed file paths via the API. We never check out or run PR code.

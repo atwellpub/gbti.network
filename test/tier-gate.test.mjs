@@ -37,10 +37,12 @@ test('buildEnvPriceTierMap: the legacy id is added alongside the explicit prices
   assert.equal(map.get('price_mm'), TIER.member);
 });
 
-test('buildEnvPriceTierMap: empty env -> empty map -> tierForPrice legacy single-price mode (creator, inert)', () => {
+test('buildEnvPriceTierMap: empty env -> empty map -> tierForPrice FAILS CLOSED to none', () => {
+  // This asserted `creator` and called it "inert, no regression". It was neither: an unprovisioned env is
+  // exactly what the PR gate had, so it granted creator to every paid subscriber.
   const map = buildEnvPriceTierMap({});
   assert.equal(map.size, 0);
-  assert.equal(tierForPrice('anything', map), TIER.creator); // pre-sow-185 behavior: inert, no regression
+  assert.equal(tierForPrice('anything', map), TIER.none);
 });
 
 test('grantTier: no tier field -> creator (legacy flat grant default)', () => {

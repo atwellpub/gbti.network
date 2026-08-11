@@ -88,15 +88,32 @@ export function buildPriceTierMap({ priceTiers = null, legacyCreatorPriceId = nu
 /**
  * Resolve a Stripe price id to a tier.
  *
- * - id present in the map            -> the mapped tier
- * - map is EMPTY (nothing configured) -> `creator`, the pre-sow-185 single-price behavior. Reachable only
- *   before any tier configuration exists, i.e. when exactly one price can exist. Once buildPriceTierMap has a
- *   legacy price id to seed, this branch is unreachable in production.
- * - anything else (unknown id, absent id, non-string) -> `none`. FAIL CLOSED.
+ * - id present in the map -> the mapped tier
+ * - EVERYTHING else (unknown id, absent id, non-string, an EMPTY map, a non-Map argument) -> `none`.
+ *   FAIL CLOSED, with no exceptions.
+ *
+ * THERE IS NO "empty map means creator" BRANCH ANY MORE, and it must not come back (2026-08-11).
+ *
+ * It existed to preserve pre-sow-185 single-price behaviour and its docstring claimed it was "unreachable in
+ * production. Once buildPriceTierMap has a legacy price id to seed". That was false. The GitHub Actions env
+ * seeded nothing, not even the legacy id, so `pr-membership-gate.yml` built an EMPTY map and this branch
+ * resolved EVERY paid subscriber to `creator`. The sow-185 publish gate therefore admitted a $5 Network
+ * Member as a Content Creator, live, for as long as both existed.
+ *
+ * A second door led to the same place: a caller passing a plain OBJECT where a Map belongs was silently
+ * coerced to an empty Map and got `creator` too. Every price map here is BUILT from an object literal, so
+ * that is the natural mistake, it looks correct at the call site, and it produced the highest privilege.
+ *
+ * A test named "a non-Map passed where a map belongs does not throw and DOES NOT GRANT" asserted this
+ * returned `creator`, with a comment rationalising it as defensive. The alternative was never a crash: it was
+ * `none`, which the adjacent test already asserts for every other malformed input. The intent was written
+ * down correctly and the code never matched it. Deleting the branch makes that test name true.
+ *
+ * This now agrees with the rest of the feature: classify-pr `decide()` defaults `tier = TIER.none`, and the
+ * syndication adapters collapse ambiguity to the restricted side. Absent must mean LESS privilege here.
  */
 export function tierForPrice(priceId, map) {
   const m = map instanceof Map ? map : new Map();
-  if (m.size === 0) return TIER.creator; // legacy single-price mode; see buildPriceTierMap
   if (typeof priceId !== 'string' || !priceId) return TIER.none;
   return m.get(priceId) ?? TIER.none;
 }
