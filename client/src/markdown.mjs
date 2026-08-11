@@ -43,20 +43,31 @@ const isDangerousAnchorHref = (url) => {
 };
 const attrOf = (attrs, name) => { const m = new RegExp(`\\b${name}="([^"]*)"`, 'i').exec(String(attrs || '')); return m ? m[1] : ''; };
 const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Bold and italic, in ONE place: inline() applies it to ordinary text, and rawAnchorHtml applies it to the
+// inner text of a raw <a>. Both need it, because the site's remark pipeline parses markdown INSIDE inline
+// HTML (CommonMark requires it), so `<a href="x">**Name**</a>` publishes as a bold link. This renderer draws
+// the preview, so any rule it applies in one place and not the other makes the preview lie about the page.
+function emphasis(t) {
+  return String(t)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+}
 const SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
 const sanitizeAnchorInner = (html) => String(html ?? '').replace(/<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
   (_m, slash, tag) => (SAFE_INNER_TAG.test(tag) ? `<${slash}${tag.toLowerCase()}>` : ''));
 /** The canonical sanitized raw-<a> HTML for an author-attributed link (mirrors markdown-blocks.mjs's rawAnchor). */
 function rawAnchorHtml(attrs, inner) {
   const href = decodeEntities(attrOf(attrs, 'href'));
-  if (!href || isDangerousAnchorHref(href)) return sanitizeAnchorInner(inner); // drop the link, keep safe text
+  if (!href || isDangerousAnchorHref(href)) return emphasis(sanitizeAnchorInner(inner)); // drop the link, keep safe text
   const rel = [];
   for (const tok of attrOf(attrs, 'rel').toLowerCase().split(/\s+/)) if (REL_ALLOWED.has(tok) && !rel.includes(tok)) rel.push(tok);
   const blank = attrOf(attrs, 'target').toLowerCase() === '_blank';
   if (blank && !rel.includes('noopener')) rel.push('noopener'); // target=_blank must carry noopener (tab-nabbing)
   const relAttr = rel.length ? ` rel="${rel.join(' ')}"` : '';
   const tgtAttr = blank ? ' target="_blank"' : '';
-  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeAnchorInner(inner)}</a>`;
+  // Sanitize first (strip any tag that is not on the safe list), THEN emphasize, so the <strong>/<em> this
+  // emits are ours by construction and never pass back through the tag stripper.
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${emphasis(sanitizeAnchorInner(inner))}</a>`;
 }
 // Extracts + sanitizes raw <a> tags from the RAW (pre-escape) line into `keep`, swapped for a placeholder the
 // escape pass cannot mangle, then escapes everything else exactly as escapeHtml always has. `keep` is threaded
@@ -118,8 +129,7 @@ function inline(escaped, fn = null) {
   // unresolved relative still renders as an img and fails visibly rather than as literal markdown text).
   t = t.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\.?\/[^\s)]+)\)/g, (_m, alt, src) => `<img src="${src}" alt="${alt}" loading="lazy">`);
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  t = emphasis(t);
   t = t.replace(/\uE000(\d+)\uE001/g, (_m, i) => `<code>${codes[Number(i)] ?? ''}</code>`);
   return t;
 }

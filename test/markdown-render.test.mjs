@@ -6,6 +6,28 @@ import assert from 'node:assert/strict';
 import { renderMarkdown } from '../client/src/markdown.mjs';
 import { embedUrl, isPortraitEmbed } from '../client/src/video-embed.mjs';
 import { remarkContentBlocks } from '../src/lib/remark-content-blocks.mjs';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
+import remarkRehype from 'remark-rehype';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
+import rehypeStringify from 'rehype-stringify';
+import { sanitizeSchema, rehypeIframeHostAllowlist, rehypeStyleAllowlist, rehypeIdSafety } from '../src/lib/markdown-sanitize.mjs';
+
+// The PUBLISHED pipeline, in astro.config.mjs order. A second construction of it lives in
+// markdown-sanitize.test.mjs; sharing one helper would mean importing across test files, which re-runs the
+// other file's tests. The duplication is test scaffolding only, and both copies cite the same config.
+async function published(md) {
+  const out = await unified()
+    .use(remarkParse).use(remarkGfm).use(remarkContentBlocks)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw).use(rehypeSanitize, sanitizeSchema)
+    .use(rehypeIframeHostAllowlist).use(rehypeStyleAllowlist).use(rehypeIdSafety)
+    .use(rehypeStringify).process(md);
+  return String(out);
+}
+const anchorOf = (html) => (/<a\b[^>]*>[\s\S]*?<\/a>/.exec(html) ?? [''])[0];
 
 test('reader: a callout fence renders a variant box with an escaped, inline-formatted body', () => {
   const html = renderMarkdown('```callout warning\nHeads up, see [docs](https://x.com).\n```');
@@ -57,6 +79,30 @@ test('reader: an attributed <a> (nofollow / target=_blank) round-trips to a real
   assert.match(blank, /<a href="https:\/\/x\.com" rel="noopener" target="_blank">this<\/a>/); // blank forces noopener
   const both = renderMarkdown('Try <a href="https://x.com" rel="nofollow" target="_blank">this</a> now.');
   assert.match(both, /<a href="https:\/\/x\.com" rel="nofollow noopener" target="_blank">this<\/a>/);
+});
+
+// 2026-08-11: the sow-170 passthrough above kept the raw <a> but treated its inner text as opaque, so
+// `<a href="x">**Name**</a>` showed literal asterisks in Preview while the published page showed a bold
+// link. CommonMark parses markdown INSIDE inline HTML and remark obeys it, so the two renderers disagreed.
+// This asserts EQUIVALENCE against the real published pipeline rather than a hand-written expectation,
+// which is the only version of this test that keeps failing if either side moves.
+test('DRIFT: emphasis inside a raw <a> renders identically in the reader and on the published page', async () => {
+  const cases = [
+    'A <a href="https://appleinsider.com/x" rel="nofollow">**ExxonMobil**</a> paid at the pump.',
+    'A <a href="https://x.com" rel="nofollow">*ParkWhiz*</a> tapped a tag.',
+    'A <a href="https://x.com" rel="nofollow">**Flash Note Cards**</a> shared a deck.',
+  ];
+  for (const md of cases) {
+    assert.equal(anchorOf(renderMarkdown(md)), anchorOf(await published(md)), `diverged on: ${md}`);
+  }
+});
+
+test('reader: emphasis inside a raw <a> becomes real tags, leaving no literal asterisks', () => {
+  const html = renderMarkdown('A <a href="https://x.com" rel="nofollow">**ExxonMobil**</a> paid.');
+  assert.match(html, /<a href="https:\/\/x\.com" rel="nofollow"><strong>ExxonMobil<\/strong><\/a>/);
+  assert.doesNotMatch(html, /\*\*/);
+  // A dropped link keeps its text, and that text is emphasized too rather than left as punctuation.
+  assert.match(renderMarkdown('A <a href="javascript:alert(1)">**bad**</a> link.'), /<strong>bad<\/strong>/);
 });
 
 test('reader: a dangerous or disallowed attributed <a> is neutralized, not passed through', () => {

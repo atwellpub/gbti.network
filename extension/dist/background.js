@@ -21082,6 +21082,9 @@ var attrOf = (attrs, name) => {
   return m ? m[1] : "";
 };
 var escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function emphasis(t) {
+  return String(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+}
 var SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
 var sanitizeAnchorInner = (html) => String(html ?? "").replace(
   /<(\/?)([a-z][a-z0-9]*)(?:\s[^>]*)?>/gi,
@@ -21089,14 +21092,14 @@ var sanitizeAnchorInner = (html) => String(html ?? "").replace(
 );
 function rawAnchorHtml(attrs, inner) {
   const href = decodeEntities(attrOf(attrs, "href"));
-  if (!href || isDangerousAnchorHref(href)) return sanitizeAnchorInner(inner);
+  if (!href || isDangerousAnchorHref(href)) return emphasis(sanitizeAnchorInner(inner));
   const rel = [];
   for (const tok of attrOf(attrs, "rel").toLowerCase().split(/\s+/)) if (REL_ALLOWED.has(tok) && !rel.includes(tok)) rel.push(tok);
   const blank = attrOf(attrs, "target").toLowerCase() === "_blank";
   if (blank && !rel.includes("noopener")) rel.push("noopener");
   const relAttr = rel.length ? ` rel="${rel.join(" ")}"` : "";
   const tgtAttr = blank ? ' target="_blank"' : "";
-  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${sanitizeAnchorInner(inner)}</a>`;
+  return `<a href="${escAttr(href)}"${relAttr}${tgtAttr}>${emphasis(sanitizeAnchorInner(inner))}</a>`;
 }
 function escapeKeepingLinks(s, keep) {
   const stripped = String(s ?? "").replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
@@ -21139,8 +21142,7 @@ function inline(escaped, fn = null) {
   }
   t = t.replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+|\.?\/[^\s)]+)\)/g, (_m, alt, src) => `<img src="${src}" alt="${alt}" loading="lazy">`);
   t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, txt, url2) => `<a href="${url2}" target="_blank" rel="noopener">${txt}</a>`);
-  t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  t = emphasis(t);
   t = t.replace(/\uE000(\d+)\uE001/g, (_m, i) => `<code>${codes[Number(i)] ?? ""}</code>`);
   return t;
 }
