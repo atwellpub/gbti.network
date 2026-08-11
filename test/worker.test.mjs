@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 
 import { resolveReferral, normalizeRefCode } from '../workers/signup/referral.mjs';
 import { decideCustomer, buildNewCustomerMetadata, buildRefreshMetadata, runSignup, normalizeVia } from '../workers/signup/signup.mjs';
+import { discordRoleTarget } from '../scripts/lib/reconcile-plan.mjs'; // the steady state signup must agree with
 import { signSession, verifySession } from '../workers/signup/session.mjs';
 import { sessionCookieHeader } from '../workers/signup/session.mjs';
 import { verifyTurnstile } from '../workers/signup/abuse.mjs';
@@ -277,7 +278,10 @@ const IDENTITY = {
   email: 'octo@example.com',
   discordAccessToken: 'discord-user-token',
 };
-const CONFIG = { guildId: 'guild-1', trialRoleId: 'role-trial', signupSource: 'signup-worker' };
+// lockedRoleId is what a FRESH signup receives since the trial retirement (2026-08-11). trialRoleId stays in
+// the fixture deliberately: if signup ever reaches for it again, these tests must fail rather than pass by
+// its absence.
+const CONFIG = { guildId: 'guild-1', trialRoleId: 'role-trial', lockedRoleId: 'role-locked', signupSource: 'signup-worker' };
 
 test('signup with an existing customer reuses it and does NOT rewrite trial_started_at', async () => {
   const existing = {
@@ -315,7 +319,7 @@ test('signup with an existing customer reuses it and does NOT rewrite trial_star
   const join = discord.calls.addGuildMember[0];
   assert.equal(join.guildId, 'guild-1');
   assert.equal(join.userId, 'd-987');
-  assert.deepEqual(join.opts.roles, ['role-trial']);
+  assert.deepEqual(join.opts.roles, ['role-locked']);
   assert.equal(join.opts.accessToken, 'discord-user-token');
 });
 
@@ -339,7 +343,47 @@ test('SOW: GitHub-only signup (Discord deferred) -> Customer omits discord_user_
   assert.equal(kv.store.get('gh:424242'), 'cus_new', 'KV index still written');
 });
 
-test('signup with no existing customer creates one with full metadata + trial role + KV index', async () => {
+// --- The signup role after the trial retirement (2026-08-11) ----------------------------------------------
+
+test('an UNSET locked role id joins the guild with NO role, never `undefined`', async () => {
+  // A missing config value must not become a malformed Discord call. Sending roles:[undefined] turns a
+  // config gap into an API error or, worse, a silent partial success, instead of a visible no-op.
+  const discord = fakeDiscord();
+  await runSignup({
+    identity: IDENTITY,
+    stripe: fakeStripe({ searchHit: null }),
+    discord,
+    kv: fakeKv(),
+    config: { guildId: 'guild-1', signupSource: 'signup-worker' }, // no lockedRoleId
+    refCode: '', via: '',
+    now: new Date('2026-06-02T12:00:00.000Z'),
+  });
+  const join = discord.calls.addGuildMember[0];
+  assert.ok(join, 'still joins the guild');
+  assert.equal(join.opts.roles, undefined, 'no roles key at all, rather than [undefined]');
+  assert.equal(discord.calls.addRole.length, 0, 'no role call with an undefined id');
+});
+
+test('the signup role EQUALS what reconcile would assign the same member (no drift)', async () => {
+  // Signup and reconcile must never disagree about what a free member holds. Asserting against
+  // discordRoleTarget rather than a hardcoded string means a future change to one side fails here rather
+  // than producing a role that silently gets swapped a day later, which is the bug this replaced.
+  assert.equal(discordRoleTarget('none'), 'locked');
+  const discord = fakeDiscord();
+  await runSignup({
+    identity: IDENTITY,
+    stripe: fakeStripe({ searchHit: null }),
+    discord,
+    kv: fakeKv(),
+    config: CONFIG,
+    refCode: '', via: '',
+    now: new Date('2026-06-02T12:00:00.000Z'),
+  });
+  const ROLE_ID_FOR = { member: CONFIG.memberRoleId, trial: CONFIG.trialRoleId, locked: CONFIG.lockedRoleId };
+  assert.deepEqual(discord.calls.addGuildMember[0].opts.roles, [ROLE_ID_FOR[discordRoleTarget('none')]]);
+});
+
+test('signup with no existing customer creates one with full metadata + locked role + KV index', async () => {
   const stripe = fakeStripe({ searchHit: null });
   const discord = fakeDiscord();
   const kv = fakeKv();
@@ -379,11 +423,12 @@ test('signup with no existing customer creates one with full metadata + trial ro
   assert.equal(stripe.calls.update.length, 0);
   // KV index written to the new customer id.
   assert.equal(kv.store.get('gh:12345'), 'cus_new');
-  // Trial role assigned on join AND explicitly via addRole (so existing guild members get it too,
-  // since Discord ignores the join `roles` for a user already in the guild).
-  assert.deepEqual(discord.calls.addGuildMember[0].opts.roles, ['role-trial']);
+  // The signup role is assigned on join AND explicitly via addRole (so existing guild members get it too,
+  // since Discord ignores the join `roles` for a user already in the guild). Both must stay symmetric.
+  assert.deepEqual(discord.calls.addGuildMember[0].opts.roles, ['role-locked']);
   assert.equal(discord.calls.addRole.length, 1);
-  assert.deepEqual(discord.calls.addRole[0], { guildId: 'guild-1', userId: 'd-987', roleId: 'role-trial' });
+  assert.deepEqual(discord.calls.addRole[0], { guildId: 'guild-1', userId: 'd-987', roleId: 'role-locked' });
+  assert.ok(!discord.calls.addRole.some((c) => c.roleId === 'role-trial'), 'never the trial role: it is retired');
 });
 
 test('signup rejects a self-referral at creation (no referred_by stored)', async () => {

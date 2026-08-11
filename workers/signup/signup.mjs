@@ -177,16 +177,31 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
 
   // Add the user to the guild (guilds.join uses the user's OAuth access token). The `roles` param is
   // honored ONLY when Discord actually adds a brand-new member; for a user already in the guild Discord
-  // returns 204 and ignores it. So we ALSO assign the Trial role explicitly, which is idempotent and
-  // works for both new and existing members. (The bot's role must sit above the Trial role.)
-  // Add the user to the guild + Trial role ONLY when Discord was linked. A GitHub-only signup skips this; reconcile
-  // keeps roles in sync once discord_user_id exists, and the deferred welcome link runs this same join.
+  // returns 204 and ignores it. So we ALSO assign the role explicitly, which is idempotent and works for
+  // both new and existing members. (The bot's role must sit above the role being assigned.)
+  // Only when Discord was linked. A GitHub-only signup skips this; reconcile keeps roles in sync once
+  // discord_user_id exists, and the deferred welcome link runs this same join.
+  //
+  // THE ROLE IS `locked`, NOT `trial` (2026-08-11). The 90-day trial is retired, so a fresh signup derives
+  // `none`, and reconcile's discordRoleTarget maps `none` -> locked. Assigning trial here handed a free
+  // member read-only community access the tier model does not give them, until the DAILY reconcile
+  // corrected it, so a signup just after 07:17 UTC held it for nearly 24 hours. This assigns what the
+  // steady state already is, which closes that window rather than deciding anything new: whether Free
+  // should eventually have its OWN role with deliberate access is a separate, additive question.
+  //
+  // HONEST LIMIT: the Locked role DENIES only through its channel permission overwrites, which the owner
+  // configures and this code cannot see. If those are unset, Locked denies nothing and this change aligns
+  // signup to the steady state without closing an access gap. It still cannot be worse than granting trial.
   if (hasDiscord) {
+    // Fail safe on an unset id rather than sending `undefined` to Discord: join with NO role instead of a
+    // malformed one. Sending [undefined] is the shape that turns a missing config value into an API error
+    // (or worse, a silent partial success) instead of a visible no-op.
+    const signupRoleId = config.lockedRoleId || null;
     await discord.addGuildMember(config.guildId, discordUserId, {
       accessToken: discordAccessToken,
-      roles: [config.trialRoleId],
+      ...(signupRoleId ? { roles: [signupRoleId] } : {}),
     });
-    await discord.addRole(config.guildId, discordUserId, config.trialRoleId);
+    if (signupRoleId) await discord.addRole(config.guildId, discordUserId, signupRoleId);
   }
 
   return {
