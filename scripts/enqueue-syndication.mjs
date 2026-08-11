@@ -26,6 +26,7 @@ import { enqueueViaKvRest } from './lib/syndication-rest.mjs';
 import { flagText } from '../membership/moderation-flags.mjs'; // SOW-087: the moderation word-list gate
 import { loadSyndicationConfig } from '../membership/syndication-config.mjs'; // SOW-125: the auto-share matrix
 import { deliverChannelsForType } from '../membership/syndication-config-core.mjs'; // SOW-125: per-type gate
+import { selectPublishedTransitions } from './lib/publish-transitions.mjs'; // sow-208: select on the publish transition, not the file add
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -113,6 +114,16 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
   const added = argvAdded.length
     ? argvAdded
     : String(env.SYNDICATE_ADDED || '').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  // sow-208: on a push with no explicit paths, SELECT the content files that TRANSITIONED to published in this
+  // push (SYNDICATE_BEFORE..SYNDICATE_AFTER), not the files merely ADDED. Publishing is a status flip now
+  // (sow-194), so an added-as-draft-then-published article never appears as an add and the old diff-filter=A
+  // selection silently missed it. A rename that is published on both sides is not a transition (no repost of a
+  // migration). Fail-closed to [] on any git error or a missing baseline. The manual --added / SYNDICATE_ADDED
+  // path (dispatch re-announce) is unchanged and takes precedence.
+  if (!added.length && (env.SYNDICATE_BEFORE || env.SYNDICATE_AFTER)) {
+    const select = deps.selectTransitions ?? selectPublishedTransitions;
+    added.push(...select({ before: env.SYNDICATE_BEFORE, after: env.SYNDICATE_AFTER, root, parseFm: (t) => parseContentFile(t).frontmatter }));
+  }
   const readFile = deps.readFile ?? ((rel) => {
     try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; }
   });

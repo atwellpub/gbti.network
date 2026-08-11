@@ -39,44 +39,24 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts --omit=optional
 
-      # The files ADDED in this push that are publishable content (posts/products/prompts index.md + shares).
-      # A reconcile draft<->published flip or an edit is a MODIFY, not an ADD, so it never re-announces.
-      - name: Compute added content paths
-        id: diff
-        # All event-controlled values flow through env (never interpolated into the script) so neither the
-        # dispatch input nor the commit refs can be a shell-injection sink.
-        env:
-          DISPATCH_ADDED: ${{ github.event.inputs.added }}
-          EVENT_BEFORE: ${{ github.event.before }}
-          EVENT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          if [ -n "$DISPATCH_ADDED" ]; then
-            ADDED="$DISPATCH_ADDED"
-          else
-            BEFORE="$EVENT_BEFORE"
-            AFTER="$EVENT_SHA"
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              FILES=$(git show --diff-filter=A --name-only --format= "$AFTER")
-            else
-              FILES=$(git diff --diff-filter=A --name-only "$BEFORE" "$AFTER")
-            fi
-            # Strict charset (lowercase kebab owner/slug, no metacharacters) so a path can never carry a shell
-            # injection even though it is passed via an env var below.
-            ADDED=$(printf '%s\n' "$FILES" | grep -E '^(members/[a-z0-9][a-z0-9-]*|house)/(posts|products|prompts)/[a-z0-9][a-z0-9-]*/index\.md$|^members/[a-z0-9][a-z0-9-]*/shares/[a-z0-9][a-z0-9._-]*\.(md|mdx)$' | tr '\n' ' ' || true)
-          fi
-          echo "added=$ADDED" >> "$GITHUB_OUTPUT"
-          echo "Added content paths: ${ADDED:-<none>}"
-
+      # sow-208: SELECT on the TRANSITION to published, not on the files ADDED. Publishing is a status flip now
+      # (sow-194 made committed drafts first-class), so an article added as a draft and later published by
+      # modifying its status line never appears as an ADD, and the old diff-filter=A selection silently missed
+      # it. enqueue-syndication.mjs diffs SYNDICATE_BEFORE..SYNDICATE_AFTER and enqueues a content file ONLY
+      # when its status becomes `published` (a rename that is published on both sides is NOT a transition, so a
+      # single house-content migration never floods the queue). The status guard, the redirectFrom rename skip,
+      # and the queue dedupe remain as layered safety. Fail-closed: a git error or a missing baseline enqueues
+      # nothing (never retro-fire the backlog). A manual dispatch `added` list takes precedence for hand
+      # re-announce. All event-controlled values flow through env (never interpolated), and the script diffs via
+      # execFileSync with array args (no shell), so neither the refs nor the paths can be an injection sink.
       - name: Enqueue for approval (apply)
-        if: steps.diff.outputs.added != ''
-        # SOW-058: ENQUEUE each published post/product/prompt/share into the syndication queue (KV) instead of
-        # posting to Discord directly. Each item is `pending` and waits for a superadmin to APPROVE it in the
-        # tracker; the Worker cron drain then posts it to every enabled channel. Paths flow through
-        # SYNDICATE_ADDED (env), never interpolated -> no injection.
         run: node scripts/enqueue-syndication.mjs --apply
         env:
-          SYNDICATE_ADDED: ${{ steps.diff.outputs.added }}
+          # Manual re-announce (workflow_dispatch): explicit paths win. Empty on a push.
+          SYNDICATE_ADDED: ${{ github.event.inputs.added }}
+          # Push: the diff range the script selects publish-transitions from (needs fetch-depth: 0 above).
+          SYNDICATE_BEFORE: ${{ github.event.before }}
+          SYNDICATE_AFTER: ${{ github.sha }}
           # The KV REST creds let Actions write the same SIGNUP_KV namespace the Worker drains. The drain (in the
           # Worker) holds the Discord/social tokens now, so this job no longer needs DISCORD_BOT_TOKEN or channel ids.
           # CF_ACCOUNT_ID + CF_KV_NAMESPACE_ID are non-secret identifiers, inlined exactly like reconcile.yml /
