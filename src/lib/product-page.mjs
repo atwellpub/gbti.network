@@ -201,6 +201,38 @@ export function resolveHero(banner, bannerPreset, featuredImage) {
 }
 
 /**
+ * sow-210: the hero for ANY content type, for surfaces that render more than products.
+ *
+ * The three authorable types keep their covers in different fields: a product uses banner / bannerPreset /
+ * featuredImage, a post uses coverImage (with coverAlt), and a prompt uses image. The WorkBench preview
+ * called resolveHero directly, so for a post or a prompt all three product fields were undefined, it fell
+ * through to the `ink` default, and the preview showed an empty dark band. It had never displayed an
+ * article cover at all.
+ *
+ * Dispatching here rather than branching in the template is deliberate: preview.astro is already shared by
+ * all three types, and adding per-type special cases inside it is exactly how the other two got missed.
+ *
+ * resolveHero itself is untouched and still does the product work, so the product path cannot regress and
+ * its existing tests keep protecting it.
+ *
+ * @param {string} type 'post' | 'prompt' | 'product' (anything else is treated as a product).
+ * @param {object} fm the item's frontmatter.
+ * @returns {{ image: any, preset: string|null, alt: string }} exactly one of image or preset, as above,
+ *   plus the alt text the type carries ('' when it has none, which the caller can fall back from).
+ */
+export function resolveHeroForType(type, fm = {}) {
+  if (type === 'post') {
+    const image = fm.coverImage ?? null;
+    return { image, preset: image ? null : 'ink', alt: fm.coverAlt || '' };
+  }
+  if (type === 'prompt') {
+    const image = fm.image ?? null;
+    return { image, preset: image ? null : 'ink', alt: '' };
+  }
+  return { ...resolveHero(fm.banner, fm.bannerPreset, fm.featuredImage), alt: '' };
+}
+
+/**
  * `{ owner, repo }` from a github.com repository URL, or `null` for anything else (a non-GitHub host, a
  * malformed URL, GitHub's own non-repo pages). Used both to build the releases-API URL and, via
  * `detectLinkSource`, to decide whether a pasted link is a GitHub repository at all.

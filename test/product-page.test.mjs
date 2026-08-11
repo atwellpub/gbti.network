@@ -15,6 +15,7 @@ import {
   linkLabel,
   isLockedLink,
   resolveHero,
+  resolveHeroForType,
   parseGithubRepo,
   detectLinkSource,
   iconForUrl,
@@ -279,4 +280,38 @@ test('sow-176 iconForUrl: fails silent (null) for unknown host, unmapped subdoma
   assert.equal(iconForUrl(''), null);
   assert.equal(iconForUrl(null), null);
   assert.equal(iconForUrl(undefined), null);
+});
+
+// sow-210: the preview showed an empty dark band instead of an article cover, and always had. It called
+// resolveHero directly with the PRODUCT fields, so for a post or a prompt all three were undefined, it fell
+// through to the 'ink' default, and no article cover was ever displayed. These pin the per-type dispatch.
+test('resolveHeroForType: a post resolves coverImage and carries coverAlt', () => {
+  const hero = resolveHeroForType('post', { coverImage: './images/cover.webp', coverAlt: 'A laptop and a phone' });
+  assert.deepEqual(hero, { image: './images/cover.webp', preset: null, alt: 'A laptop and a phone' });
+});
+
+test('resolveHeroForType: a prompt resolves its image field', () => {
+  assert.deepEqual(resolveHeroForType('prompt', { image: './images/p.webp' }), { image: './images/p.webp', preset: null, alt: '' });
+});
+
+test('resolveHeroForType: the OLD behaviour is the bug, so product fields must NOT satisfy a post', () => {
+  // A post carrying product fields (or a post whose cover is simply unset) gets the ink preset, not a hero
+  // built from a field its type does not use. This is the exact confusion the defect came from.
+  assert.deepEqual(resolveHeroForType('post', { banner: './images/b.webp', featuredImage: './images/f.webp' }),
+    { image: null, preset: 'ink', alt: '' });
+});
+
+test('resolveHeroForType: a coverless draft still gets the ink preset rather than a broken image', () => {
+  assert.deepEqual(resolveHeroForType('post', {}), { image: null, preset: 'ink', alt: '' });
+  assert.deepEqual(resolveHeroForType('prompt', {}), { image: null, preset: 'ink', alt: '' });
+  assert.deepEqual(resolveHeroForType('product', {}), { image: null, preset: 'ink', alt: '' });
+});
+
+test('resolveHeroForType: a product delegates to resolveHero unchanged, preset path included', () => {
+  const fm = { banner: null, bannerPreset: 'amber', featuredImage: './images/f.webp' };
+  assert.deepEqual(resolveHeroForType('product', fm), { ...resolveHero(fm.banner, fm.bannerPreset, fm.featuredImage), alt: '' });
+  const uploaded = { banner: './images/b.webp', bannerPreset: 'green', featuredImage: './images/f.webp' };
+  assert.deepEqual(resolveHeroForType('product', uploaded), { image: './images/b.webp', preset: null, alt: '' });
+  // an unknown type is treated as a product rather than throwing
+  assert.deepEqual(resolveHeroForType(undefined, uploaded), { image: './images/b.webp', preset: null, alt: '' });
 });

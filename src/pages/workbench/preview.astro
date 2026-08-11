@@ -138,7 +138,7 @@ const labelOf = CATEGORY_LABELS;
     import { initToc, initCarousel, slugifyHeading } from '../../lib/pd-enhance.mjs';
     import {
       normalizeGallery, hasCaptions, resolveGalleryStyle, buildToc,
-      repoUrl as findRepo, resolvePrimaryCta, railLinks, linkLabel, isLockedLink, resolveHero, iconForUrl,
+      repoUrl as findRepo, resolvePrimaryCta, railLinks, linkLabel, isLockedLink, resolveHeroForType, iconForUrl,
     } from '../../lib/product-page.mjs';
 
     (async () => {
@@ -235,14 +235,19 @@ const labelOf = CATEGORY_LABELS;
         : 'This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.');
       document.title = `Preview: ${fm.title || slug}`;
 
-      const setImg = (sel: string, val: string) => {
+      const setImg = (sel: string, val: string, alt?: string) => {
         const el = $(sel) as HTMLImageElement | null; if (!el) return;
         const url = asset(val, itemPath);
         if (url) { el.src = url; el.hidden = false; } else { el.hidden = true; }
+        // sow-210: the hero <img> ships with a hardcoded empty alt. A post carries coverAlt, and the alt
+        // text is one of the things an author is reviewing, so pass it through when the type has one.
+        if (typeof alt === 'string') el.alt = alt;
       };
-      // sow-174: the hero resolves the same way the published page does — an uploaded banner, an author-chosen
-      // color preset, or the spotlight-cover fallback — via the SAME resolveHero() the page itself calls.
-      const hero = resolveHero(fm.banner, fm.bannerPreset, fm.featuredImage);
+      // sow-174: the hero resolves the same way the published page does. sow-210: PER TYPE, because the three
+      // authorable types keep their covers in different fields. This previously called resolveHero directly
+      // with the product fields, so a post or a prompt matched none of them, fell through to the 'ink'
+      // preset, and the preview never showed an article cover at all.
+      const hero = resolveHeroForType(type, fm);
       const heroSection = document.querySelector('.pd-hero');
       if (heroSection) {
         if (hero.preset) heroSection.setAttribute('data-preset', hero.preset);
@@ -250,7 +255,7 @@ const labelOf = CATEGORY_LABELS;
       }
       const grid = document.querySelector('.pd-grid');
       if (grid) grid.setAttribute('data-side', fm.sidebarPosition === 'right' ? 'right' : 'left');
-      setImg('[data-pv-hero]', hero.image);
+      setImg('[data-pv-hero]', hero.image, hero.alt || fm.title || '');
       setImg('[data-pv-mark]', fm.iconLarge || fm.icon);
       setImg('[data-pv-barmark]', fm.icon);
 
