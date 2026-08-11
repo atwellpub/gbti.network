@@ -6,8 +6,7 @@ visibility: public
 publicStub: false
 excerpt: >-
   An App Clip runs part of an iOS app with no install, launched from a link, a QR code, or an NFC tag.
-  The technology works. Whether it fits your next project, and who has shipped one, are the
-  harder questions.
+  Here is how it works, who is already using it, and where it might fit next.
 categories:
   - design
   - ui-ux
@@ -28,47 +27,47 @@ We came across **App Clips** recently and realized how little we knew about them
 
 App Clips have existed since iOS 14 in 2020, and Apple is still adding to them, most recently in June 2025.[^1]
 
-## What an App Clip is
+## How it works
 
-A lightweight build of an existing app, offering a slice of its functionality. Apple's own example is a donut shop: the full app handles favorites, rewards, and offers, and the App Clip does one thing, order a donut.[^5]
+Not a separate SDK. An App Clip is an additional target inside the same Xcode project as the full app, sharing code with it rather than shipping as its own framework.[^8] The usual ways to keep that code shared: give individual files target membership in both, or put the shared logic in its own Swift package that both targets depend on. Copying files between the two works too, but is actively discouraged, because it is the fastest way for the clip and the full app to quietly drift apart.[^8]
 
-Three properties do the real work. It launches without an install. It never appears on the Home screen, so nobody manages it or cleans it up. The system deletes it after a period of inactivity, which erases the one calculation a person makes before installing anything: is this worth permanent space on my phone.[^5]
+That target compiles down to its own small binary, which is what makes an install unnecessary: instead of downloading the full app, the system fetches and runs just that binary for the length of the task, and removes it later.[^2][^5] The size ceiling exists for exactly this reason: everything the App Clip needs, code and assets both, has to fit inside that one download.
 
-It ships as a target inside a full app rather than standing alone, and the full app has to include the same functionality the clip offers.[^2] So this is not a way to avoid building an app. It is a way to give someone the useful part of one before they commit. People reach a clip eight different ways, from a QR code or an NFC tag to a link shared in Messages.[^3] The count is less about the feature than about how many doors your project would need to open at once.
+Security is not App Review at the moment someone taps a link. It is domain verification, done ahead of time. A developer adds the Associated Domains capability with an `appclips:<domain>` entry, then hosts a file named `apple-app-site-association` in a `.well-known` folder on that domain, declaring which App Clip is authorized to launch from it.[^9] The system checks that file before it will launch the clip at all, the same mechanism Universal Links use, extended with one more key. A link cannot stand in for someone else's App Clip without first controlling their domain.
 
-## Where an App Clip fits your next integration
+Maintaining one is two ongoing obligations rather than a checklist finished once: keep the shared code, ideally the package, in sync as the full app changes, and keep the association file live and correct on your own server. If that file goes missing or gets misconfigured, the clip simply stops launching.
 
-Three situations hold up once you look past the pitch.
+None of this is a way to avoid building the full app. Every App Clip has to ship inside one and include the same functionality it offers, so it is a way to give someone the useful part of an app before they commit to the rest.[^2] People reach a clip eight different ways, from a QR code or an NFC tag to a link shared in Messages.[^3] The number itself is less the point than the decision behind it: a project built around App Clips has to pick how many of those doors it wants open.
 
-A physical location with one task attached, where somebody is standing there with a phone and wants exactly one thing finished: ordering at a table, paying at a pump, unlocking a scooter. The constraints barely register, because the interaction is over in a minute anyway.
-
-A demo. Apple's newest push, since June 2025, is a generated demo link that gets a 100 MB budget and keeps physical invocations, aimed squarely at letting someone try a level or a workout before buying.[^1][^2] If the pitch is "try it first," this is a real answer.
-
-A website with a task that is genuinely mobile. A Smart App Banner or an App Clip card in Safari can launch one, and the 100 MB ceiling is available if the project can live with iOS 17 and skip QR codes entirely.[^2]
-
-Outside those three, the constraint list gets expensive fast. No background activity of any kind. No App Tracking Transparency, no SKAdNetwork, and the two identifiers a clip could otherwise read both return empty.[^2] The when-in-use location permission a clip does get resets on its own every night at four in the morning.[^2] Read that list as a business decision rather than a developer one: an App Clip is built so you learn almost nothing about the person using it, on purpose.
-
-If the project needs identity, needs to run in the background, needs attribution, or the task is long enough that installing was never really the imposition, an App Clip is the wrong shape for it.
-
-## Who has shipped one
+## How is it currently being used in the real world?
 
 The public record here is thin, but named deployments exist, and they sort into three groups more useful than a list of logos.
 
-The physical ones are what Apple advertised from day one. ExxonMobil put tap to pay at the pump in 2020, the Apple Store used a barcode scan in its own stores to pull up accessory details in 2021, and ParkWhiz put an NFC tag at the spot so someone could pay without installing anything.[^4][^6] Panera Bread sits just off to the side of that group: its ordering flow comes through Apple Maps rather than something you scan.[^4]
+### Physical taps and scans
 
-The second group is the one worth stopping on, because nobody markets it. SignEasy lets someone sign a document that was sent to them, with no install required of the signer. Parcel tracks a single package from a shared link. Flash Note Cards makes and shares cards inside a conversation.[^6] None of those people are the customer. They were handed a thing and needed to deal with it, which is arguably the strongest argument for the whole feature, and it is not the one Apple leads with.
+What Apple advertised from day one. ExxonMobil put tap to pay at the pump in 2020, the Apple Store used a barcode scan in its own stores to pull up accessory details in 2021, and ParkWhiz put an NFC tag at the spot so someone could pay without installing anything.[^4][^6] Panera Bread sits just off to the side of this group: its ordering flow comes through Apple Maps rather than something you scan.[^4]
 
-The third group is a single early example: Elloveo, a free trial of a children's science app.[^6] It is also the group Apple has invested in most recently, which is what the June 2025 demo work is for.
+### Sent to someone who isn't the customer
 
-What every one of them shares is a task that finishes in about a minute.
+The group worth stopping on, because nobody markets it. SignEasy lets someone sign a document that was sent to them, with no install required of the signer. Parcel tracks a single package from a shared link. Flash Note Cards makes and shares cards inside a conversation.[^6] None of those people are the customer. They were handed a thing and needed to deal with it, which is arguably the strongest argument for the whole feature, and it is not the one Apple leads with.
+
+### Try before you commit
+
+A single early example so far: Elloveo, a free trial of a children's science app.[^6] It is also the group Apple has invested in most recently, which is what the June 2025 demo work is for.
+
+What every one of them shares, across all three groups, is a task that finishes in about a minute.
 
 No source reports an install lift, a conversion rate, or a completion figure for any of them. We looked specifically for outcomes: a search for App Clip campaign results returns marketing case studies about other things entirely, and a search for App Clip business results returns mobile-ordering and micromobility material with no App Clips in it. We would rather report that absence than dress up unrelated statistics as evidence.
 
-Both sources are dated: the Heady teardown is from March 2021 and the AppleInsider piece is from December 2022.[^6][^4] Nothing comparable has surfaced since, which is itself worth knowing if you go looking for more.
+Both sources are dated: the Heady teardown is from March 2021 and the AppleInsider piece is from December 2022.[^6][^4] Nothing comparable has surfaced since.
+
+## Where it might fit next
+
+Picture the same shape wherever it lands next: a diner ordering without installing anything, a driver tapping to pay at the pump, someone trying one level of a game before deciding whether to buy the rest. An App Clip fits a task that small and that self-contained, on a website, at a location, or as a demo, and stops fitting the moment the task needs to remember who you are, run while nobody is looking, or outlast a minute.
 
 ## We have not shipped one
 
-Nobody at GBTI Network has built an App Clip. Everything above comes from Apple's documentation and from published third-party accounts, cited as such, and none of it has been checked against a real deployment by us. Treat it as a map, not a review.
+Nobody at GBTI Network has built an App Clip. Everything above comes from Apple's documentation and from published third-party accounts, cited as such, and none of it has been checked by us against something running in production. Treat it as a map, not a review.
 
 That is exactly where members come in. If you have shipped an App Clip, or scoped one and decided against it, tell us the part documentation never captures: what App Store Connect was like, whether people found the thing, whether it moved installs or replaced them, and what you would not do again. A report that it was not worth it is as useful as one that it was.
 
@@ -89,3 +88,7 @@ Cover photograph by iam hogir on Pexels.[^7]
 [^6]: Heady, "The App Clips Playbook: 5 Inspiring Examples and Teardowns," March 17, 2021. Source of the ParkWhiz, SignEasy, Parcel, Elloveo, and Flash Note Cards examples. Notably it reports no outcome figures for any of them: [heady.io](https://www.heady.io/blog/the-app-clips-playbook-5-inspiring-examples-teardowns)
 
 [^7]: Cover photograph by iam hogir on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/17744145](https://www.pexels.com/photo/a-man-sitting-at-the-desk-and-using-a-laptop-and-smartphone-17744145/)
+
+[^8]: Apple, "Creating an App Clip with Xcode," Apple Developer Documentation, read August 10, 2026. Source of the target-based architecture and the shared-code guidance, including the recommendation against copying files directly: [developer.apple.com](https://developer.apple.com/documentation/appclip/creating-an-app-clip-with-xcode)
+
+[^9]: Apple, "Supporting associated domains," Apple Developer Documentation, read August 10, 2026. Source of the `apple-app-site-association` file format and the `appclips` key that authorizes a domain to launch a given App Clip: [developer.apple.com](https://developer.apple.com/documentation/xcode/supporting-associated-domains)
