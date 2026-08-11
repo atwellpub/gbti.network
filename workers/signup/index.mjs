@@ -50,6 +50,7 @@ import { runSignup } from './signup.mjs';
 import { resolveCustomerId, createCheckout } from './checkout.mjs';
 import { buildCheckoutPriceMap, resolveCheckoutPrice } from '../../membership/checkout-prices.mjs'; // sow-185 3b: multi-price allowlist
 import { validateCouponParam } from './coupons.mjs'; // SOW-119
+import { unlinkDiscord } from './discord-unlink.mjs'; // sow-218: disconnect Discord (roles first, then the link)
 import { startOnboarding } from './connect.mjs';
 import { verifyStripeSignature, isDuplicateEvent, markEventSeen, handleStripeEvent } from './webhook.mjs';
 import { membershipStatus } from './membership-status.mjs';
@@ -398,6 +399,40 @@ async function discordLinkedFor(env, githubId) {
   } catch { return false; }
 }
 
+// sow-218: POST /discord/unlink -- disconnect this member's Discord account.
+//
+// Same dual identity as the link-status poll (extension bearer, or the website session cookie), but this one
+// WRITES, so the cookie path additionally requires CSRF. The bearer path does not: a bearer token is not sent
+// ambiently by a browser, so there is no cross-site request to forge.
+//
+// The work itself, including why the two writes are ordered as they are, lives in discord-unlink.mjs.
+async function handleDiscordUnlink(request, env) {
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  let githubId = null;
+  let cors = { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' };
+
+  if (token) {
+    let id = null;
+    try { id = await githubFetchUser(token, globalThis.fetch); } catch { id = null; }
+    if (!id || !id.githubId) return json({ error: 'bad_token' }, 401, cors);
+    githubId = String(id.githubId);
+  } else {
+    cors = { ...corsHeaders(request, env, { credentials: true }), 'Cache-Control': 'no-store' };
+    const csrf = requireCsrf(request, env);
+    if (!csrf.ok) return json({ error: 'bad_csrf' }, 403, cors);
+    const session = await verifySession(readSessionCookie(request.headers.get('Cookie')), env.SESSION_SECRET);
+    githubId = session && session.github_id ? String(session.github_id) : null;
+    if (!githubId) return json({ error: 'no_session' }, 401, cors);
+  }
+
+  const { stripe, discord } = clientsFromEnv(env);
+  const r = await unlinkDiscord({ githubId, stripe, discord, config: discordConfig(env) });
+  // A failed unlink is a 502, not a 200 with ok:false. The member is about to be told whether their account is
+  // disconnected, and a silent failure here leaves them believing it is when it is not.
+  return json(r, r.ok ? 200 : 502, cors);
+}
+
 async function handleDiscordLinkStart(request, env) {
   const url = new URL(request.url);
   // Authenticate the linker by EITHER a one-time link token (the extension's GitHub-App identity, the robust path)
@@ -696,6 +731,10 @@ export default {
       if (method === 'GET' && pathname === '/discord/link/init') return await handleDiscordLinkInit(request, env);   // SOW Part C: mint a token-bound link URL (extension)
       if (method === 'GET' && pathname === '/discord/link/start') return await handleDiscordLinkStart(request, env); // SOW Part C: deferred Discord link
       if (method === 'GET' && pathname === '/discord/link/status') return await handleDiscordLinkStatus(request, env); // SOW: welcome auto-detect poll
+      if (pathname === '/discord/unlink') { // sow-218: disconnect Discord (strips the managed roles, then the link)
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env, { credentials: true }) });
+        if (method === 'POST') return await handleDiscordUnlink(request, env);
+      }
 
       if (method === 'POST' && pathname === '/checkout') return await handleCheckout(request, env);
       if (method === 'GET' && pathname === '/checkout/success') return await handleCheckoutSuccess(request, env);

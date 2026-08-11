@@ -76,6 +76,7 @@ export function createHttpClient({ baseUrl = '', token, fetch = globalThis.fetch
     discordInvite: () => request('GET', '/api/discord-invite'), // on-demand Discord invite -> { url, source }
     discordLinkUrl: () => request('GET', '/api/discord-link'), // SOW Part C: a one-time token-bound Discord-LINK URL -> { url }
     discordLinkStatus: () => request('GET', '/api/discord-link/status'), // SOW: welcome auto-detect poll -> { linked }
+    discordUnlink: () => request('POST', '/api/discord-unlink'), // sow-218: disconnect Discord -> { ok, unlinked }
     getNews: ({ category, since, limit } = {}) => request('GET', `/api/news${qs({ category, since, limit })}`), // SOW-043: members-only news -> { items, updatedAt }
     getNewsSources: () => request('GET', '/api/news-sources'), // SOW-046: followable news channels -> { sources }
     getPrefs: () => request('GET', '/api/prefs'), // SOW-046: member prefs -> { categories, followedChannels }

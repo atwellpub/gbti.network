@@ -20656,6 +20656,21 @@ async function getDiscordLinkUrl(ctx) {
   if (!data || !data.url) throw new OperationError("discord-link-failed", "no link URL returned");
   return { url: data.url };
 }
+async function discordUnlink(ctx) {
+  requireIdentity(ctx);
+  const token = ctx.store?.get?.("githubToken");
+  if (!token) throw new OperationError("not-authenticated", "Sign in to disconnect Discord.");
+  const fetch2 = ctx.fetch ?? globalThis.fetch;
+  let res;
+  try {
+    res = await fetch2(`${SIGNUP_BASE}/discord/unlink`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  } catch (err) {
+    throw new OperationError("discord-unlink-failed", err?.message || "the Discord disconnect request failed");
+  }
+  if (!res.ok) throw new OperationError("discord-unlink-failed", `the Discord disconnect failed (${res.status})`);
+  const data = await res.json().catch(() => null);
+  return { ok: Boolean(data && data.ok), unlinked: Boolean(data && data.unlinked) };
+}
 async function getDiscordLinkStatus(ctx) {
   const token = ctx.store?.get?.("githubToken");
   if (!token) return { linked: false };
@@ -23078,6 +23093,8 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
         return ok(await getDiscordLinkUrl(ctx));
       case "/api/discord-link/status":
         return ok(await getDiscordLinkStatus(ctx));
+      case "/api/discord-unlink":
+        return ok(await discordUnlink(ctx));
       case "/api/news":
         return ok(await getNews(ctx, { category: query.category, since: query.since, limit: Number(query.limit) || void 0 }));
       case "/api/news-sources":

@@ -158,6 +158,13 @@ const CSS = `
   .dbtn { display:inline-flex; align-items:center; gap:8px; font:inherit; font-weight:600; font-size:13.5px;
     color:#fff; background:var(--wf-green); border:1.5px solid transparent; border-radius:7px; padding:11px 18px; cursor:pointer; }
   .dbtn.on, .dbtn[disabled] { color:var(--wf-soft); background:var(--wf-raise); border-color:var(--wf-line); cursor:default; }
+  /* sow-218: the connected row pairs the confirmation with a quiet Disconnect. Deliberately understated: it is
+     a real action but not the one this step is asking anybody to take. */
+  .drow { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .dlink { font:inherit; font-size:13px; font-weight:600; color:var(--wf-soft); background:none; border:0;
+    padding:6px 2px; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+  .dlink:hover:not([disabled]) { color:var(--wf-fg); }
+  .dlink[disabled] { opacity:.6; cursor:default; }
 
   /* Channels grid. */
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(238px, 1fr)); gap:12px; }
@@ -291,6 +298,38 @@ class GbtiWelcome extends GbtiElement {
     try { localStorage.setItem(DISCORD_DONE_KEY, '1'); } catch { /* storage blocked */ }
     // Auto-advance off the Discord step to the next to-do.
     if (STEPS[this._step]?.key === 'discord' && this._step < STEPS.length - 1) this._step++;
+    this.render();
+  }
+
+  /**
+   * sow-218: disconnect the linked Discord account.
+   *
+   * Server first, local state second. The wizard remembers "joined" in localStorage (DISCORD_DONE_KEY), and
+   * clearing that eagerly would show a member the Connect button while their account was still linked and still
+   * holding guild roles, which is a worse lie than the one this feature fixes. So the flag is cleared only on a
+   * confirmed unlink, and a failure is surfaced in the card rather than swallowed.
+   *
+   * A host with no client (the inert public-site embed) simply does nothing.
+   */
+  async _disconnectDiscord() {
+    if (this._discordUnlinking || !this.client?.discordUnlink) return;
+    this._discordUnlinking = true;
+    this._discordUnlinkError = null;
+    this.render();
+    let ok = false;
+    try {
+      const r = await this.client.discordUnlink();
+      ok = Boolean(r?.ok);
+      if (!ok) this._discordUnlinkError = 'We could not disconnect Discord just now. Nothing was changed. Please try again in a moment.';
+    } catch {
+      this._discordUnlinkError = 'We could not reach the network to disconnect Discord. Nothing was changed. Please try again in a moment.';
+    }
+    this._discordUnlinking = false;
+    if (ok) {
+      this._stopDiscordPoll();
+      this._discordJoined = false;
+      try { localStorage.removeItem(DISCORD_DONE_KEY); } catch { /* storage blocked */ }
+    }
     this.render();
   }
 
@@ -549,6 +588,9 @@ class GbtiWelcome extends GbtiElement {
         window.open(url, '_blank', 'noopener');
         this._startDiscordPoll();
       });
+      // sow-218: Disconnect. Clears the LOCAL joined memory only after the server confirms, so a failed unlink
+      // never leaves the step claiming disconnected while the account is still linked.
+      this.on('[data-discord-unlink]', 'click', () => this._disconnectDiscord());
     } else if (step === 'subreddit') {
       // A channel card's Follow opens the property in a new tab and marks the card followed (local memory,
       // best-effort: none of these platforms report a follow back to us).
@@ -593,14 +635,25 @@ class GbtiWelcome extends GbtiElement {
 
   _discordCard() {
     const joined = this._discordJoined;
+    // sow-218: the connected state used to be a permanently DISABLED button and nothing else, so a member who
+    // linked the wrong Discord account had no route back. It now offers Disconnect.
     const btn = joined
-      ? `<button class="dbtn on" type="button" disabled>&#10003; Discord connected</button>`
+      ? `<div class="drow">
+           <button class="dbtn on" type="button" disabled>&#10003; Discord connected</button>
+           <button class="dlink" data-discord-unlink type="button"${this._discordUnlinking ? ' disabled' : ''}>${this._discordUnlinking ? 'Disconnecting&hellip;' : 'Disconnect'}</button>
+         </div>`
       : this._discordWaiting
         ? `<button class="dbtn" data-discord-connect type="button" disabled>Waiting for Discord&hellip;</button>`
         : `<button class="dbtn" data-discord-connect type="button">Connect Discord account</button>`;
+    // The old connected copy asserted "you have the member role". That was FALSE for a fresh invitee, because
+    // signup assigned Locked to everyone until sow-218; and it is not this component's fact to state in any
+    // case, since reconcile owns the role. Describe what was actually done instead.
+    const err = this._discordUnlinkError
+      ? `<div class="callout"><span class="gl">&#9888;</span><span>${esc(this._discordUnlinkError)}</span></div>`
+      : '';
     const callout = joined
-      ? `<div class="callout"><span class="gl">&#8250;</span><span>Your Discord is connected and you have the member role in the server.</span></div>`
-      : `<div class="callout"><span class="gl">&#8250;</span><span>A new tab opens for Discord sign-in. When you finish, you land in the server and this step continues automatically.</span></div>`;
+      ? `<div class="callout"><span class="gl">&#8250;</span><span>Your Discord account is connected. Disconnecting removes your network roles in the server and unlinks the account; it does not remove you from the server.</span></div>${err}`
+      : `<div class="callout"><span class="gl">&#8250;</span><span>A new tab opens for Discord sign-in. When you finish, you land in the server and this step continues automatically.</span></div>${err}`;
     return `
       <div class="dhead">
         <span class="ico-tile">${discordIco}</span>

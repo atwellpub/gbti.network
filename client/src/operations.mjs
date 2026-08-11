@@ -1719,6 +1719,23 @@ export async function getDiscordLinkUrl(ctx) {
   return { url: data.url };
 }
 
+// sow-218: disconnect the member's Discord account. Unlike the status poll above this WRITES, so it reports
+// failure honestly rather than fail-closing to a default: the member is about to be told their account is
+// disconnected, and a swallowed error would leave them believing it when it is not. The Worker strips the
+// managed roles BEFORE clearing the link, so a partial failure never strands guild access reconcile cannot see.
+export async function discordUnlink(ctx) {
+  requireIdentity(ctx);
+  const token = ctx.store?.get?.('githubToken');
+  if (!token) throw new OperationError('not-authenticated', 'Sign in to disconnect Discord.');
+  const fetch = ctx.fetch ?? globalThis.fetch;
+  let res;
+  try { res = await fetch(`${SIGNUP_BASE}/discord/unlink`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }); }
+  catch (err) { throw new OperationError('discord-unlink-failed', err?.message || 'the Discord disconnect request failed'); }
+  if (!res.ok) throw new OperationError('discord-unlink-failed', `the Discord disconnect failed (${res.status})`);
+  const data = await res.json().catch(() => null);
+  return { ok: Boolean(data && data.ok), unlinked: Boolean(data && data.unlinked) };
+}
+
 // SOW: the welcome polls this after opening the Discord OAuth tab, to auto-detect the link and advance. Read-only
 // and fail-closed: any error / no token -> { linked: false } (never throws, so a poll loop never crashes).
 export async function getDiscordLinkStatus(ctx) {

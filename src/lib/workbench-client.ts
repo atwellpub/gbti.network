@@ -629,6 +629,9 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // The welcome poll: has this member's Discord been linked yet? Read-only; the Worker answers over the cookie
     // session (credentialed CORS + a cookie fallback) and fails closed to { linked: false }, so a poll never blocks.
     discordLinkStatus() { return workerGet('/discord/link/status'); },
+    // sow-218: disconnect. The Worker strips the managed roles BEFORE clearing the link, so a member cannot end
+    // up holding guild access that reconcile can no longer see to revoke. Never kicks.
+    discordUnlink() { return workerPost('/discord/unlink', {}); },
 
     // ----- SOW-027/044: comments — read (public + own decrypt) + post/edit (members-encrypted) + own delete -----
     listComments(a: any = {}) { return listCommentsLocal(a); },
