@@ -38,9 +38,28 @@ test('a malformed or empty allowlist admits NOBODY, never a partial set', () => 
   assert.equal(allowedTestIds(yaml.load('test_accounts: []')).size, 0);
 });
 
-test('the shipped house/test-accounts.yml parses and is EMPTY by default', () => {
+// CHANGED 2026-08-11 (SecurityMaster), and the reasoning matters more than the edit.
+//
+// This asserted the shipped file was EMPTY. That was correct at ship time and is now deliberately false: the
+// owner added `metacast-entertainment` (190312419) on 2026-08-11. Keeping the assertion would fail the suite
+// every time the feature is used exactly as designed, because widening this list IS the intended workflow.
+//
+// The name encoded an INTENT that has now been fulfilled ("nothing is resettable until the owner adds one"),
+// not a bug, so the check is retargeted rather than the file reverted. The emptiness LOGIC is still covered
+// independently a few lines above, against a literal `test_accounts: []` fixture, so nothing is lost.
+//
+// What still needs guarding is that every entry is WELL FORMED. A malformed id silently changes the size of
+// the allowlist in one direction or the other, and this list is the only thing standing between the reset
+// tool and a real member. The reviewability of the change itself is carried by CODEOWNERS, not by a test.
+test('the shipped house/test-accounts.yml parses and every listed id is well formed', () => {
   const parsed = yaml.load(fs.readFileSync(TEST_ACCOUNTS_PATH, 'utf8'));
-  assert.equal(allowedTestIds(parsed).size, 0, 'no account is resettable until the owner adds one');
+  const ids = allowedTestIds(parsed);
+  for (const id of ids) {
+    assert.match(String(id), /^[0-9]+$/, `test-accounts entry "${id}" is not a numeric github_id`);
+  }
+  // Deliberate, not accidental: this list should stay a handful of throwaways. If it ever grows large,
+  // that is a review question, not a passing test.
+  assert.ok(ids.size <= 5, `test-accounts has ${ids.size} entries; this allowlist should stay small`);
 });
 
 // --- The two refusals ---------------------------------------------------------------------------------------

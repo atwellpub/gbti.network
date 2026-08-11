@@ -9,6 +9,27 @@
 # Fields: code (3-32 chars A-Z 0-9, case-insensitive at entry), freeDays (1-3650), active,
 # note, maxRedemptions (optional; null = unlimited), expiresAt (optional ISO date; the coupon's
 # own shelf life, not the grant length).
+# OWNER RULING 2026-08-11, recorded so it is not re-litigated or "fixed" by a later reader.
+#
+# UNCAPPED AND NON-EXPIRING IS DELIBERATE. `maxRedemptions: null` and `expiresAt: null` are a decision, not
+# an oversight. SecurityMaster raised that the code is published on a public page AND in this public repo, so
+# the real audience is anyone who finds it rather than the named cohort. The owner accepted that and chose
+# MANUAL moderation over an artificial cap, reasoning that a cap set below the real cohort silently breaks
+# the campaign.
+#
+# THE CONTROL IS THEREFORE THE NOTIFICATION, WHICH MAKES IT LOAD-BEARING. Every redemption must notify
+# opportunities@gbti.network with enough detail to spot an abusive pattern. If that notification fails
+# silently there is NO remaining control on this offer, and abuse becomes invisible rather than merely
+# unmoderated. So the notification must fail LOUDLY (log plus a surfaced failure) rather than being
+# best-effort in the way a nice-to-have email would be. That is the security condition attached to keeping
+# these uncapped.
+#
+# TIER IS EXPLICIT, NOT INHERITED. Both invites confer Content Creator for one year. Do NOT rely on
+# `grantTier`'s creator default to deliver it: that default exists to preserve legacy flat grants, and
+# leaning on it means the tier is re-decided implicitly on every future redemption. Write it into the fold.
+#
+# See `.data/ops/incident-ops/security-audit-2026-08-10.md` for the finding this ruling answers.
+
 coupons:
   - code: CODEABLEYEAR
     freeDays: 365
