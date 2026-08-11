@@ -39,6 +39,17 @@ export function evaluate(results, { warnDays = 30, now = new Date() } = {}) {
       problems.push({ name: r.name, kind: 'failed', message: `${r.name} FAILED its live check (status ${r.status ?? 'n/a'}${r.detail ? `, ${r.detail}` : ''}). The credential is invalid, revoked, or expired.` });
       continue;
     }
+    // SecurityMaster 2026-08-11: a credential flagged `mustExpire` that reports NO expiry is itself the
+    // problem. Without this branch such a token is UNFLAGGABLE by construction: no expiry means no date,
+    // which means it can never fall within warnDays, while the liveness probe passes forever. That is how
+    // GH_BOT_TOKEN, a no-expiration classic PAT recorded as a temporary stopgap and holding the rights that
+    // MERGE member PRs, sat 44 days past its own tightening deadline with a green monitor the whole time.
+    // Setting no expiry did not just remove the deadline, it removed the alarm. `mustExpire` is opt-in
+    // precisely because several credentials here legitimately never expire (Stripe, Discord bot).
+    if (r.mustExpire === true && !r.expiresAt) {
+      problems.push({ name: r.name, kind: 'no-expiry', message: `${r.name} reports NO EXPIRY, and this credential is required to have one. An unexpiring token is never surfaced by an expiry check, so it silently outlives the reason it was issued. Reissue it with an expiry date.` });
+      continue;
+    }
     const d = daysUntil(r.expiresAt, now);
     if (d !== null && d <= warnDays) {
       problems.push({ name: r.name, kind: d < 0 ? 'expired' : 'expiring', message: d < 0 ? `${r.name} EXPIRED ${-d} day(s) ago (${r.expiresAt}).` : `${r.name} expires in ${d} day(s) (${r.expiresAt}). Renew it before then.` });
@@ -75,7 +86,11 @@ export async function runProbes({ env = process.env, fetch = globalThis.fetch } 
   const ghTok = env.GITHUB_BOT_TOKEN || env.GH_BOT_TOKEN;
   if (ghTok) out.push(await probe('GH_BOT_TOKEN (GitHub)', async () => {
     const res = await fetch(`https://api.github.com/repos/${REPO}`, { headers: { Authorization: `Bearer ${ghTok}`, Accept: 'application/vnd.github+json', 'User-Agent': 'gbti-credential-health' } });
-    return { ok: res.ok, status: res.status, expiresAt: res.headers.get('github-authentication-token-expiration') || null };
+    // mustExpire: this token carries contents + pull-requests + statuses write on the content repo and is what
+    // MERGES member PRs, so it is the highest-blast-radius credential held. A fine-grained PAT reports its
+    // expiry in this header; a classic PAT set with "no expiration" reports nothing, which is exactly the
+    // state that must be loud rather than silent. See .data/ops/secrets-ops/README.md.
+    return { ok: res.ok, status: res.status, expiresAt: res.headers.get('github-authentication-token-expiration') || null, mustExpire: true };
   }));
   if (env.STRIPE_SECRET_KEY) out.push(await probe('STRIPE_SECRET_KEY (Stripe read)', async () => {
     const res = await fetch('https://api.stripe.com/v1/customers?limit=1', { headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` } });

@@ -80,3 +80,52 @@ test('runProbes: a thrown fetch becomes a failed (not a crash)', async () => {
   assert.equal(results[0].ok, false);
   assert.match(results[0].detail, /network down/);
 });
+
+// ---------------------------------------------------------------------------------------------------
+// mustExpire: a credential required to carry an expiry, that reports none, is ITSELF the problem.
+// Regression guard for the 2026-08-11 finding: GH_BOT_TOKEN was a no-expiration classic PAT recorded as a
+// temporary stopgap, holding the rights that MERGE member PRs, and it sat 44 days past its own tightening
+// deadline with a GREEN monitor. It was unflaggable by construction: no expiry means no date, so it could
+// never fall within warnDays, while the liveness probe passed forever. Setting no expiry removed the alarm
+// as well as the deadline.
+// ---------------------------------------------------------------------------------------------------
+
+test('evaluate: mustExpire + NO expiry is flagged (the alarm a no-expiry token would otherwise silence)', () => {
+  const { problems, healthy } = evaluate([{ name: 'GH_BOT_TOKEN', ok: true, mustExpire: true }]);
+  assert.equal(healthy, false);
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].kind, 'no-expiry');
+  assert.match(problems[0].message, /NO EXPIRY/);
+});
+
+test('evaluate: mustExpire is OPT-IN, so a legitimately unexpiring credential is not a false positive', () => {
+  // Stripe + Discord tokens genuinely never expire; flagging them would train the operator to ignore alerts.
+  const { healthy } = evaluate([
+    { name: 'STRIPE_SECRET_KEY', ok: true },
+    { name: 'DISCORD_BOT_TOKEN', ok: true },
+  ]);
+  assert.equal(healthy, true);
+});
+
+test('evaluate: mustExpire with a real expiry keeps the ordinary expiring/healthy behaviour', () => {
+  const now = new Date('2026-08-11T00:00:00Z');
+  const far = evaluate([{ name: 'GH_BOT_TOKEN', ok: true, mustExpire: true, expiresAt: '2027-06-09T00:00:00Z' }], { now });
+  assert.equal(far.healthy, true);
+  const near = evaluate([{ name: 'GH_BOT_TOKEN', ok: true, mustExpire: true, expiresAt: '2026-08-20T00:00:00Z' }], { now });
+  assert.equal(near.problems[0].kind, 'expiring');
+});
+
+test('evaluate: a FAILED probe still outranks the no-expiry check', () => {
+  const { problems } = evaluate([{ name: 'GH_BOT_TOKEN', ok: false, status: 401, mustExpire: true }]);
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].kind, 'failed');
+});
+
+test('runProbes: the GitHub token probe declares mustExpire', async () => {
+  const fakeFetch = async () => ({ ok: true, status: 200, headers: { get: () => null } });
+  const results = await runProbes({ env: { GITHUB_BOT_TOKEN: 'ghp_x' }, fetch: fakeFetch });
+  const gh = results.find((r) => r.name.startsWith('GH_BOT_TOKEN'));
+  assert.equal(gh.mustExpire, true, 'GH_BOT_TOKEN must declare mustExpire or a no-expiration PAT goes unnoticed again');
+  // And end to end: that probe result, with no expiry header, must produce a problem.
+  assert.equal(evaluate(results).healthy, false);
+});
