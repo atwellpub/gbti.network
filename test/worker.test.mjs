@@ -367,7 +367,11 @@ test('signup with no existing customer creates one with full metadata + trial ro
   assert.equal(args.metadata.github_id, '12345');
   assert.equal(args.metadata.github_login, 'octocat');
   assert.equal(args.metadata.discord_user_id, 'd-987');
-  assert.equal(args.metadata.trial_started_at, now.toISOString());
+  // 2026-08-11: the 90-day trial is RETIRED (owner). Signup no longer mints trial_started_at, which was
+  // the single tap that produced the `trialing` status, so a new customer must NOT carry the clock.
+  // Asserting its ABSENCE rather than deleting the line: this is the whole retirement, and it belongs
+  // pinned in the test that covers what a fresh signup writes.
+  assert.equal(args.metadata.trial_started_at, undefined, 'the trial is retired: no clock is minted');
   assert.equal(args.metadata.referred_by, '42');
   assert.equal(args.metadata.via, 'post:my-first-post', 'the landed-on content is captured for the payout split');
   assert.equal(args.metadata.signup_source, 'signup-worker');
