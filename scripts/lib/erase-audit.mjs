@@ -37,11 +37,13 @@ export function deriveAuditStatus(steps = []) {
  * Pure: shape the identity-minimal audit record. `steps` are sanitized (whitelisted fields only) so no personal
  * data can leak in even if a caller passes a richer result object.
  */
-export function buildAuditRecord({ githubId, operator = null, apply = true, steps = [], now = new Date() } = {}) {
+export function buildAuditRecord({ githubId, operator = null, apply = true, steps = [], now = new Date(), kind = 'erasure-audit' } = {}) {
   if (!githubId) throw new Error('a github_id is required for the audit record');
   const clean = steps.map(sanitizeStep);
   return {
-    kind: 'erasure-audit',
+    // sow-212: the test reset writes `test-reset-audit` here. A statutory right-to-erasure and a developer
+    // resetting their own test account must never be indistinguishable in the audit log.
+    kind,
     githubId: String(githubId),
     at: now.toISOString(),
     operator: operator ? String(operator) : null,

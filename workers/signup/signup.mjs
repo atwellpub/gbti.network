@@ -100,7 +100,7 @@ export function buildRefreshMetadata({ githubLogin, discordUserId }) {
  * @param {Date}   [a.now]      injectable clock (trial_started_at source).
  * @returns {Promise<{ customerId:string, created:boolean, referredBy:string|null }>}
  */
-export async function runSignup({ identity, stripe, discord, kv, config, refCode, via, touchSession, coupon, resolveReferral: resolver, now = new Date() }) {
+export async function runSignup({ identity, stripe, discord, kv, config, refCode, via, touchSession, coupon, couponLockSalt = null, resolveReferral: resolver, now = new Date() }) {
   const { githubId, githubLogin, discordUserId, email, discordAccessToken } = identity;
   if (!githubId) throw new Error('runSignup: githubId is required');
   // SOW: Discord is now DEFERRED + optional. A GitHub-only signup creates the trial Customer with no
@@ -153,7 +153,7 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
   // re-run of this chain cannot double-redeem). Fail closed: any problem means a normal trial signup.
   let couponGrant = null;
   if (coupon && kv) {
-    couponGrant = await redeemCoupon({ kv, code: coupon, githubId, login: githubLogin, now });
+    couponGrant = await redeemCoupon({ kv, code: coupon, githubId, login: githubLogin, now, lockSalt: couponLockSalt });
   }
 
   // Add the user to the guild (guilds.join uses the user's OAuth access token). The `roles` param is

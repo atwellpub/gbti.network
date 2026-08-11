@@ -11,6 +11,7 @@ import {
   couponGrantKey,
 } from '../workers/signup/coupons.mjs';
 import { redemptionKey, redemptionCountKey } from '../membership/coupons.mjs';
+import { couponLockKey, COUPON_LOCK_VALUE } from '../membership/coupon-lock.mjs'; // sow-212
 import { runSignup } from '../workers/signup/signup.mjs';
 import { membershipStatus } from '../workers/signup/membership-status.mjs';
 
@@ -75,6 +76,37 @@ test('redeemCoupon is idempotent per github_id (one coupon per member, ever)', a
   const other = await redeemCoupon({ kv, code: 'CAPPED', githubId: '42', now: NOW });
   assert.equal(other.already, true); // the existing grant wins; no second coupon
   assert.equal(kv.store.has(redemptionKey('CAPPED', '42')), false);
+});
+
+// sow-212: after a right-to-erasure the raw-id grant is replaced by a keyed hash of the github_id, because
+// the owner ruled the one-per-member lock survives erasure while the identifying record does not. If the
+// redemption path did not consult that hash, the lock would be silently unenforced for exactly the accounts
+// that were erased, which is the abuse the ruling exists to prevent.
+test('redeemCoupon REFUSES a member holding only the minimized (post-erasure) lock', async () => {
+  const SALT = 's3cret-test-salt';
+  const lockKey = await couponLockKey(SALT, '42');
+  const kv = fakeKv({ 'coupons:config': MIRROR, [lockKey]: COUPON_LOCK_VALUE });
+
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW, lockSalt: SALT });
+  assert.equal(r, null, 'no redemption: the erased account cannot use the coupon again');
+  assert.equal(kv.store.has(couponGrantKey('42')), false, 'no new grant was written');
+  assert.equal(kv.store.has(redemptionKey('CODEABLEYEAR', '42')), false);
+  assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), undefined, 'the shared counter did not move');
+
+  // A DIFFERENT member is unaffected by someone else's lock.
+  const other = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '43', now: NOW, lockSalt: SALT });
+  assert.equal(other.already, false, 'an unlocked member still redeems normally');
+});
+
+test('the minimized lock is only consulted when a salt is configured', async () => {
+  // Without the salt the Worker cannot compute the key, so it cannot enforce the lock. That is the same
+  // fail-closed pairing as the erasure side, which declines to delete the raw record without a salt: either
+  // both halves have the secret or the raw-id lock stays in place doing the job.
+  const SALT = 's3cret-test-salt';
+  const lockKey = await couponLockKey(SALT, '42');
+  const kv = fakeKv({ 'coupons:config': MIRROR, [lockKey]: COUPON_LOCK_VALUE });
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW }); // no lockSalt
+  assert.equal(r.already, false, 'redeems, because the lock key is not computable');
 });
 
 test('redeemCoupon enforces maxRedemptions and fails closed on unknowns', async () => {

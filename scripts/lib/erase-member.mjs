@@ -23,6 +23,7 @@ import { scrubCounterpart } from '../../workers/signup/conversion-snapshot-store
 import { couponGrantKey } from '../../workers/signup/coupons.mjs'; // SOW-119 / sow-212: the one-per-member lock
 import { redemptionKey, redemptionCountKey } from '../../membership/coupons.mjs'; // SOW-119 key builders
 import { removeGrantEntryIfPresent, listCouponRedemptions, GRANDFATHERED_PATH } from './coupon-grants.mjs';
+import { couponLockKey, COUPON_LOCK_VALUE } from '../../membership/coupon-lock.mjs'; // sow-212: the minimized lock
 
 export const ACTIVITY_KEY = (githubId) => `activity:${githubId}`;
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`; // SOW-023 subscription graph
@@ -206,19 +207,55 @@ export async function readKvValue({ key, env = process.env, fetchImpl = globalTh
 }
 
 /**
- * SOW-119 / sow-212: hard-delete the coupon grant `coupon-grant:<githubId>`.
+ * SOW-119 / sow-212: hard-delete the raw coupon grant `coupon-grant:<githubId>`.
  *
- * This record is BOTH the member's free-period grant and the "one coupon per member, ever" idempotency
- * lock (workers/signup/coupons.mjs). SecurityMaster's 2026-08-11 adjudication found it has no independent
- * retention basis: Stripe is the billing record and house/grandfathered.yml is the durable grant record,
- * so this is a cache plus a lock, and it was surviving erasure.
+ * NOT used by erasure. The owner ruled on 2026-08-11 that the one-coupon-per-member lock SURVIVES an
+ * erasure, so erasure calls minimizeCouponGrant below instead. This outright delete exists for the sow-212
+ * TEST RESET, where the whole point is to make a disposable account redeemable again.
  *
- * OWNER DECISION STILL OPEN: delete the lock outright (what this does) or retain it as a SALTED HASH of the
- * github_id, which would preserve one-coupon-per-account while breaking identifiability. If the owner elects
- * the hash, it is a swap at this one call site plus a matching read in redeemCoupon; nothing else moves.
+ * The two are deliberately separate functions rather than one function with a flag: "erase this person" and
+ * "make this test account reusable" are different intents, and a boolean parameter is how they would end up
+ * confused at a call site.
  */
 export async function eraseCouponGrant({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
+  return deleteKvKey({ key: couponGrantKey(String(githubId)), env, fetchImpl });
+}
+
+/** sow-212: delete the MINIMIZED lock too. Test-reset only, for an account erased before it was reset. */
+export async function eraseCouponLock({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  const key = await couponLockKey(env.COUPON_LOCK_SALT, githubId);
+  if (!key) return { skipped: true, reason: 'COUPON_LOCK_SALT not set (cannot compute the lock key)' };
+  return deleteKvKey({ key, env, fetchImpl });
+}
+
+/**
+ * SOW-119 / erasure: MINIMIZE the coupon grant instead of deleting it.
+ *
+ * Owner ruling, 2026-08-11: the lock stays, because deleting it would let an erased account redeem the same
+ * coupon again. SecurityMaster's minimization branch reconciles that with Article 17: write a keyed HASH of
+ * the github_id (membership/coupon-lock.mjs), then delete the raw-id record. The lock keeps working; the
+ * stored artifact stops being a direct identifier.
+ *
+ * ORDER IS LOAD-BEARING: write the hashed lock FIRST, delete the raw record second. If the process dies
+ * between the two, the failure mode is a duplicated lock (harmless, both deny) rather than no lock at all
+ * (which silently restores the abuse the owner asked us to prevent).
+ *
+ * FAIL CLOSED WITHOUT THE SALT: with no COUPON_LOCK_SALT there is no way to write a lock that redeemCoupon
+ * could later find, so this does NOT delete the raw record. Reported as skipped with the reason, never a
+ * silent pass: leaving identifying data in place is the lesser harm against restoring a coupon exploit, and
+ * an operator who sees the skip can provision the salt and re-run.
+ */
+export async function minimizeCouponGrant({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  const lockKey = await couponLockKey(env.COUPON_LOCK_SALT, githubId);
+  if (!lockKey) {
+    return { skipped: true, reason: 'COUPON_LOCK_SALT not set: raw coupon-grant KEPT rather than delete the one-per-member lock' };
+  }
+  const existing = await readKvValue({ key: couponGrantKey(String(githubId)), env, fetchImpl });
+  if (existing === null) return { skipped: true, reason: 'no coupon grant to minimize' };
+  await putKvValue({ key: lockKey, value: COUPON_LOCK_VALUE, env, fetchImpl });
   return deleteKvKey({ key: couponGrantKey(String(githubId)), env, fetchImpl });
 }
 
@@ -288,7 +325,7 @@ export function planErasure({ githubId, username } = {}) {
   const who = username ? `members/${username}/` : "the member's";
   return [
     { step: 'content', auto: true, tool: 'erase-member.mjs --apply', action: `Flip ${who} content status -> draft via an auto-merged PR (reversible; history persists), and remove their house/grandfathered.yml grant in the same PR.` },
-    { step: 'coupon-grant', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the coupon grant + one-per-member lock ${COUPON_GRANT_KEY(githubId)} (SOW-119).` },
+    { step: 'coupon-grant', auto: true, tool: 'erase-member.mjs --apply', action: `MINIMIZE ${COUPON_GRANT_KEY(githubId)}: write a keyed-hash lock, then delete the raw-id record. The one-coupon-per-member lock SURVIVES erasure (owner ruling 2026-08-11); needs COUPON_LOCK_SALT.` },
     { step: 'coupon-redemptions', auto: true, tool: 'erase-member.mjs --apply', action: `Delete every redemption:<CODE>:${githubId} record (the id is in the key name) and decrement each shared redemptions:<CODE> counter.` },
     { step: 'activity', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the edge-store keys ${ACTIVITY_KEY(githubId)} (favorites + collections) and ${FOLLOWS_KEY(githubId)} (the follow graph).` },
     { step: 'lookup-cache', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the lookup-cache key ${LOOKUP_KEY(githubId)} (github_id -> Stripe customer_id).` },
@@ -522,7 +559,7 @@ export async function runErasure({
   await runStep('share-votes', () => eraseShareVotes({ githubId, env, fetchImpl })); // SOW-057: per-target voter sets
   await runStep('news-opens', () => eraseNewsOpens({ githubId, env, fetchImpl })); // SOW-111: per-item opener sets
   await runStep('content-opens', () => eraseContentOpens({ githubId, env, fetchImpl })); // SOW-126: per-item content-open sets
-  await runStep('coupon-grant', () => eraseCouponGrant({ githubId, env, fetchImpl })); // SOW-119: the grant + one-per-member lock
+  await runStep('coupon-grant', () => minimizeCouponGrant({ githubId, env, fetchImpl })); // SOW-119: minimize, never delete (owner ruling)
   await runStep('coupon-redemptions', () => eraseCouponRedemptions({ githubId, env, fetchImpl })); // SOW-119: id-in-key records + counter
   await runStep('conv-snapshot', () => eraseConversionSnapshot({ githubId, env, fetchImpl })); // SOW-059: own frozen snapshot
   await runStep('conv-counterpart', () => scrubConversionSnapshots({ githubId, env, fetchImpl })); // SOW-059: scrub as counterpart

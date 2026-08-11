@@ -17,6 +17,7 @@ import {
   redemptionCountKey,
   COUPONS_MIRROR_KEY,
 } from '../../membership/coupons.mjs';
+import { couponLockKey } from '../../membership/coupon-lock.mjs'; // sow-212: the post-erasure minimized lock
 // The same 48h freshness bound the overrides mirror uses (a local constant, not an import from
 // membership-content: that module imports THIS one for the fast-path grant, and a cycle helps nobody).
 const MAX_COUPONS_CONFIG_AGE_MS = 48 * 60 * 60 * 1000;
@@ -48,13 +49,22 @@ export async function validateCouponParam(kv, code, now = new Date()) {
  * Redeem `code` for `githubId`. Returns { code, redeemedAt, until, already } on success (already = an
  * existing grant was found, nothing new written), or null when no redemption happened (fail closed).
  */
-export async function redeemCoupon({ kv, code, githubId, login = null, now = new Date() } = {}) {
+export async function redeemCoupon({ kv, code, githubId, login = null, now = new Date(), lockSalt = null } = {}) {
   if (!kv || !code || !githubId) return null;
   try {
     // One coupon per member, ever: an existing grant is the idempotency lock (retries, GitHub-then-Discord
     // re-runs of the signup chain, or a second code later all land here).
     const existing = await kv.get(couponGrantKey(githubId), 'json');
     if (existing?.until) return { ...existing, already: true };
+
+    // The MINIMIZED lock (sow-212). After a right-to-erasure the raw-id grant is replaced by a keyed hash of
+    // the github_id, because the owner ruled the one-per-member lock survives erasure while the identifying
+    // record does not. Without this check the lock would be silently unenforced for exactly those accounts,
+    // which is the abuse the ruling exists to prevent. Returns null: no redemption, and signup continues.
+    if (lockSalt) {
+      const lockKey = await couponLockKey(lockSalt, githubId);
+      if (lockKey && (await kv.get(lockKey))) return null;
+    }
 
     const config = await readCouponsConfig(kv, now);
     const coupon = couponByCode(config, code, now);

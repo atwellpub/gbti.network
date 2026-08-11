@@ -7,9 +7,10 @@ import assert from 'node:assert/strict';
 import {
   deleteKvKey, eraseActivity, eraseFollows, eraseLookupCache, eraseShareVotes, eraseNewsOpens, planErasure, runErasure,
   eraseDiscordRoles, eraseContent, eraseStripeCustomer, ACTIVITY_KEY, FOLLOWS_KEY, LOOKUP_KEY, MEMBERS_INDEX_PATH,
-  eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY,
+  eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY, minimizeCouponGrant, eraseCouponLock,
 } from '../scripts/lib/erase-member.mjs';
 import { GRANDFATHERED_PATH } from '../scripts/lib/coupon-grants.mjs';
+import { couponLockKey } from '../membership/coupon-lock.mjs';
 import { parseArgs } from '../scripts/erase-member.mjs';
 
 const CF = { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
@@ -280,6 +281,60 @@ test('eraseCouponRedemptions clamps the counter at zero and is a reported no-op 
   const r = await eraseCouponRedemptions({ githubId: '9', env: {}, fetchImpl: async () => { throw new Error('should not fetch'); } });
   assert.equal(r.skipped, true);
   await assert.rejects(() => eraseCouponRedemptions({ githubId: '' }), /github_id is required/);
+});
+
+// --- The minimized coupon lock (owner ruling 2026-08-11) -----------------------------------------------------
+
+test('couponLockKey is keyed, stable, id-specific, and null without a salt', async () => {
+  const a = await couponLockKey('s3cret', '9');
+  const b = await couponLockKey('s3cret', '9');
+  const c = await couponLockKey('s3cret', '10');
+  const d = await couponLockKey('other-salt', '9');
+  assert.equal(a, b, 'stable for the same salt + id');
+  assert.notEqual(a, c, 'different members get different locks');
+  assert.notEqual(a, d, 'the salt actually keys it');
+  assert.match(a, /^coupon-lock:[0-9a-f]{64}$/);
+  // The id is not embedded: the digest is fixed-width regardless of how long the id is. (Irreversibility
+  // itself rests on the salt being secret, which no unit test can demonstrate.)
+  const long = await couponLockKey('s3cret', '123456789012345678');
+  assert.equal(long.length, a.length, 'fixed-width digest, so the key carries no trace of the id');
+  // Fail closed rather than fall back to an unkeyed hash: github_ids are enumerable, so an unsalted digest
+  // would be reversible in seconds and would be security theatre.
+  assert.equal(await couponLockKey('', '9'), null);
+  assert.equal(await couponLockKey(null, '9'), null);
+});
+
+test('minimizeCouponGrant writes the hashed lock BEFORE deleting the raw record', async () => {
+  const order = [];
+  const fetchImpl = async (url, init = {}) => {
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    if (init.method === 'PUT') { order.push(`put:${key}`); return { ok: true }; }
+    if (init.method === 'DELETE') { order.push(`del:${key}`); return { ok: true }; }
+    return { ok: true, text: async () => JSON.stringify({ code: 'CODEABLEYEAR', until: '2027-01-01T00:00:00.000Z' }) };
+  };
+  const env = { ...CF, COUPON_LOCK_SALT: 's3cret' };
+  const res = await minimizeCouponGrant({ githubId: '9', env, fetchImpl });
+  assert.equal(res.deleted, true);
+  const lockKey = await couponLockKey('s3cret', '9');
+  // Order is load-bearing: dying between the two must leave a duplicate lock (harmless), never no lock.
+  assert.deepEqual(order, [`put:${lockKey}`, 'del:coupon-grant:9']);
+});
+
+test('minimizeCouponGrant KEEPS the raw record when no salt is configured (fail closed)', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => { calls.push(init.method ?? 'GET'); return { ok: true, text: async () => '{}' }; };
+  const res = await minimizeCouponGrant({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(res.skipped, true);
+  assert.match(res.reason, /COUPON_LOCK_SALT/);
+  assert.match(res.reason, /KEPT/, 'says plainly that the raw record was left in place');
+  assert.equal(calls.length, 0, 'nothing is deleted: losing the lock would restore the coupon exploit');
+});
+
+test('erasure MINIMIZES the coupon grant; it does not delete it (owner ruling)', async () => {
+  const plan = planErasure({ githubId: '9', username: 'alice' });
+  const step = plan.find((s) => s.step === 'coupon-grant');
+  assert.match(step.action, /MINIMIZE/);
+  assert.doesNotMatch(step.action, /Hard-delete/);
 });
 
 // --- Stripe delete (opt-in) ---------------------------------------------------------------------------------

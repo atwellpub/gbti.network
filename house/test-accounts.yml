@@ -1,0 +1,26 @@
+# sow-212: the TEST ACCOUNT allowlist (ADMIN-owned; see CODEOWNERS).
+#
+# `scripts/reset-test-member.mjs` wipes a member's signup state so the signup and coupon flow can be run
+# again from scratch. Signup is one-shot per GitHub account by design (the Stripe Customer is reused and
+# never resets its trial clock, and a coupon grant is a permanent one-per-member lock), so testing the
+# flow twice needs those guards deliberately undone.
+#
+# THIS FILE IS THE SAFETY. The reset tool refuses to run against any github_id that is not listed here.
+# It is git-native rather than an environment variable so that widening it is a reviewable change with an
+# author and a diff, instead of something anyone can do from a shell for one command.
+#
+# Listing an id here does NOT grant it anything. It only marks the account as disposable, which is a
+# statement that losing its membership state is acceptable. Never list an account a real person uses as
+# their real membership.
+#
+# Fields: github_id (string, required), login (optional, for humans reading the file), note (optional).
+#
+# The tool ALSO refuses to run when STRIPE_SECRET_KEY is a live-mode key, independently of this list, so
+# the moment production Stripe stops being `rk_test` the tool stops working rather than quietly acquiring
+# the ability to delete a paying customer.
+
+test_accounts: []
+  # Example, kept commented until the owner adds their real test ids:
+  # - github_id: "123456789"
+  #   login: some-throwaway-account
+  #   note: signup + coupon flow testing (sow-212)
