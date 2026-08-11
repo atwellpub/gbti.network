@@ -1,8 +1,8 @@
 ---
 // sow-192 (owner-elected 2026-08-10, "GBTI Homepage" design): the logged-out extension promo banner that sits
 // between the pricing accordion and the feed. THEME-AWARE (owner request 2026-08-11): a clean white promo card
-// in light mode, the near-black panel in dark mode; the `>_ gbti` terminal chip stays dark in both because it
-// IS the motif. Shown to signed-out visitors ONLY: it carries the shared [data-home-joincard] hook, so the
+// in light mode, the near-black panel in dark mode; the `>_ gbti` terminal chip is themed too (a light tinted
+// chip in light mode, the dark chip in dark). Shown to signed-out visitors ONLY: it carries the shared [data-home-joincard] hook, so the
 // homepage mount script hides it for a signed-in member (same as the pricing accordion + join card). The whole
 // banner links to the live Chrome Web Store listing. Presentation only. Light-first, [data-theme="dark"]
 // overrides for dark (the header script always stamps an explicit data-theme, so no media query is needed).
@@ -51,19 +51,20 @@ import { EXTENSION } from '../../lib/extension';
   .xbn:hover { border-color: rgba(31, 158, 95, 0.55); box-shadow: var(--sh); }
   .xbn[hidden] { display: none !important; } /* explicit display beats the UA [hidden] rule */
 
-  /* Skewed terminal chip: >_ gbti — kept dark in BOTH themes (it is the terminal motif). */
+  /* Skewed terminal chip: >_ gbti. Light-mode default = a soft tinted chip; the dark chip is restored below. */
   .xbn-chip {
     flex: none;
     display: inline-flex;
     align-items: center;
     gap: 8px;
     padding: 12px 18px;
-    background: var(--ink);
+    background: var(--tint-warm);
+    border: 1px solid var(--line-2);
     border-radius: 6px;
     transform: skewX(-11deg);
   }
-  .xbn-prompt { font: 600 19px var(--f-mono); color: #5fd49a; transform: skewX(11deg); }
-  .xbn-word { font: 500 15px var(--f-mono); color: #847f8d; transform: skewX(11deg); }
+  .xbn-prompt { font: 600 19px var(--f-mono); color: var(--green); transform: skewX(11deg); }
+  .xbn-word { font: 500 15px var(--f-mono); color: var(--fg-mute); transform: skewX(11deg); }
 
   .xbn-copy { flex: 1; min-width: 0; }
   .xbn-title {
@@ -106,7 +107,9 @@ import { EXTENSION } from '../../lib/extension';
     box-shadow: none;
   }
   :global([data-theme="dark"]) .xbn:hover { border-color: rgba(31, 158, 95, 0.55); box-shadow: none; }
-  :global([data-theme="dark"]) .xbn-chip { background: #232029; }
+  :global([data-theme="dark"]) .xbn-chip { background: #232029; border-color: transparent; }
+  :global([data-theme="dark"]) .xbn-prompt { color: #5fd49a; }
+  :global([data-theme="dark"]) .xbn-word { color: #847f8d; }
   :global([data-theme="dark"]) .xbn-title { color: #f3f2f0; }
   :global([data-theme="dark"]) .xbn-eyebrow { color: #847f8d; }
 
