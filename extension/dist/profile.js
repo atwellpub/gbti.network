@@ -8642,6 +8642,13 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   function selectedTopics(categories) {
     return [...new Set((Array.isArray(categories) ? categories : []).filter((k) => typeof k === "string" && k))];
   }
+  var DEFAULT_TOPICS = Object.freeze(["devops", "entertainment", "music", "gaming", "ai"]);
+  function seedDefaultTopics(selected, vocabulary, defaults = DEFAULT_TOPICS) {
+    const cur = selectedTopics(selected);
+    if (cur.length) return cur;
+    const known = new Set((Array.isArray(vocabulary) ? vocabulary : []).map((t) => t && t.key).filter(Boolean));
+    return (Array.isArray(defaults) ? defaults : []).filter((k) => known.has(k));
+  }
   function selectAllTopics(selection, pool, cap = Infinity) {
     const cur = selectedTopics(selection);
     const keys = (Array.isArray(pool) ? pool : []).map((t) => t && t.key).filter((k) => typeof k === "string" && k);
@@ -12628,6 +12635,13 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     const me = String(ownUsername || "").toLowerCase();
     return me ? members.filter((m) => String(m?.username || "").toLowerCase() !== me) : [...members];
   }
+  function resumeStep(done, count) {
+    const flags = Array.isArray(done) ? done : [];
+    const n = Number.isInteger(count) && count > 0 ? count : flags.length;
+    if (n <= 0) return 0;
+    for (let i = 0; i < n; i++) if (!flags[i]) return i;
+    return n - 1;
+  }
   function paginate2(list, p, size = 10) {
     const pages = Math.max(1, Math.ceil(list.length / size));
     const page = Math.min(Math.max(1, p | 0 || 1), pages);
@@ -12832,6 +12846,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   // client-ui/src/elements/gbti-topic-picker.mjs
   var SITE7 = "https://gbti.network";
   var MAX_TOPICS = 200;
+  var SEEDED_KEY = "gbti-welcome-topics-seeded";
   var CSS28 = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
   .bar { display:flex; align-items:center; gap:10px; margin:0 0 12px; }
@@ -12873,8 +12888,41 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         } catch {
           this._selected = [];
         }
+        await this._seedDefaults();
       }
       this.render();
+    }
+    /**
+     * Give a member with NO topics the owner's default group, once, and PERSIST it.
+     *
+     * Persisting rather than merely highlighting is the whole point: the welcome step's Continue does not save
+     * anything itself, so a member who accepts the defaults by not touching them would otherwise finish
+     * onboarding with an untuned feed, which is exactly the outcome a default group exists to prevent.
+     *
+     * Silent on failure. This is a nicety layered on top of the step, so a failed write must leave the member
+     * looking at a normal, usable picker rather than an error about something they never asked for.
+     */
+    async _seedDefaults() {
+      if (!this.hasAttribute("seed-defaults") || this._selected.length) return;
+      try {
+        if (localStorage.getItem(SEEDED_KEY) === "1") return;
+      } catch {
+      }
+      const next = seedDefaultTopics(this._selected, this._topics);
+      if (!next.length) return;
+      try {
+        localStorage.setItem(SEEDED_KEY, "1");
+      } catch {
+      }
+      this._selected = next;
+      this.dispatchEvent(new CustomEvent("topics-change", { detail: { topics: [...next] }, bubbles: true, composed: true }));
+      if (this.client?.setPrefs) {
+        try {
+          const p = await this.client.setPrefs({ categories: next });
+          this._selected = selectedTopics(p?.categories);
+        } catch {
+        }
+      }
     }
     /** The current selection (topic keys), for a host that wants to read it on a Continue/Save action. */
     get selected() {
@@ -13302,7 +13350,34 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       } catch {
       }
       this._loaded = true;
+      if (!this._resumed) {
+        this._resumed = true;
+        this._step = resumeStep(this._stepDone(), STEPS.length);
+      }
       this.render();
+    }
+    /**
+     * Per-step "already done", in STEPS order. Each flag reads REAL state rather than a remembered click, so
+     * work done outside this wizard counts (see resumeStep).
+     *
+     * Every unknown resolves to NOT done. `_follows` is null when the read failed and `_topicsCount` is 0 when
+     * prefs were unreadable, and in both cases showing the step again is the harmless direction: the member
+     * sees a step they may not need, instead of being skipped past one they do.
+     */
+    _stepDone() {
+      const socials = this._socialDraft && Object.values(this._socialDraft).some((v) => String(v ?? "").trim());
+      return [
+        Boolean(this._discordJoined),
+        // discord  — the link landed (localStorage, set by the poll)
+        (this._chanFollowed?.size ?? 0) > 0,
+        // subreddit — at least one network channel followed
+        Boolean(socials),
+        // socials   — a staged or already-saved handle
+        (this._follows?.size ?? 0) > 0,
+        // follow    — following at least one member
+        (this._topicsCount ?? 0) > 0
+        // topics    — at least one topic in the stored prefs
+      ];
     }
     // SOW-048: feed the device-flow user code into the splash (host calls this from the gbti:welcome-signin handler).
     setCode(userCode, verificationUri) {
@@ -13360,8 +13435,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this.render();
     }
     _railHtml() {
+      const done = this._stepDone();
       const rows = STEPS.map((s, i) => {
-        const isDone = this._done || this._step > i;
+        const isDone = this._done || this._step > i || Boolean(done[i]);
         const isActive = !this._done && this._step === i;
         const cls = `rstep${isDone ? " done" : ""}${isActive ? " active" : ""}`;
         const mark = isDone ? "&#10003;" : String(i + 1);
@@ -13550,8 +13626,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // and news show everything, the current default).
     _topicsCard() {
       return `
-      <p class="intro">Pick the topics you care about. Your activity feed and news default to them, and you can change this any time in Settings. Skip to see everything.</p>
-      <gbti-topic-picker></gbti-topic-picker>`;
+      <p class="intro">We have started you off with a few popular topics. Add the others you care about, or remove any you do not. Your activity feed and news default to them, and you can change this any time in Settings.</p>
+      <gbti-topic-picker seed-defaults></gbti-topic-picker>`;
     }
     _membersCard() {
       const intro = `<p class="intro">Following a member alerts you when they publish new articles, prompts, and products in your feed.</p>`;
@@ -13602,12 +13678,33 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       </div>
     </div>`;
     }
+    /**
+     * Repaint ONLY what a follow toggle changes: each Follow button's state and the "N following" count.
+     *
+     * This exists because `render()` calls `this.set(...)`, which replaces the whole component's markup. Using
+     * it for a follow toggle tore down and rebuilt the entire wizard TWICE per click (once optimistically, once
+     * on the network response), which read as the panel flashing and reloading under the cursor, and threw away
+     * scroll position mid-list. <gbti-topic-picker> already learned this and re-renders its chips in place for
+     * the same reason; this is that pattern applied to the members grid.
+     *
+     * Deriving every button from `this._follows` rather than touching just the clicked one is deliberate: the
+     * response REPLACES the whole set, so a follow made in another tab shows up here too.
+     */
+    _refreshFollowUi() {
+      const count = this.$(".mcount");
+      if (count) count.textContent = `${this._follows?.size ?? 0} following`;
+      this.$$("[data-follow]").forEach((b) => {
+        const on = this._follows?.has(lc3(b.getAttribute("data-follow"))) ?? false;
+        b.classList.toggle("on", on);
+        b.innerHTML = on ? "&#10003; Following" : "Follow";
+      });
+    }
     async _toggleFollow(username) {
       const u = lc3(username);
       if (!u || !this._follows) return;
       const was = this._follows.has(u);
       was ? this._follows.delete(u) : this._follows.add(u);
-      this.render();
+      this._refreshFollowUi();
       try {
         const r = await this.client.setFollow({ username: u, on: !was });
         const list = Array.isArray(r) ? r : r?.following ?? null;
@@ -13615,7 +13712,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       } catch {
         was ? this._follows.add(u) : this._follows.delete(u);
       }
-      this.render();
+      this._refreshFollowUi();
     }
   };
   define("gbti-welcome", GbtiWelcome);

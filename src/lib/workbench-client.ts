@@ -602,8 +602,24 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     // ----- SOW-023/046: the follow graph + prefs (Following), cookie-ready KV -----
     getFollows() { return workerGet('/membership/follows'); }, // { following }
     setFollow({ username, on = true }: any) { return workerPost('/membership/follows', { username, on }); },
-    getPrefs() { return workerGet('/membership/prefs'); }, // { categories, followedChannels }
-    setPrefs(patch: any) { return workerPost('/membership/prefs', patch); },
+    // UNWRAP the envelope. `/membership/prefs` answers `{ ok, prefs: { categories, followedChannels } }`,
+    // but every consumer of client.getPrefs/setPrefs reads `.categories` off the TOP level: the comment on
+    // these two lines has always said `{ categories, followedChannels }`, and client/src/news-client.mjs
+    // (the extension + npm transport for the same two endpoints) does `return data?.prefs ?? ...`. This
+    // adapter alone returned the raw envelope, so on the WEBSITE `p?.categories` was undefined everywhere.
+    //
+    // It was not cosmetic, it DESTROYED DATA. <gbti-topic-picker> assigns the response back over its local
+    // selection (`this._selected = selectedTopics(p?.categories)`), so every chip click reset the selection
+    // to []. The next click then POSTed a one-element array, because the picker sends the whole selection
+    // rather than a delta. Each pick silently replaced every earlier pick, and the chip un-highlighted as it
+    // happened. metacast's stored prefs after picking several topics were `{"categories":["gaming"]}`, the
+    // last click alone. The same undefined also made _load() show an empty picker to a member who had
+    // already chosen topics.
+    //
+    // Fixed HERE rather than in the picker, because the picker is shared with the extension where the
+    // transport already unwraps; "fixing" the reader would have double-unwrapped that host.
+    async getPrefs() { const r: any = await workerGet('/membership/prefs'); return r?.prefs ?? r; },
+    async setPrefs(patch: any) { const r: any = await workerPost('/membership/prefs', patch); return r?.prefs ?? r; },
 
     // ----- sow-207: the welcome flow's Discord step, over the cookie session -----
     // The member is already authenticated by the httpOnly session cookie, so the connect URL points straight at the

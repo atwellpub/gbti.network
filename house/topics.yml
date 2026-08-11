@@ -77,6 +77,11 @@ topics:
   # Creative & Media
   writing: { label: Writing }
   photography: { label: Photography }
+  # Entertainment is a content-taxonomy PRIMARY (house/taxonomy.yml, the parent of gaming -> minecraft -> mods),
+  # so it drives a browse drill-down. It was missing from this follow vocabulary while its own CHILD, gaming,
+  # was present, which read as a hole rather than a decision: a member could follow Gaming but not the parent
+  # subject the network says it covers. Added 2026-08-11 with the welcome-step default group.
+  entertainment: { label: Entertainment }
   music: { label: Music }
   cinema: { label: Cinema }
   memes: { label: Memes }

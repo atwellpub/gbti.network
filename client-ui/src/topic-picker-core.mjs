@@ -54,6 +54,30 @@ export function selectedTopics(categories) {
   return [...new Set((Array.isArray(categories) ? categories : []).filter((k) => typeof k === 'string' && k))];
 }
 
+/**
+ * sow-207 QA: the topics a brand-new member starts with, so their first feed is tuned rather than empty.
+ * Owner-chosen (2026-08-11). Ordered as the owner named them; the picker renders alphabetically anyway.
+ *
+ * `entertainment` was ADDED to house/topics.yml the same day to make this set expressible: it is a
+ * content-taxonomy primary and gaming's parent, but the flat follow vocabulary had never carried it.
+ */
+export const DEFAULT_TOPICS = Object.freeze(['devops', 'entertainment', 'music', 'gaming', 'ai']);
+
+/**
+ * The starting selection for a member who has none: `defaults`, filtered to keys the vocabulary ACTUALLY
+ * has. Returns the existing selection untouched when there is one, so this can only ever fill a void.
+ *
+ * Filtering against the live vocabulary is the point rather than a nicety. These keys are written down in one
+ * file and defined in another, so a rename or removal in house/topics.yml would otherwise persist a dead key
+ * into a member's prefs, where it would sit forever biasing nothing and matching no chip.
+ */
+export function seedDefaultTopics(selected, vocabulary, defaults = DEFAULT_TOPICS) {
+  const cur = selectedTopics(selected);
+  if (cur.length) return cur;
+  const known = new Set((Array.isArray(vocabulary) ? vocabulary : []).map((t) => t && t.key).filter(Boolean));
+  return (Array.isArray(defaults) ? defaults : []).filter((k) => known.has(k));
+}
+
 /** Select every topic in `pool` (the filtered view, or the whole vocabulary), merged AFTER the current
  *  selection so existing picks keep priority under the cap. Returns a NEW de-duped key array. */
 export function selectAllTopics(selection, pool, cap = Infinity) {

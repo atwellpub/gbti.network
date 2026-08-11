@@ -506,9 +506,30 @@ function validateTiersConfig() {
 }
 validateTiersConfig();
 
+// sow-207 QA (2026-08-11): a taxonomy PRIMARY with no matching follow topic.
+//
+// SOW-080 split the flat follow vocabulary (house/topics.yml) away from the content taxonomy
+// (house/taxonomy.yml) so the follow list could grow without re-tagging content. That split is correct and
+// stays. What it lacked was any check in the OTHER direction, and the cost was concrete: `entertainment` was a
+// taxonomy primary and gaming's PARENT from the very first commit, house/topics.yml was hand-authored two weeks
+// later without it, and for two months members were offered the child topic but never the parent. Nothing
+// noticed, because the only existing rule runs topic-map -> topics.yml.
+//
+// A WARNING, not an error, deliberately. The legitimate answer is sometimes "this category is structural and
+// nobody should follow it" (see STRUCTURAL below), and categories are added through the admin Categories screen
+// as a house PR, so a hard failure would block the owner's own UI flow on a curation question. This surfaces the
+// gap on every run and leaves the judgement where it belongs.
+const STRUCTURAL_PRIMARIES = new Set(['gbti', 'blog']); // filing buckets, not interests: no follow topic wanted
+const topicGaps = Object.keys(TAXONOMY)
+  .filter((k) => !STRUCTURAL_PRIMARIES.has(k) && !TOPIC_KEYS.has(k));
+
 // SOW-076 Phase 3: `--json` emits the errors as machine-readable JSON (for the post-publish remediation), while the
 // exit code is unchanged. The default human output is untouched.
 const JSON_OUT = process.argv.includes('--json');
+if (topicGaps.length && !JSON_OUT) {
+  console.warn(`! ${topicGaps.length} taxonomy primar${topicGaps.length === 1 ? 'y has' : 'ies have'} no follow topic in house/topics.yml:`);
+  for (const k of topicGaps) console.warn(`  - ${k}: members can file content here but cannot follow it. Add it to house/topics.yml, or to STRUCTURAL_PRIMARIES if it is a filing bucket.`);
+}
 if (errors.length) {
   if (JSON_OUT) console.log(JSON.stringify({ ok: false, errors }));
   else {

@@ -1,7 +1,10 @@
 // SOW-054 Phase 3/5: the pure followed-topics picker helpers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { topicsFromJson, toggleTopic, selectedTopics, filterTopics, groupTopics, selectAllTopics } from '../client-ui/src/topic-picker-core.mjs';
+import { topicsFromJson, toggleTopic, selectedTopics, filterTopics, groupTopics, selectAllTopics, seedDefaultTopics, DEFAULT_TOPICS } from '../client-ui/src/topic-picker-core.mjs';
+import fs from 'node:fs';
+import yaml from 'js-yaml';
+import { topicVocabKeys } from '../membership/topics-vocab.mjs';
 
 test('topicsFromJson: clean list; drops malformed; label falls back to key', () => {
   assert.deepEqual(topicsFromJson({ topics: [{ key: 'ai', label: 'AI' }, { key: 'devops', label: 'DevOps' }] }),
@@ -67,4 +70,41 @@ test('selectAllTopics: merges the pool after the current selection, de-duped, ca
   // composes with a filtered pool (the picker passes filterTopics output)
   const filtered = filterTopics([{ key: 'ai', label: 'AI' }, { key: 'aws', label: 'AWS' }, { key: 'css', label: 'CSS' }], 'a');
   assert.deepEqual(selectAllTopics([], filtered), ['ai', 'aws']);
+});
+
+// --- sow-207 QA: the onboarding default topic group ------------------------------------------------------
+
+const VOCAB = [
+  { key: 'ai', label: 'AI' }, { key: 'devops', label: 'DevOps' }, { key: 'entertainment', label: 'Entertainment' },
+  { key: 'gaming', label: 'Gaming' }, { key: 'music', label: 'Music' }, { key: 'rust', label: 'Rust' },
+];
+
+test('seedDefaultTopics fills an EMPTY selection with the owner default group', () => {
+  assert.deepEqual(seedDefaultTopics([], VOCAB).sort(), ['ai', 'devops', 'entertainment', 'gaming', 'music']);
+  assert.deepEqual(seedDefaultTopics(null, VOCAB).sort(), ['ai', 'devops', 'entertainment', 'gaming', 'music']);
+});
+
+test('seedDefaultTopics NEVER overwrites an existing selection', () => {
+  // The whole safety of seeding is that it can only fill a void. A member who picked one topic keeps exactly
+  // that one; the defaults are not merged in on top of a deliberate choice.
+  assert.deepEqual(seedDefaultTopics(['rust'], VOCAB), ['rust']);
+  assert.deepEqual(seedDefaultTopics(['gaming'], VOCAB), ['gaming']);
+});
+
+test('a default key absent from the vocabulary is DROPPED, never persisted', () => {
+  // house/topics.yml and DEFAULT_TOPICS are separate files. A rename or removal there must not write a dead
+  // key into a member's prefs, where it would match no chip and bias nothing.
+  assert.deepEqual(seedDefaultTopics([], [{ key: 'ai' }, { key: 'rust' }]), ['ai']);
+  assert.deepEqual(seedDefaultTopics([], []), [], 'no vocabulary loaded -> seed nothing');
+  assert.deepEqual(seedDefaultTopics([], null), []);
+});
+
+test('every DEFAULT_TOPICS key really exists in house/topics.yml', () => {
+  // The guard that makes the drop-behaviour above a safety net rather than the normal path. `entertainment`
+  // is the reason this test exists: it was a content-taxonomy primary and gaming's PARENT, yet the flat follow
+  // vocabulary never carried it, so the owner's default group could not be expressed until it was added.
+  const keys = new Set(topicVocabKeys(yaml.load(fs.readFileSync('house/topics.yml', 'utf8'))));
+  for (const k of DEFAULT_TOPICS) {
+    assert.ok(keys.has(k), `DEFAULT_TOPICS key "${k}" is not in house/topics.yml`);
+  }
 });

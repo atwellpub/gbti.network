@@ -3,10 +3,16 @@
 // selection), renders toggle chips, and persists each toggle via client.setPrefs({ categories }). Emits
 // 'topics-change' with the new selection. Inert without a signed-in client (shows the vocabulary, persists nothing).
 import { GbtiElement, define, esc } from '../base.mjs';
-import { topicsFromJson, toggleTopic, selectedTopics, filterTopics, groupTopics, selectAllTopics } from '../topic-picker-core.mjs';
+import { topicsFromJson, toggleTopic, selectedTopics, filterTopics, groupTopics, selectAllTopics, seedDefaultTopics } from '../topic-picker-core.mjs';
 
 const SITE = 'https://gbti.network';
 const MAX_TOPICS = 200; // SOW-080: mirrors membership/member-prefs.mjs MAX_CATEGORIES (the Worker truncates beyond this)
+// sow-207 QA: seeding the default topics is remembered so it happens AT MOST ONCE per browser. Without this, a
+// member who deliberately pressed Clear during onboarding would have the defaults silently restored the next time
+// the step loaded, because an empty selection and "never chose" are indistinguishable to the client (the Worker
+// normalizes a missing prefs record to `{ categories: [] }`). Opt-in per host via the `seed-defaults` attribute,
+// so ONLY onboarding seeds: the Settings picker must never re-impose topics on an established member.
+const SEEDED_KEY = 'gbti-welcome-topics-seeded';
 
 const CSS = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
@@ -43,8 +49,33 @@ class GbtiTopicPicker extends GbtiElement {
     catch { this._topics = []; }
     if (this.client?.getPrefs) {
       try { const p = await this.client.getPrefs(); this._selected = selectedTopics(p?.categories); } catch { this._selected = []; }
+      await this._seedDefaults();
     }
     this.render();
+  }
+
+  /**
+   * Give a member with NO topics the owner's default group, once, and PERSIST it.
+   *
+   * Persisting rather than merely highlighting is the whole point: the welcome step's Continue does not save
+   * anything itself, so a member who accepts the defaults by not touching them would otherwise finish
+   * onboarding with an untuned feed, which is exactly the outcome a default group exists to prevent.
+   *
+   * Silent on failure. This is a nicety layered on top of the step, so a failed write must leave the member
+   * looking at a normal, usable picker rather than an error about something they never asked for.
+   */
+  async _seedDefaults() {
+    if (!this.hasAttribute('seed-defaults') || this._selected.length) return;
+    try { if (localStorage.getItem(SEEDED_KEY) === '1') return; } catch { /* storage blocked: seed anyway */ }
+    const next = seedDefaultTopics(this._selected, this._topics);
+    if (!next.length) return; // the vocabulary did not load, or every default key is gone from it
+    try { localStorage.setItem(SEEDED_KEY, '1'); } catch { /* private mode: at worst it seeds again next time */ }
+    this._selected = next;
+    this.dispatchEvent(new CustomEvent('topics-change', { detail: { topics: [...next] }, bubbles: true, composed: true }));
+    if (this.client?.setPrefs) {
+      try { const p = await this.client.setPrefs({ categories: next }); this._selected = selectedTopics(p?.categories); }
+      catch { /* keep the optimistic selection; the Worker is the authority on the next load */ }
+    }
   }
 
   /** The current selection (topic keys), for a host that wants to read it on a Continue/Save action. */

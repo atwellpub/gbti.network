@@ -48,6 +48,32 @@ export function excludeSelf(members, ownUsername) {
   return me ? members.filter((m) => String(m?.username || '').toLowerCase() !== me) : [...members];
 }
 
+/**
+ * sow-207 QA: the step a RETURNING member should land on, given a per-step "is this already done" flag list.
+ *
+ * The wizard used to open at step 0 every time, so a refresh (or following the "Skip for now" link and coming
+ * back) sent a member who had already connected Discord, followed channels and members, and picked topics all
+ * the way back to "Connect Discord" with the rail's checkmarks cleared. None of their work was lost, since all
+ * of it persists server-side, but the wizard could not see what it had already achieved.
+ *
+ * DERIVED, NOT A SAVED CURSOR. The flags come from real state (the Discord link, the followed channels, the
+ * saved socials, the follow graph, the stored topic prefs), so a member who did some of this SOMEWHERE ELSE
+ * gets credit for it: linking Discord from the extension, or following people from their profile pages, both
+ * count here. A persisted step number would instead replay a stale position and re-ask for work already done.
+ *
+ * Returns the FIRST incomplete step. When everything is complete it returns the LAST step rather than a
+ * done-state, deliberately: the done card is a place you arrive by pressing "I am all set", and auto-jumping
+ * a returning member straight to it would hide the wizard they came back to use. Landing them on the final
+ * step lets them keep adjusting and finish on their own action.
+ */
+export function resumeStep(done, count) {
+  const flags = Array.isArray(done) ? done : [];
+  const n = Number.isInteger(count) && count > 0 ? count : flags.length;
+  if (n <= 0) return 0;
+  for (let i = 0; i < n; i++) if (!flags[i]) return i;
+  return n - 1;
+}
+
 /** 1-based page `p` of `size` from `list`, clamped. Returns { page, pages, items }. */
 export function paginate(list, p, size = 10) {
   const pages = Math.max(1, Math.ceil(list.length / size));

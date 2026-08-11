@@ -8,7 +8,7 @@
 // Host-agnostic: it consumes only the injected client + a public fetch of /members-index.json, so it runs in
 // the extension now and the npm CMS later. Emits gbti:welcome-done when the member finishes.
 import { GbtiElement, define, esc } from '../base.mjs';
-import { phaseLabel, shuffle, excludeSelf, paginate } from '../welcome-core.mjs';
+import { phaseLabel, shuffle, excludeSelf, paginate, resumeStep } from '../welcome-core.mjs';
 import { DISCORD_LINK_URL } from '../discord.mjs';
 import { socialIcon, SOCIAL_KEYS, SOCIAL_LABELS } from '../social-icons.mjs';
 import { recallProfileSocials } from '../profile-fields.mjs'; // SOW-129 QA: recall saved profile socials into the welcome step
@@ -368,7 +368,33 @@ class GbtiWelcome extends GbtiElement {
       ]);
     } catch { /* keep the staged draft (possibly empty) */ }
     this._loaded = true;
+    // sow-207 QA: RESUME where the member actually is, rather than reopening at step 1 every time. Computed
+    // here because this is the point where every signal has landed. Guarded by _resumed so a second load()
+    // (the setClient fan-out can re-run it) never yanks a member out of the step they are reading.
+    if (!this._resumed) {
+      this._resumed = true;
+      this._step = resumeStep(this._stepDone(), STEPS.length);
+    }
     this.render();
+  }
+
+  /**
+   * Per-step "already done", in STEPS order. Each flag reads REAL state rather than a remembered click, so
+   * work done outside this wizard counts (see resumeStep).
+   *
+   * Every unknown resolves to NOT done. `_follows` is null when the read failed and `_topicsCount` is 0 when
+   * prefs were unreadable, and in both cases showing the step again is the harmless direction: the member
+   * sees a step they may not need, instead of being skipped past one they do.
+   */
+  _stepDone() {
+    const socials = this._socialDraft && Object.values(this._socialDraft).some((v) => String(v ?? '').trim());
+    return [
+      Boolean(this._discordJoined),          // discord  — the link landed (localStorage, set by the poll)
+      (this._chanFollowed?.size ?? 0) > 0,   // subreddit — at least one network channel followed
+      Boolean(socials),                      // socials   — a staged or already-saved handle
+      (this._follows?.size ?? 0) > 0,        // follow    — following at least one member
+      (this._topicsCount ?? 0) > 0,          // topics    — at least one topic in the stored prefs
+    ];
   }
 
   // SOW-048: feed the device-flow user code into the splash (host calls this from the gbti:welcome-signin handler).
@@ -433,8 +459,13 @@ class GbtiWelcome extends GbtiElement {
   }
 
   _railHtml() {
+    // sow-207 QA: the rail was PURELY positional (`_step > i`), which resume makes visibly wrong. A member who
+    // skipped socials but followed members and picked topics now resumes ON socials, and a positional rail would
+    // then show Members and Topics as still to-do, re-asking for work already finished. Mixing in the real
+    // per-step flags keeps a check meaning "this is done" rather than "you walked past this".
+    const done = this._stepDone();
     const rows = STEPS.map((s, i) => {
-      const isDone = this._done || this._step > i;
+      const isDone = this._done || this._step > i || Boolean(done[i]);
       const isActive = !this._done && this._step === i;
       const cls = `rstep${isDone ? ' done' : ''}${isActive ? ' active' : ''}`;
       const mark = isDone ? '&#10003;' : String(i + 1);
@@ -628,8 +659,8 @@ class GbtiWelcome extends GbtiElement {
   // and news show everything, the current default).
   _topicsCard() {
     return `
-      <p class="intro">Pick the topics you care about. Your activity feed and news default to them, and you can change this any time in Settings. Skip to see everything.</p>
-      <gbti-topic-picker></gbti-topic-picker>`;
+      <p class="intro">We have started you off with a few popular topics. Add the others you care about, or remove any you do not. Your activity feed and news default to them, and you can change this any time in Settings.</p>
+      <gbti-topic-picker seed-defaults></gbti-topic-picker>`;
   }
 
   _membersCard() {
@@ -689,12 +720,34 @@ class GbtiWelcome extends GbtiElement {
     </div>`;
   }
 
+  /**
+   * Repaint ONLY what a follow toggle changes: each Follow button's state and the "N following" count.
+   *
+   * This exists because `render()` calls `this.set(...)`, which replaces the whole component's markup. Using
+   * it for a follow toggle tore down and rebuilt the entire wizard TWICE per click (once optimistically, once
+   * on the network response), which read as the panel flashing and reloading under the cursor, and threw away
+   * scroll position mid-list. <gbti-topic-picker> already learned this and re-renders its chips in place for
+   * the same reason; this is that pattern applied to the members grid.
+   *
+   * Deriving every button from `this._follows` rather than touching just the clicked one is deliberate: the
+   * response REPLACES the whole set, so a follow made in another tab shows up here too.
+   */
+  _refreshFollowUi() {
+    const count = this.$('.mcount');
+    if (count) count.textContent = `${this._follows?.size ?? 0} following`;
+    this.$$('[data-follow]').forEach((b) => {
+      const on = this._follows?.has(lc(b.getAttribute('data-follow'))) ?? false;
+      b.classList.toggle('on', on);
+      b.innerHTML = on ? '&#10003; Following' : 'Follow'; // static markup, mirrors _memberCard exactly
+    });
+  }
+
   async _toggleFollow(username) {
     const u = lc(username);
     if (!u || !this._follows) return;
     const was = this._follows.has(u);
     was ? this._follows.delete(u) : this._follows.add(u); // optimistic
-    this.render();
+    this._refreshFollowUi();
     try {
       const r = await this.client.setFollow({ username: u, on: !was });
       const list = Array.isArray(r) ? r : (r?.following ?? null);
@@ -702,7 +755,7 @@ class GbtiWelcome extends GbtiElement {
     } catch {
       was ? this._follows.add(u) : this._follows.delete(u); // revert
     }
-    this.render();
+    this._refreshFollowUi();
   }
 }
 
