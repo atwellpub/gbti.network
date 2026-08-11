@@ -414,15 +414,23 @@ export async function gatherMembers(stripe, overrides, now, { repoIndex = null, 
     const discordRoles = await resolveDiscordRoles(discord, guildId, meta.discord_user_id ?? null, env);
     const entry = memberEntryFor(customer, overrides, now, { repoIndex, discordRoles, priceTierMap });
 
-    // Fail-closed warning: a member who is NOT effectively paid/grandfathered but has no resolvable
-    // folder cannot have their content drafted on lapse. Name them so the owner can fix the index.
-    if (!entry.username && entry.effective?.status !== 'paid') {
-      console.warn(
-        `reconcile: WARNING no folder resolved for github_id ${githubId} (login ${meta.github_login ?? 'unknown'}, ` +
-          `status ${entry.effective?.status ?? 'unknown'}). Their content cannot be reconciled. ` +
-          'Add a members-index.yml entry mapping this github_id to their folder.',
-      );
-    }
+    // NO "unresolved folder" WARNING HERE, deliberately. Removed 2026-08-11; do not re-add it.
+    //
+    // It used to fire for any member who was not effectively paid and had no resolvable folder, on the
+    // rationale that "their content cannot be drafted on lapse". SOW-197 removed that behaviour: a lapse no
+    // longer touches content in either direction, so the reason the warning existed is gone.
+    //
+    // What remained was a false positive that grew with every signup. Publishing is paid-only and a folder
+    // is minted only at publish (enrollmentCandidates enrolls PAID members exclusively), so every free or
+    // trial member who never published has no folder BY DESIGN and tripped it. Worse, the remediation it
+    // printed, "add a members-index.yml entry", contradicts that rule: hand-adding a non-paid member is not
+    // something the system would ever do for itself. It produced owner to-do items that could not be
+    // correctly actioned, and two of them were carried across three band compactions before anyone checked
+    // the premise.
+    //
+    // The case that genuinely still matters, a BANNED member whose folder cannot be resolved so the ban
+    // cannot be enforced, is covered strictly better in scripts/lib/reconcile-plan.mjs by the `unresolved`
+    // action: it surfaces the member AND exits non-zero, where this only printed to stderr.
     members.push(entry);
   }
   return members;
