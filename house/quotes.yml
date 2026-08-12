@@ -53,3 +53,6 @@ quotes:
   - text: The fool wanders, the wise asks
     author: Benjamin Disraeli
     enabled: true
+  - text: A rolling stone gathers no moss
+    author: Traditional Proverb
+    enabled: true
