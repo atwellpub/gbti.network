@@ -10,4 +10,4 @@ type: comment
 author: gbtilabs
 ---
 
-We wrote this article because the topic of App Clips crossed our desk and we were impressed at the ability of this tool and we were curious how other projects were using it in their IOS application experience. Thanks for reading! We hope you also learned something new today.
+We wrote this article because the topic of App Clips crossed our desk. We were impressed by what the tool can do, and curious how other projects are using it in their iOS applications. Thanks for reading. We hope you learned something new today.
