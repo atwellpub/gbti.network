@@ -21761,19 +21761,20 @@ function removeFlagTerm(doc, { list, term } = {}, ctx = {}) {
 }
 
 // membership/syndication-config-core.mjs
-var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "dailydev"]);
 var TEMPLATE_CHANNELS = CHANNELS;
 var CHANNEL_CAPABILITY = Object.freeze({
   discord: "auto",
   "discord-category": "auto",
   reddit: "auto",
   devto: "auto",
-  // SOW-134 built the full-body auto adapter, but Hashnode retired its free GraphQL API (2026-05-13): API
-  // publishing now needs a paid Pro plan on the publication. Owner-decided: keep Hashnode as a MANUAL-assist
-  // channel (a Social Queue task a superadmin posts by hand) instead of paying for Pro. The adapter is kept but
-  // never called (manual channels are hard-excluded from the adapter run); flip back to 'auto' if Pro is added.
+  // DORMANT (sow-217, 2026-08-12): Hashnode is RETIRED and out of CHANNELS, so this entry is never consulted.
+  // Kept deliberately so a revival is a one-line change rather than a rebuild. History: SOW-134 built the
+  // full-body auto adapter; Hashnode paywalled its whole GraphQL API behind Pro on 2026-05-13 (reads included,
+  // not just publishing), which demoted this to 'manual'; then it required a custom domain on Pro, which is
+  // what ended it. Revival = re-add 'hashnode' to CHANNELS + the two hand-maintained duplicates, and flip this
+  // to 'auto' only if the Pro plan is actually bought (the adapter cannot work without it).
   hashnode: "manual",
-  // SOW-134 + manual pivot: no Pro, so hand-post to gbti.hashnode.dev via the Social Queue
   mastodon: "auto",
   // SOW-123
   bluesky: "auto",
@@ -22246,7 +22247,7 @@ function setTemplate(doc, { type, template, channel, stub } = {}, ctx = {}) {
   d.syndication[sharedField] = nextTemplates;
   return { next: d, changed: true, audit: auditEntry6(ctx, t, { stub: isStub || void 0, template: value || null }) };
 }
-var SYNDICATION_CHANNEL_NAMES = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+var SYNDICATION_CHANNEL_NAMES = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "dailydev"]);
 function setSyndicationSettings(doc, { enabled, requireApproval, holdMinutes, channels, autoMatrix, channelHoldMinutes } = {}, ctx = {}) {
   const d = structuredClone(doc && typeof doc === "object" ? doc : {});
   if (!d.syndication || typeof d.syndication !== "object" || Array.isArray(d.syndication)) d.syndication = {};

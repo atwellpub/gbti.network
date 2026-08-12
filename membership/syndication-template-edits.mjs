@@ -185,7 +185,11 @@ export function setTemplate(doc, { type, template, channel, stub } = {}, ctx = {
 // idempotent against the normalized current values.
 // sow-159: Mastodon retired (see syndication-config-core CHANNELS). Dropped here too so its templates
 // cannot be edited/created through the admin template surface.
-export const SYNDICATION_CHANNEL_NAMES = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'bluesky', 'reddit', 'devto', 'hashnode', 'dailydev']);
+// HAND-MAINTAINED DUPLICATE of CHANNELS (membership/syndication-config-core.mjs). It does not derive from it,
+// so a channel added or retired there must be edited here too. sow-159 dropped 'mastodon', sow-217 dropped
+// 'hashnode'. If this list and CHANNELS ever disagree, a superadmin can save a template for a channel the
+// drain will never honour, which validates cleanly and then silently does nothing.
+export const SYNDICATION_CHANNEL_NAMES = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'bluesky', 'reddit', 'devto', 'dailydev']);
 
 export function setSyndicationSettings(doc, { enabled, requireApproval, holdMinutes, channels, autoMatrix, channelHoldMinutes } = {}, ctx = {}) {
   const d = structuredClone(doc && typeof doc === 'object' ? doc : {});

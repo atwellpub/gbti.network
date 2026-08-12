@@ -45,7 +45,7 @@ test('SOW-131: isChannelEnabled + enabledChannelNames are MATRIX-DERIVED (any ce
   assert.equal(isChannelEnabled(c, 'mastodon'), false);  // every cell off
   assert.equal(isChannelEnabled(c, 'bluesky'), true);    // popular counts as enabled
   // Only mastodon is off; every other MATRIX channel is default-enabled.
-  assert.deepEqual(enabledChannelNames(c).sort(), ['bluesky', 'dailydev', 'devto', 'discord', 'discord-category', 'hashnode', 'linkedin', 'reddit', 'x']);
+  assert.deepEqual(enabledChannelNames(c).sort(), ['bluesky', 'dailydev', 'devto', 'discord', 'discord-category', 'linkedin', 'reddit', 'x']); // sow-217: hashnode retired (out of CHANNELS)
   // The legacy `channels` flag no longer gates enablement: channels:false but matrix on -> enabled.
   const flagged = syndicationConfigFromParsed({ channels: { reddit: false }, auto_matrix: { post: { reddit: 'on' } } });
   assert.equal(isChannelEnabled(flagged, 'reddit'), true);
@@ -61,7 +61,7 @@ test('toSyndicationMirror returns the secret-free shape for KV', () => {
     // SOW-126: the content-engagement (`popular` engine) settings, mirrored like news_engagement.
     content_engagement: { enabled: false, threshold: 3, tier: 'signed-in', signals: { opens: true, favorites: false, upvotes: false, comments: false } },
     // SOW-088: reddit joined CHANNELS (default false) so the admin pipeline switch survives normalization.
-    channels: { discord: true, 'discord-category': false, x: false, linkedin: false, bluesky: false, reddit: false, devto: false, hashnode: false, dailydev: false }, // sow-159: mastodon retired (out of CHANNELS)
+    channels: { discord: true, 'discord-category': false, x: false, linkedin: false, bluesky: false, reddit: false, devto: false, dailydev: false }, // sow-159: mastodon retired; sow-217: hashnode retired (both out of CHANNELS)
     channel_templates: {},
     stub_templates: {},
     channel_templates_stub: {},

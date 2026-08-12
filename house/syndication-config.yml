@@ -43,13 +43,11 @@ syndication:
     bluesky: true
     reddit: false
     devto: false
-    hashnode: true
     dailydev: true
   manual_assist_channels:
     - x
     - linkedin
     - dailydev
-    - hashnode
   auto_matrix:
     share:
       discord: 'on'
@@ -59,22 +57,18 @@ syndication:
       bluesky: on-manual
       x: on-manual
       linkedin: on-manual
-      hashnode: 'off'
       dailydev: on-manual
     post:
       x: on-manual
       linkedin: on-manual
       dailydev: on-manual
-      hashnode: on-manual
     product:
       x: on-manual
       linkedin: on-manual
-      hashnode: on-manual
       dailydev: on-manual
     prompt:
       x: on-manual
       linkedin: on-manual
-      hashnode: on-manual
       dailydev: on-manual
   channel_templates:
     devto:
@@ -133,5 +127,3 @@ syndication:
         To follow {fullName}'s work more closely, consider joining our network and subscribing to
         them directly: {member-url}
       share: '{title} {shareurl}'
-    hashnode:
-      share: '"{title}" {shareurl}'

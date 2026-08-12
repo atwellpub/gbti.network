@@ -13,11 +13,11 @@ import { GbtiElement, define, esc } from '../base.mjs';
 import { renderTemplate, renderBodyTemplate, recordDestinations } from '../../../membership/syndication-format.mjs';
 import { channelForCategoryPath } from '../../../membership/news-channels.mjs';
 
-const DEST_LABEL = { discord: 'Discord', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', x: 'X', bluesky: 'Bluesky', linkedin: 'LinkedIn' }; // sow-159: mastodon retired
-// SOW-137 follow-up: dev.to + Hashnode cross-post the FULL article body, so the "Message template" field is
-// actually the article TITLE (fed to the adapter as the title; the body is the fetched article + byline + CTA).
-// dev.to is the only API-driven full-body channel left; Hashnode is now manual-assist (a Social Queue task), so
-// it uses the normal message-template field like X / LinkedIn / daily.dev.
+const DEST_LABEL = { discord: 'Discord', reddit: 'Reddit', devto: 'dev.to', dailydev: 'daily.dev', x: 'X', bluesky: 'Bluesky', linkedin: 'LinkedIn' }; // sow-159: mastodon retired; sow-217: hashnode retired
+// SOW-137 follow-up: dev.to cross-posts the FULL article body, so the "Message template" field is actually
+// the article TITLE (fed to the adapter as the title; the body is the fetched article + byline + CTA).
+// dev.to is now the ONLY full-body channel: Hashnode was the other one and sow-217 retired it (its whole
+// GraphQL API went Pro-only on 2026-05-13, reads included, and it then required a custom domain on Pro).
 const FULL_BODY_DESTS = new Set(['devto']);
 
 // Cloudflare KV's list() is eventually consistent, so a JUST-posted record can be missing from the tracker

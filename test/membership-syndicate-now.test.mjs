@@ -43,7 +43,10 @@ test('GET: readiness (secrets decide for AUTO; manual is always ready), template
   assert.equal(byId.dailydev.ready, true); // SOW-135/136: daily.dev is manual-only -> always ready
   assert.equal(byId.reddit.ready, false); // AUTO destination, just missing its secrets in this env
   assert.match(byId.reddit.reason, /missing secrets/);
-  assert.equal(byId.hashnode.ready, true); // MANUAL destination now (no Pro): always ready, enqueues a Social Queue task
+  // sow-217: Hashnode is RETIRED and out of MANUAL_DESTS, so it is no longer OFFERED as a destination at all.
+  // Asserting its ABSENCE rather than deleting the line, because this surface is one of the three
+  // hand-maintained channel lists: if MANUAL_DESTS ever drifts back out of step with CHANNELS, this fails.
+  assert.equal(byId.hashnode, undefined, 'a retired channel must not be offered as a manual destination');
   assert.equal(r.body.templates.prompt, 'New prompt: {title} {url}');
   assert.equal(r.body.templates.share, 'Shared on the GBTI Network: "{title}" {url}'); // sow-180: the share default is content-first, no member credit
   assert.deepEqual(r.body.channelMap, [{ category: 'ai', channelId: '111222333444555666' }]);

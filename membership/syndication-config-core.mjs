@@ -33,7 +33,23 @@ export const SYNDICATION_MIRROR_KEY = 'synd:config';
 // Mastodon infra (the adapter, CHANNEL_CAPABILITY.mastodon below, the stubs, secret keys, and the
 // {member-mastodon-handle} format plumbing) is LEFT on disk inert; re-enabling is re-adding 'mastodon' here.
 // Re-implementation runbook: .data/ops/channel-ops/mastadon.md.
-export const CHANNELS = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'bluesky', 'reddit', 'devto', 'hashnode', 'dailydev']);
+//
+// sow-217: Hashnode is RETIRED the same way (2026-08-12), for the same reason in a different currency: it
+// demanded payment twice. It retired the free GraphQL API on 2026-05-13, and the announcement is broader
+// than "publishing" - "every API request, queries and mutations, now requires a Pro plan" - so READS are
+// paywalled too. Then it asked for a custom domain on Pro. It had already been demoted to manual-assist, so
+// what is being switched off is human effort per article, not an automation. Everything else (the adapter,
+// hashnode-body.mjs, CHANNEL_CAPABILITY.hashnode, the title cap, the secret keys, the four hashnode-*
+// template types and their defaults, the icon and brand colour) is LEFT on disk inert; re-enabling is
+// re-adding 'hashnode' here plus the two hand-maintained duplicates named below.
+// Re-implementation runbook: .data/ops/channel-ops/hashnode.md.
+//
+// TWO LISTS BELOW DO NOT DERIVE FROM THIS ONE and must be edited by hand whenever a channel is added or
+// retired: SYNDICATION_CHANNEL_NAMES (membership/syndication-template-edits.mjs) and MANUAL_DESTS
+// (workers/signup/membership-syndicate-now.mjs). A half-applied removal is the specific failure mode: a
+// validation list that still accepts a channel this list rejects produces a config a superadmin can save
+// and the drain will never honour.
+export const CHANNELS = Object.freeze(['discord', 'discord-category', 'x', 'linkedin', 'bluesky', 'reddit', 'devto', 'dailydev']);
 // SOW-088: the channels a per-channel TEMPLATE override may target (the admin Channels tab tiles). Same set
 // as the pipeline switches; blank/missing overrides fall back to the shared `templates` map, then built-ins.
 export const TEMPLATE_CHANNELS = CHANNELS;
@@ -49,11 +65,13 @@ export const CHANNEL_CAPABILITY = Object.freeze({
   'discord-category': 'auto',
   reddit: 'auto',
   devto: 'auto',
-  // SOW-134 built the full-body auto adapter, but Hashnode retired its free GraphQL API (2026-05-13): API
-  // publishing now needs a paid Pro plan on the publication. Owner-decided: keep Hashnode as a MANUAL-assist
-  // channel (a Social Queue task a superadmin posts by hand) instead of paying for Pro. The adapter is kept but
-  // never called (manual channels are hard-excluded from the adapter run); flip back to 'auto' if Pro is added.
-  hashnode: 'manual', // SOW-134 + manual pivot: no Pro, so hand-post to gbti.hashnode.dev via the Social Queue
+  // DORMANT (sow-217, 2026-08-12): Hashnode is RETIRED and out of CHANNELS, so this entry is never consulted.
+  // Kept deliberately so a revival is a one-line change rather than a rebuild. History: SOW-134 built the
+  // full-body auto adapter; Hashnode paywalled its whole GraphQL API behind Pro on 2026-05-13 (reads included,
+  // not just publishing), which demoted this to 'manual'; then it required a custom domain on Pro, which is
+  // what ended it. Revival = re-add 'hashnode' to CHANNELS + the two hand-maintained duplicates, and flip this
+  // to 'auto' only if the Pro plan is actually bought (the adapter cannot work without it).
+  hashnode: 'manual',
   mastodon: 'auto', // SOW-123
   bluesky: 'auto', // SOW-122
   x: 'manual', // SOW-120: the adapter renders, but posting is manual-assist (the free API tier was deprecated)

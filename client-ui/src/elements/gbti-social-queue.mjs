@@ -19,9 +19,16 @@ const composeUrl = (channel, text) => {
   if (channel === 'x') return `https://twitter.com/intent/tweet?text=${t}`;
   if (channel === 'linkedin') return `https://www.linkedin.com/feed/?shareActive=true&text=${t}`;
   if (channel === 'dailydev') return 'https://app.daily.dev/squads/gbti_network'; // SOW-135: no text prefill; Assist opens the squad, the Copy button supplies the link
-  if (channel === 'hashnode') return 'https://hashnode.com/draft'; // Hashnode is a full-article cross-post: Assist opens a new draft; copy the article from the gbti.network link in the task text
+  if (channel === 'hashnode') return 'https://hashnode.com/draft'; // RETAINED for already-queued tasks, see below
   return null;
 };
+// sow-217 RETAINED these three Hashnode entries deliberately, and this is a DEPARTURE from how sow-159
+// retired Mastodon (which stripped them). The Social Queue is a task LOG, not a routing table: it renders
+// whatever was enqueued before the retirement. Mastodon's account was already suspended, so no actionable
+// task could be pending; Hashnode was a WORKING manual channel until today, so a task may well be sitting in
+// the queue right now. Stripping the label and icon would render those rows as an unlabelled channel with no
+// way to act on them, which is a worse outcome than a dormant entry in a lookup table. Nothing NEW can be
+// enqueued for Hashnode: that is decided upstream by CHANNELS and MANUAL_DESTS, both of which dropped it.
 const CH_LABEL = { x: 'X', discord: 'Discord', 'discord-category': 'Discord', reddit: 'Reddit', devto: 'dev.to', hashnode: 'Hashnode', dailydev: 'daily.dev', linkedin: 'LinkedIn', bluesky: 'Bluesky' };
 const CH_ICON = { x: 'x', discord: 'discord', 'discord-category': 'discord', reddit: 'reddit', devto: 'devto', hashnode: 'hashnode', dailydev: 'dailydev', linkedin: 'linkedin', bluesky: 'bluesky' };
 const SRC_LABEL = { share: 'Share', post: 'Article', product: 'Product', prompt: 'Prompt' };

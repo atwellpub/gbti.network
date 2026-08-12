@@ -29,7 +29,10 @@ import { createDiscordClient } from '../../clients/discord.mjs';
 
 // The destinations the manual flow offers (SOW-088: the Reddit adapter landed, the Radle port).
 // sow-159: Mastodon retired (2026-07-28); dropped from the Manually-Syndicate destinations so no manual post can target it either.
-const MANUAL_DESTS = ['discord', 'reddit', 'x', 'linkedin', 'bluesky', 'devto', 'hashnode', 'dailydev']; // SOW-137: hashnode (auto) + dailydev (manual) were missing the Manually-Syndicate surface
+// HAND-MAINTAINED DUPLICATE of CHANNELS (membership/syndication-config-core.mjs); it does not derive from it.
+// SOW-137 added hashnode + dailydev here because they were missing the Manually-Syndicate surface; sow-217
+// removed hashnode again on retirement. Keep in step with CHANNELS and SYNDICATION_CHANNEL_NAMES.
+const MANUAL_DESTS = ['discord', 'reddit', 'x', 'linkedin', 'bluesky', 'devto', 'dailydev'];
 
 const FEATURED_ENV = { post: 'DISCORD_CHANNEL_POSTS', product: 'DISCORD_CHANNEL_PRODUCTS', prompt: 'DISCORD_CHANNEL_PROMPTS', share: 'DISCORD_CHANNEL_SHARES' };
 

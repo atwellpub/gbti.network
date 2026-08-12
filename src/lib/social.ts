@@ -46,7 +46,11 @@ export const SOCIAL_LINKS = [
   { label: 'YouTube', href: 'https://www.youtube.com/@gbti_network', path: siYoutube.path },
   { label: 'GitHub', href: 'https://github.com/gbti-network', path: siGithub.path },
   { label: 'Dev.to', href: 'https://dev.to/gbti', path: siDevdotto.path },
-  { label: 'Hashnode', href: 'https://gbti.hashnode.dev/', path: siHashnode.path }, // sow-132: the GBTI publication
+  // sow-217: the Hashnode footer link is REMOVED. sow-132 added it when the publication was an active
+  // channel; retiring the channel while still advertising the property sends readers somewhere nobody
+  // maintains. `siHashnode` stays imported on purpose: it is still used by ICON_PATHS below, which serves a
+  // MEMBER linking their own Hashnode profile. That is a different thing from GBTI syndicating to its own
+  // publication, and the owner kept it (sow-217 question 1), matching how sow-159 left member Mastodon values.
 
   { label: 'Daily.dev', href: 'https://daily.dev/squads/gbti_network/', path: siDailydotdev.path },
   { label: 'Discord', href: '/membership/', path: siDiscord.path },

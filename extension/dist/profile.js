@@ -7023,18 +7023,19 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   define("gbti-syndication-tracker", GbtiSyndicationTracker);
 
   // membership/syndication-config-core.mjs
-  var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "hashnode", "dailydev"]);
+  var CHANNELS = Object.freeze(["discord", "discord-category", "x", "linkedin", "bluesky", "reddit", "devto", "dailydev"]);
   var CHANNEL_CAPABILITY = Object.freeze({
     discord: "auto",
     "discord-category": "auto",
     reddit: "auto",
     devto: "auto",
-    // SOW-134 built the full-body auto adapter, but Hashnode retired its free GraphQL API (2026-05-13): API
-    // publishing now needs a paid Pro plan on the publication. Owner-decided: keep Hashnode as a MANUAL-assist
-    // channel (a Social Queue task a superadmin posts by hand) instead of paying for Pro. The adapter is kept but
-    // never called (manual channels are hard-excluded from the adapter run); flip back to 'auto' if Pro is added.
+    // DORMANT (sow-217, 2026-08-12): Hashnode is RETIRED and out of CHANNELS, so this entry is never consulted.
+    // Kept deliberately so a revival is a one-line change rather than a rebuild. History: SOW-134 built the
+    // full-body auto adapter; Hashnode paywalled its whole GraphQL API behind Pro on 2026-05-13 (reads included,
+    // not just publishing), which demoted this to 'manual'; then it required a custom domain on Pro, which is
+    // what ended it. Revival = re-add 'hashnode' to CHANNELS + the two hand-maintained duplicates, and flip this
+    // to 'auto' only if the Pro plan is actually bought (the adapter cannot work without it).
     hashnode: "manual",
-    // SOW-134 + manual pivot: no Pro, so hand-post to gbti.hashnode.dev via the Social Queue
     mastodon: "auto",
     // SOW-123
     bluesky: "auto",
@@ -7289,6 +7290,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .chtile.soon { opacity:.55; cursor:default; }
   .br-discord { background:#5865F2; } .br-reddit { background:#FF4500; } .br-x { background:#000; } .br-devto { background:#0a0a0a; }
   .br-li { background:#0A66C2; } .br-bsky { background:#1185FE; }
+  /* .br-hashnode is DORMANT (sow-217): the tile is gone, the brand colour is kept so a revival is a one-liner. */
   .br-substack { background:#FF6719; } .br-hashnode { background:#2962FF; } .br-dailydev { background:#CE3DF3; }
 
   /* template rows + variable chips */
@@ -7369,6 +7371,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   <g id="cb-linkedin"><path fill="currentColor" d="M6.1 8.6H2.9V20h3.2V8.6zM4.5 3.5a1.9 1.9 0 1 0 0 3.8 1.9 1.9 0 0 0 0-3.8zM20.9 20h-3.2v-5.6c0-1.3 0-3-1.9-3s-2.1 1.4-2.1 2.9V20H10.5V8.6h3v1.6h.1c.4-.8 1.5-1.6 3-1.6 3.2 0 3.8 2.1 3.8 4.9V20z"/></g>
   <g id="cb-bsky"><path fill="currentColor" d="M12 10.8C10.9 8.6 8 5.2 5.3 4 3.4 3.1 2 3.6 2 5.8c0 2.2 1.2 7.2 1.9 8.2.7 1 2 .9 3.3.7-2.2.4-2.6 1.9-1.5 3.4C7.8 21 9.7 17.9 10.2 16.7c.3-.8.5-1.4.6-1.6.1.2.3.8.6 1.6.5 1.2 2.4 4.3 4.5 1.4 1.1-1.5.7-3-1.5-3.4 1.3.2 2.6.3 3.3-.7.7-1 1.9-6 1.9-8.2 0-2.2-1.4-2.7-3.3-1.8-2.7 1.2-5.6 4.6-6.7 6.8z"/></g>
   <g id="cb-substack"><path fill="currentColor" d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.539 24V10.812H1.46zM22.539 0H1.46v2.836h21.08V0z"/></g>
+  <!-- cb-hashnode: DORMANT (sow-217), kept inert for a revival; no tile references it today. -->
   <g id="cb-hashnode"><path fill="currentColor" d="M22.351 8.019l-6.37-6.37a5.63 5.63 0 0 0-7.962 0l-6.37 6.37a5.63 5.63 0 0 0 0 7.962l6.37 6.37a5.63 5.63 0 0 0 7.962 0l6.37-6.37a5.63 5.63 0 0 0 0-7.962zM12 15.953a3.953 3.953 0 1 1 0-7.906 3.953 3.953 0 0 1 0 7.906z"/></g>
   <g id="cb-dailydev"><path fill="currentColor" d="M18.29 5.706a1.405 1.405 0 0 0-1.987 0L4.716 17.296l1.324-2.65-2.65-2.649 3.312-3.311 2.65 2.65 1.986-1.988-3.642-3.642a1.405 1.405 0 0 0-1.987 0L.411 11.004a1.404 1.404 0 0 0 0 1.987l4.305 4.304.993.993a1.405 1.405 0 0 0 1.987 0L19.285 6.7l-.993-.994Zm-.332 3.647 2.65 2.65-4.306 4.305a1.404 1.404 0 1 0 1.986 1.986l5.299-5.298a1.404 1.404 0 0 0 0-1.987l-4.305-4.304-1.324 2.648Z"/></g>
 </defs></svg>`;
@@ -7379,8 +7382,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { id: "discord-category", name: "Discord", sub: "Category", icon: "cb-discord", cls: "br-discord" },
     { id: "reddit", name: "Reddit", sub: "Subreddit", icon: "cb-reddit", cls: "br-reddit" },
     { id: "devto", name: "dev.to", sub: "Org blog", icon: "cb-devto", cls: "br-devto" },
-    { id: "hashnode", name: "Hashnode", sub: "Manual", icon: "cb-hashnode", cls: "br-hashnode" },
-    // SOW-134 + manual pivot (no Pro)
     { id: "dailydev", name: "daily.dev", sub: "Manual", icon: "cb-dailydev", cls: "br-dailydev" },
     // SOW-135
     { id: "x", name: "X", sub: "Manual", icon: "cb-x", cls: "br-x" },
@@ -7396,7 +7397,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
   ].map((c) => ({ ...c, active: isTileActive(c.id) }));
   var MATRIX_TYPE_LABEL = { share: "Share", post: "Article", product: "Product", prompt: "Prompt" };
-  var MATRIX_CHAN_LABEL = { discord: "Discord", "discord-category": "Discord cat", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", bluesky: "Bluesky", x: "X", linkedin: "LinkedIn" };
+  var MATRIX_CHAN_LABEL = { discord: "Discord", "discord-category": "Discord cat", reddit: "Reddit", devto: "dev.to", dailydev: "daily.dev", bluesky: "Bluesky", x: "X", linkedin: "LinkedIn" };
   var AUTO_MODE_LABEL = { off: "Off", on: "On-Automatic", "on-manual": "On-Manual", popular: "Popular" };
   var TMPL_TYPES = [
     { key: "share", nm: "Share", df: "reshare line" },
@@ -7436,7 +7437,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   ];
   var SYND_TAB_IDS = SYND_TABS.map((t) => t.id);
   var SYND_SUB_KEY = "gbti-synd-sub";
-  var TMPL_KEYS = ["share", "post", "product", "prompt", "reddit-body", "reddit-comment", "devto-intro", "devto-body", "devto-footer", "devto-stub", "hashnode-intro", "hashnode-body", "hashnode-footer", "hashnode-stub"];
+  var TMPL_KEYS = ["share", "post", "product", "prompt", "reddit-body", "reddit-comment", "devto-intro", "devto-body", "devto-footer", "devto-stub"];
   var GbtiChannelMapManager = class extends GbtiElement {
     connectedCallback() {
       super.connectedCallback?.();
@@ -13051,7 +13052,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     ["youtube", "YouTube", "https://www.youtube.com/@gbti_network", "Video sessions and walkthroughs from the network.", "@gbti_network"],
     ["github", "GitHub", "https://github.com/gbti-network", "The public content repo and our open source work.", "gbti-network"],
     ["devto", "Dev.to", "https://dev.to/gbti", "Member articles crossposted to the GBTI organization on DEV.", "@gbti"],
-    ["hashnode", "Hashnode", "https://gbti.hashnode.dev/", "Member articles crossposted to the GBTI publication on Hashnode.", "gbti.hashnode.dev"],
+    // sow-217: the Hashnode follow tile is REMOVED with the footer link. Retiring the channel while still
+    // inviting new members to follow the publication would point them at something nobody maintains.
     ["dailydev", "daily.dev", "https://daily.dev/squads/gbti_network/", "Follow the GBTI squad inside your daily.dev feed.", "GBTI squad"],
     ["linkedin", "LinkedIn", "https://www.linkedin.com/company/gbti-network/posts", "Network updates and member work on LinkedIn.", "GBTI Network"]
   ];
@@ -16088,7 +16090,7 @@ From the author:
   }
 
   // client-ui/src/elements/gbti-syndicate-now.mjs
-  var DEST_LABEL = { discord: "Discord", reddit: "Reddit", devto: "dev.to", hashnode: "Hashnode", dailydev: "daily.dev", x: "X", bluesky: "Bluesky", linkedin: "LinkedIn" };
+  var DEST_LABEL = { discord: "Discord", reddit: "Reddit", devto: "dev.to", dailydev: "daily.dev", x: "X", bluesky: "Bluesky", linkedin: "LinkedIn" };
   var FULL_BODY_DESTS = /* @__PURE__ */ new Set(["devto"]);
   var LOCAL_SENDS_KEY = "gbti-synd-local-sends";
   var LOCAL_SENDS_MAX_AGE = 7 * 24 * 60 * 60 * 1e3;

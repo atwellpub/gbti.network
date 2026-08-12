@@ -39,7 +39,8 @@ const GBTI_CHANNELS = [
   ['youtube', 'YouTube', 'https://www.youtube.com/@gbti_network', 'Video sessions and walkthroughs from the network.', '@gbti_network'],
   ['github', 'GitHub', 'https://github.com/gbti-network', 'The public content repo and our open source work.', 'gbti-network'],
   ['devto', 'Dev.to', 'https://dev.to/gbti', 'Member articles crossposted to the GBTI organization on DEV.', '@gbti'],
-  ['hashnode', 'Hashnode', 'https://gbti.hashnode.dev/', 'Member articles crossposted to the GBTI publication on Hashnode.', 'gbti.hashnode.dev'],
+  // sow-217: the Hashnode follow tile is REMOVED with the footer link. Retiring the channel while still
+  // inviting new members to follow the publication would point them at something nobody maintains.
   ['dailydev', 'daily.dev', 'https://daily.dev/squads/gbti_network/', 'Follow the GBTI squad inside your daily.dev feed.', 'GBTI squad'],
   ['linkedin', 'LinkedIn', 'https://www.linkedin.com/company/gbti-network/posts', 'Network updates and member work on LinkedIn.', 'GBTI Network'],
 ];
