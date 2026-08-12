@@ -19,7 +19,7 @@ layout: journal
 coverImage: ./images/memory-and-motherboard.webp
 coverAlt: Memory modules and a processor laid out on a workbench
 featured: false
-updatedAt: '2026-08-10T02:43:03.949Z'
+updatedAt: '2026-08-12T02:42:26.495Z'
 type: post
 author: gbtilabs
 ---
