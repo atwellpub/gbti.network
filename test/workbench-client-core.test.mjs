@@ -219,7 +219,7 @@ test('mergedRedirectFrom: a rename appends + dedupes the old URL; a plain re-pub
   assert.equal(mergedRedirectFrom({ oldFm: null, inputRedirectFrom: [], renaming: false, type: 'post', oldSlug: 'x' }), undefined);
 });
 
-test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or no-intro is empty', () => {
+test('renameIntroMoveFiles: an intro moves + retargets; no-intro or a note-less type is empty', () => {
   const introText = serializeContentFile({ id: 'intro-old', targetType: 'product', targetSlug: 'old', authorNote: true, visibility: 'public' }, 'From the author.');
   const from = { scope: 'member', username: 'gwen' };
   const files = renameIntroMoveFiles({ from, type: 'product', oldSlug: 'old', newSlug: 'new', introText });
@@ -230,8 +230,15 @@ test('renameIntroMoveFiles: a product/prompt intro moves + retargets; a post or 
   assert.equal(movedFm.targetSlug, 'new');
   assert.equal(files[1].path, 'members/gwen/comments/intro-old.md');
   assert.equal(files[1].content, null, 'the old intro is deleted');
-  // A post has no intro-comment requirement.
-  assert.deepEqual(renameIntroMoveFiles({ from, type: 'post', oldSlug: 'old', newSlug: 'new', introText }), []);
+  // 2026-08-11: a POST now carries its note through a rename too. This previously returned [], which orphaned
+  // an article's note at the old slug where nothing would ever read it again.
+  const postFiles = renameIntroMoveFiles({ from, type: 'post', oldSlug: 'old', newSlug: 'new', introText });
+  assert.equal(postFiles.length, 2, 'an article rename moves its note instead of stranding it');
+  assert.equal(postFiles[0].path, 'members/gwen/comments/intro-new.md');
+  assert.equal(parseContentFile(postFiles[0].content).frontmatter.targetSlug, 'new');
+  assert.equal(postFiles[1].content, null, 'the old intro is deleted');
+  // A type that cannot carry a note at all is still empty.
+  assert.deepEqual(renameIntroMoveFiles({ from, type: 'share', oldSlug: 'old', newSlug: 'new', introText }), []);
   // No existing intro (introText null) -> nothing to move.
   assert.deepEqual(renameIntroMoveFiles({ from, type: 'product', oldSlug: 'old', newSlug: 'new', introText: null }), []);
 });

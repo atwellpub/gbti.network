@@ -4,8 +4,38 @@
 // forward `authorNote` to publish(), so this covers all three MCP tools.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { publish, saveDraft, authorContent, buildIntroCommentFile, describeContentPublish, OperationError } from '../client/src/operations.mjs';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { publish, saveDraft, authorContent, buildIntroCommentFile, describeContentPublish, AUTHOR_NOTE_TYPES, OperationError } from '../client/src/operations.mjs';
 import { buildContentFile } from '../client/src/content-ops.mjs';
+import { AUTHOR_NOTE_TYPES as WEB_AUTHOR_NOTE_TYPES } from '../src/lib/workbench-client-core.mjs';
+
+const repoFile = (rel) => fs.readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), 'utf8');
+
+// The set of types that may carry a from-the-author note exists in THREE places: the client core, the website
+// core, and a literal in the client-ui editor, which sits behind a bundle boundary and can import neither. A
+// disagreement is invisible until someone types a note that is then silently discarded, which is exactly the
+// bug this work fixed. Reading the editor's SOURCE is the only way to hold the third copy to the other two.
+test('DRIFT: the client core, the website core and the editor agree on which types carry an author note', () => {
+  assert.deepEqual([...AUTHOR_NOTE_TYPES].sort(), [...WEB_AUTHOR_NOTE_TYPES].sort(), 'the two cores disagree');
+  const src = repoFile('client-ui/src/elements/gbti-content-editor.mjs');
+  const m = /const AUTHOR_NOTE_TYPES = new Set\(\[([^\]]*)\]\)/.exec(src);
+  assert.ok(m, 'the editor no longer declares AUTHOR_NOTE_TYPES as a literal Set; update this test with it');
+  const editorTypes = m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).sort();
+  assert.deepEqual(editorTypes, [...AUTHOR_NOTE_TYPES].sort(), 'the editor literal drifted from the cores');
+  // Both gates in the editor must READ the constant, or widening it silently changes only one of them.
+  assert.match(src, /const showAuthorNote = AUTHOR_NOTE_TYPES\.has\(this\.type\)/);
+  assert.match(src, /const introSlug = AUTHOR_NOTE_TYPES\.has\(this\.type\)/);
+});
+
+// The REQUIREMENT is narrower than the permission, and conflating them would block every article that has no
+// note. validate-content enforces an intro for product/prompt only; nothing requires one of a post.
+test('an author note is PERMITTED on a post but never REQUIRED of one', () => {
+  assert.ok(AUTHOR_NOTE_TYPES.has('post'));
+  const validate = repoFile('scripts/validate-content.mjs');
+  assert.match(validate, /a published product\/prompt requires a from-the-author introduction comment/);
+  assert.doesNotMatch(validate, /requires? a from-the-author (introduction )?comment[^\n]*\bpost\b/);
+});
 
 const fakeRepo = (puts = [], opens = []) => ({
   upstream: 'gbti-network/gbti.network',
@@ -43,11 +73,25 @@ test('buildIntroCommentFile: builds a PUBLIC authorNote intro for a prompt (dete
   assert.match(f.content, /Hello from me/);
 });
 
-test('buildIntroCommentFile: null for a post, a blank note, or a missing note', () => {
-  const post = buildContentFile({ type: 'post', username: 'alice', input: { title: 'T', slug: 's' }, body: 'B' });
-  assert.equal(buildIntroCommentFile({ username: 'alice', built: post, authorNote: 'note' }), null); // posts need no intro
+// 2026-08-11: this test previously asserted `null` for a post, which is what silently discarded a note typed
+// on an article. The published article page has always PINNED an author note (ContentFooter -> Comments.astro,
+// which then hides the "Written by" box), and validate-content has always permitted a public authorNote on a
+// post; only the write path excluded them. A post's note is OPTIONAL, unlike a product/prompt's.
+test('buildIntroCommentFile: a POST with a note seeds one, exactly like a prompt', () => {
+  const post = buildContentFile({ type: 'post', username: 'alice', input: { title: 'T', slug: 'my-article' }, body: 'B' });
+  const f = buildIntroCommentFile({ username: 'alice', built: post, authorNote: 'Why I wrote this.', now: '2026-08-11T00:00:00Z' });
+  assert.equal(f.path, 'members/alice/comments/intro-my-article.md');
+  assert.match(f.content, /targetType: post/);
+  assert.match(f.content, /authorNote: true/);
+  assert.match(f.content, /visibility: public/);
+  assert.match(f.content, /Why I wrote this\./);
+});
+
+test('buildIntroCommentFile: null for a blank note, a missing note, or a type that cannot carry one', () => {
   assert.equal(buildIntroCommentFile({ username: 'alice', built: promptBuilt(), authorNote: '   ' }), null); // blank note
   assert.equal(buildIntroCommentFile({ username: 'alice', built: promptBuilt() }), null); // no note
+  const share = { type: 'share', slug: 's', frontmatter: {} };
+  assert.equal(buildIntroCommentFile({ username: 'alice', built: share, authorNote: 'note' }), null); // never a share
 });
 
 test('publish: a prompt WITH authorNote seeds the intro comment into the SAME PR (two files, one branch)', async () => {
@@ -65,6 +109,25 @@ test('publish: a prompt WITH authorNote seeds the intro comment into the SAME PR
   assert.match(intro, /authorNote: true/);
   assert.match(intro, /targetSlug: my-prompt/);
   assert.match(intro, /Why I made this\./);
+});
+
+test('publish: a POST with authorNote seeds the intro comment into the SAME PR', async () => {
+  const puts = [];
+  await publish(ctxFor({ repo: fakeRepo(puts) }), {
+    type: 'post', input: { title: 'My Article', slug: 'my-article' }, body: 'The article body', authorNote: 'Why I wrote this.',
+  });
+  assert.deepEqual(
+    puts.map((p) => p.path).sort(),
+    ['members/alice/comments/intro-my-article.md', 'members/alice/posts/my-article/index.md'],
+    'the article index.md AND its intro comment ride one branch, so the note is never silently dropped',
+  );
+  assert.match(decode(puts, /comments\/intro-my-article\.md$/), /targetType: post/);
+});
+
+test('publish: a POST WITHOUT authorNote stays a single-file PR (the note is optional for an article)', async () => {
+  const puts = [];
+  await publish(ctxFor({ repo: fakeRepo(puts) }), { type: 'post', input: { title: 'A', slug: 'no-note' }, body: 'Body' });
+  assert.deepEqual(puts.map((p) => p.path), ['members/alice/posts/no-note/index.md']);
 });
 
 test('publish: a prompt WITHOUT authorNote stays a single-file PR (no regression)', async () => {

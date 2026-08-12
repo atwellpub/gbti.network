@@ -2329,6 +2329,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     { key: "discussions", label: "Discussions" }
   ];
   var TYPE_LABEL = { post: "Article", product: "Product", prompt: "Prompt", profile: "Profile" };
+  var AUTHOR_NOTE_TYPES = /* @__PURE__ */ new Set(["post", "product", "prompt"]);
   var RAIL_SCHEMA = {
     post: [
       { title: "Details", open: true, keys: ["visibility", "excerpt", "categories", "tags"] },
@@ -2562,7 +2563,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
                <div class="docsec-h">${VIDEO} Video <span class="dsub">YouTube or Vimeo, shown at the top of the product page</span></div>
                <input class="inp" data-key="video" data-kind="${esc(videoField.kind || "text")}" type="text" value="${esc(this.presetStr(p.video) || "")}" placeholder="https://youtube.com/watch?v=…" />
              </section>` : "";
-      const showAuthorNote = this.type === "product" || this.type === "prompt";
+      const showAuthorNote = AUTHOR_NOTE_TYPES.has(this.type);
       const authorSection = showAuthorNote ? `
              <section class="docsec" id="secAuthorNote">
                <div class="docsec-h">${CHAT} From the author <span class="dsub">a personal note shown under the content (published in the same PR)</span></div>
@@ -2935,7 +2936,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._bindHeader();
       this._wireRail();
       this._wireLinks();
-      const introSlug = this.type === "product" || this.type === "prompt" ? this.presetStr(this.preset?.input?.slug) : "";
+      const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : "";
       if (introSlug) {
         this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
           const ta = this.$("#authornote");

@@ -12,6 +12,15 @@ import { splitMemberMarkdown, encAssetFor, MEMBER_MARKER } from '../../client/sr
 // posting stays paid-gated via postComment's membership check). The comments-index already carries news rows.
 export const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share', 'news']);
 
+// SOW-014 + 2026-08-11: the content types that MAY carry a from-the-author note. Distinct from the types that
+// REQUIRE one, which is product/prompt and lives in validate-content.mjs -- an article's note is optional and
+// always has been permitted on the READ side (validate-content's public-comment rule, Comments.astro's pinned
+// block), so widening this only closes the write path that never caught up. Declared here AND in
+// operations.mjs AUTHOR_NOTE_TYPES: the two cores are separate bundle boundaries and already mirror
+// COMMENT_TARGET_TYPES the same way. test/publish-intro-comment.test.mjs asserts every copy agrees, including
+// the literal in the client-ui editor, which can import neither core.
+export const AUTHOR_NOTE_TYPES = new Set(['post', 'product', 'prompt']);
+
 // sow-158 image upload: the frontmatter keys that hold an uploaded image path (per the editor RAIL_SCHEMA:
 // coverImage on a post; icon/featuredImage/banner on a product; image on a prompt). coverAlt is text, not a path.
 export const IMAGE_FIELD_KEYS = ['coverImage', 'image', 'banner', 'featuredImage', 'icon'];
@@ -229,16 +238,17 @@ export function introFolderFor({ scope, username } = {}) {
   return scope === 'house' ? `members/${NETWORK_CONTENT_OWNER}` : `members/${username}`;
 }
 
-// The from-the-author intro-comment MOVE files for a rename or reassignment (product/prompt only): read
-// intro-<old>.md, rewrite its id + targetSlug to the new slug, emit the new file + the old-path delete. `[]`
-// for a post, or when the item has no intro (introText null). Pure given the already-read introText. Mirrors
-// operations.mjs introMoveFiles.
+// The from-the-author intro-comment MOVE files for a rename or reassignment: read intro-<old>.md, rewrite its
+// id + targetSlug to the new slug, emit the new file + the old-path delete. `[]` for a type that cannot carry
+// a note, or when the item has no intro (introText null). Pure given the already-read introText. Mirrors
+// operations.mjs introMoveFiles. 2026-08-11: posts are included, so renaming an article carries its note
+// instead of orphaning it at the old slug.
 //
 // sow-183: `from`/`to` are each { scope, username } -- a plain rename (unchanged folder) passes the SAME
 // value for both; an authorship reassignment passes a DIFFERENT `to`, so the intro moves house<->member or
 // member<->member right alongside the content item, never left behind at the old owner's folder.
 export function renameIntroMoveFiles({ from, to, type, oldSlug, newSlug, introText } = {}) {
-  if (!['product', 'prompt'].includes(type)) return [];
+  if (!AUTHOR_NOTE_TYPES.has(type)) return [];
   if (introText == null) return [];
   const oldIntro = `${introFolderFor(from)}/comments/intro-${oldSlug}.md`;
   const intro = parseContentFile(introText);

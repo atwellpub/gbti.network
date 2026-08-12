@@ -19412,6 +19412,7 @@ async function listShareComments(ctx, { targetSlug, limit } = {}) {
   return listComments(ctx, { targetType: "share", targetSlug, limit });
 }
 var COMMENT_TARGET_TYPES = /* @__PURE__ */ new Set(["post", "product", "prompt", "share", "news"]);
+var AUTHOR_NOTE_TYPES = /* @__PURE__ */ new Set(["post", "product", "prompt"]);
 var COMMENTS_INDEX_URL = "https://gbti.network/comments-index.json";
 var COMMENTS_INDEX_TTL_MS = 6e4;
 var commentsIndexCache = null;
@@ -19808,7 +19809,7 @@ function describeContentPublish(built, { hasIntro } = {}) {
 }
 function buildIntroCommentFile({ username, built, authorNote, now } = {}) {
   const note = String(authorNote ?? "").trim();
-  if (!note || !built?.slug || !["product", "prompt"].includes(built.type)) return null;
+  if (!note || !built?.slug || !AUTHOR_NOTE_TYPES.has(built.type)) return null;
   const introBuilt = buildCommentFile({
     username,
     // SOW-145: a house product/prompt intro lands at house/comments/ with author 'gbti' (mirrors the item scope).

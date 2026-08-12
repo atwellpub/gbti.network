@@ -67,6 +67,13 @@ const HIDDEN_KEYS = new Set(['canonicalUrl']);
 // exhaustive formFields grouping. Each section lists the field keys to show, in order. Any formField NOT listed here
 // is preserved HIDDEN (gather() still submits its existing value). status + publishedAt surface in the slug-meta.
 // (Article deliberately has no Video section -- owner: the video sidebar is not needed for the article edit page.)
+// SOW-014 + 2026-08-11: the content types that MAY carry a from-the-author note, which now includes a post.
+// This is a LITERAL rather than an import on purpose: the two cores that own the same set
+// (client/src/operations.mjs and src/lib/workbench-client-core.mjs) sit behind bundle boundaries this
+// component cannot cross. test/publish-intro-comment.test.mjs reads this file's source and fails if the three
+// copies disagree. A note stays OPTIONAL for a post; only a product/prompt is required to have one.
+const AUTHOR_NOTE_TYPES = new Set(['post', 'product', 'prompt']);
+
 const RAIL_SCHEMA = {
   post: [
     { title: 'Details', open: true, keys: ['visibility', 'excerpt', 'categories', 'tags'] },
@@ -290,7 +297,7 @@ class GbtiContentEditor extends GbtiElement {
                <div class="docsec-h">${VIDEO} Video <span class="dsub">YouTube or Vimeo, shown at the top of the product page</span></div>
                <input class="inp" data-key="video" data-kind="${esc(videoField.kind || 'text')}" type="text" value="${esc(this.presetStr(p.video) || '')}" placeholder="https://youtube.com/watch?v=…" />
              </section>` : '';
-    const showAuthorNote = this.type === 'product' || this.type === 'prompt';
+    const showAuthorNote = AUTHOR_NOTE_TYPES.has(this.type);
     const authorSection = showAuthorNote ? `
              <section class="docsec" id="secAuthorNote">
                <div class="docsec-h">${CHAT} From the author <span class="dsub">a personal note shown under the content (published in the same PR)</span></div>
@@ -679,8 +686,8 @@ class GbtiContentEditor extends GbtiElement {
     this._bindHeader(); // SOW-062 P6: the inline title/tagline/slug mirror to their hidden [data-key] inputs
     this._wireRail(); // SOW-062 P6: chips / toggles / visibility switch / status dots
     this._wireLinks(); // SOW-062 P6: the product links[] row editor (serializes into the hidden json input)
-    // SOW-062 P6: prefill the from-the-author note from the existing intro-<slug> comment (product/prompt, existing item).
-    const introSlug = (this.type === 'product' || this.type === 'prompt') ? this.presetStr(this.preset?.input?.slug) : '';
+    // SOW-062 P6: prefill the from-the-author note from the existing intro-<slug> comment (existing item).
+    const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : '';
     if (introSlug) {
       this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
         const ta = this.$('#authornote');

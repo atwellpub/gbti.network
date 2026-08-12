@@ -28,7 +28,7 @@ import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
 import { canPublish, canStageDrafts } from '../../client/src/membership.mjs';
 import { memberContent } from '../../client-ui/src/member-view-core.mjs';
-import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, networkContent } from './workbench-client-core.mjs';
+import { planMemberFiles, reassembleMemberBody, filterThreadComments, coerceCommentInput, favoritedFrom, COMMENT_TARGET_TYPES, AUTHOR_NOTE_TYPES, MEMBER_READ_TIER, sanitizeImageName, referencedImagePaths, base64Bytes, renameOriginOf, mergedRedirectFrom, renameIntroMoveFiles, introFolderFor, networkContent } from './workbench-client-core.mjs';
 import { mergeRepoDrafts } from '../../client/src/repo-drafts-core.mjs';
 
 const MAX_IMAGE_BYTES = 1_048_576; // 1 MB, matching the Worker gate + check-media
@@ -72,7 +72,7 @@ function readCsrf(): string | null {
   return null;
 }
 
-/** Seed the from-the-author intro comment (product/prompt) in the SAME publish PR, so the gate's diff-scoped
+/** Seed the from-the-author intro comment in the SAME publish PR, so the gate's diff-scoped
  *  intro check passes. Deterministic id (intro-<slug>): a re-publish updates the same comment. Mirrors
  *  operations.buildIntroCommentFile. Returns a { path, content } file, or null.
  *  sow-183: `target` is the item's TARGET { scope, username } (house or member), not always the acting caller
@@ -82,7 +82,7 @@ function readCsrf(): string | null {
  *  author, which is always 'gbti'). */
 function buildIntroFile(target: { scope: string; username: string | null }, actingUser: string, built: any, authorNote: string | undefined): { path: string; content: string } | null {
   const note = String(authorNote ?? '').trim();
-  if (!note || !built?.slug || !['product', 'prompt'].includes(built.type)) return null;
+  if (!note || !built?.slug || !AUTHOR_NOTE_TYPES.has(built.type)) return null;
   const intro = buildCommentFile({
     username: target.scope === 'house' ? actingUser : target.username,
     scope: target.scope,

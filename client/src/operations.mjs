@@ -206,6 +206,10 @@ export async function listShareComments(ctx, { targetSlug, limit } = {}) {
 // <gbti-discussion> in the expanded reader; listShareComments is the 'share' specialization. Same read surface
 // (the COMMENT_PATH enumeration + the published filter), just parameterized on targetType.
 const COMMENT_TARGET_TYPES = new Set(['post', 'product', 'prompt', 'share', 'news']); // SOW-046 D: 'news' enables news discussion
+// SOW-014 + 2026-08-11: the content types that MAY carry a from-the-author note. NOT the types that REQUIRE
+// one (product/prompt, enforced in validate-content.mjs) -- an article's note is optional. Mirrors
+// workbench-client-core.mjs AUTHOR_NOTE_TYPES; a drift test asserts every copy agrees.
+export const AUTHOR_NOTE_TYPES = new Set(['post', 'product', 'prompt']);
 // SOW-089: the comments INDEX fast path. /comments-index.json is one CDN fetch carrying every published
 // comment (public bodies inline; members rows pointer-only) — replacing the reader walk that downloaded
 // every comment file sequentially (~12s on a real thread). A short-lived module cache avoids refetching per
@@ -758,13 +762,15 @@ export function describeContentPublish(built, { hasIntro } = {}) {
 }
 
 /**
- * SOW-014: build the from-the-author intro comment file for a NEW product/prompt, to commit in the SAME publish PR.
- * Returns { path, content } or null (no note, or a type that needs no intro). Pure + exported for unit tests. The id
+ * SOW-014: build the from-the-author intro comment file, to commit in the SAME publish PR. Returns
+ * { path, content } or null (no note, or a type that cannot carry one). Pure + exported for unit tests. The id
  * is deterministic (intro-<slug>) so a re-publish updates the same comment file, never duplicating it.
+ * 2026-08-11: posts included. The note stays OPTIONAL for a post (validate-content requires one only for a
+ * product/prompt); this returning null for a post is what silently discarded a note typed on an article.
  */
 export function buildIntroCommentFile({ username, built, authorNote, now } = {}) {
   const note = String(authorNote ?? '').trim();
-  if (!note || !built?.slug || !['product', 'prompt'].includes(built.type)) return null;
+  if (!note || !built?.slug || !AUTHOR_NOTE_TYPES.has(built.type)) return null;
   const introBuilt = buildCommentFile({
     username,
     // SOW-145: a house product/prompt intro lands at house/comments/ with author 'gbti' (mirrors the item scope).
