@@ -33,7 +33,7 @@ import { buildRepoIndex } from './lib/repo-content.mjs';
 import { planReconcile } from './lib/reconcile-plan.mjs';
 import { buildOverridesMirror, mirrorOverridesToKv, mirrorSyndicationConfigToKv, mirrorContentChannelsToKv, mirrorTopicsToKv, mirrorCouponsToKv } from './lib/kv-mirror.mjs';
 import { syncFavoriteCounts, readCountsFromDisk, readFavoritedByFromDisk, readMembersIndexFromDisk } from './lib/favorite-counts.mjs';
-import { syncCouponGrants, readGrandfatheredFromDisk } from './lib/coupon-grants.mjs'; // SOW-119
+import { syncCouponGrants, readGrandfatheredFromDisk, listCouponRedemptions, planCouponGrants } from './lib/coupon-grants.mjs'; // SOW-119 (+ sow-218: pre-apply)
 import { syncEnrollments } from './lib/enroll-members.mjs'; // SOW-157: hosted-member index enrollment
 import { syncUpvoteCounts, readCountsFromDisk as readUpvoteCountsFromDisk } from './lib/upvote-counts.mjs';
 import { main as promotePopular } from './promote-popular.mjs'; // SOW-126: the engagement-triggered popular promoter
@@ -371,8 +371,19 @@ export async function resolveDiscordRoles(discord, guildId, discordUserId, env) 
   try {
     member = await discord.getMember(guildId, discordUserId);
   } catch {
-    return []; // best-effort: unknown roles
+    // sow-218: NULL, not []. These are different facts and returning [] for both was a fail-open: the plan
+    // only emits a remove-role for a role it can SEE held, so "unknown" read as "holds nothing" and a lapsed
+    // member kept @Member (the role that actually grants access) through any transient Discord error.
+    // planReconcile treats null as "assume anything" and strips every non-target role.
+    //
+    // ONLY this path. A 404 is handled below and is a different fact.
+    return null;
   }
+  // A null member is the 404 path, which clients/discord.mjs maps explicitly (`getMember`, :38). That is
+  // KNOWN, not unknown: they are not in the guild, so they hold nothing. Returning null here instead would
+  // make the planner emit three doomed role calls for every member who left or has a stale discord_user_id,
+  // which is noise, not safety. Verified against a dry run: treating 404 as unknown took the plan from 3
+  // actions to 15, all of them destined to fail.
   if (!member) return [];
   const roleIds = new Set((member.roles ?? []).map(String));
   const held = [];
@@ -555,6 +566,48 @@ export async function gatherTargetedMember(stripe, overrides, now, githubId, { r
   return [memberEntryFor(customer, overrides, now, { repoIndex, discordRoles, priceTierMap: buildEnvPriceTierMap(env) })];
 }
 
+/**
+ * sow-218: merge coupon grants that KV knows about but `house/grandfathered.yml` does not yet carry into the
+ * in-memory overrides for THIS run. See the call site for why the durable PR fold cannot do this itself.
+ *
+ * Mutates `overrides.grandfathers`, which is the same Map `effectiveStatus` consults, so a fresh invitee
+ * resolves effective-paid on the first run: they get @Member, they enroll into members-index, and they can
+ * publish. It only ever ADDS a grant the fold is about to write anyway, so it cannot grant anything the next
+ * run would take back, and it never overwrites an entry that already exists (planCouponGrants skips those,
+ * including a hand-set bounded comp).
+ *
+ * Exported for tests. Returns the number of grants applied.
+ */
+export async function applyPendingCouponGrants({ overrides, env = process.env, now = new Date(), listRedemptions = listCouponRedemptions, root = ROOT } = {}) {
+  if (!overrides?.grandfathers) return 0;
+  let grants = [];
+  try {
+    const kv = await listRedemptions({ env });
+    if (!kv?.available || !Array.isArray(kv.redemptions) || kv.redemptions.length === 0) return 0;
+    // `.parsed`, not the wrapper: readGrandfatheredFromDisk returns { text, parsed } and planCouponGrants
+    // wants the parsed document. Handing it the wrapper would make grandfathersFromParsed find nothing, so
+    // EVERY already-folded grant would look new and be re-applied. Harmless in effect, wrong in reasoning,
+    // and it would have masked a real regression here later.
+    const { parsed } = readGrandfatheredFromDisk(root);
+    ({ grants } = planCouponGrants({ redemptions: kv.redemptions, grandfatheredParsed: parsed, now }));
+  } catch (e) {
+    console.warn(`reconcile: WARNING could not pre-apply coupon grants (${e?.message ?? e}); falling back to the next run.`);
+    return 0;
+  }
+  for (const g of grants) {
+    overrides.grandfathers.set(String(g.githubId), {
+      github_id: String(g.githubId),
+      reason: `coupon:${g.code}`,
+      until: g.until,
+      ...(g.tier ? { tier: g.tier } : {}),
+    });
+  }
+  if (grants.length) {
+    console.log(`reconcile: pre-applied ${grants.length} unfolded coupon grant(s) to this run (the durable fold still follows).`);
+  }
+  return grants.length;
+}
+
 async function main() {
   const { dryRun } = parseArgs(process.argv.slice(2));
   const now = new Date();
@@ -562,6 +615,24 @@ async function main() {
 
   const overrides = loadOverrides(ROOT);
   const repoIndex = buildRepoIndex(ROOT);
+
+  // sow-218: APPLY unfolded coupon grants to this run's overrides, in memory, BEFORE anything reads them.
+  //
+  // The durable fold (syncCouponGrants, far below) opens a PR and merges it via the API. It does NOT touch
+  // this checkout, so `loadOverrides(ROOT)` above keeps reading the commit the workflow started from. That is
+  // why a coupon invitee needed TWO daily runs: run one folded the grant into a PR it could not itself see,
+  // and only run two, from a fresh checkout, resolved them as effective-paid. Until then they were not paid to
+  // the gate and not eligible for members-index enrollment (which requires effective.status === 'paid'), so
+  // the site told them they held Content Creator through 2027 while every publish was rejected.
+  //
+  // Reordering the fold would not have helped, for the same reason: the run cannot see its own merge. Applying
+  // the grants to the in-memory map is what makes run ONE correct. The PR still lands and remains the durable
+  // record; this only stops the run from being blind to a grant it is about to write down.
+  //
+  // Costs nothing extra: listCouponRedemptions + planCouponGrants already run in this process for the fold.
+  // Best-effort by design, exactly like the fold itself: a KV hiccup leaves the previous two-run behaviour
+  // rather than aborting a run that has content flips and role syncs to do.
+  await applyPendingCouponGrants({ overrides, env, now });
 
   const { stripe, github, discord, resend } = buildClients(env);
 

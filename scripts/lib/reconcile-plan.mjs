@@ -155,12 +155,25 @@ export function planReconcile({ members = [], repoIndex = {}, now = new Date(), 
     if (m.discordUserId) {
       // Access role: EXACTLY ONE of member/trial/locked (the exclusive swap; unchanged).
       const target = discordRoleTarget(status); // 'member' | 'trial' | 'locked'
+      // sow-218: `null` means the role read FAILED, which is different from an empty array meaning "holds
+      // none", and conflating the two was a fail-open.
+      //
+      // resolveDiscordRoles used to return [] for both. The removals below are emitted only for a role we can
+      // SEE held, so an unreadable member produced the add and NO removals: a lapsed account got Locked added
+      // while KEEPING @Member. Since this guild is allow-based (verified 2026-08-11: Locked denies
+      // VIEW_CHANNEL nowhere, @Member allows it on 12 channels), @Member is what grants access, so a transient
+      // Discord error left a lapsed member fully admitted until the next run happened to read them cleanly.
+      //
+      // Unknown now means "assume they might hold anything" and every non-target role is stripped. Removing a
+      // role a member does not hold is a no-op at Discord, so the held-check was only ever an optimization to
+      // avoid pointless calls, and skipping that optimization is much cheaper than the failure it was hiding.
+      const unknownRoles = m.discordRoles === null || m.discordRoles === undefined;
       const held = new Set((Array.isArray(m.discordRoles) ? m.discordRoles : []).filter((r) => MANAGED_DISCORD_ROLES.includes(r)));
-      if (!held.has(target)) {
+      if (unknownRoles || !held.has(target)) {
         actions.push({ kind: 'discord', type: 'add-role', githubId, discordUserId: m.discordUserId, role: target });
       }
       for (const role of MANAGED_DISCORD_ROLES) {
-        if (role !== target && held.has(role)) {
+        if (role !== target && (unknownRoles || held.has(role))) {
           actions.push({ kind: 'discord', type: 'remove-role', githubId, discordUserId: m.discordUserId, role });
         }
       }

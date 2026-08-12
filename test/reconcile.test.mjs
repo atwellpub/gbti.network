@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { planReconcile, discordRoleTarget, discordCreatorTarget, CREATOR_DISCORD_ROLE, REMINDER_DAY } from '../scripts/lib/reconcile-plan.mjs';
+import { applyPendingCouponGrants } from '../scripts/reconcile.mjs'; // sow-218: same-run coupon grant pre-apply
 import {
   flipStatus,
   parseArgs,
@@ -607,7 +608,7 @@ test('FIX 1: buildRepoIndex parses login + status from a real on-disk member fol
 // FIX 2: Discord current-role resolution (so remove-role fires on lapse, add-role does not churn)
 // =============================================================================================
 
-test('resolveDiscordRoles returns the SET of managed roles held (member/trial/locked), best-effort on error', async () => {
+test('resolveDiscordRoles returns the SET of managed roles held, and NULL when the read fails', async () => {
   const env = { DISCORD_MEMBER_ROLE_ID: 'rm', DISCORD_TRIAL_ROLE_ID: 'rt', DISCORD_LOCKED_ROLE_ID: 'rl' };
   const member = (roles) => ({ getMember: async () => ({ roles }) });
   assert.deepEqual(await resolveDiscordRoles(member(['rm', 'other']), 'g', 'u', env), ['member']);
@@ -615,11 +616,15 @@ test('resolveDiscordRoles returns the SET of managed roles held (member/trial/lo
   assert.deepEqual(await resolveDiscordRoles(member(['rl']), 'g', 'u', env), ['locked']);
   // a corrupted state holding two managed roles is reported in full so the planner can heal it
   assert.deepEqual(await resolveDiscordRoles(member(['rm', 'rl']), 'g', 'u', env), ['member', 'locked']);
-  assert.deepEqual(await resolveDiscordRoles(member(['other']), 'g', 'u', env), []);
-  // missing member -> [] (unknown)
-  assert.deepEqual(await resolveDiscordRoles({ getMember: async () => null }, 'g', 'u', env), []);
-  // error -> [] (best-effort, planner just adds the target)
-  assert.deepEqual(await resolveDiscordRoles({ getMember: async () => { throw new Error('429'); } }, 'g', 'u', env), []);
+  assert.deepEqual(await resolveDiscordRoles(member(['other']), 'g', 'u', env), [], 'read OK, holds none -> EMPTY');
+  // sow-218: UNKNOWN is null, not []. Returning [] for both made the planner treat an unreadable member as
+  // holding nothing, so it skipped every removal and a lapsed member kept @Member. These two lines are the
+  // difference between "we know they hold nothing" and "we could not find out".
+  // A null member is the 404 path (clients/discord.mjs getMember maps it): they are NOT in the guild, which
+  // is KNOWN, so it stays []. Only a genuine failure is unknown. Treating 404 as unknown took a real dry run
+  // from 3 planned actions to 15, every extra one destined to fail against a member who is not there.
+  assert.deepEqual(await resolveDiscordRoles({ getMember: async () => null }, 'g', 'u', env), [], '404 -> not in guild -> EMPTY');
+  assert.equal(await resolveDiscordRoles({ getMember: async () => { throw new Error('429'); } }, 'g', 'u', env), null, 'error -> UNKNOWN');
   // no client / no guild / no user -> []
   assert.deepEqual(await resolveDiscordRoles(null, 'g', 'u', env), []);
   assert.deepEqual(await resolveDiscordRoles(member(['rm']), null, 'u', env), []);
@@ -875,4 +880,73 @@ test('sow-185: shouldSyncCreatorRole gates the Content-Creator badge on a POPULA
   assert.equal(shouldSyncCreatorRole({ DISCORD_CREATOR_ROLE_ID: '1536102140802633788' }), false);          // role id but EMPTY price map -> inert (the guard)
   assert.equal(shouldSyncCreatorRole({ STRIPE_PRICE_CREATOR_ANNUAL: 'price_c' }), false);                  // price map but no role id
   assert.equal(shouldSyncCreatorRole({ DISCORD_CREATOR_ROLE_ID: '1536102140802633788', STRIPE_PRICE_CREATOR_ANNUAL: 'price_c' }), true); // both -> sync
+});
+
+// sow-218: the fail-open this closes. A member whose Discord roles could not be read must still have every
+// non-target role stripped, because "unknown" was previously indistinguishable from "holds nothing" and the
+// removals were skipped entirely. In an ALLOW-based guild that left a lapsed member holding @Member, which is
+// the role that actually grants access, until some later run happened to read them cleanly.
+test('sow-218: an UNREADABLE member still gets every non-target role stripped', () => {
+  const lapsed = {
+    githubId: '900', discordUserId: 'd900', effective: { status: 'cancelled' },
+    discordRoles: null, // the read failed
+  };
+  const actions = planReconcile({ members: [lapsed], now: new Date('2026-08-12T00:00:00Z') }).filter((a) => a.kind === 'discord');
+  const removed = actions.filter((a) => a.type === 'remove-role').map((a) => a.role).sort();
+  const added = actions.filter((a) => a.type === 'add-role').map((a) => a.role);
+  assert.deepEqual(added, ['locked'], 'the target is still assigned');
+  assert.deepEqual(removed, ['member', 'trial'], 'and BOTH other access roles are stripped despite the failed read');
+});
+
+test('sow-218: a member read as holding NOTHING emits no pointless removals', () => {
+  // The optimization the null/[] split preserves: a successful read of an empty set still skips the no-op calls.
+  const fresh = {
+    githubId: '901', discordUserId: 'd901', effective: { status: 'cancelled' },
+    discordRoles: [],
+  };
+  const actions = planReconcile({ members: [fresh], now: new Date('2026-08-12T00:00:00Z') }).filter((a) => a.kind === 'discord');
+  assert.deepEqual(actions.filter((a) => a.type === 'remove-role'), [], 'nothing held, nothing to remove');
+  assert.deepEqual(actions.filter((a) => a.type === 'add-role').map((a) => a.role), ['locked']);
+});
+
+// sow-218: pre-applying unfolded coupon grants, so run ONE sees a grant it is about to write down.
+//
+// The durable fold opens a PR and merges it via the API, which never touches this run's checkout. That is why
+// a coupon invitee needed two daily runs: run one folded a grant it could not itself see, and only run two
+// resolved them effective-paid. Until then they were not paid to the gate and not eligible for members-index
+// enrollment, so the site promised Content Creator through 2027 while every publish was rejected.
+test('sow-218: an unfolded KV grant is applied to THIS run\'s overrides', async () => {
+  const overrides = { grandfathers: new Map(), bans: new Map(), roles: new Map(), membersIndex: new Map() };
+  const listRedemptions = async () => ({
+    available: true,
+    redemptions: [{ code: 'CODEABLEYEAR', githubId: '190312419', login: 'metacast', until: '2027-08-12T00:00:00.000Z' }],
+  });
+  const n = await applyPendingCouponGrants({ overrides, listRedemptions, now: new Date('2026-08-12T00:00:00Z'), root: process.cwd() });
+  assert.equal(n, 1);
+  const g = overrides.grandfathers.get('190312419');
+  assert.equal(g.reason, 'coupon:CODEABLEYEAR');
+  assert.equal(g.until, '2027-08-12T00:00:00.000Z');
+});
+
+test('sow-218: an EXPIRED grant is not applied, and an empty KV is a clean no-op', async () => {
+  const overrides = { grandfathers: new Map() };
+  const expired = async () => ({ available: true, redemptions: [{ code: 'X', githubId: '1', until: '2020-01-01T00:00:00.000Z' }] });
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: expired, now: new Date('2026-08-12T00:00:00Z'), root: process.cwd() }), 0);
+  assert.equal(overrides.grandfathers.size, 0);
+  const empty = async () => ({ available: true, redemptions: [] });
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: empty, root: process.cwd() }), 0);
+});
+
+test('sow-218: a KV failure degrades to the OLD two-run behaviour rather than aborting the run', async () => {
+  // Best-effort by design, exactly like the fold itself. A reconcile has content flips and role syncs to do;
+  // losing the same-day optimization must never cost the rest of the run.
+  const overrides = { grandfathers: new Map() };
+  const boom = async () => { throw new Error('KV down'); };
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: boom, root: process.cwd() }), 0);
+  const unavailable = async () => ({ available: false, reason: 'CF credentials not set' });
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: unavailable, root: process.cwd() }), 0);
+  // and an UNREADABLE grandfathered.yml is the same story: no throw, no grants, run continues.
+  const ok = async () => ({ available: true, redemptions: [{ code: 'X', githubId: '1', until: '2027-01-01T00:00:00.000Z' }] });
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: ok, root: '/nonexistent' }), 0);
+  assert.equal(overrides.grandfathers.size, 0);
 });
