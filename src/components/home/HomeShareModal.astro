@@ -3,9 +3,11 @@
 // composer bar on the homepage (index.astro, [data-share-open]) opens this native <dialog>; the four-step
 // <gbti-share-composer> (Phase E) is the modal body, unchanged. The client is injected by index.astro's
 // mountComposer (setClient + the lazy element import), so the composer inside this dialog hydrates on the
-// signed-in signal exactly as it did inline. Backdrop click, Esc, and the close X dismiss it; a successful
+// signed-in signal exactly as it did inline. Esc and the close X dismiss it -- NOT a backdrop/outside click
+// (owner request): an accidental outside click, or a text selection that starts in an input and releases
+// outside, must never discard an in-progress draft. A successful
 // post (the composer emits gbti-share-posted, bubbling + composed) closes it too, mirroring the extension
-// shell's openComposeModal. Styles live in gbti-v3.css (.share-modal), like PersonalizeModal. Inert for a
+// shell's openComposeModal (which already made this SOW-041 decision). Styles live in gbti-v3.css (.share-modal), like PersonalizeModal. Inert for a
 // signed-out / no-JS visitor (the dialog never opens; the bar that opens it is paid-gated and ships hidden).
 ---
 <dialog class="share-modal" data-share-modal aria-label="Share with the network">
@@ -16,15 +18,17 @@
 </dialog>
 
 <script>
-  // The share modal controller: open on any [data-share-open], close on the X / backdrop / Esc / a post.
+  // The share modal controller: open on any [data-share-open], close ONLY on the X, Esc, or a successful post.
   (() => {
     const dialog = document.querySelector<HTMLDialogElement>('[data-share-modal]');
     if (!dialog) return;
 
+    // Close on the X only. Deliberately NO backdrop/outside-click close (owner request): an accidental click on
+    // the backdrop, or a text selection that begins inside an input and releases outside, must not discard the
+    // draft. Esc still closes it natively (the <dialog> cancel), and a successful post closes it (below).
     dialog.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
-      if (t.closest('[data-share-close]')) { dialog.close(); return; }
-      if (t === dialog) dialog.close(); // backdrop (clicks on the dialog box itself, outside the card)
+      if (t.closest('[data-share-close]')) dialog.close();
     });
 
     document.addEventListener('click', (e) => {
