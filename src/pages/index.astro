@@ -725,3 +725,11 @@ const SHOPTALK = {
     onMemberSignal(render); // BaseLayout invokes hydrateMemberSignal(); the cookie member arrives here
   })();
 </script>
+
+<script>
+  // sow-224: after a Share is posted from the homepage composer (or on load from the session store), prepend an
+  // honest "in the publishing queue" stub into the homepage feed until the published Share lands (a public Share
+  // only; a members Share is queued in the member stream on /account/).
+  import { initFeedPendingStubs } from '../lib/feed-pending-stub';
+  initFeedPendingStubs();
+</script>

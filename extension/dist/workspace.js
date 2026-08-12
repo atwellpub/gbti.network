@@ -9386,16 +9386,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     const readM = s.match(/(?:^|&)read=([^&]+)/);
     const doM = s.match(/(?:^|&)do=([a-z]+)(?:&|$)/);
     const tab = tabM && TAB_IDS.has(tabM[1]) ? tabM[1] : null;
-    let read = null;
+    let read2 = null;
     if (readM) {
       try {
-        read = decodeURIComponent(readM[1]);
+        read2 = decodeURIComponent(readM[1]);
       } catch {
-        read = readM[1];
+        read2 = readM[1];
       }
     }
     const action = doM && DO_ACTIONS.has(doM[1]) ? doM[1] : null;
-    return { tab, read, action };
+    return { tab, read: read2, action };
   }
   function stripDoParam(hash) {
     const s = String(hash || "").replace(/^#/, "");
@@ -9773,6 +9773,92 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-upvote", GbtiUpvote);
 
+  // client-ui/src/share-pending-stub.mjs
+  var PENDING_KEY = "gbti-pending-shares";
+  var PENDING_MAX_AGE_MS = 15 * 60 * 1e3;
+  var PENDING_NOTE = "In the publishing queue. It publishes to the site in about 2 to 3 minutes.";
+  var PENDING_LINK_TEXT = "Track it under Pull requests";
+  function prsHrefFor(host) {
+    return host === "extension" ? "workspace.html#tab=prs" : "/workbench/#tab=prs";
+  }
+  function shareSlug(item) {
+    const author = item && item.author;
+    const id = item && item.id;
+    return author && id ? `${author}/${id}` : "";
+  }
+  function pendingTitle(item) {
+    return item && (item.title || item.shortDescription) || "Your share";
+  }
+  function pendingStubView(entry, { host } = {}) {
+    return {
+      slug: entry.slug,
+      title: entry.title || "Your share",
+      note: PENDING_NOTE,
+      linkText: PENDING_LINK_TEXT,
+      prsHref: prsHrefFor(host),
+      prUrl: entry.prUrl || ""
+    };
+  }
+  function defaultStore() {
+    try {
+      return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+    } catch {
+      return null;
+    }
+  }
+  function read(store2) {
+    const s = store2 ?? defaultStore();
+    if (!s) return {};
+    try {
+      const raw = s.getItem(PENDING_KEY);
+      const o = raw ? JSON.parse(raw) : {};
+      return o && typeof o === "object" ? o : {};
+    } catch {
+      return {};
+    }
+  }
+  function write(store2, map) {
+    const s = store2 ?? defaultStore();
+    if (!s) return;
+    try {
+      if (!Object.keys(map).length) s.removeItem(PENDING_KEY);
+      else s.setItem(PENDING_KEY, JSON.stringify(map));
+    } catch {
+    }
+  }
+  function rememberPending({ item, prNumber = null, prUrl = "" } = {}, { store: store2, now = Date.now() } = {}) {
+    const slug = shareSlug(item);
+    if (!slug) return null;
+    const map = read(store2);
+    const entry = { slug, author: item.author, id: item.id, title: pendingTitle(item), visibility: item.visibility || "members", prNumber, prUrl, at: now };
+    map[slug] = entry;
+    write(store2, map);
+    return entry;
+  }
+  function livePending({ store: store2, now = Date.now(), maxAgeMs = PENDING_MAX_AGE_MS } = {}) {
+    const map = read(store2);
+    const live = {};
+    for (const slug of Object.keys(map)) {
+      const e = map[slug];
+      if (e && typeof e.at === "number" && now - e.at < maxAgeMs) live[slug] = e;
+    }
+    if (Object.keys(live).length !== Object.keys(map).length) write(store2, live);
+    return Object.values(live).sort((a, b) => b.at - a.at);
+  }
+  function dropPublished(publishedSlugs, { store: store2, now = Date.now(), maxAgeMs = PENDING_MAX_AGE_MS } = {}) {
+    const published = new Set(publishedSlugs || []);
+    const map = read(store2);
+    let changed = false;
+    for (const slug of Object.keys(map)) {
+      if (published.has(slug)) {
+        delete map[slug];
+        changed = true;
+      }
+    }
+    if (changed) write(store2, map);
+    return livePending({ store: store2, now, maxAgeMs });
+  }
+
   // client-ui/src/elements/gbti-shares-feed.mjs
   var LOCKED4 = /* @__PURE__ */ new Set(["expired", "cancelled", "none", "banned"]);
   var CSS24 = `
@@ -9821,6 +9907,13 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   /* SOW-032/041 discussion container (the thread itself renders inside <gbti-discussion>). */
   .discussion-wrap { margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
   .discussion-wrap h4 { margin:0 0 10px; font-size:14px; }
+
+  /* sow-224: the "in the publishing queue" pending stub. Amber left-rail so it reads as in-progress, not live. */
+  .pstub { border:1.5px solid var(--line); border-left:3px solid var(--s-amber-fg); border-radius:12px; padding:12px 14px; margin:0 0 12px; background:var(--panel); }
+  .pstub-tag { display:inline-block; font:700 10px/1 var(--font-mono, ui-monospace, monospace); letter-spacing:.09em; text-transform:uppercase; color:var(--s-amber-fg); }
+  .pstub-title { margin-top:7px; font-size:14.5px; font-weight:700; color:var(--fg); }
+  .pstub-note { margin:5px 0 0; font-size:13px; line-height:1.5; color:var(--muted); }
+  .pstub-link { color:var(--brand); font-weight:600; }
 `;
   var authorName3 = (a) => a === "gbti" ? "GBTI Network" : a || "A member";
   var GbtiSharesFeed = class extends GbtiElement {
@@ -9833,9 +9926,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const item = e?.detail?.item;
         if (item) {
           if (e.detail) e.detail.handled = true;
-          this._reading = item;
+          rememberPending({ item, prNumber: e.detail?.prNumber, prUrl: e.detail?.prUrl });
+          this._reading = null;
           this.render();
-          this.reload(true);
+          this.reload(true).then(() => this.render());
           return;
         }
         this._reading = null;
@@ -9934,26 +10028,44 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     _renderList() {
       const head = `<div class="head"><h3>Co-op stream</h3><button class="refresh" type="button">Refresh</button></div>`;
       const items = this._items || [];
-      if (!items.length) {
+      const pending = dropPublished(items.map((it) => `${it.author}/${it.id}`), {});
+      const stubs = pending.map((p) => this._pendingStubHtml(pendingStubView(p, { host: this._host() }))).join("");
+      if (!items.length && !pending.length) {
         this.set(this.css(CSS24) + head + `<p class="muted">No Shares yet. Post the first one with the + button.</p>`);
         this.on(".refresh", "click", () => this.reload());
         return;
       }
       const pager = this._nextBefore ? `<div class="pager"><button class="load-older" type="button" data-load-older>Load older</button></div>` : "";
-      this.set(this.css(CSS24) + head + `<div data-list></div>${pager}`);
+      this.set(this.css(CSS24) + head + stubs + `<div data-list></div>${pager}`);
       this.on(".refresh", "click", () => this.reload());
       if (this._nextBefore) this.on("[data-load-older]", "click", () => this._loadOlder());
-      const list = document.createElement("gbti-card-list");
-      list.mode = "detailed";
-      list.items = items.map((it) => shareToItem(it));
-      list.addEventListener("card-open", (e) => {
-        const it = e.detail?.item;
-        if (it) {
-          this._reading = it;
-          this.render();
-        }
-      });
-      this.$("[data-list]")?.replaceChildren(list);
+      if (items.length) {
+        const list = document.createElement("gbti-card-list");
+        list.mode = "detailed";
+        list.items = items.map((it) => shareToItem(it));
+        list.addEventListener("card-open", (e) => {
+          const it = e.detail?.item;
+          if (it) {
+            this._reading = it;
+            this.render();
+          }
+        });
+        this.$("[data-list]")?.replaceChildren(list);
+      }
+    }
+    /** sow-224: the host (website vs extension) for the stub's Pull-requests link. The website stamps
+     *  data-signup-base on <html> (BaseLayout); the extension pages do not. */
+    _host() {
+      try {
+        return typeof document !== "undefined" && document.documentElement?.dataset?.signupBase ? "website" : "extension";
+      } catch {
+        return "extension";
+      }
+    }
+    /** sow-224: one pending stub card (amber "Queued", the shared copy, the per-host Pull-requests link). */
+    _pendingStubHtml(v) {
+      const link = v.prsHref ? ` <a class="pstub-link" href="${esc(v.prsHref)}">${esc(v.linkText)}</a>.` : "";
+      return `<article class="pstub"><span class="pstub-tag">Queued</span><div class="pstub-title">${esc(v.title)}</div><p class="pstub-note">${esc(v.note)}${link}</p></article>`;
     }
     /** Append the next older page (website cookie adapter only; feature-detected by the nextBefore cursor). */
     async _loadOlder() {
@@ -10065,7 +10177,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-shares", GbtiShares);
 
-  // node_modules/js-yaml/dist/js-yaml.mjs
+  // ../../../../../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -17425,9 +17537,9 @@ From the author:
 `;
   var GbtiBrowse = class extends GbtiElement {
     connectedCallback() {
-      const { tab, read, action } = parseBrowseHash(typeof location !== "undefined" ? location.hash : "");
+      const { tab, read: read2, action } = parseBrowseHash(typeof location !== "undefined" ? location.hash : "");
       this._tab = tab && TABS2.some((t) => t.id === tab) ? tab : "all";
-      this._openPath = this._tab !== "share" && this._tab !== "all" && this._tab !== "news" ? read : null;
+      this._openPath = this._tab !== "share" && this._tab !== "all" && this._tab !== "news" ? read2 : null;
       this._openDo = this._openPath ? action : null;
       if (this._openDo) consumeDo();
       this._cache = {};
@@ -17441,12 +17553,12 @@ From the author:
         if (t && t.tagName === "IMG" && t.classList?.contains("thumb")) t.style.display = "none";
       }, true);
       this._onHash = () => {
-        const { tab: tab2, read: read2, action: action2 } = parseBrowseHash(typeof location !== "undefined" ? location.hash : "");
+        const { tab: tab2, read: read3, action: action2 } = parseBrowseHash(typeof location !== "undefined" ? location.hash : "");
         const t = tab2 && TABS2.some((x) => x.id === tab2) ? tab2 : this._tab;
-        if (read2 && t !== "share" && t !== "all" && t !== "news") {
+        if (read3 && t !== "share" && t !== "all" && t !== "news") {
           this._tab = t;
-          const found = (this._cache[t] || []).find((x) => x.path === read2);
-          this._reading = { ...found || { type: t, path: read2 }, doAction: action2 || null };
+          const found = (this._cache[t] || []).find((x) => x.path === read3);
+          this._reading = { ...found || { type: t, path: read3 }, doAction: action2 || null };
           if (action2) consumeDo();
           this.render();
           this._ensure(t);

@@ -862,6 +862,12 @@ a.who:hover { color: var(--fg); }
 .feed-item { display: grid; grid-template-columns: minmax(0,1fr) 196px; gap: 24px; padding: 26px 0; border-bottom: 1px solid var(--line); align-items: start; }
 .feed-item.nocover { grid-template-columns: 1fr; }
 .feed-item[hidden] { display: none; }
+/* sow-224: the client-prepended "in the publishing queue" stub. Amber left-rail + tint so it reads as
+   in-progress, not as a live published card. The card reuses .feed-main / .feed-title / .feed-ex. */
+.feed-pending { border-left: 3px solid var(--amber); background: var(--amber-tint); padding-left: 16px; padding-right: 16px; border-radius: 10px; margin-bottom: 8px; }
+.feed-pending .fp-tag { display: inline-block; font: 700 10px/1 var(--f-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--amber-text); }
+.feed-pending .feed-title { margin-top: 8px; }
+.feed-pending .fp-link { color: var(--green); font-weight: 600; }
 .feed-main { min-width: 0; }
 .feed-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .feed-meta .tmeta { white-space: nowrap; }

@@ -44,6 +44,7 @@ const tagsAttr = (it: FeedItem) => (it.tags ?? []).map((t) => String(t).trim().t
               data-comments={it.comments ?? 0}
               data-visibility={it.stub ? 'members' : 'public'}
               data-tags={tagsAttr(it)}
+              data-share-slug={it.kind === 'share' ? it.slug : undefined}
             >
               <div class="feed-main">
                 <div class="feed-meta">

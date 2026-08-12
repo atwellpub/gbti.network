@@ -283,3 +283,10 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
     } catch { /* private mode */ }
   });
 </script>
+
+<script>
+  // sow-224: after a Share is posted (or on load from the session store), prepend an honest "in the publishing
+  // queue" stub into this build-time feed (Latest Activity on /account/, and /feeds/ if the member browses there).
+  import { initFeedPendingStubs } from '../../lib/feed-pending-stub';
+  initFeedPendingStubs();
+</script>
