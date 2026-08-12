@@ -526,6 +526,11 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const res = await workerPost('/membership/author', { itemId: `share-${id_}`, files, title });
       return { id: id_, path: built.path, visibility: built.frontmatter?.visibility ?? 'members', encrypted: Boolean(plan?.encPath), prNumber: res.number, prUrl: res.html_url, updated: !!res.already };
     },
+    // SOW-057: the share composer's "Fetch details" link preview. The website holds no GitHub token in the page,
+    // so this rides the cookie session to the Worker's SSRF-guarded, now cookie-enabled /membership/og-preview
+    // via workerPost (credentials + the double-submit CSRF header). Returns { image, title, description, tags,
+    // suggestedCategory }; the composer prefills the fields (all optional) and never blocks a share on a miss.
+    ogPreview({ url }: any) { return workerPost('/membership/og-preview', { url }); },
     // The community Shares stream, tier-gated server-side (paid/trial see members + public; else public only).
     // Members bodies arrive pointer-only (encryptedBody); <gbti-shares-feed> decrypts on expand via decrypt().
     async listShares({ limit, before }: any = {}) {

@@ -1,7 +1,8 @@
 // SOW-057: POST /membership/og-preview — fetch a link's OpenGraph preview SERVER-SIDE so the share composer can
 // prefill a featured image (the browser/extension cannot fetch arbitrary cross-origin pages). Returns
-// { ok, image, title, description, tags, suggestedCategory }. Authenticated by the GitHub bearer token (any
-// signed-in member; a trial may stage drafts). The fetch is SSRF-guarded (no private/loopback/link-local/metadata
+// { ok, image, title, description, tags, suggestedCategory }. Authenticated by the GitHub bearer token (the
+// extension/npm hosts) OR the website's gbti_session cookie (allowCookie, CSRF-gated) -- any signed-in member.
+// The fetch is SSRF-guarded (no private/loopback/link-local/metadata
 // targets), bounded, timed out, and NEVER throws (a bad target page returns { ok: true, image: null }).
 //
 // SOW-087: alongside the preview, the page's declared tags feed a topic-category SUGGESTION (topic-suggest.mjs,
@@ -11,6 +12,7 @@
 // so it is unit-tested with fakes (no network, no secrets).
 
 import { githubFetchUser } from './oauth.mjs';
+import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 1b shared choke point: bearer OR cookie + CSRF
 import { scrapeOgPreview } from '../lib/og-scrape.mjs';
 import { oembedEndpointFor, previewFromOembed } from '../lib/oembed-providers.mjs'; // SOW-102: provider fallback
 import { mediumFeedUrlFor, previewFromMediumFeed } from '../lib/medium-preview.mjs'; // Medium RSS fallback (bot-challenged pages)
@@ -53,30 +55,23 @@ export function safeFetchTarget(raw) {
   return { ok: true, url: u.toString() };
 }
 
-async function authMember(request, { fetchImpl, fetchUser }) {
-  const auth = request.headers.get('Authorization') || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'a GitHub bearer token is required' } };
-  let user;
-  try {
-    user = await fetchUser(token, fetchImpl);
-  } catch {
-    return { ok: false, status: 401, body: { error: 'unauthorized', message: 'could not verify the GitHub token' } };
-  }
-  if (!user?.githubId) return { ok: false, status: 401, body: { error: 'unauthorized', message: 'the GitHub token has no user id' } };
-  return { ok: true, githubId: String(user.githubId) };
-}
-
 const EMPTY_PREVIEW = { ok: true, image: null, title: null, description: null, tags: [], suggestedCategory: null };
 
 export async function handleOgPreview(request, env, {
   fetchImpl = globalThis.fetch,
   fetchUser = githubFetchUser,
   suggest = suggestTopic, // SOW-087: injectable for tests
+  allowCookie = false, // opt-in the WEBSITE (cookie session) path; the extension/npm bearer path is unchanged
+  verifyCookie, // injectable cookie verifier for tests (defaults to the identity resolver's own)
 } = {}) {
   if (request.method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } };
 
-  const a = await authMember(request, { fetchImpl, fetchUser });
+  // Any signed-in member may fetch a preview. Bearer (extension/npm) OR the gbti_session cookie (website),
+  // resolved through the shared choke point so a cookie POST also clears the double-submit CSRF gate. The OG
+  // fetch itself is SSRF-guarded below; identity is only used to gate the route, not to scope the fetch.
+  const identityOpts = { fetchImpl, fetchUser, allowCookie };
+  if (verifyCookie) identityOpts.verifyCookie = verifyCookie;
+  const a = await resolveIdentity(request, env, identityOpts);
   if (!a.ok) return a;
 
   let payload;

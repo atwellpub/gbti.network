@@ -816,12 +816,15 @@ export default {
       }
 
       // SOW-057: server-side OpenGraph preview for the share composer. Authenticated (any signed-in member),
-      // SSRF-guarded, bounded, never cached, varied on the bearer.
+      // SSRF-guarded, bounded, never cached. Cookie-enabled (credentialed reflected-origin CORS + allowCookie)
+      // so the WEBSITE share composer (homepage + /account/) can fetch previews over the gbti_session cookie; a
+      // cookie POST clears the CSRF gate inside resolveIdentity. The extension/npm bearer path is unchanged.
       if (pathname === '/membership/og-preview') {
-        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'POST') {
-          const r = await handleOgPreview(request, env);
-          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+          const r = await handleOgPreview(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
 

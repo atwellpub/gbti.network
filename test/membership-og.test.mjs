@@ -13,6 +13,15 @@ function req(body, { token = 'tok', method = 'POST' } = {}) {
 }
 const fetchUser = async () => ({ githubId: '42', githubLogin: 'me' });
 
+// A WEBSITE (cookie-session) request: no bearer, the double-submit CSRF pair + an allow-listed Origin. The
+// signed session itself is injected via verifyCookie in the tests, so no SESSION_SECRET is needed.
+function cookieReq(body, { csrf = 'C', header = 'C', origin = 'https://gbti.network' } = {}) {
+  const map = { Cookie: `gbti_csrf=${csrf}`, 'X-GBTI-CSRF': header, Origin: origin };
+  return { method: 'POST', headers: { get: (h) => (map[h] ?? null) }, async json() { return body; } };
+}
+const OG_ENV = { CORS_ALLOWED_ORIGINS: 'https://gbti.network' };
+const verifyCookie = async () => ({ github_id: '42', github_login: 'me' });
+
 test('safeFetchTarget blocks loopback, private, link-local, metadata, credentials, and non-http', () => {
   assert.equal(safeFetchTarget('http://localhost/x').ok, false);
   assert.equal(safeFetchTarget('http://127.0.0.1/x').ok, false);
@@ -35,6 +44,32 @@ test('handler: 401 without a token, 401 when the token has no user id', async ()
   assert.equal(noTok.status, 401);
   const badUser = await handleOgPreview(req({ url: 'https://ex.com' }), {}, { fetchImpl: async () => ({}), fetchUser: async () => ({}) });
   assert.equal(badUser.status, 401);
+});
+
+// sow-158 Phase 1b cookie enablement: the WEBSITE share composer authenticates over the gbti_session cookie.
+test('handler: a cookie session (allowCookie + CSRF + Origin) is accepted -- the website path', async () => {
+  const html = '<head><meta property="og:title" content="Hi"></head>';
+  const fetchImpl = async () => ({ ok: true, headers: { get: () => 'text/html' }, text: async () => html });
+  const r = await handleOgPreview(cookieReq({ url: 'https://ex.com/a' }), OG_ENV, {
+    allowCookie: true, verifyCookie, fetchImpl,
+    fetchUser: async () => { throw new Error('the bearer path must not run for a cookie caller'); },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.title, 'Hi');
+});
+
+test('handler: a cookie caller is 401 when the route is bearer-only (allowCookie defaults false)', async () => {
+  const r = await handleOgPreview(cookieReq({ url: 'https://ex.com/a' }), OG_ENV, {
+    verifyCookie, fetchImpl: async () => { throw new Error('must not fetch'); }, fetchUser,
+  });
+  assert.equal(r.status, 401); // cookie ignored -> a bearer token is required
+});
+
+test('handler: a cookie POST with a mismatched CSRF header is 403 even with allowCookie', async () => {
+  const r = await handleOgPreview(cookieReq({ url: 'https://ex.com/a' }, { header: 'WRONG' }), OG_ENV, {
+    allowCookie: true, verifyCookie, fetchImpl: async () => { throw new Error('must not fetch'); }, fetchUser,
+  });
+  assert.equal(r.status, 403);
 });
 
 test('handler: an SSRF target is rejected with 400 and the page is NEVER fetched', async () => {
