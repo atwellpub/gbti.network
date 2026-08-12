@@ -5,6 +5,7 @@
 // adapter (src/lib/workbench-client) -- no GitHub token in the page. noindex: a private, per-member surface.
 import BaseLayout from '../layouts/BaseLayout.astro';
 import FeedView from '../components/feeds/FeedView.astro';
+import HomeShareModal from '../components/home/HomeShareModal.astro';
 import { loadFeedItems } from '../lib/feed-items';
 
 // The membership button grid. Icons come from the site sprite (#ico-*). `#tab=` deep-links land in the WorkBench.
@@ -82,10 +83,23 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
           <div class="hub-card" data-share-card hidden>
             <h2 class="hub-h">Share with the community</h2>
             <p class="hub-sub">Post a note or a link to the members stream. Members-only is the default; switch to public to share it on the site feed.</p>
-            <div data-share-mount>
-              <p class="hub-load">Loading the composer&hellip;</p>
-              <gbti-share-composer></gbti-share-composer>
+            {/* Owner request: match the homepage share UX. The account page had the full four-step composer INLINE
+                (sow-218); the homepage uses a collapsed bar that opens the wizard in a modal. Reuse that exact bar +
+                the shared HomeShareModal (which holds the one <gbti-share-composer>). mountHub already injects the
+                client + lazy-imports the composer, so the modal's composer hydrates just as the inline one did. */}
+            <div class="home-share-bar" style="margin-bottom:0">
+              <button type="button" class="hsb-open" data-share-open>
+                <img class="hsb-av" alt="" width="34" height="34" decoding="async" />
+                <span class="hsb-prompt"><i class="hsb-caret" aria-hidden="true"></i>Share something with the network&hellip;</span>
+                <span class="hsb-act hsb-share">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a3 3 0 1 0-2.82-4H15a3 3 0 0 0 .12.83l-6.1 3.55a3 3 0 1 0 0 4.24l6.1 3.55A3 3 0 1 0 18 16a3 3 0 0 0-1.77.58l-6.1-3.55a3 3 0 0 0 0-1.66l6.1-3.55A3 3 0 0 0 18 8Z" fill="currentColor"/></svg>Share
+                </span>
+              </button>
+              <a class="hsb-act hsb-wb" href="/workbench/">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Zm5-3h6a1 1 0 0 1 1 1v2H8V5a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>Workbench
+              </a>
             </div>
+            <HomeShareModal />
           </div>
           <div class="hub-card hub-card-feed">
             <h2 class="hub-h">Latest Activity</h2>
@@ -144,6 +158,13 @@ const { contentItems, shareItems, membersShareCount, avatarIndex } = await loadF
       // This is a presentational gate. The Worker share endpoint remains the real boundary (sow-218 Phase 2).
       const isCreator = s.paidTier === 'creator';
       if (shareCard) shareCard.hidden = !isCreator;
+      if (isCreator) {
+        // Point the collapsed share bar's avatar at the member's GitHub avatar (same convention as the homepage bar).
+        document.querySelectorAll<HTMLImageElement>('.hsb-av').forEach((img) => {
+          img.src = 'https://github.com/' + encodeURIComponent(String(s.login)) + '.png?size=68';
+          img.alt = '@' + String(s.login);
+        });
+      }
       // sow-218: the live member stream is for members who can actually SEE members-only shares, which is the
       // paid tiers. The Worker re-checks per caller and serves a free or banned account public shares only, so
       // this is presentation; hiding it from the tiers that would see a public-only duplicate of the feed
