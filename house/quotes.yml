@@ -50,3 +50,6 @@ quotes:
   - text: Life really does begin at forty. Up until then, you are just doing research.
     author: Carl Jung
     enabled: true
+  - text: The fool wanders, the wise asks
+    author: Benjamin Disraeli
+    enabled: true
