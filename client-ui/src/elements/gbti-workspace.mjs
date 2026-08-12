@@ -6,7 +6,8 @@
 // injected client) so it runs in the extension now and the npm CMS later. Fail-soft: every read falls back to an
 // empty state, never throws.
 import { GbtiElement, define, esc, getIdentity } from '../base.mjs';
-import { classifyPull, classifyDraft, prLifecycle, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, publicPathFor, submitAck, sortItems, filterByStatus, mergeTypeItems, sortModeFor, WORKSPACE_SORT_KEY, scopeFor, WORKSPACE_SCOPE_KEY } from '../workspace-core.mjs';
+import { classifyPull, classifyDraft, prLifecycle, prEvent, sortPullsByEvent, shouldPollPr, parseWorkspaceTab, parseWorkspaceNew, parseWorkspaceEdit, parseWorkspaceDraft, planHashRoute, typeForContentPath, publicPathFor, submitAck, sortItems, filterByStatus, mergeTypeItems, sortModeFor, WORKSPACE_SORT_KEY, scopeFor, WORKSPACE_SCOPE_KEY } from '../workspace-core.mjs';
+import { relTime, absTime } from '../time-core.mjs'; // sow-221: the shared "time ago" + its tooltip stamp
 import { wbCacheGet, wbCacheSet, wbCacheInvalidateMany } from '../workbench-cache.mjs'; // SOW-073: SWR workbench cache
 
 const WB_CONTENT_TYPES = new Set(['post', 'prompt', 'product']); // SOW-073: types whose publish invalidates a tab
@@ -53,6 +54,9 @@ const CSS = `
   .row .gl svg { width:19px; height:19px; }
   .row .t b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row .t .meta { color:var(--muted); font-size:12.5px; }
+  /* sow-221: the event time sits in the meta line, dimmer than the #N link so the link still leads. */
+  .row .t .meta .when { opacity:.85; }
+  .row .t .meta .when::before { content:"·"; margin:0 6px; opacity:.6; }
   .row .t .why { display:block; margin-top:3px; color:var(--danger); font-size:12px; line-height:1.35; white-space:normal; } /* SOW-072 P2: the rejection reason, never silent */
   .row .t .why[hidden] { display:none; }
   .tag { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--hover); font-size:11.5px; color:var(--muted); white-space:nowrap; }
@@ -609,7 +613,10 @@ class GbtiWorkspace extends GbtiElement {
     if (this._tab === 'saved') return `<gbti-saved></gbti-saved>`; // SOW-037
     if (this._tab === 'subs') return `<gbti-subscriptions></gbti-subscriptions>`; // SOW-037
     if (this._tab === 'prs') {
-      const prs = this._prs;
+      // sow-221: newest event first, so the tab reads as a history. The Worker returns GitHub's `sort=updated`
+      // order, which is close but not the same thing: a PR merged today can sit below one whose branch was
+      // touched later. Sorting on the event we actually DISPLAY keeps the order and the label consistent.
+      const prs = this._prs === null ? null : sortPullsByEvent(this._prs);
       if (prs === null) return `<p class="empty">Loading your pull requests...</p>`;
       if (prs.length === 0) return `<p class="empty">No pull requests yet. Publish from the site or the CMS and they show here.</p>`;
       // SOW-085: paginate the PR list too (same 15/page pager as the content tabs); rows key on pr.number, so a
@@ -617,9 +624,16 @@ class GbtiWorkspace extends GbtiElement {
       const PAGE = 15;
       const pages = Math.max(1, Math.ceil(prs.length / PAGE));
       const page = Math.min(this._page || 0, pages - 1);
-      const rows = prs.slice(page * PAGE, page * PAGE + PAGE).map((pr) => `<li class="row">
-        <span class="t"><b>${esc(pr.title || ('PR #' + pr.number))}</b><span class="meta"><a href="${esc(pr.html_url || '#')}" target="_blank" rel="noopener">#${esc(pr.number)}</a> on GitHub</span><span class="why" data-n="${esc(pr.number)}" hidden></span></span>
-        <span class="right"><span class="gate tag" data-n="${esc(pr.number)}">checking...</span></span></li>`).join('');
+      const rows = prs.slice(page * PAGE, page * PAGE + PAGE).map((pr) => {
+        // The state pill on the right already says WHERE the PR stands ("Accepted"), so the meta line names the
+        // event that produced the timestamp instead of repeating it: "#271 on GitHub, merged 2 hours ago".
+        // A payload without timestamps (an un-deployed Worker) yields no verb and the row reads as before.
+        const ev = prEvent(pr);
+        const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">${esc(ev.verb)} ${esc(relTime(ev.at))}</span>` : '';
+        return `<li class="row">
+        <span class="t"><b>${esc(pr.title || ('PR #' + pr.number))}</b><span class="meta"><a href="${esc(pr.html_url || '#')}" target="_blank" rel="noopener">#${esc(pr.number)}</a> on GitHub${when}</span><span class="why" data-n="${esc(pr.number)}" hidden></span></span>
+        <span class="right"><span class="gate tag" data-n="${esc(pr.number)}">checking...</span></span></li>`;
+      }).join('');
       const pager = pages > 1 ? `<div class="pager">`
         + `<button class="btn" data-page="${page - 1}" type="button"${page === 0 ? ' disabled' : ''}>&larr; Prev</button>`
         + `<span class="pager-n">Page ${page + 1} of ${pages}</span>`

@@ -1556,6 +1556,29 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return { label: "Proposed", tone: "" };
     }
   }
+  function prEvent(pr = {}) {
+    const at = (v) => typeof v === "string" && v ? v : null;
+    if (pr.merged === true || pr.state === "merged") {
+      const t = at(pr.mergedAt) ?? at(pr.updatedAt) ?? at(pr.createdAt);
+      return t ? { verb: "merged", at: t } : { verb: "", at: null };
+    }
+    if (pr.state === "closed") {
+      const t = at(pr.closedAt) ?? at(pr.updatedAt) ?? at(pr.createdAt);
+      return t ? { verb: "closed", at: t } : { verb: "", at: null };
+    }
+    const created = at(pr.createdAt);
+    const updated = at(pr.updatedAt);
+    if (updated && created && Date.parse(updated) - Date.parse(created) > 6e4) return { verb: "updated", at: updated };
+    if (created) return { verb: "opened", at: created };
+    return updated ? { verb: "updated", at: updated } : { verb: "", at: null };
+  }
+  function sortPullsByEvent(prs = []) {
+    const key = (pr) => {
+      const t = prEvent(pr).at;
+      return t ? Date.parse(t) || 0 : 0;
+    };
+    return [...Array.isArray(prs) ? prs : []].sort((a, b) => key(b) - key(a));
+  }
   function prLifecycle(pull = {}, status = null) {
     const c = classifyPull(pull, status);
     const merged = pull.merged === true || pull.state === "merged";
@@ -3684,6 +3707,40 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-content-list", GbtiContentList);
 
+  // client-ui/src/time-core.mjs
+  function relTime2(v, now = Date.now()) {
+    if (!v) return "";
+    const ms = typeof v === "number" ? v : Date.parse(v);
+    if (!ms) return "";
+    const diff = now - ms;
+    if (diff < 6e4) return "just now";
+    const mins = Math.floor(diff / 6e4);
+    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hrs = Math.floor(diff / 36e5);
+    if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+    const d = Math.floor(diff / 864e5);
+    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
+    const mo = Math.floor(d / 30);
+    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
+    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
+  }
+  function absTime(v) {
+    if (!v) return "";
+    const ms = typeof v === "number" ? v : Date.parse(v);
+    if (!ms) return "";
+    try {
+      return new Date(ms).toLocaleString(void 0, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    } catch {
+      return new Date(ms).toISOString();
+    }
+  }
+
   // client-ui/src/elements/gbti-pr-list.mjs
   var GbtiPrList = class extends GbtiElement {
     async render() {
@@ -3697,10 +3754,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this.css() + `<div class="panel">
            <h2>My pull requests</h2>
            ${prs.length === 0 ? `<p class="muted">No open PRs.</p>` : ""}
-           <ul class="list">${prs.map((pr) => `<li class="row" style="justify-content:space-between" data-n="${esc(pr.number)}">
-             <span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">#${esc(pr.number)}</a> ${esc(pr.title)}</span>
+           <ul class="list">${sortPullsByEvent(prs).map((pr) => {
+          const ev = prEvent(pr);
+          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">· ${esc(ev.verb)} ${esc(relTime2(ev.at))}</span>` : "";
+          return `<li class="row" style="justify-content:space-between" data-n="${esc(pr.number)}">
+             <span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">#${esc(pr.number)}</a> ${esc(pr.title)}${when}</span>
              <span class="gate tag" data-n="${esc(pr.number)}">checking…</span>
-           </li>`).join("")}</ul>
+           </li>`;
+        }).join("")}</ul>
          </div>`
       );
       for (const pr of prs) this.loadStatus(pr.number);
@@ -9427,22 +9488,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     const a = Array.isArray(labels) ? labels : [];
     return a.length ? String(a[a.length - 1] || "").trim() : "";
   }
-  function relTime2(v, now = Date.now()) {
-    if (!v) return "";
-    const ms = typeof v === "number" ? v : Date.parse(v);
-    if (!ms) return "";
-    const diff = now - ms;
-    if (diff < 6e4) return "just now";
-    const mins = Math.floor(diff / 6e4);
-    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-    const hrs = Math.floor(diff / 36e5);
-    if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
-    const d = Math.floor(diff / 864e5);
-    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
-    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
-  }
   var lockIco = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
   var CSS22 = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); --feed-radius:7px; }
@@ -14137,6 +14182,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .row .gl svg { width:19px; height:19px; }
   .row .t b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .row .t .meta { color:var(--muted); font-size:12.5px; }
+  /* sow-221: the event time sits in the meta line, dimmer than the #N link so the link still leads. */
+  .row .t .meta .when { opacity:.85; }
+  .row .t .meta .when::before { content:"·"; margin:0 6px; opacity:.6; }
   .row .t .why { display:block; margin-top:3px; color:var(--danger); font-size:12px; line-height:1.35; white-space:normal; } /* SOW-072 P2: the rejection reason, never silent */
   .row .t .why[hidden] { display:none; }
   .tag { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--hover); font-size:11.5px; color:var(--muted); white-space:nowrap; }
@@ -14698,15 +14746,19 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (this._tab === "saved") return `<gbti-saved></gbti-saved>`;
       if (this._tab === "subs") return `<gbti-subscriptions></gbti-subscriptions>`;
       if (this._tab === "prs") {
-        const prs = this._prs;
+        const prs = this._prs === null ? null : sortPullsByEvent(this._prs);
         if (prs === null) return `<p class="empty">Loading your pull requests...</p>`;
         if (prs.length === 0) return `<p class="empty">No pull requests yet. Publish from the site or the CMS and they show here.</p>`;
         const PAGE2 = 15;
         const pages2 = Math.max(1, Math.ceil(prs.length / PAGE2));
         const page2 = Math.min(this._page || 0, pages2 - 1);
-        const rows2 = prs.slice(page2 * PAGE2, page2 * PAGE2 + PAGE2).map((pr) => `<li class="row">
-        <span class="t"><b>${esc(pr.title || "PR #" + pr.number)}</b><span class="meta"><a href="${esc(pr.html_url || "#")}" target="_blank" rel="noopener">#${esc(pr.number)}</a> on GitHub</span><span class="why" data-n="${esc(pr.number)}" hidden></span></span>
-        <span class="right"><span class="gate tag" data-n="${esc(pr.number)}">checking...</span></span></li>`).join("");
+        const rows2 = prs.slice(page2 * PAGE2, page2 * PAGE2 + PAGE2).map((pr) => {
+          const ev = prEvent(pr);
+          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">${esc(ev.verb)} ${esc(relTime2(ev.at))}</span>` : "";
+          return `<li class="row">
+        <span class="t"><b>${esc(pr.title || "PR #" + pr.number)}</b><span class="meta"><a href="${esc(pr.html_url || "#")}" target="_blank" rel="noopener">#${esc(pr.number)}</a> on GitHub${when}</span><span class="why" data-n="${esc(pr.number)}" hidden></span></span>
+        <span class="right"><span class="gate tag" data-n="${esc(pr.number)}">checking...</span></span></li>`;
+        }).join("");
         const pager2 = pages2 > 1 ? `<div class="pager"><button class="btn" data-page="${page2 - 1}" type="button"${page2 === 0 ? " disabled" : ""}>&larr; Prev</button><span class="pager-n">Page ${page2 + 1} of ${pages2}</span><button class="btn" data-page="${page2 + 1}" type="button"${page2 >= pages2 - 1 ? " disabled" : ""}>Next &rarr;</button></div>` : "";
         return `<ul class="rows">${rows2}</ul>${pager2}`;
       }

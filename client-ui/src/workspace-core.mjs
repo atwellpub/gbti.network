@@ -104,6 +104,44 @@ export function classifyPull(pr = {}, status = null) {
 //   needsAttention: true when the author should look (rejected/closed, needs-changes, error) -> drives the bell badge.
 //   reason: the gate status description (why), or a plain-language fallback for the attention states so the author
 //          is never left guessing. Empty for a clean pending/accepted PR. Pure; node-testable.
+/**
+ * sow-221: WHICH of a pull request's four timestamps a row should show, and what to call it.
+ *
+ * The row already carries a state pill from classifyPull ("Accepted", "Proposed"), so repeating that word
+ * next to the time would say the same thing twice. This returns the VERB for the event that actually
+ * produced the timestamp, which reads as "#271 on GitHub, merged 2 hours ago": the pill says where the PR
+ * stands, the meta line says when it last moved. "Opened" alone was the simpler option and was rejected
+ * because a list mixing open and finished work is mostly asking when something FINISHED.
+ *
+ * Falls back down the chain, so a payload from the pre-sow-221 Worker (no timestamps at all) yields
+ * { verb: '', at: null } and the row renders exactly as it does today rather than showing "Invalid Date".
+ * Pure.
+ */
+export function prEvent(pr = {}) {
+  const at = (v) => (typeof v === 'string' && v ? v : null);
+  if (pr.merged === true || pr.state === 'merged') {
+    const t = at(pr.mergedAt) ?? at(pr.updatedAt) ?? at(pr.createdAt);
+    return t ? { verb: 'merged', at: t } : { verb: '', at: null };
+  }
+  if (pr.state === 'closed') {
+    const t = at(pr.closedAt) ?? at(pr.updatedAt) ?? at(pr.createdAt);
+    return t ? { verb: 'closed', at: t } : { verb: '', at: null };
+  }
+  // Open. "Updated" only when something actually happened after it was opened; GitHub sets updated_at on
+  // creation too, so an untouched PR would otherwise read "updated" the moment it was opened.
+  const created = at(pr.createdAt);
+  const updated = at(pr.updatedAt);
+  if (updated && created && Date.parse(updated) - Date.parse(created) > 60000) return { verb: 'updated', at: updated };
+  if (created) return { verb: 'opened', at: created };
+  return updated ? { verb: 'updated', at: updated } : { verb: '', at: null };
+}
+
+/** sow-221: newest event first. A PR with no timestamp sorts last rather than jumping to the top. Pure. */
+export function sortPullsByEvent(prs = []) {
+  const key = (pr) => { const t = prEvent(pr).at; return t ? Date.parse(t) || 0 : 0; };
+  return [...(Array.isArray(prs) ? prs : [])].sort((a, b) => key(b) - key(a));
+}
+
 export function prLifecycle(pull = {}, status = null) {
   const c = classifyPull(pull, status);
   const merged = pull.merged === true || pull.state === 'merged';

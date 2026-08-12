@@ -194,7 +194,8 @@ function isCallerHostedPull(pr, githubId) {
 }
 
 /**
- * GET /membership/my-pulls -> { ok, items: [{ number, title, html_url }] }: the caller's OPEN PRs on the
+ * GET /membership/my-pulls -> { ok, items: [{ number, title, html_url, state, merged, createdAt, updatedAt,
+ * mergedAt, closedAt }] }: the caller's OPEN PRs on the
  * canonical repo. A fork-scoped member token cannot read the upstream, and in the hybrid flow GBTI's App (not
  * the member) opens the PRs, so this reads with the installation token and filters by the PR HEAD fork owner ==
  * the member's login (never by author).
@@ -213,7 +214,14 @@ export async function listMemberPulls(request, env, deps = {}) {
   const list = await res.json().catch(() => []);
   const items = (Array.isArray(list) ? list : [])
     .filter((pr) => headOwnerOf(pr) === who.login || isCallerHostedPull(pr, who.githubId))
-    .map((pr) => ({ number: pr.number, title: pr.title, html_url: pr.html_url, state: pr.state, merged: Boolean(pr.merged_at) }));
+    // sow-221: the four timestamps ride along. GitHub already sends them on this object (merged_at was being
+    // read for the boolean above and then thrown away), so the workspace can say WHEN each PR event happened
+    // without a second call. Additive: every existing consumer reads the same fields it always did.
+    .map((pr) => ({
+      number: pr.number, title: pr.title, html_url: pr.html_url, state: pr.state, merged: Boolean(pr.merged_at),
+      createdAt: pr.created_at ?? null, updatedAt: pr.updated_at ?? null,
+      mergedAt: pr.merged_at ?? null, closedAt: pr.closed_at ?? null,
+    }));
   return { status: 200, body: { ok: true, items } };
 }
 

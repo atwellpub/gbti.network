@@ -2,6 +2,8 @@
 // membership-gate check). Read-only; the gate is authoritative on what merges.
 
 import { GbtiElement, define, esc } from '../base.mjs';
+import { prEvent, sortPullsByEvent } from '../workspace-core.mjs'; // sow-221: one event rule for every PR row
+import { relTime, absTime } from '../time-core.mjs';
 
 class GbtiPrList extends GbtiElement {
   async render() {
@@ -17,10 +19,14 @@ class GbtiPrList extends GbtiElement {
         `<div class="panel">
            <h2>My pull requests</h2>
            ${prs.length === 0 ? `<p class="muted">No open PRs.</p>` : ''}
-           <ul class="list">${prs.map((pr) => `<li class="row" style="justify-content:space-between" data-n="${esc(pr.number)}">
-             <span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">#${esc(pr.number)}</a> ${esc(pr.title)}</span>
+           <ul class="list">${sortPullsByEvent(prs).map((pr) => {
+             const ev = prEvent(pr); // sow-221: same rule as the workspace tab, never a second interpretation
+             const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">· ${esc(ev.verb)} ${esc(relTime(ev.at))}</span>` : '';
+             return `<li class="row" style="justify-content:space-between" data-n="${esc(pr.number)}">
+             <span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">#${esc(pr.number)}</a> ${esc(pr.title)}${when}</span>
              <span class="gate tag" data-n="${esc(pr.number)}">checking…</span>
-           </li>`).join('')}</ul>
+           </li>`;
+           }).join('')}</ul>
          </div>`,
     );
     for (const pr of prs) this.loadStatus(pr.number);

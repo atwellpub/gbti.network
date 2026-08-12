@@ -51,25 +51,13 @@ export function categoryLeaf(labels) {
   return a.length ? String(a[a.length - 1] || '').trim() : '';
 }
 
-// Relative "time ago". Elapsed-since is inherently in the viewer's OS clock/timezone (Date.now() is local epoch),
-// so no timezone handling is needed. An item from TODAY now reads "N hours/minutes ago" instead of flattening to
-// "today" (owner request). Exported for testing.
-export function relTime(v, now = Date.now()) {
-  if (!v) return '';
-  const ms = typeof v === 'number' ? v : Date.parse(v);
-  if (!ms) return '';
-  const diff = now - ms;
-  if (diff < 60000) return 'just now'; // < 1 min (also covers small clock skew / future stamps)
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
-  const hrs = Math.floor(diff / 3600000);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
-  const d = Math.floor(diff / 86400000);
-  if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`;
-  const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`;
-  return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? '' : 's'} ago`;
-}
+// sow-221: relTime now lives in ../time-core.mjs so the pull request rows could use it without becoming a
+// FOURTH copy. Re-exported here because existing importers (and test/card-avatars.test.mjs) read it from
+// this module; the behavior is byte-for-byte the function that used to be defined right here.
+// NOTE: imported AND re-exported, not `export ... from`. A bare re-export does not bind the name in this
+// module's scope, and the card row below calls relTime() directly, so that form would throw at runtime.
+import { relTime } from '../time-core.mjs';
+export { relTime };
 
 const lockIco = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
 

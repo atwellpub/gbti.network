@@ -116,11 +116,30 @@ test('listMemberPulls (SOW-033 P4): closed/merged included with state + merged, 
   const r = await listMemberPulls(getReq(), env, { kv: fakeKv(), fetchImpl, signJwt, fetchUser: userAlice });
   assert.equal(r.status, 200);
   assert.ok(pullsUrl.includes('state=all'), 'queries state=all so closed/merged PRs are returned');
+  // sow-221: the four timestamps ride along now. The fixtures above set only merged_at, so the rest come back
+  // null, which is exactly the shape the UI must tolerate (prEvent falls back to no verb and no time).
   assert.deepEqual(r.body.items, [
-    { number: 7, title: 'Open', html_url: 'u7', state: 'open', merged: false },
-    { number: 8, title: 'Merged', html_url: 'u8', state: 'closed', merged: true },
-    { number: 9, title: 'Declined', html_url: 'u9', state: 'closed', merged: false },
+    { number: 7, title: 'Open', html_url: 'u7', state: 'open', merged: false, createdAt: null, updatedAt: null, mergedAt: null, closedAt: null },
+    { number: 8, title: 'Merged', html_url: 'u8', state: 'closed', merged: true, createdAt: null, updatedAt: null, mergedAt: '2026-06-01T00:00:00Z', closedAt: null },
+    { number: 9, title: 'Declined', html_url: 'u9', state: 'closed', merged: false, createdAt: null, updatedAt: null, mergedAt: null, closedAt: null },
   ], 'bob PR #10 excluded by head-owner scope; merged derived from merged_at');
+});
+
+// sow-221: the timestamps GitHub actually sends must survive the projection, not just be present as nulls.
+test('listMemberPulls passes GitHub created_at / updated_at / merged_at / closed_at straight through', async () => {
+  const pulls = [{
+    number: 11, title: 'Timed', html_url: 'u11', state: 'closed',
+    created_at: '2026-08-01T10:00:00Z', updated_at: '2026-08-10T11:00:00Z',
+    merged_at: '2026-08-10T11:00:00Z', closed_at: '2026-08-10T11:00:00Z',
+    head: { repo: { owner: { login: 'alice' } } },
+  }];
+  const fetchImpl = async (url) => instOk(url) || { ok: true, async json() { return pulls; } };
+  const r = await listMemberPulls(getReq(), env, { kv: fakeKv(), fetchImpl, signJwt, fetchUser: userAlice });
+  assert.deepEqual(r.body.items[0], {
+    number: 11, title: 'Timed', html_url: 'u11', state: 'closed', merged: true,
+    createdAt: '2026-08-01T10:00:00Z', updatedAt: '2026-08-10T11:00:00Z',
+    mergedAt: '2026-08-10T11:00:00Z', closedAt: '2026-08-10T11:00:00Z',
+  });
 });
 
 test('listMemberPulls is unauthorized when the token does not resolve to a user', async () => {
