@@ -94,7 +94,8 @@ const labelOf = CATEGORY_LABELS;
           </article>
           <div data-pv-cta hidden></div>
           <div id="pd-screenshots" class="pd-gallery pd-anchor" data-pv-gallery hidden></div>
-          <p class="pv-inert" style="margin-top:36px">The author box and discussion render here on the published page.</p>
+          <div data-pv-note style="margin-top:48px" hidden></div>
+          <p class="pv-inert" style="margin-top:36px" data-pv-inert-foot>The author box and discussion render here on the published page.</p>
         </div>
       </div>
     </div>
@@ -456,6 +457,45 @@ const labelOf = CATEGORY_LABELS;
           + `<div class="pd-cta-btns">${ctaButtons(asMember)}</div>`;
         ctaBox.hidden = false;
       };
+
+      // sow-219 Phase 2: the from-the-author note. The published page pins it above the discussion and then
+      // DROPS the author box, because the note carries the byline (ContentFooter's skipAuthorBox), so the
+      // preview mirrors both halves of that. Only a committed repo draft can have one: it lives in a sibling
+      // comment file that reaches the repo in the same PR, and the same GET /membership/file this page already
+      // uses can read it. A fork-staged draft goes through /membership/drafts, which does not carry the
+      // comment, so it keeps showing the inert line rather than growing a second data path.
+      (async () => {
+        const noteBox = $('[data-pv-note]');
+        const foot = $('[data-pv-inert-foot]');
+        if (!noteBox || store !== 'repo' || !repoPath) return;
+        try {
+          const { introPathFor, buildAuthorNoteHtml } = await import('../../lib/author-note.mjs');
+          const notePath = introPathFor(repoPath, slug);
+          if (!notePath) return;
+          const res = await fetch(`${base}/membership/file?path=${encodeURIComponent(notePath)}&ref=main`, { credentials: 'include' });
+          const text = res.ok ? (await res.json())?.text : null;
+          if (typeof text !== 'string' || !text) return; // no note: the published page shows the author box
+          const { parseContentFile } = await import('../../../client/src/content-ops.mjs');
+          const parsed: any = parseContentFile(text);
+          // Match the published selection exactly: only a PUBLIC, authorNote-flagged, published comment pins.
+          const nfm = parsed.frontmatter || {};
+          if (nfm.authorNote !== true || nfm.visibility !== 'public' || (nfm.status && nfm.status !== 'published')) return;
+          const author = String(nfm.author || fm.author || '');
+          const { authorDisplay, authorHref } = await import('../../lib/authors.ts');
+          const { renderMarkdown } = await import('../../../client/src/markdown.mjs');
+          let avatarUrl = '';
+          try {
+            const idx = await fetch('/members-index.json').then((r) => (r.ok ? r.json() : null));
+            avatarUrl = (idx?.members || []).find((m: any) => m?.username === author)?.avatar || '';
+          } catch { /* the letter disc is the documented fallback */ }
+          noteBox.innerHTML = buildAuthorNoteHtml({
+            name: authorDisplay(author), href: authorHref(author), avatarUrl,
+            bodyHtml: renderMarkdown(String(parsed.body || '')),
+          });
+          noteBox.hidden = false;
+          if (foot) foot.textContent = 'The discussion renders here on the published page. The author box is replaced by the note above.';
+        } catch { /* a preview never fails on its optional trimmings */ }
+      })();
 
       let asMemberNow = false;
       let stopToc: (() => void) | undefined;
