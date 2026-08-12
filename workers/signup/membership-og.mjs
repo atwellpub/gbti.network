@@ -55,7 +55,12 @@ export function safeFetchTarget(raw) {
   return { ok: true, url: u.toString() };
 }
 
-const EMPTY_PREVIEW = { ok: true, image: null, title: null, description: null, tags: [], suggestedCategory: null };
+// sow-211: `reason` says WHY a preview is empty, because four very different outcomes used to arrive at the
+// composer as one indistinguishable { ok: true, ...nulls }: the page genuinely has no OpenGraph data, we
+// could not reach it, it is not a web page at all, or it timed out. The route still NEVER throws and still
+// never 500s, so this is additive: `reason: null` is the genuine no-data case and keeps today's behaviour.
+// The composer turns each into its own sentence (ogPreviewState in gbti-share-composer.mjs).
+const EMPTY_PREVIEW = { ok: true, image: null, title: null, description: null, tags: [], suggestedCategory: null, reason: null };
 
 export async function handleOgPreview(request, env, {
   fetchImpl = globalThis.fetch,
@@ -63,6 +68,9 @@ export async function handleOgPreview(request, env, {
   suggest = suggestTopic, // SOW-087: injectable for tests
   allowCookie = false, // opt-in the WEBSITE (cookie session) path; the extension/npm bearer path is unchanged
   verifyCookie, // injectable cookie verifier for tests (defaults to the identity resolver's own)
+  // sow-211: injectable alongside the other deps so the TIMEOUT branch is testable. Distinguishing a timeout
+  // from a refused connection needs the abort to actually fire, and a test cannot wait 8 real seconds.
+  timeoutMs = FETCH_TIMEOUT_MS,
 } = {}) {
   if (request.method !== 'POST') return { status: 405, body: { error: 'method_not_allowed' } };
 
@@ -91,7 +99,7 @@ export async function handleOgPreview(request, env, {
   const oembedUrl = oembedEndpointFor(target.url);
   if (oembedUrl) {
     const oc = new AbortController();
-    const ot = setTimeout(() => oc.abort(), FETCH_TIMEOUT_MS);
+    const ot = setTimeout(() => oc.abort(), timeoutMs);
     try {
       const res = await fetchImpl(oembedUrl, {
         signal: oc.signal,
@@ -111,7 +119,7 @@ export async function handleOgPreview(request, env, {
     const feedUrl = mediumFeedUrlFor(target.url);
     if (feedUrl) {
       const mc = new AbortController();
-      const mt = setTimeout(() => mc.abort(), FETCH_TIMEOUT_MS);
+      const mt = setTimeout(() => mc.abort(), timeoutMs);
       try {
         const res = await fetchImpl(feedUrl, {
           signal: mc.signal,
@@ -126,7 +134,7 @@ export async function handleOgPreview(request, env, {
 
   // Bounded, timed-out fetch. Any failure returns a clean empty preview (never a 500), since an OG miss is normal.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     if (!preview) {
       const res = await fetchImpl(target.url, {
@@ -135,9 +143,9 @@ export async function handleOgPreview(request, env, {
         headers: { 'User-Agent': 'gbti-link-preview/0.1 (+https://gbti.network)', Accept: 'text/html,application/xhtml+xml' },
         cf: { cacheTtl: 1800, cacheEverything: true },
       });
-      if (!res || !res.ok) return { status: 200, body: { ...EMPTY_PREVIEW } };
+      if (!res || !res.ok) return { status: 200, body: { ...EMPTY_PREVIEW, reason: 'unreachable' } };
       const ct = res.headers?.get?.('content-type') || '';
-      if (ct && !/html|xml/i.test(ct)) return { status: 200, body: { ...EMPTY_PREVIEW } };
+      if (ct && !/html|xml/i.test(ct)) return { status: 200, body: { ...EMPTY_PREVIEW, reason: 'not-a-page' } };
       let html = await res.text();
       if (typeof html === 'string' && html.length > MAX_BYTES) html = html.slice(0, MAX_BYTES);
       preview = scrapeOgPreview(html, target.url);
@@ -162,10 +170,14 @@ export async function handleOgPreview(request, env, {
         description: preview.description || null,
         tags: preview.tags || [],
         suggestedCategory: suggestedCategory || null,
+        // We reached the page and read it. If it yielded nothing, that IS the genuine no-data case.
+        reason: null,
       },
     };
   } catch {
-    return { status: 200, body: { ...EMPTY_PREVIEW } };
+    // The abort signal is the only thing that distinguishes "took too long" from "refused/failed", and the
+    // difference matters to the author: one is worth retrying, the other usually is not.
+    return { status: 200, body: { ...EMPTY_PREVIEW, reason: controller.signal.aborted ? 'timeout' : 'unreachable' } };
   } finally {
     clearTimeout(timer);
   }

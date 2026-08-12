@@ -134,3 +134,60 @@ test('handler: a throwing suggester still returns the preview with suggestedCate
   assert.equal(r.body.title, 'Hi');
   assert.equal(r.body.suggestedCategory, null);
 });
+
+// ---------------------------------------------------------------------------
+// sow-211: four very different outcomes used to reach the composer as one indistinguishable
+// { ok: true, ...nulls }. `reason` tells them apart so the composer can say which happened. Still additive:
+// the route never throws, never 500s, and `reason: null` remains the genuine no-data case.
+
+test('sow-211: an upstream non-2xx is unreachable, not a blank page', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 503, headers: { get: () => 'text/html' }, text: async () => '' });
+  const r = await handleOgPreview(req({ url: 'https://ex.com/a' }), {}, { fetchImpl, fetchUser });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true, 'still never a 500');
+  assert.equal(r.body.reason, 'unreachable');
+});
+
+test('sow-211: a non-HTML content type is not-a-page', async () => {
+  const fetchImpl = async () => ({ ok: true, headers: { get: () => 'application/pdf' }, text: async () => '%PDF' });
+  const r = await handleOgPreview(req({ url: 'https://ex.com/file.pdf' }), {}, { fetchImpl, fetchUser });
+  assert.equal(r.body.reason, 'not-a-page');
+});
+
+test('sow-211: a network failure is unreachable', async () => {
+  const fetchImpl = async () => { throw new Error('ECONNREFUSED'); };
+  const r = await handleOgPreview(req({ url: 'https://ex.com/a' }), {}, { fetchImpl, fetchUser });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.reason, 'unreachable');
+});
+
+// The distinction that needs the abort signal to actually fire. A timeout is worth retrying; a refused
+// connection usually is not, and before this they were the same empty response. Driven through the REAL
+// timer (timeoutMs is injectable for exactly this) rather than by faking an AbortError, so the test would
+// catch the handler forgetting to wire the signal at all.
+test('sow-211: a fetch that outlives the timeout is a timeout, told apart from a refused connection', async () => {
+  const hangs = (_url, opts) => new Promise((_resolve, reject) => {
+    opts.signal.addEventListener('abort', () => {
+      const e = new Error('The operation was aborted'); e.name = 'AbortError'; reject(e);
+    });
+  });
+  const r = await handleOgPreview(req({ url: 'https://ex.com/slow' }), {}, { fetchImpl: hangs, fetchUser, timeoutMs: 5 });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true, 'a timeout is still never a 500');
+  assert.equal(r.body.reason, 'timeout');
+});
+
+test('sow-211: a page we REACHED that simply has no OG data keeps reason null', async () => {
+  const fetchImpl = async () => ({ ok: true, headers: { get: () => 'text/html' }, text: async () => '<head></head>' });
+  const r = await handleOgPreview(req({ url: 'https://ex.com/bare' }), {}, { fetchImpl, fetchUser });
+  assert.equal(r.body.title, null);
+  assert.equal(r.body.reason, null, 'reached and read, genuinely empty: not a failure');
+});
+
+test('sow-211: a successful preview also carries reason null', async () => {
+  const html = '<head><meta property="og:title" content="Hi"></head>';
+  const fetchImpl = async () => ({ ok: true, headers: { get: () => 'text/html' }, text: async () => html });
+  const r = await handleOgPreview(req({ url: 'https://ex.com/a' }), {}, { fetchImpl, fetchUser, suggest: async () => null });
+  assert.equal(r.body.title, 'Hi');
+  assert.equal(r.body.reason, null);
+});

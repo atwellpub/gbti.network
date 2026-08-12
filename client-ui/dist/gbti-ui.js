@@ -8780,6 +8780,24 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   var STEP_LABELS = ["Link", "Preview", "Note", "Publish"];
   var NEXT_LABEL = { 1: "Fetch details", 2: "Looks good", 3: "Continue" };
+  var OG_REASON_TEXT = {
+    unreachable: "We could not reach that page.",
+    "not-a-page": "That link is not a web page.",
+    timeout: "That link took too long to respond."
+  };
+  function ogPreviewState({ og = null, error = null } = {}) {
+    if (error) {
+      const code = String(error?.code || "");
+      if (code === "not_authenticated" || code === "not-authenticated" || code === "http-401") {
+        return { kind: "error", message: "Sign in to fetch a link preview.", retry: false };
+      }
+      return { kind: "error", message: `We could not fetch a preview for that link.${code ? ` (${code})` : ""}`, retry: true };
+    }
+    if (og && (og.title || og.description || og.image)) return { kind: "card", message: "", retry: false };
+    const reason = og && typeof og.reason === "string" ? og.reason : "";
+    if (OG_REASON_TEXT[reason]) return { kind: "empty", message: OG_REASON_TEXT[reason], retry: reason !== "not-a-page" };
+    return { kind: "empty", message: "No preview available for this link.", retry: false };
+  }
   var CSS21 = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
   .card { background:var(--panel); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border:1px solid var(--line); border-radius:14px; padding:16px; }
@@ -8813,6 +8831,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .busy { opacity:.55; pointer-events:none; }
   .og { margin-top:10px; }
   .og .ogmsg { font-size:12.5px; color:var(--muted); }
+  /* sow-211: a FAILED preview reads as a failure, not as a quiet absence. Same red as .msg.err above, so the
+     composer has one error colour rather than two. A reached-but-empty page stays muted: it is not an error. */
+  .og .ogmsg.err { color:#c0392b; }
   /* SOW-102: the rich link-preview card (image + title + description + domain), replacing the bare image. */
   .og .ogcard { display:flex; gap:12px; align-items:stretch; border:1px solid var(--line); border-radius:7px; overflow:hidden; background:var(--panel); }
   .og .ogimg { flex:none; width:120px; min-height:76px; object-fit:cover; border:0; border-radius:0; }
@@ -9179,9 +9200,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._lastOgUrl = url;
       box.hidden = false;
       box.innerHTML = `<span class="ogmsg">Fetching preview…</span>`;
+      let og = null;
+      let error = null;
       try {
-        const og = await this.client.ogPreview({ url });
-        if ((this.$("input[type=url]")?.value || "").trim() !== url) return;
+        og = await this.client.ogPreview({ url });
+      } catch (e) {
+        error = e;
+      }
+      if ((this.$("input[type=url]")?.value || "").trim() !== url) return;
+      const state = ogPreviewState({ og, error });
+      if (state.kind === "card") {
         const t = this.$("input.title");
         if (t && !t.value.trim() && og?.title) t.value = String(og.title).slice(0, 80);
         const d = this.$("input.desc");
@@ -9189,29 +9217,32 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         this._suggested = og?.suggestedCategory || null;
         this._applySuggested();
         this._image = og?.image || null;
-        if (og?.title || og?.description || this._image) {
-          let domain = "";
-          try {
-            domain = new URL(url).hostname.replace(/^www\./, "");
-          } catch {
-          }
-          box.innerHTML = `<div class="ogcard">` + (this._image ? `<img class="ogimg" src="${esc(this._image)}" alt="" />` : "") + `<div class="ogtxt">` + (og?.title ? `<span class="ogtitle">${esc(og.title)}</span>` : "") + (og?.description ? `<span class="ogdesc">${esc(og.description)}</span>` : "") + (domain ? `<span class="ogdomain">${esc(domain)}</span>` : "") + `</div></div><button class="ogclear" type="button" data-ogclear>Remove preview</button>`;
-          const clr = box.querySelector("[data-ogclear]");
-          if (clr) clr.addEventListener("click", () => {
-            this._image = null;
-            this._lastOgUrl = null;
-            box.hidden = true;
-            box.innerHTML = "";
-          });
-        } else {
-          box.innerHTML = `<span class="ogmsg">No preview available for this link.</span>`;
+        let domain = "";
+        try {
+          domain = new URL(url).hostname.replace(/^www\./, "");
+        } catch {
         }
-      } catch {
-        this._lastOgUrl = null;
-        this._image = null;
-        box.hidden = true;
-        box.innerHTML = "";
+        box.innerHTML = `<div class="ogcard">` + (this._image ? `<img class="ogimg" src="${esc(this._image)}" alt="" />` : "") + `<div class="ogtxt">` + (og?.title ? `<span class="ogtitle">${esc(og.title)}</span>` : "") + (og?.description ? `<span class="ogdesc">${esc(og.description)}</span>` : "") + (domain ? `<span class="ogdomain">${esc(domain)}</span>` : "") + `</div></div><button class="ogclear" type="button" data-ogclear>Remove preview</button>`;
+        const clr = box.querySelector("[data-ogclear]");
+        if (clr) clr.addEventListener("click", () => {
+          this._image = null;
+          this._lastOgUrl = null;
+          box.hidden = true;
+          box.innerHTML = "";
+        });
+        return;
       }
+      this._image = null;
+      if (state.kind === "error") {
+        this._lastOgUrl = null;
+        this._suggested = null;
+      }
+      box.innerHTML = `<span class="ogmsg${state.kind === "error" ? " err" : ""}">${esc(state.message)}</span>` + (state.retry ? ` <button class="ogclear" type="button" data-ogretry>Try again</button>` : "");
+      const again = box.querySelector("[data-ogretry]");
+      if (again) again.addEventListener("click", () => {
+        this._lastOgUrl = null;
+        this._fetchPreview();
+      });
     }
     async _post() {
       const card = this.$(".card");

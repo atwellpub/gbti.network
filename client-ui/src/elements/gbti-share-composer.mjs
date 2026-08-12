@@ -32,6 +32,52 @@ const IC = {
 const STEP_LABELS = ['Link', 'Preview', 'Note', 'Publish'];
 const NEXT_LABEL = { 1: 'Fetch details', 2: 'Looks good', 3: 'Continue' };
 
+// sow-211: the composer used to HIDE the whole preview box on any throw (a 401, a network failure, a 500)
+// and say nothing, which is what the owner reported as "nothing was extracted and there was no visual
+// feedback". The empty-but-reached case was already legible; the FAILED case was not, and the two were never
+// the indistinguishable pair the SOW originally described.
+//
+// The information to explain a failure was already arriving and being discarded: both hosts throw an error
+// carrying `.code` and `.message` (WorkbenchClientError in src/lib/workbench-client.ts, GbtiClientError in
+// client-ui/src/client.mjs), and the old bare `catch` dropped both.
+//
+// Pure and exported so every branch is unit-testable: the element modules guard customElements for node, so
+// the house pattern is to test the helper rather than the element (see domainOf in gbti-news.mjs, prEvent in
+// workspace-core.mjs).
+
+/** Why an empty preview is empty. Mirrors membership-og.mjs's `reason`; anything unrecognised falls through
+ *  to the generic empty message rather than showing a raw code to the author. */
+const OG_REASON_TEXT = {
+  unreachable: 'We could not reach that page.',
+  'not-a-page': 'That link is not a web page.',
+  timeout: 'That link took too long to respond.',
+};
+
+/**
+ * Decide what the preview box should show. Exactly one of three kinds, so the renderer has no branching of
+ * its own and cannot grow a second interpretation.
+ *
+ * @param {{og?: object|null, error?: any}} args
+ * @returns {{kind:'card'|'empty'|'error', message:string, retry:boolean}}
+ */
+export function ogPreviewState({ og = null, error = null } = {}) {
+  if (error) {
+    const code = String(error?.code || '');
+    // A signed-out or expired session is the one failure with a specific action attached, so it gets its own
+    // sentence. Mirrors newsGet in workbench-client.ts, which already drives a view from the code not the status.
+    if (code === 'not_authenticated' || code === 'not-authenticated' || code === 'http-401') {
+      return { kind: 'error', message: 'Sign in to fetch a link preview.', retry: false };
+    }
+    // The code is appended rather than swallowed: a generic apology is what made this undiagnosable.
+    return { kind: 'error', message: `We could not fetch a preview for that link.${code ? ` (${code})` : ''}`, retry: true };
+  }
+  if (og && (og.title || og.description || og.image)) return { kind: 'card', message: '', retry: false };
+  const reason = og && typeof og.reason === 'string' ? og.reason : '';
+  if (OG_REASON_TEXT[reason]) return { kind: 'empty', message: OG_REASON_TEXT[reason], retry: reason !== 'not-a-page' };
+  // Reached it, read it, it genuinely has nothing. Unchanged wording, because it was already correct.
+  return { kind: 'empty', message: 'No preview available for this link.', retry: false };
+}
+
 const CSS = `
   :host { display:block; font-family:var(--font-body); color:var(--fg); }
   .card { background:var(--panel); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border:1px solid var(--line); border-radius:14px; padding:16px; }
@@ -65,6 +111,9 @@ const CSS = `
   .busy { opacity:.55; pointer-events:none; }
   .og { margin-top:10px; }
   .og .ogmsg { font-size:12.5px; color:var(--muted); }
+  /* sow-211: a FAILED preview reads as a failure, not as a quiet absence. Same red as .msg.err above, so the
+     composer has one error colour rather than two. A reached-but-empty page stays muted: it is not an error. */
+  .og .ogmsg.err { color:#c0392b; }
   /* SOW-102: the rich link-preview card (image + title + description + domain), replacing the bare image. */
   .og .ogcard { display:flex; gap:12px; align-items:stretch; border:1px solid var(--line); border-radius:7px; overflow:hidden; background:var(--panel); }
   .og .ogimg { flex:none; width:120px; min-height:76px; object-fit:cover; border:0; border-radius:0; }
@@ -417,32 +466,49 @@ class GbtiShareComposer extends GbtiElement {
     this._lastOgUrl = url;
     box.hidden = false;
     box.innerHTML = `<span class="ogmsg">Fetching preview…</span>`;
+    let og = null;
+    let error = null;
     try {
-      const og = await this.client.ogPreview({ url });
-      if ((this.$('input[type=url]')?.value || '').trim() !== url) return; // the field moved on; a newer fetch owns the box
+      og = await this.client.ogPreview({ url });
+    } catch (e) {
+      error = e;
+    }
+    if ((this.$('input[type=url]')?.value || '').trim() !== url) return; // the field moved on; a newer fetch owns the box
+    // sow-211: ONE decision, made by the pure mapper, so a failure can never again render as a hidden box.
+    const state = ogPreviewState({ og, error });
+    if (state.kind === 'card') {
       const t = this.$('input.title'); if (t && !t.value.trim() && og?.title) t.value = String(og.title).slice(0, 80);
       const d = this.$('input.desc'); if (d && !d.value.trim() && og?.description) d.value = String(og.description).slice(0, 200);
       // SOW-087: soft-prefill the category from the Worker's suggestion (the author can always override).
       this._suggested = og?.suggestedCategory || null;
       this._applySuggested();
       this._image = og?.image || null;
-      if (og?.title || og?.description || this._image) {
-        let domain = '';
-        try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch { /* leave empty */ }
-        box.innerHTML = `<div class="ogcard">`
-          + (this._image ? `<img class="ogimg" src="${esc(this._image)}" alt="" />` : '')
-          + `<div class="ogtxt">`
-          + (og?.title ? `<span class="ogtitle">${esc(og.title)}</span>` : '')
-          + (og?.description ? `<span class="ogdesc">${esc(og.description)}</span>` : '')
-          + (domain ? `<span class="ogdomain">${esc(domain)}</span>` : '')
-          + `</div></div>`
-          + `<button class="ogclear" type="button" data-ogclear>Remove preview</button>`;
-        const clr = box.querySelector('[data-ogclear]');
-        if (clr) clr.addEventListener('click', () => { this._image = null; this._lastOgUrl = null; box.hidden = true; box.innerHTML = ''; });
-      } else {
-        box.innerHTML = `<span class="ogmsg">No preview available for this link.</span>`;
-      }
-    } catch { this._lastOgUrl = null; this._image = null; box.hidden = true; box.innerHTML = ''; }
+      let domain = '';
+      try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch { /* leave empty */ }
+      box.innerHTML = `<div class="ogcard">`
+        + (this._image ? `<img class="ogimg" src="${esc(this._image)}" alt="" />` : '')
+        + `<div class="ogtxt">`
+        + (og?.title ? `<span class="ogtitle">${esc(og.title)}</span>` : '')
+        + (og?.description ? `<span class="ogdesc">${esc(og.description)}</span>` : '')
+        + (domain ? `<span class="ogdomain">${esc(domain)}</span>` : '')
+        + `</div></div>`
+        + `<button class="ogclear" type="button" data-ogclear>Remove preview</button>`;
+      const clr = box.querySelector('[data-ogclear]');
+      if (clr) clr.addEventListener('click', () => { this._image = null; this._lastOgUrl = null; box.hidden = true; box.innerHTML = ''; });
+      return;
+    }
+    // Empty or failed. The box STAYS VISIBLE and says which. A preview is optional metadata, so neither state
+    // blocks posting; the author can continue to the note and publish without one.
+    this._image = null;
+    // A THROW clears the same-URL guard (as it always did) so the next input event can retry on its own; a
+    // reached-but-empty page keeps it, since re-asking on every keystroke is what the guard exists to stop.
+    if (state.kind === 'error') { this._lastOgUrl = null; this._suggested = null; }
+    box.innerHTML = `<span class="ogmsg${state.kind === 'error' ? ' err' : ''}">${esc(state.message)}</span>`
+      + (state.retry ? ` <button class="ogclear" type="button" data-ogretry>Try again</button>` : '');
+    // The same-URL guard at the top of this method would otherwise strand a failed fetch until the author
+    // edits the field, so retry clears it and re-runs rather than asking them to retype the link.
+    const again = box.querySelector('[data-ogretry]');
+    if (again) again.addEventListener('click', () => { this._lastOgUrl = null; this._fetchPreview(); });
   }
 
   async _post() {
