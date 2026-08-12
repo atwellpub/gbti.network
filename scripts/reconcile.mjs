@@ -33,7 +33,7 @@ import { buildRepoIndex } from './lib/repo-content.mjs';
 import { planReconcile } from './lib/reconcile-plan.mjs';
 import { buildOverridesMirror, mirrorOverridesToKv, mirrorSyndicationConfigToKv, mirrorContentChannelsToKv, mirrorTopicsToKv, mirrorCouponsToKv } from './lib/kv-mirror.mjs';
 import { syncFavoriteCounts, readCountsFromDisk, readFavoritedByFromDisk, readMembersIndexFromDisk } from './lib/favorite-counts.mjs';
-import { syncCouponGrants, readGrandfatheredFromDisk, listCouponRedemptions, planCouponGrants } from './lib/coupon-grants.mjs'; // SOW-119 (+ sow-218: pre-apply)
+import { syncCouponGrants, readGrandfatheredFromDisk, readCouponsFromDisk, listCouponRedemptions, planCouponGrants } from './lib/coupon-grants.mjs'; // SOW-119 (+ sow-218: pre-apply, sow-185: explicit tier)
 import { syncEnrollments } from './lib/enroll-members.mjs'; // SOW-157: hosted-member index enrollment
 import { syncUpvoteCounts, readCountsFromDisk as readUpvoteCountsFromDisk } from './lib/upvote-counts.mjs';
 import { main as promotePopular } from './promote-popular.mjs'; // SOW-126: the engagement-triggered popular promoter
@@ -589,7 +589,10 @@ export async function applyPendingCouponGrants({ overrides, env = process.env, n
     // EVERY already-folded grant would look new and be re-applied. Harmless in effect, wrong in reasoning,
     // and it would have masked a real regression here later.
     const { parsed } = readGrandfatheredFromDisk(root);
-    ({ grants } = planCouponGrants({ redemptions: kv.redemptions, grandfatheredParsed: parsed, now }));
+    // sow-185: the SAME couponsParsed the durable fold uses. Both paths run planCouponGrants, and if only
+    // one of them saw the registry they could disagree about a member's tier WITHIN A SINGLE RUN: this run
+    // would gate on one tier while the PR it opens records the other. One input, one answer.
+    ({ grants } = planCouponGrants({ redemptions: kv.redemptions, grandfatheredParsed: parsed, couponsParsed: readCouponsFromDisk(root), now }));
   } catch (e) {
     console.warn(`reconcile: WARNING could not pre-apply coupon grants (${e?.message ?? e}); falling back to the next run.`);
     return 0;
@@ -746,7 +749,7 @@ async function main() {
     console.log('reconcile: DRY RUN would fold coupon redemptions from KV -> house/grandfathered.yml (requires CF creds + a GitHub PR).');
   } else {
     try {
-      const r = await syncCouponGrants({ env, github, now, readGrandfathered: () => readGrandfatheredFromDisk(ROOT) });
+      const r = await syncCouponGrants({ env, github, now, readGrandfathered: () => readGrandfatheredFromDisk(ROOT), readCoupons: () => readCouponsFromDisk(ROOT) });
       console.log(
         r.synced
           ? `reconcile: folded ${r.additions} coupon redemption(s) into grandfather grants (PR #${r.prNumber})${r.conversions ? `, ${r.conversions} converted from permanent comp (SOW-142)` : ''}.`

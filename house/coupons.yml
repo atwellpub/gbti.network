@@ -7,8 +7,9 @@
 # validates codes against live values without a redeploy. This file carries no secrets.
 #
 # Fields: code (3-32 chars A-Z 0-9, case-insensitive at entry), freeDays (1-3650), active,
-# note, maxRedemptions (optional; null = unlimited), expiresAt (optional ISO date; the coupon's
-# own shelf life, not the grant length).
+# tier (member | creator; REQUIRED while active, see the ruling below), note, maxRedemptions
+# (optional; null = unlimited), expiresAt (optional ISO date; the coupon's own shelf life, not
+# the grant length).
 # OWNER RULING 2026-08-11, recorded so it is not re-litigated or "fixed" by a later reader.
 #
 # UNCAPPED AND NON-EXPIRING IS DELIBERATE. `maxRedemptions: null` and `expiresAt: null` are a decision, not
@@ -36,9 +37,20 @@
 # Owner: this is the gap to weigh when deciding how long to leave the codes uncapped. Tracked with
 # @OnboardingMaster, who holds the build.
 #
-# TIER IS EXPLICIT, NOT INHERITED. Both invites confer Content Creator for one year. Do NOT rely on
-# `grantTier`'s creator default to deliver it: that default exists to preserve legacy flat grants, and
-# leaning on it means the tier is re-decided implicitly on every future redemption. Write it into the fold.
+# TIER IS EXPLICIT, NOT INHERITED. Do NOT rely on `grantTier`'s creator default to deliver it: that default
+# exists to preserve legacy flat grants, and leaning on it means the tier is re-decided implicitly on every
+# future redemption. Write it into the fold.
+#
+# ENFORCED IN CODE 2026-08-12, so this is now a rule rather than a request. Each coupon carries a `tier`,
+# `validateCoupons` REJECTS an active coupon that names none, the signup Worker stamps the tier into the KV
+# redemption record, and the reconcile fold writes it into house/grandfathered.yml. The precedence when the
+# fold plans a grant, highest first: a hand-set tier on an existing entry (an owner decision outranks a
+# campaign), then the redemption record (what was promised when it was actually redeemed), then this file,
+# then nothing.
+#
+# What this did NOT change: a tierless grant still resolves to creator downstream, so no live member's
+# access moved. The fix is that the value is now RECORDED rather than re-derived, and a future change to
+# `grantTier`'s default can no longer silently move everyone already folded.
 #
 # See `.data/ops/incident-ops/security-audit-2026-08-10.md` for the finding this ruling answers.
 
@@ -46,6 +58,7 @@ coupons:
   - code: CODEABLEYEAR
     freeDays: 365
     active: true
+    tier: creator
     note: Codeable experts, first year free (SOW-119)
     maxRedemptions: null
     expiresAt: null

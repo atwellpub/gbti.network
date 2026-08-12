@@ -1,9 +1,17 @@
 // SOW-119: the coupon registry core. Pure over the PARSED house/coupons.yml ({ coupons: [{ code, freeDays,
-// active, note?, maxRedemptions?, expiresAt? }] }), like the other membership cores: callers (the CI
+// active, tier, note?, maxRedemptions?, expiresAt? }] }), like the other membership cores: callers (the CI
 // validator, the signup Worker via the coupons:config KV mirror, the admin edit core) parse or fetch the
 // yaml/mirror and pass the object. Everything FAILS CLOSED: a malformed entry never grants time, an unknown
 // or inactive or expired code resolves to null, and a bad freeDays yields no `until`.
 // Node-free (no fs / no yaml).
+//
+// sow-185 / owner ruling 2026-08-11: TIER IS EXPLICIT, NOT INHERITED. A coupon NAMES the paid tier it
+// confers, and the reconcile fold writes that name into the grandfather grant. `grantTier`'s creator
+// default still exists, but it is there to preserve LEGACY flat grants, not to decide what a live campaign
+// hands out. Leaning on it means the tier is silently re-decided on every future redemption, and a later
+// change to that default would move everyone already folded. See house/coupons.yml for the ruling itself.
+
+import { PAID_GRANT_TIERS } from './tier-gate.mjs'; // sow-185: the paid tiers a grant (and so a coupon) may name
 
 /** Normalize a coupon code for lookup: trim + uppercase (codes are case-insensitive at entry). */
 export function normalizeCouponCode(code) {
@@ -27,6 +35,10 @@ function normalizeEntry(e) {
     code,
     freeDays,
     active: e?.active === true,
+    // sow-185: only a real PAID tier survives. An absent, misspelled or `none` tier normalizes to null,
+    // which the fold reads as "this coupon names no tier" and leaves the grant tierless, exactly as it
+    // behaved before this field existed. A typo therefore costs the explicitness, never a wrong grant.
+    tier: PAID_GRANT_TIERS.includes(e?.tier) ? e.tier : null,
     note: typeof e?.note === 'string' ? e.note : '',
     maxRedemptions,
     expiresAt: typeof e?.expiresAt === 'string' && e.expiresAt ? e.expiresAt : null,
@@ -57,6 +69,21 @@ export function couponIsRedeemable(coupon, now = new Date()) {
 export function couponByCode(parsed, code, now = new Date()) {
   const c = couponsFromParsed(parsed).get(normalizeCouponCode(code));
   return c && couponIsRedeemable(c, now) ? c : null;
+}
+
+/**
+ * sow-185: the paid tier a coupon confers, or null when it names none. The ONE place the reconcile fold
+ * and any other reader agree on how a code resolves to a tier. Deliberately does NOT fall back to creator:
+ * that fallback lives in grantTier, downstream, and duplicating it here would reintroduce the implicitness
+ * this field exists to remove.
+ *
+ * Reads the registry rather than the coupon's own redeemability, on purpose. A grant is folded from a
+ * redemption that ALREADY happened, so a coupon since deactivated or expired must still resolve to the
+ * tier it was redeemed under; gating this on couponIsRedeemable would silently downgrade a pending fold
+ * the moment a campaign is switched off.
+ */
+export function couponTier(parsed, code) {
+  return couponsFromParsed(parsed).get(normalizeCouponCode(code))?.tier ?? null;
 }
 
 /** The grant end date for a redemption at `now`: now + freeDays, as an ISO string (UTC). */
@@ -102,6 +129,14 @@ export function validateCoupons(parsed, { file = 'coupons.yml' } = {}) {
     }
     if (e?.expiresAt !== undefined && e?.expiresAt !== null && Number.isNaN(new Date(e.expiresAt).getTime())) {
       errors.push(`${file}: coupons[${i}] expiresAt must be an ISO date when set`);
+    }
+    // sow-185, enforcing the owner's "TIER IS EXPLICIT, NOT INHERITED" ruling in CI rather than restating it
+    // in a comment. A LIVE campaign must name what it hands out; an inactive or fully-expired coupon is not
+    // handing anything out, so it is only held to naming a valid tier IF it names one at all.
+    if (e?.tier !== undefined && e?.tier !== null && !PAID_GRANT_TIERS.includes(e.tier)) {
+      errors.push(`${file}: coupons[${i}] tier must be one of ${PAID_GRANT_TIERS.join(', ')} when set (got "${e.tier}")`);
+    } else if (e?.active === true && (e?.tier === undefined || e?.tier === null)) {
+      errors.push(`${file}: coupons[${i}] (${code || 'unnamed'}) is active and must name the tier it confers (tier: ${PAID_GRANT_TIERS.join(' or ')}); a fold must never inherit it from grantTier's default`);
     }
   });
   return errors;

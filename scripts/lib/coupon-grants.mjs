@@ -13,8 +13,10 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { grandfathersFromParsed } from '../../membership/overrides-core.mjs';
 import { PAID_GRANT_TIERS } from '../../membership/tier-gate.mjs'; // sow-185: the paid tiers a grant may carry
+import { couponTier } from '../../membership/coupons.mjs'; // sow-185: the tier a coupon confers
 
 export const GRANDFATHERED_PATH = 'house/grandfathered.yml';
+export const COUPONS_PATH = 'house/coupons.yml';
 export const COUPON_REASON_PREFIX = 'coupon:';
 
 const KEY_RE = /^redemption:([A-Z0-9]{3,32}):(\d+)$/;
@@ -50,7 +52,9 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
       if (!res?.ok) continue;
       const value = await res.json().catch(() => null);
       if (!value?.until) continue;
-      redemptions.push({ code: m[1], githubId: m[2], login: value.login ?? null, redeemedAt: value.redeemedAt ?? null, until: value.until });
+      // sow-185: `tier` is present only on records written after the Worker began stamping it. An older
+      // record carries none and falls back to the registry lookup in planCouponGrants.
+      redemptions.push({ code: m[1], githubId: m[2], login: value.login ?? null, redeemedAt: value.redeemedAt ?? null, until: value.until, tier: value.tier ?? null });
     } catch {
       // one bad record never aborts the sweep
     }
@@ -69,8 +73,16 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
  *   - no entry                 -> ADD (the normal SOW-119 fold)
  * Expired redemptions, malformed records, and duplicate ids are dropped as before.
  * Returns { grants, skippedBounded }; a grant carries `replaces: true` when it supersedes an entry.
+ *
+ * sow-185, owner ruling "TIER IS EXPLICIT, NOT INHERITED": every grant this plans NAMES its paid tier,
+ * resolved in strict precedence and never invented:
+ *   1. the existing entry's hand-set tier  (an owner decision outranks a campaign default; SOW-142)
+ *   2. the redemption record's stamped tier (what the coupon promised when it was actually redeemed)
+ *   3. the coupon registry's declared tier (house/coupons.yml, for records predating the stamp)
+ *   4. nothing                             (no tier is written; grantTier's creator default applies, the
+ *                                           exact pre-sow-185 behaviour, so this can only ADD explicitness)
  */
-export function planCouponGrants({ redemptions = [], grandfatheredParsed = null, now = new Date() } = {}) {
+export function planCouponGrants({ redemptions = [], grandfatheredParsed = null, couponsParsed = null, now = new Date() } = {}) {
   const existing = grandfathersFromParsed(grandfatheredParsed);
   const grants = [];
   const skippedBounded = [];
@@ -94,16 +106,18 @@ export function planCouponGrants({ redemptions = [], grandfatheredParsed = null,
       replaces = true;
     }
     seen.add(githubId);
+    // sow-185: the four-step precedence documented above. A hand-set tier on the existing entry wins because
+    // converting a permanent comp changes only the time BOUND (permanent -> free year); the owner's tier
+    // choice is orthogonal and must survive the conversion, else renderGrantBlock would drop it and
+    // grantTier would silently revert the grant to the creator default. Only ever a real paid tier.
+    const tier = [entry?.tier, r?.tier, couponTier(couponsParsed, r.code)].find((t) => PAID_GRANT_TIERS.includes(t)) ?? null;
     grants.push({
       githubId,
       login: typeof r.login === 'string' && /^[a-z0-9-]+$/i.test(r.login) ? r.login.toLowerCase() : null,
       code: r.code,
       until: until.toISOString(),
       ...(replaces ? { replaces: true } : {}),
-      // sow-185: converting a permanent comp changes only the time BOUND (permanent -> free year); a hand-set
-      // tier is orthogonal to that and must survive the conversion, else renderGrantBlock would drop it and
-      // tier-gate.grantTier would silently revert the grant to the creator default. Only carry a real paid tier.
-      ...(entry && PAID_GRANT_TIERS.includes(entry.tier) ? { tier: entry.tier } : {}),
+      ...(tier ? { tier } : {}),
     });
   }
   grants.sort((a, b) => a.githubId.localeCompare(b.githubId));
@@ -210,6 +224,20 @@ export function readGrandfatheredFromDisk(root) {
 }
 
 /**
+ * sow-185: read the coupon registry (parsed) from disk, for the fold's tier lookup. Returns null rather
+ * than throwing when the file is missing or unparseable: a coupon registry we cannot read must not abort
+ * the fold, it just costs the registry fallback, and the grant then folds exactly as it did before this
+ * field existed. Fails toward the OLD behaviour, never toward a wrong tier.
+ */
+export function readCouponsFromDisk(root) {
+  try {
+    return yaml.load(fs.readFileSync(path.join(root, COUPONS_PATH), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The sync: list redemptions, plan the missing grants, and write them via ONE auto-merged house PR
  * (the reconcile bot is admin; house/** admin CODEOWNERS + the gate stay the boundary).
  */
@@ -221,6 +249,7 @@ export async function syncCouponGrants({
   now = new Date(),
   listRedemptions = listCouponRedemptions,
   readGrandfathered = null,
+  readCoupons = null,
 } = {}) {
   const kv = await listRedemptions({ env, fetchImpl });
   if (!kv.available) return { synced: false, reason: kv.reason };
@@ -229,7 +258,11 @@ export async function syncCouponGrants({
   const current = readGrandfathered ? await readGrandfathered() : null;
   if (!current?.text) return { synced: false, reason: 'cannot read house/grandfathered.yml' };
 
-  const { grants, skippedBounded } = planCouponGrants({ redemptions: kv.redemptions, grandfatheredParsed: current.parsed, now });
+  // sow-185: an unreadable coupon registry is NOT fatal here (see readCouponsFromDisk). It costs the
+  // registry step of the tier precedence, not the fold.
+  const couponsParsed = readCoupons ? await readCoupons() : null;
+
+  const { grants, skippedBounded } = planCouponGrants({ redemptions: kv.redemptions, grandfatheredParsed: current.parsed, couponsParsed, now });
   if (!grants.length) return { synced: false, reason: 'all redemptions already granted', redemptions: kv.redemptions.length, skippedBounded };
   if (!github) return { synced: false, reason: 'no github client to write the grants PR', additions: grants.length, skippedBounded };
 

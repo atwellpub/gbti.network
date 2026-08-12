@@ -32,10 +32,12 @@ function fakeKv(seed = {}) {
   };
 }
 
+// sow-185: the mirror carries each coupon's tier. CAPPED deliberately names none, standing in for a record
+// written before the field existed.
 const MIRROR = JSON.stringify({
   generatedAt: NOW.toISOString(),
   coupons: [
-    { code: 'CODEABLEYEAR', freeDays: 365, active: true, note: '', maxRedemptions: null, expiresAt: null },
+    { code: 'CODEABLEYEAR', freeDays: 365, active: true, tier: 'creator', note: '', maxRedemptions: null, expiresAt: null },
     { code: 'CAPPED', freeDays: 30, active: true, note: '', maxRedemptions: 1, expiresAt: null },
   ],
 });
@@ -65,6 +67,23 @@ test('redeemCoupon writes the grant, the per-code record, and the counter', asyn
   assert.ok(kv.store.has(couponGrantKey('42')));
   assert.ok(kv.store.has(redemptionKey('CODEABLEYEAR', '42')));
   assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), '1');
+});
+
+// sow-185: the record is the PROMISE. The reconcile fold can resolve the tier from house/coupons.yml, so
+// this is not what makes a grant explicit; it pins what the coupon conferred at the moment it was redeemed,
+// so retuning a live campaign cannot fold a pending redemption under terms the member never accepted.
+test('redeemCoupon stamps the coupon tier into both KV records, and omits it when the coupon names none', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR });
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', login: 'newbie', now: NOW });
+  assert.equal(r.tier, 'creator');
+  assert.equal(JSON.parse(kv.store.get(couponGrantKey('42'))).tier, 'creator', 'the fast-path grant carries it');
+  assert.equal(JSON.parse(kv.store.get(redemptionKey('CODEABLEYEAR', '42'))).tier, 'creator', 'and so does the record the fold reads');
+
+  // A coupon naming no tier writes no tier: the fold falls back to the registry rather than to a guess.
+  const bare = fakeKv({ 'coupons:config': MIRROR });
+  const b = await redeemCoupon({ kv: bare, code: 'CAPPED', githubId: '43', now: NOW });
+  assert.equal(b.tier, undefined);
+  assert.equal('tier' in JSON.parse(bare.store.get(redemptionKey('CAPPED', '43'))), false);
 });
 
 test('redeemCoupon is idempotent per github_id (one coupon per member, ever)', async () => {

@@ -77,8 +77,9 @@ test('planCouponGrants + appendGrantEntries carry a hand-set tier through a perm
   assert.equal(map.get('888').tier, 'member'); // renderGrantBlock emitted the tier line, so it survives the fold
 });
 
-test('planCouponGrants invents no tier when the permanent comp had none (fold defaults to creator downstream)', () => {
-  // github_id 111 in FILE is a permanent comp with NO tier -> the converted grant carries no tier field.
+test('planCouponGrants invents no tier when nothing names one (fold defaults to creator downstream)', () => {
+  // github_id 111 in FILE is a permanent comp with NO tier, the redemption carries none, and NO coupon
+  // registry is supplied -> the converted grant carries no tier field, exactly as it folded pre-sow-185.
   const { grants } = planCouponGrants({
     redemptions: [{ githubId: '111', code: 'CODEABLEYEAR', login: 'existing', until: '2027-01-01T00:00:00.000Z' }],
     grandfatheredParsed: yaml.load(FILE),
@@ -86,6 +87,45 @@ test('planCouponGrants invents no tier when the permanent comp had none (fold de
   });
   assert.equal(grants.length, 1);
   assert.equal('tier' in grants[0], false); // no tier -> tier-gate.grantTier applies the creator default
+});
+
+// sow-185, the owner's "TIER IS EXPLICIT, NOT INHERITED" ruling. The fold NAMES the tier instead of leaving
+// grantTier to re-derive it on every read. Four sources, strict precedence, and nothing is ever invented.
+test('planCouponGrants tier precedence: hand-set entry > redemption record > coupon registry > nothing', () => {
+  const REGISTRY = { coupons: [{ code: 'CODEABLEYEAR', freeDays: 365, active: true, tier: 'creator' }, { code: 'MEMBERPROMO', freeDays: 30, active: true, tier: 'member' }] };
+  const file = FILE + `  - github_id: "888"   # github.com/tieredcomp\n    login: tieredcomp\n    reason: complimentary access (member level)\n    until: null\n    tier: member\n`;
+  const plan = (redemptions, couponsParsed = REGISTRY) =>
+    planCouponGrants({ redemptions, grandfatheredParsed: yaml.load(file), couponsParsed, now: NOW });
+
+  // 1. The existing entry's HAND-SET tier outranks everything: an owner decision beats a campaign default,
+  //    and the conversion changes only the time bound.
+  const handSet = plan([{ githubId: '888', code: 'CODEABLEYEAR', login: 'tieredcomp', tier: 'creator', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal(handSet.grants[0].tier, 'member', 'the hand-set member tier survives a creator coupon AND a creator record');
+
+  // 2. The REDEMPTION RECORD beats the registry: it is what the coupon promised when it was redeemed, so
+  //    retuning a live campaign afterwards cannot fold a member under terms they never accepted.
+  const stamped = plan([{ githubId: '222', code: 'CODEABLEYEAR', login: 'newbie', tier: 'member', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal(stamped.grants[0].tier, 'member', 'the stamped record wins over the registry saying creator');
+
+  // 3. The REGISTRY fills in for a record written before the Worker stamped the tier (metacast's case).
+  const fromRegistry = plan([{ githubId: '222', code: 'CODEABLEYEAR', login: 'newbie', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal(fromRegistry.grants[0].tier, 'creator', 'an unstamped record resolves through house/coupons.yml');
+  const otherCode = plan([{ githubId: '333', code: 'MEMBERPROMO', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal(otherCode.grants[0].tier, 'member', 'and it resolves PER CODE, not one tier for all coupons');
+
+  // 4. Nothing names one -> no tier field. Never invented, and identical to the pre-sow-185 fold.
+  const unknownCode = plan([{ githubId: '444', code: 'NOSUCHCODE', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal('tier' in unknownCode.grants[0], false, 'a code absent from the registry yields no tier');
+  const noRegistry = plan([{ githubId: '444', code: 'CODEABLEYEAR', until: '2027-07-15T12:00:00.000Z' }], null);
+  assert.equal('tier' in noRegistry.grants[0], false, 'an unreadable registry costs explicitness, not correctness');
+
+  // A junk tier anywhere in the chain is skipped rather than written: fail toward the old behaviour.
+  const junk = plan([{ githubId: '444', code: 'NOSUCHCODE', tier: 'creater', until: '2027-07-15T12:00:00.000Z' }]);
+  assert.equal('tier' in junk.grants[0], false, 'an unrecognized stamped tier is not written through');
+
+  // And the named tier reaches the FILE, not just the plan.
+  const next = appendGrantEntries(file, fromRegistry.grants, NOW);
+  assert.equal(grandfathersFromParsed(yaml.load(next)).get('222').tier, 'creator');
 });
 
 test('appendGrantEntries keeps comments, parses back, and round-trips through overrides-core', () => {

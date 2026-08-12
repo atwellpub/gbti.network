@@ -78,7 +78,12 @@ export async function redeemCoupon({ kv, code, githubId, login = null, now = new
     const until = redemptionUntil(now, coupon.freeDays);
     if (!until) return null;
 
-    const record = { code: coupon.code, redeemedAt: now.toISOString(), until, ...(login ? { login: String(login) } : {}) };
+    // sow-185: stamp the tier the coupon conferred AT REDEMPTION TIME. The reconcile fold can already
+    // resolve it from house/coupons.yml, so this is not what makes the grant explicit; it closes a narrow
+    // drift window. A redemption sits in KV until the next fold, and if an admin retunes the campaign's
+    // tier in between, the registry lookup would fold that member under terms they never redeemed. The
+    // record is the promise; the registry is the fallback for records written before this field existed.
+    const record = { code: coupon.code, redeemedAt: now.toISOString(), until, ...(coupon.tier ? { tier: coupon.tier } : {}), ...(login ? { login: String(login) } : {}) };
     await kv.put(couponGrantKey(githubId), JSON.stringify(record));
     await kv.put(redemptionKey(coupon.code, githubId), JSON.stringify(record));
     const count = Number(await kv.get(redemptionCountKey(coupon.code))) || 0;
