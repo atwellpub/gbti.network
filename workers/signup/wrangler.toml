@@ -38,6 +38,10 @@ DISCORD_MEMBER_ROLE_ID = "1511810502970441900"
 # SOW-011 lockout role: a lapsed/banned account is moved here (its channel overwrites deny the community
 # channels; reconcile never kicks). The bot role must sit ABOVE this role.
 DISCORD_LOCKED_ROLE_ID = "1512558475341987990"
+# sow-185/sow-218: the STACKABLE Content Creator badge (a creator holds Member AND Creator). Already provisioned
+# for reconcile in .github/workflows/reconcile.yml; signup needs it too, or a Codeable invitee has to wait for the
+# next daily run to be badged. Separate axis from the exclusive access role above; the swap never strips it.
+DISCORD_CREATOR_ROLE_ID = "1536102140802633788"
 # On-demand invite: the channel the bot mints an invite to (#welcome). The bot needs CREATE_INSTANT_INVITE on it.
 DISCORD_INVITE_CHANNEL_ID = "1073029071602204804"
 # Static fallback invite (a real, permanent, unlimited-use invite) used only when the bot mint fails. The
@@ -212,6 +216,7 @@ DISCORD_GUILD_ID = "1073029070411006053"
 DISCORD_TRIAL_ROLE_ID = "1511800465107583198"
 DISCORD_MEMBER_ROLE_ID = "1511810502970441900"
 DISCORD_LOCKED_ROLE_ID = "1512558475341987990"
+DISCORD_CREATOR_ROLE_ID = "1536102140802633788"   # sow-185/sow-218: the stackable Content Creator badge
 DISCORD_INVITE_CHANNEL_ID = "1073029071602204804"
 DISCORD_INVITE_URL = "https://discord.gg/cCs952QJJs"   # real permanent fallback invite (no guild vanity URL)
 # SOW-058: per-type Discord channel ids the syndication drain posts APPROVED items to (non-secret; the bot token is

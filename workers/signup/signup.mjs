@@ -17,7 +17,8 @@
 import { resolveReferral } from './referral.mjs';
 import { SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1c: validate the bound touch-session shape
 import { redeemCoupon } from './coupons.mjs'; // SOW-119
-import { discordRoleTarget } from '../../membership/discord-roles.mjs'; // sow-218: the SHARED status -> role rule
+import { discordRoleTarget, discordCreatorTarget, MANAGED_ACCESS_ROLES } from '../../membership/discord-roles.mjs'; // sow-218
+import { resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: override-aware paid tier
 import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs';
 import { effectiveStatus } from '../../membership/overrides-core.mjs';
 import { overridesFromMirror } from '../../membership/usage-bucket.mjs';
@@ -43,19 +44,28 @@ import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs
  * A live coupon grant counts as paid here. It is the whole point of the invite, and it is authoritative before
  * the fold lands: the same fast path membership-status.mjs uses to report a fresh redeemer as paid.
  */
-export async function resolveSignupRole({ kv, githubId, customer, couponGrant = null, now = new Date() }) {
+export async function resolveSignupRole({ kv, githubId, customer, couponGrant = null, priceTierMap = null, now = new Date() }) {
+  const couponLive = Boolean(couponGrant?.until && new Date(couponGrant.until).getTime() > now.getTime());
   try {
-    if (couponGrant?.until && new Date(couponGrant.until).getTime() > now.getTime()) return 'member';
-    const { status } = deriveMembershipFromCustomer(customer, { now });
+    const { status, tier: stripeTier } = deriveMembershipFromCustomer(customer, { priceTierMap, now });
     const mirror = await kv?.get(OVERRIDES_KV_KEY, 'json');
-    if (!mirror?.generatedAt) return 'locked';
+    if (!mirror?.generatedAt) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
     const ageMs = now.getTime() - new Date(mirror.generatedAt).getTime();
-    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) return 'locked';
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
     const overrides = overridesFromMirror(mirror);
-    if (!overrides) return 'locked';
-    return discordRoleTarget(effectiveStatus(String(githubId), status, overrides, now).status);
+    if (!overrides) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
+
+    const eff = effectiveStatus(String(githubId), status, overrides, now);
+    // A BAN outranks a coupon, exactly as it does everywhere else. Checked before the coupon is honoured so a
+    // banned account cannot buy its way back in with an invite code.
+    if (eff.status === 'banned') return { access: 'locked', creator: false };
+    if (couponLive) return { access: 'member', creator: true };
+
+    const grant = overrides.grandfathers.get(String(githubId));
+    const tier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant });
+    return { access: discordRoleTarget(eff.status), creator: discordCreatorTarget(tier) };
   } catch {
-    return 'locked'; // any failure withholds the grant rather than handing one out
+    return { access: 'locked', creator: false }; // any failure withholds the grant rather than handing one out
   }
 }
 
@@ -239,17 +249,42 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
   // any deny. That is why resolving this correctly matters, and why every failure path returns `locked`:
   // withholding the grant is the safe direction and needs no channel overwrite to exist.
   if (hasDiscord) {
-    const target = await resolveSignupRole({ kv, githubId, customer: existing, couponGrant, now });
+    const { access, creator } = await resolveSignupRole({
+      kv, githubId, customer: existing, couponGrant, priceTierMap: config.priceTierMap ?? null, now,
+    });
     const roleIdFor = { member: config.memberRoleId, trial: config.trialRoleId, locked: config.lockedRoleId };
     // Fail safe on an unset id rather than sending `undefined` to Discord: join with NO role instead of a
     // malformed one. Sending [undefined] is the shape that turns a missing config value into an API error
     // (or worse, a silent partial success) instead of a visible no-op.
-    const signupRoleId = roleIdFor[target] || null;
+    const signupRoleId = roleIdFor[access] || null;
     await discord.addGuildMember(config.guildId, discordUserId, {
       accessToken: discordAccessToken,
       ...(signupRoleId ? { roles: [signupRoleId] } : {}),
     });
     if (signupRoleId) await discord.addRole(config.guildId, discordUserId, signupRoleId);
+
+    // SWAP, do not merely add. Signup used to only ever add, so the roles ACCUMULATED: the test account ended
+    // up holding Applicant (from its first signup) AND Locked (from a later Discord link), because nothing
+    // removed the first and only the daily reconcile swaps. Mirrors reconcile's plan: add the target, then
+    // strip every OTHER access role, so a stray left by an earlier run self-heals on the next link.
+    //
+    // Adding BEFORE removing is deliberate: a member being upgraded never passes through a moment with no
+    // access role at all. Each removal is independent and best-effort, because failing to strip a stale role
+    // must not undo the grant that just succeeded; reconcile re-runs this daily and will finish the job.
+    for (const role of MANAGED_ACCESS_ROLES) {
+      const staleId = role !== access ? roleIdFor[role] : null;
+      if (!staleId) continue;
+      try { await discord.removeRole(config.guildId, discordUserId, staleId); } catch { /* reconcile retries */ }
+    }
+
+    // sow-185: the stackable Content Creator badge, an INDEPENDENT axis the access swap above never touches.
+    // Inert until the owner provisions DISCORD_CREATOR_ROLE_ID, exactly as reconcile gates it.
+    if (config.creatorRoleId) {
+      try {
+        if (creator) await discord.addRole(config.guildId, discordUserId, config.creatorRoleId);
+        else await discord.removeRole(config.guildId, discordUserId, config.creatorRoleId);
+      } catch { /* best-effort; reconcile reconciles the badge daily */ }
+    }
   }
 
   return {

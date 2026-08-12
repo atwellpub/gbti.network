@@ -37,3 +37,25 @@ export function discordRoleTarget(effectiveStatus) {
   if (TRIAL_STATUSES.has(effectiveStatus)) return 'trial';
   return 'locked';
 }
+
+/**
+ * The three EXCLUSIVE access roles. A member holds exactly one; assigning a target means REMOVING the others.
+ *
+ * Signup used to only ever ADD, which is how the test account ended up holding Applicant AND Locked at the same
+ * time: the trial role from its original signup, plus Locked from a later Discord link, with nothing removing
+ * the first. Only the daily reconcile swapped, so any account that linked Discord more than once accumulated
+ * roles until the next run. Adding without removing is not idempotent, it is additive.
+ */
+export const MANAGED_ACCESS_ROLES = ['member', 'trial', 'locked'];
+
+/**
+ * sow-185: the stackable Content Creator BADGE, a separate axis from the access role above. A Content Creator
+ * holds member AND creator; a Network Member holds member alone. Deliberately NOT in MANAGED_ACCESS_ROLES, so
+ * the exclusive access swap never strips it.
+ */
+export const CREATOR_ROLE = 'creator';
+
+/** True when an effective TIER should hold the stackable Creator badge. Absent or unknown tier -> false. */
+export function discordCreatorTarget(tier) {
+  return tier === 'creator';
+}

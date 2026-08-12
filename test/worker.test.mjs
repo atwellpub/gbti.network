@@ -80,7 +80,7 @@ function fakeStripe({ searchHit = null } = {}) {
 
 /** Fake Discord client capturing addGuildMember + addRole. */
 function fakeDiscord() {
-  const calls = { addGuildMember: [], addRole: [] };
+  const calls = { addGuildMember: [], addRole: [], removeRole: [] };
   return {
     calls,
     async addGuildMember(guildId, userId, opts) {
@@ -89,6 +89,11 @@ function fakeDiscord() {
     },
     async addRole(guildId, userId, roleId) {
       calls.addRole.push({ guildId, userId, roleId });
+      return null;
+    },
+    // sow-218: signup now SWAPS (add target, strip the other access roles) instead of only adding.
+    async removeRole(guildId, userId, roleId) {
+      calls.removeRole.push({ guildId, userId, roleId });
       return null;
     },
   };
@@ -1317,50 +1322,64 @@ const freshMirror = (over = {}) => ({
 });
 const paidCustomer = { id: 'cus_1', metadata: { github_id: '12345' }, subscriptions: { data: [{ status: 'active', items: { data: [{ price: { id: 'price_x' } }] } }] } };
 
-test('sow-218: a LIVE coupon grant resolves to the member role, before any fold has landed', async () => {
+test('sow-218: a LIVE coupon grant resolves to member + the CREATOR badge, before any fold has landed', async () => {
   // The invitee case. The grant is authoritative here precisely because house/grandfathered.yml does not carry
   // it yet: reconcile folds it AFTER computing roles, so waiting for the mirror meant up to two daily cycles.
-  const role = await resolveSignupRole({
+  // The invite promises Content Creator for a year, so the badge comes with it rather than a run later.
+  const r = await resolveSignupRole({
     kv: mirrorKv(freshMirror()), githubId: '12345', customer: null,
     couponGrant: { until: '2027-08-11T00:00:00.000Z' }, now: NOW,
   });
-  assert.equal(role, 'member');
+  assert.deepEqual(r, { access: 'member', creator: true });
 });
 
-test('sow-218: an EXPIRED coupon grant does not grant anything', async () => {
-  const role = await resolveSignupRole({
+test('sow-218: an EXPIRED coupon grant grants nothing', async () => {
+  const r = await resolveSignupRole({
     kv: mirrorKv(freshMirror()), githubId: '12345', customer: null,
     couponGrant: { until: '2020-01-01T00:00:00.000Z' }, now: NOW,
   });
-  assert.equal(role, 'locked');
+  assert.deepEqual(r, { access: 'locked', creator: false });
 });
 
 test('sow-218: a paying subscriber linking Discord gets the MEMBER role, not locked', async () => {
-  const role = await resolveSignupRole({ kv: mirrorKv(freshMirror()), githubId: '12345', customer: paidCustomer, now: NOW });
-  assert.equal(role, 'member');
+  const r = await resolveSignupRole({ kv: mirrorKv(freshMirror()), githubId: '12345', customer: paidCustomer, now: NOW });
+  assert.equal(r.access, 'member');
 });
 
-test('sow-218: a BANNED member whose Stripe still says paid gets locked (ban outranks)', async () => {
-  // The fail-open this mirror read exists to prevent. Deriving from Stripe alone would hand them the member
-  // role, which is worse than the bug being fixed.
+test('sow-218: a BANNED member gets locked and NO badge, even holding a live coupon', async () => {
+  // A ban outranks a coupon everywhere else, so it must here too: otherwise a banned account buys its way back
+  // in with an invite code. Checked BEFORE the coupon is honoured.
   const mirror = freshMirror({ bans: { bans: [{ github_id: '12345', reason: 'test' }] } });
-  const role = await resolveSignupRole({ kv: mirrorKv(mirror), githubId: '12345', customer: paidCustomer, now: NOW });
-  assert.equal(role, 'locked');
+  const r = await resolveSignupRole({
+    kv: mirrorKv(mirror), githubId: '12345', customer: paidCustomer,
+    couponGrant: { until: '2027-08-11T00:00:00.000Z' }, now: NOW,
+  });
+  assert.deepEqual(r, { access: 'locked', creator: false });
 });
 
 test('sow-218: a grandfathered member with NO Stripe subscription still gets the member role', async () => {
   const mirror = freshMirror({ grandfathered: { grandfathered: [{ github_id: '12345', reason: 'comp' }] } });
-  const role = await resolveSignupRole({ kv: mirrorKv(mirror), githubId: '12345', customer: null, now: NOW });
-  assert.equal(role, 'member');
+  const r = await resolveSignupRole({ kv: mirrorKv(mirror), githubId: '12345', customer: null, now: NOW });
+  assert.equal(r.access, 'member');
 });
 
-test('sow-218: a STALE, absent or unreadable mirror withholds the grant (degrades to the old behaviour)', async () => {
+test('sow-218: a STALE, absent or unreadable mirror withholds the grant', async () => {
   const stale = freshMirror({ generatedAt: '2026-08-01T00:00:00.000Z' }); // older than the 48h bound
-  assert.equal(await resolveSignupRole({ kv: mirrorKv(stale), githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
-  assert.equal(await resolveSignupRole({ kv: mirrorKv(null), githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+  assert.equal((await resolveSignupRole({ kv: mirrorKv(stale), githubId: '12345', customer: paidCustomer, now: NOW })).access, 'locked');
+  assert.equal((await resolveSignupRole({ kv: mirrorKv(null), githubId: '12345', customer: paidCustomer, now: NOW })).access, 'locked');
   const throwingKv = { get: async () => { throw new Error('kv down'); } };
-  assert.equal(await resolveSignupRole({ kv: throwingKv, githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
-  assert.equal(await resolveSignupRole({ kv: null, githubId: '12345', customer: paidCustomer, now: NOW }), 'locked');
+  assert.equal((await resolveSignupRole({ kv: throwingKv, githubId: '12345', customer: paidCustomer, now: NOW })).access, 'locked');
+  assert.equal((await resolveSignupRole({ kv: null, githubId: '12345', customer: paidCustomer, now: NOW })).access, 'locked');
+});
+
+test('sow-218: a coupon invitee is still admitted when the mirror is unavailable', async () => {
+  // The grant lives in KV and needs no mirror to be true. Denying an invitee because an unrelated blob went
+  // stale would recreate the lockout this whole change exists to remove.
+  const r = await resolveSignupRole({
+    kv: mirrorKv(null), githubId: '12345', customer: null,
+    couponGrant: { until: '2027-08-11T00:00:00.000Z' }, now: NOW,
+  });
+  assert.deepEqual(r, { access: 'member', creator: true });
 });
 
 test('sow-218: runSignup ASSIGNS the resolved role, not a hardcoded one', async () => {
@@ -1374,4 +1393,46 @@ test('sow-218: runSignup ASSIGNS the resolved role, not a hardcoded one', async 
   // The join `roles` and the explicit addRole must stay symmetric: Discord ignores the join roles for a user
   // already in the guild, so the pair is what makes this work for both new and returning members.
   assert.deepEqual(discord.calls.addGuildMember[0].opts.roles, ['role-member'], 'and the join carries the same role');
+});
+
+test('sow-218: signup SWAPS roles, so a stale one cannot accumulate', async () => {
+  // The bug the owner caught in the live guild: the test account held Applicant AND Locked at once, because
+  // signup only ever ADDED. The trial role came from its first signup, Locked from a later Discord link, and
+  // nothing removed either. Only the daily reconcile swapped, so linking twice stacked roles until then.
+  const discord = fakeDiscord();
+  const CFG = { ...CONFIG, creatorRoleId: 'r-creator' };
+  await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CFG, now: NOW,
+  });
+  const added = discord.calls.addRole.map((c) => c.roleId);
+  const removed = discord.calls.removeRole.map((c) => c.roleId).sort();
+  assert.ok(added.includes('role-member'), 'the target access role is added');
+  assert.deepEqual(removed.filter((r) => r !== 'r-creator'), ['role-locked', 'role-trial'], 'BOTH other access roles are stripped');
+  assert.ok(!removed.includes('role-member'), 'and never the role just granted');
+});
+
+test('sow-218: a coupon invitee is badged Content Creator at link time, not a reconcile later', async () => {
+  const discord = fakeDiscord();
+  const CFG = { ...CONFIG, creatorRoleId: 'r-creator' };
+  const kv = { get: async (k) => (k === 'overrides:mirror' ? freshMirror() : null), put: async () => {} };
+  await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: null, created: { id: 'cus_new' } }), discord, kv,
+    config: CFG, coupon: 'CODEABLEYEAR', now: NOW,
+  });
+  // No coupon config is mirrored in this fixture, so redeemCoupon returns null and the member resolves from
+  // Stripe alone: the badge must then be REMOVED rather than granted. Fail-closed, and it proves the axis is
+  // driven by the resolution rather than by the mere presence of a coupon parameter.
+  assert.ok(discord.calls.removeRole.some((c) => c.roleId === 'r-creator'), 'no live grant -> no badge');
+});
+
+test('sow-218: the Creator badge is INERT until the role id is provisioned', async () => {
+  const discord = fakeDiscord();
+  await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW, // CONFIG has no creatorRoleId
+  });
+  const touched = [...discord.calls.addRole, ...discord.calls.removeRole].map((c) => c.roleId);
+  assert.ok(!touched.includes(undefined), 'never sends an undefined role id');
+  assert.ok(!touched.includes('r-creator'));
 });

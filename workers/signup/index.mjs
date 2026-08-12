@@ -51,6 +51,7 @@ import { resolveCustomerId, createCheckout } from './checkout.mjs';
 import { buildCheckoutPriceMap, resolveCheckoutPrice } from '../../membership/checkout-prices.mjs'; // sow-185 3b: multi-price allowlist
 import { validateCouponParam } from './coupons.mjs'; // SOW-119
 import { unlinkDiscord } from './discord-unlink.mjs'; // sow-218: disconnect Discord (roles first, then the link)
+import { buildEnvPriceTierMap } from '../../membership/tier-gate.mjs'; // sow-185: price -> tier map for the Creator badge
 import { startOnboarding } from './connect.mjs';
 import { verifyStripeSignature, isDuplicateEvent, markEventSeen, handleStripeEvent } from './webhook.mjs';
 import { membershipStatus } from './membership-status.mjs';
@@ -139,8 +140,15 @@ function discordConfig(env) {
     trialRoleId: env.DISCORD_TRIAL_ROLE_ID,
     memberRoleId: env.DISCORD_MEMBER_ROLE_ID,
     // sow-218: all three ids are now needed, because signup RESOLVES which one to assign (resolveSignupRole)
-    // rather than hardcoding one. `locked` is the fail-closed fallback, not the default.
+    // rather than hardcoding one, and SWAPS to it (stripping the other two). `locked` is the fail-closed
+    // fallback, not the default.
     lockedRoleId: env.DISCORD_LOCKED_ROLE_ID,
+    // sow-185: the stackable Content Creator badge, a separate axis from the exclusive access role. Unset ->
+    // signup touches it at all, matching how reconcile gates the same axis.
+    creatorRoleId: env.DISCORD_CREATOR_ROLE_ID,
+    // sow-185: so signup can resolve a paying subscriber's TIER for the badge above. Without it every price is
+    // unknown and resolves to `none` (fail closed), which withholds the badge until reconcile adds it.
+    priceTierMap: buildEnvPriceTierMap(env),
     signupSource: 'signup-worker',
   };
 }
