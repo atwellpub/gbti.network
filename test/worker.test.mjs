@@ -1372,6 +1372,30 @@ test('sow-218: a STALE, absent or unreadable mirror withholds the grant', async 
   assert.equal((await resolveSignupRole({ kv: null, githubId: '12345', customer: paidCustomer, now: NOW })).access, 'locked');
 });
 
+test('sow-218: an EXISTING coupon grant is read from KV, not just one redeemed in this run', async () => {
+  // The bug the owner caught in the live guild. A member who redeemed weeks ago and links Discord later sends
+  // NO coupon code, so couponGrant is null. Reading only the in-run value made the account fall through to the
+  // Stripe derivation, where a stale trial_started_at from before the trial retirement derived `trialing` and
+  // handed a Codeable invitee the retired Applicant role instead of Member plus Creator.
+  const withGrant = {
+    get: async (k) => (k === 'overrides:mirror' ? freshMirror()
+      : k === 'coupon-grant:12345' ? { code: 'CODEABLEYEAR', until: '2027-08-11T00:00:00.000Z' } : null),
+    put: async () => {},
+  };
+  const trialCustomer = { id: 'cus_old', metadata: { github_id: '12345', trial_started_at: '2026-07-01T00:00:00.000Z' } };
+  const r = await resolveSignupRole({ kv: withGrant, githubId: '12345', customer: trialCustomer, couponGrant: null, now: NOW });
+  assert.deepEqual(r, { access: 'member', creator: true }, 'the stored grant outranks a stale trial clock');
+});
+
+test('sow-218: without a grant, a stale trial clock still resolves to the trial role', async () => {
+  // The other half of the same behaviour, so the fix above is not just "always return member". A genuine
+  // mid-trial member keeps the trial role until their clock runs out.
+  const trialCustomer = { id: 'cus_old', metadata: { github_id: '12345', trial_started_at: '2026-07-01T00:00:00.000Z' } };
+  const r = await resolveSignupRole({ kv: mirrorKv(freshMirror()), githubId: '12345', customer: trialCustomer, now: NOW });
+  assert.equal(r.access, 'trial');
+  assert.equal(r.creator, false);
+});
+
 test('sow-218: a coupon invitee is still admitted when the mirror is unavailable', async () => {
   // The grant lives in KV and needs no mirror to be true. Denying an invitee because an unrelated blob went
   // stale would recreate the lockout this whole change exists to remove.

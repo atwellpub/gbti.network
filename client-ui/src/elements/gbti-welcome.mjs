@@ -380,7 +380,26 @@ class GbtiWelcome extends GbtiElement {
       const p = await this.client?.getPrefs?.();
       this._topicsCount = Array.isArray(p?.categories) ? p.categories.length : 0;
     } catch { this._topicsCount = 0; }
+    // Discord connectedness: localStorage FIRST, then the SERVER, which is the actual authority.
+    //
+    // This used to read localStorage alone, and localStorage is per-browser. A member who linked Discord on one
+    // machine and opened the welcome flow on another was shown "Connect Discord account" for an account that was
+    // already linked, and the resume logic counted the step as incomplete. Connecting again is not harmless
+    // either: it re-runs the whole signup chain to re-assign roles.
+    //
+    // The server read is what caught this. `discordLinkStatus` was already here, already fail-closed, and was
+    // only ever polled AFTER clicking connect, never consulted on load. A `true` from the server upgrades the
+    // local flag and writes it back, so the next load is instant; a `false` never downgrades a local `true`,
+    // because the poll fails closed and an unreachable Worker must not un-tick a step the member finished.
     try { this._discordJoined = localStorage.getItem(DISCORD_DONE_KEY) === '1'; } catch { this._discordJoined = false; }
+    if (!this._discordJoined && this.client?.discordLinkStatus) {
+      try {
+        if ((await this.client.discordLinkStatus())?.linked) {
+          this._discordJoined = true;
+          try { localStorage.setItem(DISCORD_DONE_KEY, '1'); } catch { /* storage blocked */ }
+        }
+      } catch { /* unreachable: keep the local answer */ }
+    }
     try {
       const raw = JSON.parse(localStorage.getItem(CHAN_FOLLOWED_KEY) || '[]');
       this._chanFollowed = new Set(Array.isArray(raw) ? raw : []);

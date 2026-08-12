@@ -16,7 +16,7 @@
 
 import { resolveReferral } from './referral.mjs';
 import { SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1c: validate the bound touch-session shape
-import { redeemCoupon } from './coupons.mjs'; // SOW-119
+import { redeemCoupon, readCouponGrant } from './coupons.mjs'; // SOW-119 (+ sow-218: read an EXISTING grant)
 import { discordRoleTarget, discordCreatorTarget, MANAGED_ACCESS_ROLES } from '../../membership/discord-roles.mjs'; // sow-218
 import { resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: override-aware paid tier
 import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs';
@@ -45,7 +45,23 @@ import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs
  * the fold lands: the same fast path membership-status.mjs uses to report a fresh redeemer as paid.
  */
 export async function resolveSignupRole({ kv, githubId, customer, couponGrant = null, priceTierMap = null, now = new Date() }) {
-  const couponLive = Boolean(couponGrant?.until && new Date(couponGrant.until).getTime() > now.getTime());
+  // READ THE EXISTING GRANT, do not rely on one redeemed in THIS run. `couponGrant` is only populated when a
+  // coupon code came in with the request, which happens on the coupon signup and never again. A member who
+  // redeemed weeks ago and links Discord later arrives with no code, so trusting only the in-run value made an
+  // invitee look like whatever Stripe alone said.
+  //
+  // That is not hypothetical: it is the bug the owner caught. The test account still carried a `trial_started_at`
+  // from a signup predating the trial retirement, so with no grant in hand it derived `trialing`, and
+  // discordRoleTarget mapped that to the Applicant role. A Codeable invitee was handed the retired trial role
+  // instead of Member plus Creator.
+  //
+  // readCouponGrant is the same KV fast path membership-status.mjs uses to report a coupon member as paid, and
+  // it already returns null for an expired window.
+  let grant = couponGrant;
+  if (!grant && kv) {
+    try { grant = await readCouponGrant(kv, githubId, now); } catch { grant = null; }
+  }
+  const couponLive = Boolean(grant?.until && new Date(grant.until).getTime() > now.getTime());
   try {
     const { status, tier: stripeTier } = deriveMembershipFromCustomer(customer, { priceTierMap, now });
     const mirror = await kv?.get(OVERRIDES_KV_KEY, 'json');

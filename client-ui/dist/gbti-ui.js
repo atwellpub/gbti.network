@@ -13389,6 +13389,18 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       } catch {
         this._discordJoined = false;
       }
+      if (!this._discordJoined && this.client?.discordLinkStatus) {
+        try {
+          if ((await this.client.discordLinkStatus())?.linked) {
+            this._discordJoined = true;
+            try {
+              localStorage.setItem(DISCORD_DONE_KEY, "1");
+            } catch {
+            }
+          }
+        } catch {
+        }
+      }
       try {
         const raw = JSON.parse(localStorage.getItem(CHAN_FOLLOWED_KEY) || "[]");
         this._chanFollowed = new Set(Array.isArray(raw) ? raw : []);
@@ -15971,6 +15983,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 From the author:
 
 "${sanitizeMentions(String(item.authorNote).trim())}"` : "",
+      // {author-note-quoted-italic}: the italicized note WITH its surrounding quotes, or EMPTY. Same
+      // empty-awareness as {author-note-block} above, for a template that wants the bare quoted note rather than
+      // the labelled paragraph. 2026-08-11: the stored reddit-comment template wrote the quotes itself around
+      // {author-note-italic}, so a note-less article syndicated to Reddit as a lone "". Punctuation that belongs
+      // to an optional value has to travel WITH it; a template cannot know whether the value showed up.
+      authornotequoteditalic: String(item.authorNote || "").trim() ? `"${sanitizeMentions(String(item.authorNote).trim()).split("\n").map((l) => l.trim() ? `*${l.trim()}*` : l).join("\n")}"` : "",
       memberurl: item.author ? `https://gbti.network/members/${encodeURIComponent(String(item.author))}/` : "",
       // {member-url}: the public profile
       shortdescription: sanitizeMentions(item.blurb || ""),
@@ -16000,7 +16018,7 @@ From the author:
     const text = String(template || "").replace(/\{([a-zA-Z-]+)\}/g, (_, name) => {
       const val = vars[name.toLowerCase().replace(/-/g, "")] ?? "";
       return name === name.toUpperCase() && /[A-Z]/.test(name) && !/^<@!?\d+>$/.test(val) ? val.toUpperCase() : val;
-    }).replace(/\\n/g, "\n").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    }).replace(/\\n/g, "\n").replace(/(^|\s)(""|''|“”|‘’|\(\)|\[\])(?=\s|$)/g, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
     return truncate(text, limit);
   }
   function renderBodyTemplate(template, item = {}, rawBody = "") {
