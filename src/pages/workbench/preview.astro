@@ -260,6 +260,12 @@ const labelOf = CATEGORY_LABELS;
       if (grid) grid.setAttribute('data-side', fm.sidebarPosition === 'right' ? 'right' : 'left');
       setImg('[data-pv-hero]', hero.image, hero.alt || fm.title || '');
 
+      // The category breadcrumb, resolved once: the product eyebrow below and the article lead both want it.
+      let labels: Record<string, string> = {};
+      try { labels = JSON.parse((root as HTMLElement).dataset.labels || '{}'); } catch { labels = {}; }
+      const cats = Array.isArray(fm.categories) ? fm.categories : [];
+      const catPath = cats.map((c: string) => labels[c] || c).join(' › ');
+
       // sow-214: an ARTICLE is not a product, and until now the preview rendered it as one. The published
       // page picks ArticleJournal / ArticleEditorial / ArticleCard from `layout`; this preview rendered every
       // type through the product Doc Shell, so an article preview was a different page from the article and
@@ -280,16 +286,39 @@ const labelOf = CATEGORY_LABELS;
         // Adopt the real article geometry. These classes already ship on this page: .art-* lives in
         // gbti-v3.css, which global.css imports and BaseLayout loads, so this needs no new CSS.
         const grid = document.querySelector('.pd-grid');
-        const rail = document.querySelector('.pd-rail');
+        const rail = document.querySelector('.pd-rail') as HTMLElement | null;
         const col = document.querySelector('.pd-col');
         if (grid) grid.className = shell.grid;
-        if (rail) rail.className = shell.rail;
         if (col) (col as HTMLElement).className = shell.column;
-        // The lead, built from the shared helper so its order cannot diverge from the published layout.
-        const coverHtml = hero.image ? `<img src="${esc(asset(hero.image, itemPath))}" alt="${esc(hero.alt || fm.title || '')}" />` : '';
-        const lead = buildArticleLeadHtml({ layout, title: fm.title || slug, coverHtml, caption: hero.alt || '' });
-        const article = document.getElementById('pd-overview');
-        if (article && lead) article.insertAdjacentHTML('beforebegin', lead);
+        // Card has no contents rail on the published page, so the preview must not invent one. Hiding rather
+        // than removing keeps the element for the toc wiring below, which queries it unconditionally.
+        if (rail) {
+          if (shell.rail) { rail.className = shell.rail; rail.hidden = false; }
+          else { rail.hidden = true; }
+        }
+        // sow-214 stage two: Editorial's grid is THREE columns (a narrow actions strip, the reading column,
+        // then the aside) and grid children take columns in source order. The preview has only two of those
+        // three, so without this the aside would land in the ~60px actions strip and the column would sit
+        // where the aside belongs. Emit the missing strip empty (the published page fills it with the
+        // save/share controls, which a draft preview deliberately omits) and move the rail to last.
+        if (grid && shell.spacer && !grid.querySelector(`.${shell.spacer}`)) {
+          const strip = document.createElement('div');
+          strip.className = shell.spacer;
+          grid.insertBefore(strip, grid.firstChild);
+        }
+        if (grid && rail && shell.railLast) grid.appendChild(rail);
+        // The lead, built from the shared helper so its shape cannot diverge from the published layout.
+        // Card carries its classes on the <img> itself; the other two wrap it, hence shell.cover here.
+        const coverCls = layout === 'card' ? ` class="${shell.cover}"` : '';
+        const coverHtml = hero.image ? `<img${coverCls} src="${esc(asset(hero.image, itemPath))}" alt="${esc(hero.alt || fm.title || '')}" />` : '';
+        const lead = buildArticleLeadHtml({
+          layout, title: fm.title || slug, coverHtml, caption: hero.alt || '', eyebrow: catPath,
+        });
+        // Editorial hoists its lead ABOVE the grid as a full-bleed hero, a sibling of it exactly as the
+        // published section has it; the other two open the reading column with it. `leadIn` is the contract's
+        // own record of which, so the two hosts cannot disagree about it.
+        const anchor = shell.leadIn === 'section' ? grid : document.getElementById('pd-overview');
+        if (anchor && lead) anchor.insertAdjacentHTML('beforebegin', lead);
       }
       setImg('[data-pv-mark]', fm.iconLarge || fm.icon);
       setImg('[data-pv-barmark]', fm.icon);
@@ -299,11 +328,8 @@ const labelOf = CATEGORY_LABELS;
       const bn = $('[data-pv-barname]'); if (bn) bn.textContent = title;
       const dsc = $('[data-pv-desc]'); if (dsc) dsc.textContent = fm.shortDescription || fm.excerpt || '';
 
-      let labels: Record<string, string> = {};
-      try { labels = JSON.parse((root as HTMLElement).dataset.labels || '{}'); } catch { labels = {}; }
-      const cats = Array.isArray(fm.categories) ? fm.categories : [];
       const eb = $('[data-pv-eyebrow]');
-      if (eb) eb.textContent = cats.length ? cats.map((c: string) => labels[c] || c).join(' › ') : type;
+      if (eb) eb.textContent = cats.length ? catPath : type;
 
       const cap = (s: string) => String(s).charAt(0).toUpperCase() + String(s).slice(1);
       const show = (sel: string, text: string) => {

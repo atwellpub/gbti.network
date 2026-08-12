@@ -1413,8 +1413,14 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 }
 .detail-edit:hover { color: var(--fg); border-color: var(--fg-mute); }
 .detail-edit svg { width: 15px; height: 15px; flex: none; }
-/* sow-183: the Card article layout's Edit pill sits inside the card's own padding, matching its clamp(). */
-.art-c-card { position: relative; }
+/* sow-183: the Card article layout's Edit pill sits inside the card's own padding, matching its clamp().
+   sow-214 stage two: the card's own geometry moved here from inline style attributes on ArticleCard.astro, so
+   the WorkBench preview can adopt the layout by class instead of copying a style string that would then be
+   free to drift. The clamp() below is the one the Edit pill already hard-coded to match, which is the tell
+   that it always belonged in this class. Defined after .card (line 184) so it wins at equal specificity. */
+.art-c-band { background: var(--paper-2); }
+.art-c-card { position: relative; max-width: 820px; padding: clamp(28px, 5vw, 56px); }
+.art-c-cover { border-radius: var(--r-lg); }
 .art-c-card .detail-edit { top: clamp(28px, 5vw, 56px); right: clamp(28px, 5vw, 56px); }
 /* sow-183: the prompt page's Edit pill sits inline beside the breadcrumb (not absolutely positioned) -- the
    header has no fixed-width constraint on the title, so an overlay risks colliding with a long one, same

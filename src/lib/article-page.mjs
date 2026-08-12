@@ -74,13 +74,22 @@ export function coverDimensions(layout) {
 // test/article-page.test.mjs, which compares the two skeletons and fails when one side moves alone.
 
 /**
- * The class + id contract for the JOURNAL layout, read by both hosts rather than typed as strings twice.
+ * The class + id contract for each article layout, read by both hosts rather than typed as strings twice.
  *
- * Journal ONLY, deliberately. Editorial and Card are not here because their structures genuinely differ
- * rather than being the same shape with different prefixes, and writing them from memory is how a
- * confident-looking table ends up wrong: Editorial's rail is `art-e-aside` and its cover is `art-e-hero`
- * with a second flat-header variant, and Card has no rail at all, using `art-c-card` with utility classes.
- * Each needs its own extraction read off its own component, which is the next stage of sow-214.
+ * sow-214 stage two: Editorial and Card joined Journal here, each read off its own component rather than
+ * written from memory. Stage one deliberately shipped Journal alone after a first draft of all three turned
+ * out to be invented, so the shape below is deliberately NOT a single template with three prefixes. The three
+ * layouts differ structurally, and the fields say how:
+ *
+ *   - `leadIn` is where the title/cover block belongs. Journal and Card put it inside the reading column;
+ *     Editorial hoists it above the grid as a full-bleed hero with the title overlaid on the image.
+ *   - `rail` is null for Card, which has no contents rail at all on the published page.
+ *   - `spacer` names the grid child Editorial needs but the preview cannot fill. `art-e-grid` is a THREE
+ *     column grid (actions strip, column, aside) and grid children take columns in source order, so a host
+ *     rendering only two of them would slot the aside into the 60px actions strip. The preview emits an empty
+ *     one rather than pretending the grid is two columns.
+ *   - `railLast` records that Editorial's aside is the LAST grid child while Journal's rail is the first.
+ *   - `overviewId` is false for Card, whose body wrapper carries no id because it has no rail to anchor.
  */
 export const ARTICLE_SHELL = Object.freeze({
   journal: Object.freeze({
@@ -92,6 +101,47 @@ export const ARTICLE_SHELL = Object.freeze({
     cover: 'art-j-cover',
     caption: 'art-j-cap',
     coverBeforeTitle: false, // Journal puts the title first, then the cover inset in the column
+    leadIn: 'column',
+    spacer: null,
+    railLast: false,
+    overviewId: true,
+  }),
+  editorial: Object.freeze({
+    section: 'art-shell band',
+    grid: 'art-e-grid art-wrap',
+    rail: 'art-e-aside',
+    column: 'art-e-col',
+    title: 'art-e-title',
+    cover: 'art-e-hero',
+    caption: 'art-e-cap',
+    // The title is nested INSIDE the hero rather than sequenced against it, so "cover before title" is true in
+    // the only sense a host needs: the image element opens the lead.
+    coverBeforeTitle: true,
+    leadIn: 'section',
+    spacer: 'art-e-actions-rail',
+    railLast: true,
+    overviewId: true,
+    // Editorial-only parts of the lead, named here because the preview builds the same markup.
+    coverInner: 'art-e-hero-in',
+    flatHeader: 'art-e-header-flat', // the no-cover variant: the same header without the image behind it
+    eyebrow: 'art-e-cats',
+    eyebrowItem: 'art-e-cat',
+  }),
+  card: Object.freeze({
+    section: 'band art-c-band',
+    grid: 'wrap',
+    rail: null,
+    column: 'card mx-auto art-c-card',
+    title: 'h1 mt-8',
+    cover: 'art-c-cover mt-32 w-full object-cover',
+    caption: 'mt-8 body-sm muted tcenter',
+    coverBeforeTitle: false,
+    leadIn: 'column',
+    spacer: null,
+    railLast: false,
+    overviewId: false,
+    header: 'tcenter',
+    eyebrow: 'eyebrow',
   }),
 });
 
@@ -99,11 +149,8 @@ export const ARTICLE_SHELL = Object.freeze({
 export const ARTICLE_LAYOUTS = Object.freeze(['journal', 'editorial', 'card']);
 
 /**
- * Resolve a layout name to its shell contract, defaulting exactly as the published page does.
- * Until Editorial and Card are extracted, they resolve to journal here, which means the preview renders a
- * journal-shaped article for them. That is a smaller lie than the current one (every article rendered as a
- * PRODUCT) and it is visible in the drift test rather than hidden, but it is still a lie and it is why the
- * remaining two layouts are the next stage rather than optional polish.
+ * Resolve a layout name to its shell contract, defaulting exactly as the published page does: an unknown or
+ * absent layout is a journal, matching [slug].astro's own fallback.
  */
 export function articleShell(layout) {
   return ARTICLE_SHELL[layout] ?? ARTICLE_SHELL.journal;
@@ -115,8 +162,8 @@ function esc(s) {
 }
 
 /**
- * Build an article's LEAD (title, cover, caption) in the order its layout uses, for a host that cannot
- * render Astro components.
+ * Build an article's LEAD (eyebrow, title, cover, caption) in the shape its layout uses, for a host that
+ * cannot render Astro components.
  *
  * The lead rather than the whole page, deliberately. The preview's rail, body injection, contents rail and
  * member toggle already work and are bound to existing elements, so replacing the whole document would
@@ -125,18 +172,32 @@ function esc(s) {
  * a heading followed by an inset cover and its caption. That is what is shared here, and the surrounding
  * geometry comes from ARTICLE_SHELL's class names, which both hosts read.
  *
+ * Three small builders rather than one parameterized template, because the three leads are genuinely three
+ * shapes: Journal sequences a heading then an inset cover, Card centres a header block above a plain image,
+ * and Editorial nests the heading INSIDE the cover as an overlay. Folding those into one function would mean
+ * a flag per difference, which is the config-blob version of the duplication this is meant to remove.
+ *
  * `coverHtml` is INJECTED because the hosts cannot emit the same element: the published page uses Astro's
  * build-time <Image>, the preview a plain <img> at a CDN URL.
  *
  * @param {object} args
- * @param {string} args.layout    'journal' (others fall back until they are extracted)
+ * @param {string} args.layout      'journal' | 'editorial' | 'card' (anything else is a journal)
  * @param {string} args.title
  * @param {string} [args.coverHtml] the caller's cover element, or '' for none
  * @param {string} [args.caption]   rendered under the cover, as coverAlt is on the page
+ * @param {string} [args.eyebrow]   the category breadcrumb; Journal has no eyebrow in its lead (it sits in
+ *                                  the rail instead), so it is ignored there rather than silently appearing
  * @returns {string}
  */
-export function buildArticleLeadHtml({ layout, title, coverHtml = '', caption = '' } = {}) {
+export function buildArticleLeadHtml({ layout, title, coverHtml = '', caption = '', eyebrow = '' } = {}) {
   const s = articleShell(layout);
+  if (s === ARTICLE_SHELL.editorial) return editorialLead(s, { title, coverHtml, caption, eyebrow });
+  if (s === ARTICLE_SHELL.card) return cardLead(s, { title, coverHtml, caption, eyebrow });
+  return journalLead(s, { title, coverHtml, caption });
+}
+
+/** Journal: the title, then the cover inset in the reading column with its caption under it. */
+function journalLead(s, { title, coverHtml, caption }) {
   const cover = coverHtml
     ? `<div class="${s.cover}">${coverHtml}</div>${caption ? `<p class="${s.caption}">${esc(caption)}</p>` : ''}`
     : '';
@@ -144,4 +205,29 @@ export function buildArticleLeadHtml({ layout, title, coverHtml = '', caption = 
   // Whether the cover leads is the single thing that makes a layout look different at a glance, so it
   // belongs in the shared contract rather than in a template where one host can change it alone.
   return s.coverBeforeTitle ? cover + heading : heading + cover;
+}
+
+/**
+ * Editorial: a full-bleed hero carrying the image with the eyebrow and title overlaid, then the caption as a
+ * SIBLING below it rather than inside. With no cover the component swaps to a flat header of the same parts,
+ * and so does this: the hero treatment needs an image behind it to be legible.
+ */
+function editorialLead(s, { title, coverHtml, caption, eyebrow }) {
+  const cats = eyebrow ? `<div class="${s.eyebrow}"><span class="${s.eyebrowItem}">${esc(eyebrow)}</span></div>` : '';
+  const heading = `<h1 data-gbti-region="title" class="${s.title}">${esc(title)}</h1>`;
+  if (!coverHtml) return `<div class="${s.flatHeader}">${cats}${heading}</div>`;
+  return `<div class="${s.cover}">${coverHtml}<div class="${s.coverInner}">${cats}${heading}</div></div>`
+    + (caption ? `<p class="${s.caption}">${esc(caption)}</p>` : '');
+}
+
+/**
+ * Card: a centred header (eyebrow, title) inside the reading card, then a plain full-width image with no
+ * wrapper element, then a centred caption. The cover carries its classes directly, which is why the
+ * contract's `cover` is a class list for a bare <img> here and a wrapper class in the other two.
+ */
+function cardLead(s, { title, coverHtml, caption, eyebrow }) {
+  const cats = eyebrow ? `<p class="${s.eyebrow}">${esc(eyebrow)}</p>` : '';
+  const header = `<header class="${s.header}">${cats}<h1 data-gbti-region="title" class="${s.title}">${esc(title)}</h1></header>`;
+  if (!coverHtml) return header;
+  return header + coverHtml + (caption ? `<p class="${s.caption}">${esc(caption)}</p>` : '');
 }
