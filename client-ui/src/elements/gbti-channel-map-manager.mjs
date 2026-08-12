@@ -450,7 +450,7 @@ class GbtiChannelMapManager extends GbtiElement {
       ? `<p style="margin:2px 0 12px;color:var(--muted);font-size:12px;line-height:1.5">dev.to cross-posts the full article body, so there are no per-type message templates here. Below: the byline is prepended and the CTA footer appended, and the ${vis === 'stub' ? 'stub body is the members-only teaser' : 'Body wraps the article ({body} = the full article verbatim)'}.</p>`
       : TMPL_TYPES.map((t) => `<div class="tmpl">
         <div class="tl"><div class="nm">${esc(t.nm)}</div><div class="df">${esc(t.df + custom(t.key))}</div></div>
-        <input class="ctrl" maxlength="500" data-tk="${esc(t.key)}" value="${esc(work[t.key] || '')}" /></div>`).join(''))
+        <textarea class="ctrl" maxlength="500" rows="3" data-tk="${esc(t.key)}">${esc(work[t.key] || '')}</textarea></div>`).join(''))
       + (cur === 'reddit'
         ? `<div class="tmpl"><div class="tl"><div class="nm">Reddit body</div><div class="df">${esc('the description under the title' + custom('reddit-body'))}</div></div>
             <textarea class="ctrl" maxlength="500" rows="3" data-tk="reddit-body">${esc(work['reddit-body'] || '')}</textarea></div>

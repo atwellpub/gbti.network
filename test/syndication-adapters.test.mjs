@@ -305,6 +305,28 @@ test('reddit: the auto rail renders the stored reddit-comment template when the 
   assert.equal(r.comment.id, 'c7');
 });
 
+// SOW-223: the four per-type template fields became textareas so a template can carry a line break. On every
+// other channel that break renders into message BODY text, which is the point. On Reddit the SAME per-type
+// template IS the post title (templateFor with channelOnly resolves channel_templates.reddit.<type>), and a
+// title cannot hold one, so the adapter flattens it rather than the shared admin UI special-casing Reddit.
+test('reddit: a newline in the per-type title template is flattened to a space (SOW-223)', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    if (url.includes('/api/v1/access_token')) return { ok: true, status: 200, json: async () => ({ access_token: 'at1' }) };
+    return { ok: true, status: 200, json: async () => ({ json: { errors: [], data: { id: 'x3', name: 't3_x3', url: 'https://r/x3' } } }) };
+  };
+  const env = { REDDIT_CLIENT_ID: 'id', REDDIT_CLIENT_SECRET: 'sec', REDDIT_REFRESH_TOKEN: 'rt', REDDIT_SUBREDDIT: 'GBTI_network' };
+  const cfg = { channel_templates: { reddit: { post: 'New article\n\n{title}' } } };
+  const { createRedditAdapter } = await import('../clients/syndication/reddit.mjs');
+  const rd = createRedditAdapter({ env, fetchImpl, cfg });
+  await rd.post({ ...item, source: 'post', redditKind: 'link' });
+  const submit = calls.find((c) => String(c.url).includes('/api/submit'));
+  const title = new URLSearchParams(submit.opts.body).get('title');
+  assert.ok(!/[\r\n]/.test(title), `the Reddit title must not contain a line break, got ${JSON.stringify(title)}`);
+  assert.match(title, /^New article /);
+});
+
 // sow-180: a SHARE is someone else's link, so it never AUTO-renders the member-crediting reddit-comment.
 test('reddit: a share does not auto-post the crediting first comment (sow-180)', async () => {
   const calls = [];

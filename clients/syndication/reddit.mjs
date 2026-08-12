@@ -40,7 +40,13 @@ export function createRedditAdapter({ env = {}, fetchImpl = globalThis.fetch, cf
       // adversarial finding: it previously ignored the template system entirely via buildChannelText).
       const stubish = item.membersOnly === true || String(item.visibility || '') === 'members';
       const autoTitle = cfg ? renderTemplate(templateFor(cfg, item.source, 'reddit', { stub: stubish, channelOnly: true }) || '{title}', item, { limit: channelLimit('reddit') }) : buildChannelText(item, { limit: channelLimit('reddit'), includeUrl: false });
-      const title = ((typeof item.textOverride === 'string' && item.textOverride.trim()) ? item.textOverride : autoTitle).slice(0, channelLimit('reddit'));
+      // SOW-223: a Reddit TITLE cannot hold a line break, and since 2026-08-12 the per-type template fields
+      // are textareas, so an admin can type one into cfg.channel_templates.reddit.<type> - which IS this
+      // title (templateFor with channelOnly resolves exactly that key). Every other consumer of those four
+      // fields renders message BODY text, where the break is the point, so the constraint is enforced here
+      // at the one channel that has it rather than by special-casing the shared admin UI.
+      const title = ((typeof item.textOverride === 'string' && item.textOverride.trim()) ? item.textOverride : autoTitle)
+        .replace(/\s*\n+\s*/g, ' ').slice(0, channelLimit('reddit'));
       let token;
       try { token = await refreshAccessToken(env, fetchImpl); }
       catch (err) { return { ok: false, error: err.message }; }

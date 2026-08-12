@@ -254,6 +254,10 @@ export function renderTemplate(template, item = {}, { limit = 2000, previewMenti
     // 2-char backslash-n, not a real break) becomes an actual newline, so the paragraph breaks post as intended
     // instead of showing the text "\n\n". Real newlines are untouched; a run of 3+ collapses to a blank line so
     // an empty token (a note-less item) does not leave a big gap.
+    // SOW-223 (2026-08-12): the per-type template fields became textareas, so a break is now typed directly
+    // and nothing in house/syndication-config.yml still uses the 2-char form. KEEP THIS ANYWAY. It reads as
+    // dead code precisely because no current template needs it, and deleting it would silently flatten any
+    // template still authored the old way. It is a legacy fallback, not a leftover.
     .replace(/\\n/g, '\n')
     // 2026-08-11 safety net: punctuation a template wrapped around a token that resolved to NOTHING. The
     // quotes are the case that shipped (a note-less article posted a lone "" to Reddit), but templates are
