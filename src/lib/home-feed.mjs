@@ -124,25 +124,46 @@ export function feedCounts(contentItems = [], shareItems = []) {
   return { all: network + shares, news: null, network, articles: c.article, products: c.product, prompts: c.prompt, shares };
 }
 
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 /**
- * sow-192 (homepage v2): bucket a set of day-stamps (epoch ms) into `cells` heatmap cells across the
- * min..max span, returning a level per cell: 0 for an empty cell, else 1..4 scaled RELATIVE to the busiest
- * cell (so a dense commit history reads as a proper contribution graph rather than saturating every cell at
- * 4). Pure and testable; the homepage feeds it git commit dates (see git-history.commitsByDate). An empty
- * input returns all zeros, so a shallow clone with no history renders a blank band.
+ * sow-206 (homepage v2): bucket git commit dates into the LAST `months` calendar months ending at the month
+ * containing `nowMs`, returning one bucket per month oldest -> newest as { key: 'YYYY-MM', label, year, count }.
+ * This replaces the sow-192 `heatCells` contribution-grid, which borrowed GitHub's column-major weekly grammar
+ * while plotting a transposed, drifting axis (a cell was 1/252 of the whole repo lifetime) and so read as
+ * noise. A month is a real, fixed bucket, so a simple bar chart over these is honest and legible.
+ *
+ * Input is `commitsByDate()` shape: an array of [isoDay 'YYYY-MM-DD', count]. UTC is used throughout so the
+ * result does not depend on the build machine's timezone, and `nowMs` is a parameter so callers stay
+ * deterministic and testable (the homepage passes Date.now() at build). Pure. Fail-closed: an empty or
+ * invalid input returns the months zeroed, so a shallow clone renders an empty-but-valid chart.
  */
-export function heatCells(stamps, cells) {
-  const n = Math.max(0, cells | 0);
-  const clean = (stamps || []).filter((t) => typeof t === 'number' && t > 0).sort((a, b) => a - b);
-  const out = new Array(n).fill(0);
-  if (!clean.length || n === 0) return out;
-  const min = clean[0];
-  const span = Math.max(1, clean[clean.length - 1] - min);
-  const counts = new Array(n).fill(0);
-  for (const t of clean) counts[Math.min(n - 1, Math.floor(((t - min) / span) * n))]++;
-  const max = Math.max(...counts);
-  if (max === 0) return out;
-  return counts.map((c) => (c === 0 ? 0 : Math.max(1, Math.ceil((c / max) * 4))));
+export function commitsByMonth(dateCounts, months, nowMs) {
+  const n = Math.max(0, months | 0);
+  if (n === 0) return [];
+  const now = new Date(nowMs);
+  const anchorY = now.getUTCFullYear();
+  const anchorM = now.getUTCMonth(); // 0..11
+  const buckets = [];
+  const byKey = new Map();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(anchorY, anchorM - i, 1)); // JS normalizes a negative month across years
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    const key = `${y}-${String(m + 1).padStart(2, '0')}`;
+    const bucket = { key, label: MONTH_ABBR[m], year: y, count: 0 };
+    byKey.set(key, bucket);
+    buckets.push(bucket);
+  }
+  for (const entry of dateCounts || []) {
+    if (!Array.isArray(entry)) continue;
+    const day = entry[0];
+    const c = entry[1];
+    if (typeof day !== 'string' || typeof c !== 'number' || !(c > 0)) continue;
+    const bucket = byKey.get(day.slice(0, 7)); // 'YYYY-MM'
+    if (bucket) bucket.count += c;
+  }
+  return buckets;
 }
 
 /**

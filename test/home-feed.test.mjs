@@ -2,7 +2,7 @@
 // SOW-018 reversal), the New & Popular ranking, tag aggregation, and relative time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, heatCells, personalizeOrder } from '../src/lib/home-feed.mjs';
+import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, commitsByMonth, personalizeOrder } from '../src/lib/home-feed.mjs';
 
 test('decodeEntities resolves numeric + common named entities in scraped share metadata', () => {
   assert.equal(decodeEntities('WordPress Down &#8211; SQL Injection'), 'WordPress Down – SQL Injection');
@@ -28,20 +28,29 @@ test('feedCounts (sow-192): per-tab counts from the build arrays, news is null, 
   assert.equal(c.news, null); // runtime worker data has no build-time count
 });
 
-test('heatCells (sow-192): empty input is all zeros; levels are 1..4 scaled to the busiest cell', () => {
-  assert.deepEqual(heatCells([], 5), [0, 0, 0, 0, 0]);
-  assert.deepEqual(heatCells(undefined, 3), [0, 0, 0]);
-  assert.deepEqual(heatCells([100, 200], 0), []);
-  // day 1 has 1 commit, day 10 (the max span) has 4 -> busiest cell = 4, so day-10 cell is level 4 and
-  // the day-1 cell is level 1; empty middle cells stay 0.
-  const D = (n) => new Date(2026, 0, n).valueOf();
-  const cells = heatCells([D(1), D(10), D(10), D(10), D(10)], 4);
-  assert.equal(cells.length, 4);
-  assert.equal(cells[0], 1); // the single early commit
-  assert.equal(cells[3], 4); // the four late commits are the busiest cell
-  assert.ok(cells.every((l) => l >= 0 && l <= 4));
-  // non-numeric / non-positive stamps are ignored, not counted
-  assert.deepEqual(heatCells([0, -5, NaN, 'x'], 3), [0, 0, 0]);
+test('commitsByMonth (sow-206): last N calendar months, UTC-anchored, fail-closed, buckets [isoDay,count]', () => {
+  const NOW = Date.UTC(2026, 7, 11); // 2026-08-11 (August), UTC-anchored so the test is TZ-independent
+  // Empty / invalid inputs return the months zeroed (a shallow clone renders an empty-but-valid chart).
+  assert.deepEqual(commitsByMonth([], 0, NOW), []);
+  const empty = commitsByMonth([], 12, NOW);
+  assert.equal(empty.length, 12);
+  assert.ok(empty.every((m) => m.count === 0));
+  // The window is the 12 months ending in the anchor month, oldest -> newest.
+  assert.equal(empty[0].key, '2025-09'); // Sep 2025
+  assert.equal(empty[0].label, 'Sep');
+  assert.equal(empty[11].key, '2026-08'); // Aug 2026 (the anchor)
+  assert.equal(empty[11].label, 'Aug');
+  assert.equal(empty[11].year, 2026);
+  // Real buckets: days in the same month sum; a commit outside the window is dropped; malformed rows ignored.
+  const months = commitsByMonth(
+    [['2026-08-01', 3], ['2026-08-30', 2], ['2026-07-15', 4], ['2020-01-01', 99], ['bad', 1], ['2026-06-10', 'x'], 'nope'],
+    12,
+    NOW,
+  );
+  assert.equal(months.find((m) => m.key === '2026-08').count, 5); // 3 + 2
+  assert.equal(months.find((m) => m.key === '2026-07').count, 4);
+  assert.equal(months.find((m) => m.key === '2026-06').count, 0); // 'x' count ignored
+  assert.equal(months.reduce((n, m) => n + m.count, 0), 9); // the 2020 + malformed rows never counted
 });
 
 test('personalizeOrder (sow-192 Phase D): defaults to newest-first over every row', () => {
