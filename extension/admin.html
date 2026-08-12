@@ -1,8 +1,20 @@
 <!doctype html>
 <!-- SOW-036/038: the GBTI extension's Admin page, inside the shared member-hub shell (top bar + left rail injected
-     by shell.mjs). Mounts <gbti-admin> (role-gated moderation/admin tools, SOW-006 AD1). <gbti-admin> self-gates on
-     the signed-in role and the SOW-005 gate + CODEOWNERS are the real boundary, so opening it is harmless for a
-     plain member. Reached from the avatar menu's "Admin tools" entry (shown only for moderator+). -->
+     by shell.mjs). Reached from the avatar menu's "Admin tools" entry (shown only for moderator+).
+
+     sow-228: THE STAFF SURFACE LIVES IN AN INERT <template> AND IS CLONED IN ONLY FOR A RESOLVED STAFF ROLE.
+     This comment used to say opening the page "is harmless for a plain member" because <gbti-admin> self-gates.
+     That was true when the page mounted ONE panel; it grew to EIGHT and only that one ever self-gated, so the
+     sentence outlived the behaviour it described and the page shipped ungated. The nav link was hidden by
+     [data-admin-only] the whole time: we hid the entrance and never locked the door.
+
+     The panels are in a <template> rather than merely hidden because template content is INERT by spec -- it does
+     not render and its custom elements do NOT upgrade -- so for a non-staff visitor no panel ever mounts and no
+     admin request is ever issued. `display:none` would still ship the markup and still fire every load.
+
+     THE CLIENT GATE IS DISCLOSURE CONTROL, NOT THE BOUNDARY. The Worker's authorizeStaff/authorizeAdmin, the
+     SOW-005 gate and CODEOWNERS remain the authority. Adding a panel here does NOT make it safe: put it inside
+     the template, and give it a server-side check of its own. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -35,6 +47,14 @@
     .admin-tab.on { background: var(--green); color: #fff; }
     [data-panel] { display: none; }
     [data-panel].on { display: block; }
+    /* sow-228: the non-staff notice. `[hidden]` is asserted with !important because an explicit display on the
+       element would otherwise beat the UA's [hidden]{display:none} and leak the denial to a legitimate admin. */
+    [hidden] { display: none !important; }
+    .admin-deny { max-width: 640px; margin: 24px auto; padding: 26px 28px; border: 1.5px solid var(--line); border-radius: 16px; background: var(--paper); text-align: center; }
+    .admin-deny h2 { font-family: var(--f-display); font-weight: 700; font-size: 19px; letter-spacing: -.005em; margin: 0 0 10px; }
+    .admin-deny p { color: var(--fg-mute); font-size: 14px; line-height: 1.55; margin: 0 0 8px; }
+    .admin-deny a { color: var(--green); font-weight: 600; text-decoration: none; }
+    .admin-deny a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -43,6 +63,17 @@
       <div class="nt-top" data-topbar>
         <div><h1 class="hub-h">Admin tools</h1><p class="hub-sub">Governance and moderation.</p></div>
       </div>
+      <!-- sow-228: shown only when the role resolves BELOW moderator. Never shown while the role is still
+           unresolved, so a legitimate admin does not see a denial flash on a slow status call. -->
+      <div class="admin-deny" data-admin-deny hidden>
+        <h2>These tools are for moderators and above</h2>
+        <p>Your account is signed in, but it does not carry a staff role, so there is nothing to show here.
+          If you believe that is wrong, ask a superadmin to check your role.</p>
+        <p><a href="newtab.html">Back to the feed</a></p>
+      </div>
+      <!-- sow-228: INERT until cloned by admin.mjs for a resolved staff role. Nothing in here renders, upgrades,
+           or issues a request for a non-staff visitor. A NEW PANEL GOES INSIDE THIS TEMPLATE. -->
+      <template data-admin-panels>
       <div class="admin-tabs" role="tablist">
         <button class="admin-tab on" type="button" data-tab="members">Members</button>
         <button class="admin-tab" type="button" data-tab="moderation">Moderation</button>
@@ -95,6 +126,7 @@
           <div class="admin-card-b"><div class="admin-sub"><gbti-channel-map-manager></gbti-channel-map-manager></div></div>
         </section>
       </div>
+      </template>
     </main>
   </div>
   <script src="dist/admin.js"></script>

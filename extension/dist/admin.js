@@ -18824,6 +18824,12 @@ From the author:
   function shouldGate(status) {
     return !(status?.authenticated && status?.identity?.login);
   }
+  function shouldGateStaff(status) {
+    if (shouldGate(status)) return true;
+    if (typeof status.role !== "string") return true;
+    const rank = RANK5[status.role];
+    return typeof rank !== "number" || rank < RANK5.moderator;
+  }
   var _lastStatus = null;
   async function loadShellAccount(root = document.querySelector("[data-shell]")) {
     const status = await api("/api/status");
@@ -19327,32 +19333,56 @@ From the author:
 
   // extension/src/admin.mjs
   mountPageClient();
-  initShell({ active: "admin", nav: "workbench" });
+  var shell = initShell({ active: "admin", nav: "workbench" });
   var ADMIN_TAB_KEY = "gbti-admin-tab";
-  var adminTabs = Array.from(document.querySelectorAll("[data-tab]"));
-  var adminPanels = Array.from(document.querySelectorAll("[data-panel]"));
-  function showAdminTab(name) {
-    if (!adminPanels.some((p) => p.dataset.panel === name)) name = "members";
-    adminTabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === name));
-    adminPanels.forEach((p) => p.classList.toggle("on", p.dataset.panel === name));
+  function wireAdminTabs() {
+    const adminTabs = Array.from(document.querySelectorAll("[data-tab]"));
+    const adminPanels = Array.from(document.querySelectorAll("[data-panel]"));
+    function showAdminTab(name) {
+      if (!adminPanels.some((p) => p.dataset.panel === name)) name = "members";
+      adminTabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === name));
+      adminPanels.forEach((p) => p.classList.toggle("on", p.dataset.panel === name));
+      try {
+        localStorage.setItem(ADMIN_TAB_KEY, name);
+      } catch (e) {
+      }
+    }
+    adminTabs.forEach((t) => t.addEventListener("click", () => showAdminTab(t.dataset.tab)));
+    function tabFromHash() {
+      const m = /(?:^|[#&])tab=([a-z-]+)/.exec(location.hash || "");
+      return m && adminPanels.some((p) => p.dataset.panel === m[1]) ? m[1] : null;
+    }
+    let initialAdminTab = "members";
     try {
-      localStorage.setItem(ADMIN_TAB_KEY, name);
+      initialAdminTab = localStorage.getItem(ADMIN_TAB_KEY) || "members";
     } catch (e) {
     }
+    showAdminTab(tabFromHash() || initialAdminTab);
+    window.addEventListener("hashchange", () => {
+      const t = tabFromHash();
+      if (t) showAdminTab(t);
+    });
   }
-  adminTabs.forEach((t) => t.addEventListener("click", () => showAdminTab(t.dataset.tab)));
-  function tabFromHash() {
-    const m = /(?:^|[#&])tab=([a-z-]+)/.exec(location.hash || "");
-    return m && adminPanels.some((p) => p.dataset.panel === m[1]) ? m[1] : null;
+  var revealed = false;
+  function revealAdminPanels() {
+    if (revealed) return;
+    const tpl = document.querySelector("template[data-admin-panels]");
+    if (!tpl) return;
+    revealed = true;
+    tpl.replaceWith(tpl.content.cloneNode(true));
+    wireAdminTabs();
   }
-  var initialAdminTab = "members";
-  try {
-    initialAdminTab = localStorage.getItem(ADMIN_TAB_KEY) || "members";
-  } catch (e) {
+  function showAdminDenied() {
+    const deny = document.querySelector("[data-admin-deny]");
+    if (deny) deny.hidden = false;
   }
-  showAdminTab(tabFromHash() || initialAdminTab);
-  window.addEventListener("hashchange", () => {
-    const t = tabFromHash();
-    if (t) showAdminTab(t);
+  shell.loadShellAccount().then((status) => {
+    if (!status) return;
+    if (shouldGateStaff(status)) {
+      showAdminDenied();
+      return;
+    }
+    revealAdminPanels();
+  }).catch(() => {
   });
 })();

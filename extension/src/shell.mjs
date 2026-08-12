@@ -251,6 +251,23 @@ export function shouldGate(status) {
   return !(status?.authenticated && status?.identity?.login);
 }
 
+/** sow-228: the STAFF gate decision for admin.html (PURE, testable). Same contract as shouldGate: TRUE means DENY.
+ *  `data-admin-only` hid the rail's Admin LINK at moderator and up, but the PAGE had no check and is directly
+ *  navigable, so any signed-in member who reached the URL got the whole staff surface. Uses RANK.moderator so the
+ *  entrance and the door share one threshold; if they ever diverge we are back to this defect.
+ *  FAILS CLOSED on purpose: signed out, malformed, or a role this build does not recognize all deny. An
+ *  unrecognized role must render nothing rather than everything, including one a future release adds.
+ *  This is UX and disclosure control, NEVER the boundary. The Worker's authorizeStaff/authorizeAdmin, the SOW-005
+ *  gate and CODEOWNERS remain the authority; do not let a green client gate justify relaxing any of them. */
+export function shouldGateStaff(status) {
+  if (shouldGate(status)) return true;
+  // Require a STRING before the lookup. `RANK[['admin']]` coerces the array to the key 'admin' and would otherwise
+  // resolve to rank 2, so a non-string role is denied on its type rather than on its stringification.
+  if (typeof status.role !== 'string') return true;
+  const rank = RANK[status.role];
+  return typeof rank !== 'number' || rank < RANK.moderator;
+}
+
 // The last raw /api/status, kept so the gate can tell an EXPIRED session (token died) from a never-signed-in one
 // and label the splash accordingly. Not exported; read only by initShell's gate handler.
 let _lastStatus = null;
