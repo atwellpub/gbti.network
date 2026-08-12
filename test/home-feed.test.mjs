@@ -2,7 +2,7 @@
 // SOW-018 reversal), the New & Popular ranking, tag aggregation, and relative time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, commitsByMonth, personalizeOrder } from '../src/lib/home-feed.mjs';
+import { feedTime, sortByNewest, isPublicShare, rankNewAndPopular, aggregateTags, relativeTime, readMinutes, decodeEntities, matchesNarrow, chunkPages, newsTargetSlug, utmUrl, feedCounts, commitsHeatGrid, personalizeOrder } from '../src/lib/home-feed.mjs';
 
 test('decodeEntities resolves numeric + common named entities in scraped share metadata', () => {
   assert.equal(decodeEntities('WordPress Down &#8211; SQL Injection'), 'WordPress Down – SQL Injection');
@@ -28,29 +28,34 @@ test('feedCounts (sow-192): per-tab counts from the build arrays, news is null, 
   assert.equal(c.news, null); // runtime worker data has no build-time count
 });
 
-test('commitsByMonth (sow-206): last N calendar months, UTC-anchored, fail-closed, buckets [isoDay,count]', () => {
-  const NOW = Date.UTC(2026, 7, 11); // 2026-08-11 (August), UTC-anchored so the test is TZ-independent
-  // Empty / invalid inputs return the months zeroed (a shallow clone renders an empty-but-valid chart).
-  assert.deepEqual(commitsByMonth([], 0, NOW), []);
-  const empty = commitsByMonth([], 12, NOW);
-  assert.equal(empty.length, 12);
-  assert.ok(empty.every((m) => m.count === 0));
-  // The window is the 12 months ending in the anchor month, oldest -> newest.
-  assert.equal(empty[0].key, '2025-09'); // Sep 2025
-  assert.equal(empty[0].label, 'Sep');
-  assert.equal(empty[11].key, '2026-08'); // Aug 2026 (the anchor)
-  assert.equal(empty[11].label, 'Aug');
-  assert.equal(empty[11].year, 2026);
-  // Real buckets: days in the same month sum; a commit outside the window is dropped; malformed rows ignored.
-  const months = commitsByMonth(
-    [['2026-08-01', 3], ['2026-08-30', 2], ['2026-07-15', 4], ['2020-01-01', 99], ['bad', 1], ['2026-06-10', 'x'], 'nope'],
-    12,
-    NOW,
-  );
-  assert.equal(months.find((m) => m.key === '2026-08').count, 5); // 3 + 2
-  assert.equal(months.find((m) => m.key === '2026-07').count, 4);
-  assert.equal(months.find((m) => m.key === '2026-06').count, 0); // 'x' count ignored
-  assert.equal(months.reduce((n, m) => n + m.count, 0), 9); // the 2020 + malformed rows never counted
+test('commitsHeatGrid (sow-206): column-major weeks, adaptive+capped window, quartile levels, fail-closed', () => {
+  const NOW = Date.UTC(2026, 7, 12); // Wed 2026-08-12, UTC-anchored so the test is TZ-independent
+  // Fail-closed: no commits -> a full `cap`-week grid of zero-level cells (a shallow clone renders empty-valid).
+  const empty = commitsHeatGrid([], 53, NOW);
+  assert.equal(empty.weeks.length, 53);
+  assert.equal(empty.total, 0);
+  assert.equal(empty.weekdayLabels[0], 'Sun');
+  assert.ok(empty.weeks.every((wk) => wk.length === 7)); // every column is 7 weekdays
+  // Each column is a WEEK read top-to-bottom, Sun..Sat, so consecutive days in a column are +1 day apart.
+  const someWeek = empty.weeks[10].filter(Boolean);
+  for (let i = 1; i < someWeek.length; i++) {
+    assert.equal(Date.parse(someWeek[i].date + 'T00:00:00Z') - Date.parse(someWeek[i - 1].date + 'T00:00:00Z'), 86_400_000);
+  }
+  // The window ADAPTS to the first commit (short history -> few columns), not the full cap.
+  const g = commitsHeatGrid([['2026-08-03', 6], ['2026-08-10', 2], ['2026-08-10', 3], ['bad', 1], ['2026-08-04', 'x']], 53, NOW);
+  assert.ok(g.weeks.length <= 3); // ~2-3 weeks of history, not 53
+  const cells = g.weeks.flat().filter(Boolean);
+  assert.equal(cells.find((c) => c.date === '2026-08-10').count, 5); // 2 + 3 same-day
+  assert.equal(cells.find((c) => c.date === '2026-08-03').count, 6);
+  assert.equal(cells.find((c) => c.date === '2026-08-04').count, 0); // 'x' count ignored, still a real 0-day
+  assert.equal(g.total, 11); // malformed rows never counted
+  // Future days of the current week (after NOW = Wed) are null, not zero cells.
+  const lastCol = g.weeks[g.weeks.length - 1];
+  assert.equal(lastCol[6], null); // Saturday is after Wednesday
+  // Per-cell title carries the exact count + a human date, so accuracy is verifiable by hovering.
+  assert.equal(cells.find((c) => c.date === '2026-08-10').title, '5 commits on Aug 10, 2026');
+  // Quartile levels are 0..4 and 0 exactly when the day has no commits.
+  assert.ok(cells.every((c) => c.level >= 0 && c.level <= 4 && (c.count === 0) === (c.level === 0)));
 });
 
 test('personalizeOrder (sow-192 Phase D): defaults to newest-first over every row', () => {

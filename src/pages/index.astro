@@ -24,7 +24,7 @@ import { getCollection } from 'astro:content';
 import { isListed, byNewest } from '../lib/content';
 import { authorDisplay, authorHref } from '../lib/authors';
 import { loadFeedItems } from '../lib/feed-items';
-import { sortByNewest, rankNewAndPopular, aggregateTags, feedCounts, commitsByMonth } from '../lib/home-feed.mjs';
+import { sortByNewest, rankNewAndPopular, aggregateTags, feedCounts, commitsHeatGrid } from '../lib/home-feed.mjs';
 import { commitsByDate, commitCount } from '../lib/git-history';
 import { FIRST_TOUCH_PCT, SIGNUP_BASE } from '../lib/membership';
 
@@ -91,15 +91,14 @@ const personalizeData = {
   tags,
 };
 
-// sow-206: an honest commits-per-month bar chart (this replaced the sow-192 contribution-grid, which borrowed
-// GitHub's column-major weekly grammar while plotting a transposed, drifting axis and so read as noise).
-// commitsByDate() reads the whole repo history at build and is fail-closed to empty on a shallow clone;
-// commitsByMonth buckets it into the last 12 real calendar months. The counters below stay honest, non-windowed
-// totals (no reads/installs/"this week"): commits / articles / products / prompts / members. The deploy build
-// checks out at fetch-depth: 0, so production has the full history (a shallow/git-less build renders an empty band).
-const months = commitsByMonth(commitsByDate(), 12, Date.now());
-const maxMonth = Math.max(1, ...months.map((m) => m.count));
-const monthsTotal = months.reduce((n, m) => n + m.count, 0);
+// sow-206: a genuine, LABELED GitHub-style commit contribution graph (owner elected this over an earlier
+// sow-192 grid that borrowed the contribution-graph look while plotting a transposed, drifting axis, and over
+// a monthly bar chart). commitsByDate() reads the whole repo history at build (fail-closed to empty on a
+// shallow clone); commitsHeatGrid maps it to real day cells, weeks as columns, from the first commit through
+// this week (capped at a rolling year), with per-cell counts so accuracy is verifiable. The counters below stay
+// honest, non-windowed totals: commits / articles / products / prompts / members. The deploy build checks out
+// at fetch-depth: 0, so production has the full history (a shallow/git-less build renders an empty band).
+const heatGrid = commitsHeatGrid(commitsByDate(), 53, Date.now());
 const memberCount = profiles.length;
 const actStats = [
   { n: commitCount(), l: 'commits' },
@@ -350,15 +349,21 @@ const SHOPTALK = {
       <a href="https://github.com/gbti-network/gbti.network" class="link">View the public repo <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
     </div>
     <div class="card act-card">
-      <p class="mono" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-mute);margin-bottom:16px">Commits per month, last 12 months</p>
-      <div class="act-bars" role="img" aria-label={`${monthsTotal} commit${monthsTotal === 1 ? '' : 's'} across the repository over the last 12 months`}>
-        {months.map((m) => (
-          <div class="act-bar" title={`${m.label} ${m.year}: ${m.count} commit${m.count === 1 ? '' : 's'}`}>
-            <div class="act-bar-track"><div class="act-bar-fill" style={`height:${m.count ? Math.max(8, Math.round((m.count / maxMonth) * 100)) : 0}%`}></div></div>
-            <span class="act-bar-x">{m.label.slice(0, 1)}</span>
-          </div>
-        ))}
+      <p class="mono" style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg-mute);margin-bottom:16px">Commit activity</p>
+      <div class="cgraph">
+        <div class="cg-months" style={`grid-template-columns:repeat(${heatGrid.weeks.length},var(--cg-cell))`} aria-hidden="true">
+          {heatGrid.monthLabels.map((ml) => <span style={`grid-column:${ml.col + 1}`}>{ml.label}</span>)}
+        </div>
+        <div class="cg-wd" aria-hidden="true"><span style="grid-row:2">Mon</span><span style="grid-row:4">Wed</span><span style="grid-row:6">Fri</span></div>
+        <div class="cg-cells" role="img" aria-label={`${heatGrid.total} commit${heatGrid.total === 1 ? '' : 's'} across the repository over the last ${heatGrid.weeks.length} weeks`}>
+          {heatGrid.weeks.map((week) => week.map((day) => (
+            day
+              ? <span class={day.level ? `l${day.level}` : undefined} title={day.title}></span>
+              : <span class="cg-future" aria-hidden="true"></span>
+          )))}
+        </div>
       </div>
+      <div class="cg-legend"><span>Less</span><i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span>More</span></div>
       <div class="act-stats">
         {actStats.map((s) => <div class="stat"><div class="n">{s.n}</div><div class="l">{s.l}</div></div>)}
       </div>

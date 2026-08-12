@@ -125,45 +125,86 @@ export function feedCounts(contentItems = [], shareItems = []) {
 }
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MS_PER_DAY = 86_400_000;
+const humanDate = (iso) => {
+  const [y, mo, d] = iso.split('-');
+  return `${MONTH_ABBR[Number(mo) - 1]} ${Number(d)}, ${y}`;
+};
 
 /**
- * sow-206 (homepage v2): bucket git commit dates into the LAST `months` calendar months ending at the month
- * containing `nowMs`, returning one bucket per month oldest -> newest as { key: 'YYYY-MM', label, year, count }.
- * This replaces the sow-192 `heatCells` contribution-grid, which borrowed GitHub's column-major weekly grammar
- * while plotting a transposed, drifting axis (a cell was 1/252 of the whole repo lifetime) and so read as
- * noise. A month is a real, fixed bucket, so a simple bar chart over these is honest and legible.
+ * sow-206: build a GitHub-style commit contribution graph from git commit dates. This is the honest, LABELED
+ * form of the homepage activity grid: each cell is a REAL day, each column is a calendar week read top-to-bottom
+ * (Sun..Sat), and columns advance through time left-to-right, so the visual grammar (columns are weeks) finally
+ * matches the data. (The sow-192 `heatCells` grid was the opposite: a flat time-ordered array filled row-major,
+ * so time wrapped like text, and a cell was 1/252 of the whole repo lifetime.)
  *
- * Input is `commitsByDate()` shape: an array of [isoDay 'YYYY-MM-DD', count]. UTC is used throughout so the
- * result does not depend on the build machine's timezone, and `nowMs` is a parameter so callers stay
- * deterministic and testable (the homepage passes Date.now() at build). Pure. Fail-closed: an empty or
- * invalid input returns the months zeroed, so a shallow clone renders an empty-but-valid chart.
+ * Input is `commitsByDate()` shape: an array of [isoDay 'YYYY-MM-DD', count]. The window is the week of the
+ * FIRST commit through the current week, capped at `maxWeeks` (so a young repo fills leftward and a mature one
+ * shows a rolling ~year). UTC throughout so the result is timezone-independent; `nowMs` is a parameter so the
+ * homepage (which passes Date.now() at build) stays deterministic and testable. Pure. Fail-closed: empty/invalid
+ * input returns an all-zero grid, so a shallow clone renders an empty-but-valid graph.
+ *
+ * Returns { weeks, monthLabels, weekdayLabels, total } where `weeks` is an array of columns, each a length-7
+ * array of Day | null (null = a future day in the current week). A Day is { date, count, level, title }; `level`
+ * is 0 for an empty day else 1..4 by QUARTILE over the window's busy days (a stable scale, not one relative to a
+ * single spike). `monthLabels` is { col, label } for each column that starts a new month.
  */
-export function commitsByMonth(dateCounts, months, nowMs) {
-  const n = Math.max(0, months | 0);
-  if (n === 0) return [];
-  const now = new Date(nowMs);
-  const anchorY = now.getUTCFullYear();
-  const anchorM = now.getUTCMonth(); // 0..11
-  const buckets = [];
-  const byKey = new Map();
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(anchorY, anchorM - i, 1)); // JS normalizes a negative month across years
-    const y = d.getUTCFullYear();
-    const m = d.getUTCMonth();
-    const key = `${y}-${String(m + 1).padStart(2, '0')}`;
-    const bucket = { key, label: MONTH_ABBR[m], year: y, count: 0 };
-    byKey.set(key, bucket);
-    buckets.push(bucket);
-  }
+export function commitsHeatGrid(dateCounts, maxWeeks, nowMs) {
+  const cap = Math.max(1, maxWeeks | 0);
+  const counts = new Map();
+  let firstMs = Infinity;
   for (const entry of dateCounts || []) {
     if (!Array.isArray(entry)) continue;
     const day = entry[0];
     const c = entry[1];
-    if (typeof day !== 'string' || typeof c !== 'number' || !(c > 0)) continue;
-    const bucket = byKey.get(day.slice(0, 7)); // 'YYYY-MM'
-    if (bucket) bucket.count += c;
+    if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+    if (typeof c !== 'number' || !(c > 0)) continue;
+    counts.set(day, (counts.get(day) || 0) + c);
+    const ms = Date.parse(`${day}T00:00:00Z`);
+    if (Number.isFinite(ms) && ms < firstMs) firstMs = ms;
   }
-  return buckets;
+  const today = Math.floor(nowMs / MS_PER_DAY) * MS_PER_DAY; // 00:00Z of the current day
+  const lastWeekStart = today - new Date(today).getUTCDay() * MS_PER_DAY; // Sunday of this week
+  const capStart = lastWeekStart - (cap - 1) * 7 * MS_PER_DAY;
+  const firstWeekStart = firstMs === Infinity
+    ? capStart
+    : Math.max(firstMs - new Date(firstMs).getUTCDay() * MS_PER_DAY, capStart);
+  const numWeeks = Math.round((lastWeekStart - firstWeekStart) / (7 * MS_PER_DAY)) + 1;
+
+  const isoOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const weeks = [];
+  const monthLabels = [];
+  const nonzero = [];
+  let total = 0;
+  let prevMonth = -1;
+  for (let w = 0; w < numWeeks; w++) {
+    const colStart = firstWeekStart + w * 7 * MS_PER_DAY;
+    const days = [];
+    for (let d = 0; d < 7; d++) {
+      const ms = colStart + d * MS_PER_DAY;
+      if (ms > today) { days.push(null); continue; } // a future day in the current week
+      const iso = isoOf(ms);
+      const count = counts.get(iso) || 0;
+      total += count;
+      if (count > 0) nonzero.push(count);
+      days.push({ date: iso, count, level: 0, title: `${count} commit${count === 1 ? '' : 's'} on ${humanDate(iso)}` });
+    }
+    weeks.push(days);
+    const m = new Date(colStart).getUTCMonth();
+    if (m !== prevMonth) { monthLabels.push({ col: w, label: MONTH_ABBR[m] }); prevMonth = m; }
+  }
+
+  // Quartile thresholds over the busy days (GitHub-style: the scale adapts to the repo, not to one spike).
+  nonzero.sort((a, b) => a - b);
+  const at = (p) => (nonzero.length ? nonzero[Math.min(nonzero.length - 1, Math.floor(p * nonzero.length))] : 0);
+  const q1 = at(0.25);
+  const q2 = at(0.5);
+  const q3 = at(0.75);
+  const levelOf = (c) => (c <= 0 ? 0 : c <= q1 ? 1 : c <= q2 ? 2 : c <= q3 ? 3 : 4);
+  for (const week of weeks) for (const day of week) if (day) day.level = levelOf(day.count);
+
+  return { weeks, monthLabels, weekdayLabels: WEEKDAY_ABBR, total };
 }
 
 /**

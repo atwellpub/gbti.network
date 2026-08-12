@@ -344,14 +344,22 @@ section { position: relative; }
 .heat .l1, .heat-legend .l1 { background: #bfe6d0; } .heat .l2, .heat-legend .l2 { background: #7fd0a3; } .heat .l3, .heat-legend .l3 { background: #44b378; } .heat .l4, .heat-legend .l4 { background: var(--green-600); }
 .heat-legend { display: flex; align-items: center; gap: 6px; margin-top: 14px; font-family: var(--f-mono); font-size: 11px; color: var(--fg-mute); }
 .heat-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-/* sow-206: the honest commits-per-month bar chart that replaced the .heat contribution-grid on the homepage
-   (the .heat rules above stay for the archived /home/v1/ page). One bar per month over the last 12 months;
-   a nonzero month is floored to a visible height, an empty month is a zero-height bar that keeps the axis. */
-.act-bars { display: flex; align-items: stretch; gap: 6px; height: 132px; margin-top: 4px; }
-.act-bar { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.act-bar-track { flex: 1; display: flex; align-items: flex-end; }
-.act-bar-fill { width: 100%; max-width: 30px; margin: 0 auto; background: var(--green); border-radius: 4px 4px 2px 2px; }
-.act-bar-x { margin-top: 8px; text-align: center; font-family: var(--f-mono); font-size: 10px; color: var(--fg-mute); }
+/* sow-206: the labeled, accurate GitHub-style commit contribution graph that replaced the bar chart on the
+   homepage (the .heat rules above stay for the archived /home/v1/ page). Real day cells, weeks as columns
+   (grid-auto-flow:column is the column-major fix), fixed square cells, month + weekday labels, quartile colors. */
+.cgraph { --cg-cell: 15px; --cg-gap: 4px; display: grid; grid-template-columns: auto auto; column-gap: 8px; row-gap: 5px; width: max-content; max-width: 100%; margin: 6px auto 2px; overflow-x: auto; }
+.cg-months { grid-column: 2; grid-row: 1; display: grid; column-gap: var(--cg-gap); font-family: var(--f-mono); font-size: 10px; color: var(--fg-mute); }
+.cg-months span { grid-row: 1; justify-self: start; white-space: nowrap; }
+.cg-wd { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cg-cell)); row-gap: var(--cg-gap); align-items: center; font-family: var(--f-mono); font-size: 9.5px; color: var(--fg-mute); }
+.cg-cells { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cg-cell)); grid-auto-flow: column; grid-auto-columns: var(--cg-cell); gap: var(--cg-gap); }
+.cg-cells span { width: var(--cg-cell); height: var(--cg-cell); border-radius: 3px; background: var(--tint); }
+.cg-cells span.cg-future { background: transparent; }
+.cg-cells .l1, .cg-legend .l1 { background: #bfe6d0; }
+.cg-cells .l2, .cg-legend .l2 { background: #7fd0a3; }
+.cg-cells .l3, .cg-legend .l3 { background: #44b378; }
+.cg-cells .l4, .cg-legend .l4 { background: var(--green-600); }
+.cg-legend { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 14px; font-family: var(--f-mono); font-size: 11px; color: var(--fg-mute); }
+.cg-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; background: var(--tint); }
 .act-stats { display: flex; gap: 30px; margin-top: auto; padding-top: 26px; }
 .pr-card { padding: 8px; min-width: 0; }
 .pr-head { font-family: var(--f-mono); font-size: 11px; letter-spacing: .12em; color: var(--fg-mute); padding: 14px 14px 12px; text-transform: uppercase; }
@@ -1180,8 +1188,8 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .feed-empty { font-family: var(--f-mono); font-size: 13px; color: var(--fg-mute); text-align: center; margin: 30px 0; }
 .feed-empty[hidden] { display: none; }
 
-/* sow-206: the .heat-wide grid variant was removed with the homepage contribution-grid; the #activity band
-   now renders the commits-per-month bar chart (.act-bars). The stat row stays centered under it. */
+/* sow-206: the old .heat-wide grid variant was removed; the #activity band now renders the labeled commit
+   contribution graph (.cgraph). The stat row stays centered under it. */
 #activity .act-stats { justify-content: center; gap: 56px; }
 
 /* sow-136 QA: the nine-offer join section at the homepage bottom (codeable-invite card style). Each
