@@ -81,3 +81,35 @@ test('no dist/articles: reports a note, no errors', () => {
   assert.ok(notes.some((n) => n.includes('dist/articles not found')));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// sow-219 (2026-08-11): an article may carry a from-the-author note, and ContentFooter's skipAuthorBox then
+// DROPS the "Written by" box, because the pinned note already carries the byline. This guard demanded the
+// AuthorBox unconditionally, so the very first article published with a note failed the deploy build. The
+// markup below is copied from a real built product page that has a note, not invented.
+const NOTE_INSTEAD_OF_AUTHORBOX = `
+  <div class="art-j-rail">rail stuff</div>
+  <section class="dark community-invite" style="max-width:820px">Join the GBTI Network</section>
+  <section id="comments">
+    <article class="card"><div><p class="eyebrow" style="color:var(--green-700)">From the author</p>
+    <a href="/members/gbtilabs/" class="link">GBTI Network</a></div></article>
+  </section>
+`;
+
+test('an article whose AuthorBox is replaced by a pinned author note still passes', () => {
+  const root = tmpRoot();
+  writeArticle(root, 'post-with-a-note', `<html><body>${NOTE_INSTEAD_OF_AUTHORBOX}</body></html>`);
+  const { errors } = checkArticleClosingSlot({ root });
+  assert.deepEqual(errors, [], 'a note is a valid substitute for the Written by box, not a missing element');
+});
+
+test('a page with NEITHER the AuthorBox nor a note still fails (the invariant is attribution, not laxity)', () => {
+  const root = tmpRoot();
+  writeArticle(root, 'post-with-no-attribution', '<html><body>'
+    + '<div class="art-j-rail">rail</div>'
+    + '<section class="dark community-invite">Join</section>'
+    + '<section id="comments">0 Comments</section>'
+    + '</body></html>');
+  const { errors } = checkArticleClosingSlot({ root });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /author attribution/);
+});

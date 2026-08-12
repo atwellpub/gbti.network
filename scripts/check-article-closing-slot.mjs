@@ -22,9 +22,15 @@ import { fileURLToPath } from 'node:url';
 // <style> block's selector text, which is how an earlier debugging session was misled by "community-invite"
 // alone -- that string also appears in an unrelated global `.community-invite{display:none}` rule on every
 // page regardless of whether the section itself rendered).
+// A marker may be an ARRAY, meaning any one of them satisfies the check.
 const CLOSING_SLOT_MARKERS = [
   ['CommunityInvite ("Join the GBTI Network")', 'class="dark community-invite"'],
-  ['AuthorBox ("Written by")', 'class="author-box mx-auto"'],
+  // sow-219 (2026-08-11): an article can now carry a from-the-author note, and ContentFooter's skipAuthorBox
+  // DELIBERATELY drops the "Written by" box when it does, because the pinned note already carries the byline.
+  // This entry required the AuthorBox specifically, so the first article published with a note failed the
+  // build. The real invariant is that the page attributes its author ONE of the two ways.
+  ['the author attribution (AuthorBox "Written by", or the pinned "From the author" note)',
+    ['class="author-box mx-auto"', 'style="color:var(--green-700)">From the author<']],
   ['Comments section', 'id="comments"'],
 ];
 
@@ -60,7 +66,8 @@ export function checkArticleClosingSlot({ root, distDir = path.join(root, 'dist'
     checked++;
     const html = fs.readFileSync(file, 'utf8');
     for (const [label, marker] of CLOSING_SLOT_MARKERS) {
-      if (!html.includes(marker)) {
+      const anyOf = Array.isArray(marker) ? marker : [marker];
+      if (!anyOf.some((m) => html.includes(m))) {
         errors.push(`articles/${slug}/: missing ${label} -- the ContentFooter closing-slot content did not render. A non-literal slot attribute on any ONE slotted child in [slug].astro or an Article*.astro layout silently drops every OTHER statically-slotted sibling (this exact bug shipped once, see sow-183); check for that first.`);
       }
     }
