@@ -68,6 +68,17 @@ export function ogPreviewState({ og = null, error = null } = {}) {
     if (code === 'not_authenticated' || code === 'not-authenticated' || code === 'http-401') {
       return { kind: 'error', message: 'Sign in to fetch a link preview.', retry: false };
     }
+    // A validation refusal already carries a specific, member-readable reason from the Worker ("only http(s)
+    // URLs are allowed", "that host is not allowed"). Surface it instead of the generic line, and do NOT
+    // offer a retry, since the same URL will be refused again.
+    //
+    // This does not weaken the SSRF posture, which is a guardrail this SOW names explicitly: every blocked
+    // host gets the same sentence whether or not anything is listening there, so nothing about internal
+    // hosts is revealed by the difference between two responses.
+    if (code === 'invalid_url' || code === 'bad_request') {
+      const detail = String(error?.message || '').trim();
+      return { kind: 'error', message: detail && detail !== code ? `We cannot preview that link: ${detail}` : 'We cannot preview that link.', retry: false };
+    }
     // The code is appended rather than swallowed: a generic apology is what made this undiagnosable.
     return { kind: 'error', message: `We could not fetch a preview for that link.${code ? ` (${code})` : ''}`, retry: true };
   }

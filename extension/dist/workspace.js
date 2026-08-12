@@ -8756,6 +8756,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (code === "not_authenticated" || code === "not-authenticated" || code === "http-401") {
         return { kind: "error", message: "Sign in to fetch a link preview.", retry: false };
       }
+      if (code === "invalid_url" || code === "bad_request") {
+        const detail = String(error?.message || "").trim();
+        return { kind: "error", message: detail && detail !== code ? `We cannot preview that link: ${detail}` : "We cannot preview that link.", retry: false };
+      }
       return { kind: "error", message: `We could not fetch a preview for that link.${code ? ` (${code})` : ""}`, retry: true };
     }
     if (og && (og.title || og.description || og.image)) return { kind: "card", message: "", retry: false };

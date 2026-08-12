@@ -58,6 +58,30 @@ test('an unauthenticated failure gets its own sentence and no retry button', () 
   }
 });
 
+// A validation refusal already has a specific, member-readable reason. It is shown instead of the generic
+// line, with no retry, because the same URL will be refused identically the second time.
+test('a validation refusal shows the server reason and offers no retry', () => {
+  const s = ogPreviewState({ error: new WorkbenchClientError('invalid_url', 'only http(s) URLs are allowed') });
+  assert.equal(s.kind, 'error');
+  assert.equal(s.message, 'We cannot preview that link: only http(s) URLs are allowed');
+  assert.equal(s.retry, false);
+});
+
+test('a validation refusal with no usable detail still reads as a sentence, not as a bare code', () => {
+  for (const e of [new WorkbenchClientError('invalid_url'), new WorkbenchClientError('bad_request', 'bad_request')]) {
+    const s = ogPreviewState({ error: e });
+    assert.equal(s.message, 'We cannot preview that link.', 'the code must not be shown as the message');
+  }
+});
+
+// The SSRF guardrail this SOW names: making failure visible must not reveal whether an internal host exists.
+// Every blocked host is refused with the SAME sentence, so no pair of responses can be compared to learn one.
+test('every blocked host is refused identically, so nothing leaks about internal hosts', () => {
+  const refuse = (host) => ogPreviewState({ error: new WorkbenchClientError('invalid_url', 'that host is not allowed') }).message;
+  assert.equal(refuse('127.0.0.1'), refuse('10.0.0.5'));
+  assert.equal(refuse('169.254.169.254'), refuse('a-host-that-does-not-exist.internal'));
+});
+
 // The Worker's four collapsed outcomes, now told apart. Reasons mirror membership-og.mjs.
 test('each Worker reason becomes its own sentence', () => {
   const m = (reason) => ogPreviewState({ og: { ok: true, title: null, image: null, description: null, reason } });
