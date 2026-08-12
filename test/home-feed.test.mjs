@@ -28,9 +28,9 @@ test('feedCounts (sow-192): per-tab counts from the build arrays, news is null, 
   assert.equal(c.news, null); // runtime worker data has no build-time count
 });
 
-test('commitsHeatGrid (sow-206): column-major weeks, adaptive+capped window, quartile levels, fail-closed', () => {
+test('commitsHeatGrid (sow-206): column-major weeks, fixed rolling window, quartile levels, fail-closed', () => {
   const NOW = Date.UTC(2026, 7, 12); // Wed 2026-08-12, UTC-anchored so the test is TZ-independent
-  // Fail-closed: no commits -> a full `cap`-week grid of zero-level cells (a shallow clone renders empty-valid).
+  // Fail-closed: no commits -> a full `maxWeeks`-week grid of zero-level cells (a shallow clone renders empty-valid).
   const empty = commitsHeatGrid([], 53, NOW);
   assert.equal(empty.weeks.length, 53);
   assert.equal(empty.total, 0);
@@ -41,9 +41,9 @@ test('commitsHeatGrid (sow-206): column-major weeks, adaptive+capped window, qua
   for (let i = 1; i < someWeek.length; i++) {
     assert.equal(Date.parse(someWeek[i].date + 'T00:00:00Z') - Date.parse(someWeek[i - 1].date + 'T00:00:00Z'), 86_400_000);
   }
-  // The window ADAPTS to the first commit (short history -> few columns), not the full cap.
+  // The window is FIXED at `maxWeeks` columns ending this week (fills the container), NOT adaptive to history.
   const g = commitsHeatGrid([['2026-08-03', 6], ['2026-08-10', 2], ['2026-08-10', 3], ['bad', 1], ['2026-08-04', 'x']], 53, NOW);
-  assert.ok(g.weeks.length <= 3); // ~2-3 weeks of history, not 53
+  assert.equal(g.weeks.length, 53);
   const cells = g.weeks.flat().filter(Boolean);
   assert.equal(cells.find((c) => c.date === '2026-08-10').count, 5); // 2 + 3 same-day
   assert.equal(cells.find((c) => c.date === '2026-08-03').count, 6);

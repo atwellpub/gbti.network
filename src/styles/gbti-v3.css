@@ -346,19 +346,24 @@ section { position: relative; }
 .heat-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 /* sow-206: the labeled, accurate GitHub-style commit contribution graph that replaced the bar chart on the
    homepage (the .heat rules above stay for the archived /home/v1/ page). Real day cells, weeks as columns
-   (grid-auto-flow:column is the column-major fix), fixed square cells, month + weekday labels, quartile colors. */
-.cgraph { --cg-cell: 15px; --cg-gap: 4px; display: grid; grid-template-columns: auto auto; column-gap: 8px; row-gap: 5px; width: max-content; max-width: 100%; margin: 6px auto 2px; overflow-x: auto; }
-.cg-months { grid-column: 2; grid-row: 1; display: grid; column-gap: var(--cg-gap); font-family: var(--f-mono); font-size: 10px; color: var(--fg-mute); }
-.cg-months span { grid-row: 1; justify-self: start; white-space: nowrap; }
-.cg-wd { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cg-cell)); row-gap: var(--cg-gap); align-items: center; font-family: var(--f-mono); font-size: 9.5px; color: var(--fg-mute); }
-.cg-cells { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: repeat(7, var(--cg-cell)); grid-auto-flow: column; grid-auto-columns: var(--cg-cell); gap: var(--cg-gap); }
-.cg-cells span { width: var(--cg-cell); height: var(--cg-cell); border-radius: 3px; background: var(--tint); }
+   (grid-auto-flow:column is the column-major fix), month + weekday labels, quartile colors. It FILLS the card
+   width: the cells wrapper is width:100% with an inline aspect-ratio (weeks/7) + repeat(weeks,1fr) columns, so
+   the 53-week year spans the container and every cell stays square and responsive. */
+/* On a narrow viewport the 53-week year cannot shrink to unreadable slivers, so the graph scrolls inside its
+   own wrapper (GitHub does the same on mobile); the wrapper is capped at 100% so the PAGE never overflows. */
+.cgraph-wrap { max-width: 100%; overflow-x: auto; }
+.cgraph { --cg-gap: 3px; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 6px; width: 100%; min-width: 620px; margin: 6px 0 2px; }
+.cg-months { grid-column: 2; grid-row: 1; display: grid; font-family: var(--f-mono); font-size: 10px; color: var(--fg-mute); }
+.cg-months span { grid-row: 1; justify-self: start; white-space: nowrap; overflow: visible; }
+.cg-wd { grid-column: 1; grid-row: 2; display: grid; grid-template-rows: repeat(7, 1fr); row-gap: var(--cg-gap); align-items: center; font-family: var(--f-mono); font-size: 9.5px; color: var(--fg-mute); }
+.cg-cells { grid-column: 2; grid-row: 2; width: 100%; display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; gap: var(--cg-gap); }
+.cg-cells span { border-radius: 2px; background: var(--tint); min-width: 0; }
 .cg-cells span.cg-future { background: transparent; }
 .cg-cells .l1, .cg-legend .l1 { background: #bfe6d0; }
 .cg-cells .l2, .cg-legend .l2 { background: #7fd0a3; }
 .cg-cells .l3, .cg-legend .l3 { background: #44b378; }
 .cg-cells .l4, .cg-legend .l4 { background: var(--green-600); }
-.cg-legend { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 14px; font-family: var(--f-mono); font-size: 11px; color: var(--fg-mute); }
+.cg-legend { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 14px; font-family: var(--f-mono); font-size: 11px; color: var(--fg-mute); }
 .cg-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; background: var(--tint); }
 .act-stats { display: flex; gap: 30px; margin-top: auto; padding-top: 26px; }
 .pr-card { padding: 8px; min-width: 0; }

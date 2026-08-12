@@ -139,11 +139,12 @@ const humanDate = (iso) => {
  * matches the data. (The sow-192 `heatCells` grid was the opposite: a flat time-ordered array filled row-major,
  * so time wrapped like text, and a cell was 1/252 of the whole repo lifetime.)
  *
- * Input is `commitsByDate()` shape: an array of [isoDay 'YYYY-MM-DD', count]. The window is the week of the
- * FIRST commit through the current week, capped at `maxWeeks` (so a young repo fills leftward and a mature one
- * shows a rolling ~year). UTC throughout so the result is timezone-independent; `nowMs` is a parameter so the
- * homepage (which passes Date.now() at build) stays deterministic and testable. Pure. Fail-closed: empty/invalid
- * input returns an all-zero grid, so a shallow clone renders an empty-but-valid graph.
+ * Input is `commitsByDate()` shape: an array of [isoDay 'YYYY-MM-DD', count]. The window is a FIXED rolling
+ * `maxWeeks` weeks ending at the current week (a full year at 53), so the graph always fills the container
+ * width and reads like GitHub's year view: a young repo shows its recent activity on the right with empty
+ * weeks before it, and fills in over time. UTC throughout so the result is timezone-independent; `nowMs` is a
+ * parameter so the homepage (which passes Date.now() at build) stays deterministic and testable. Pure.
+ * Fail-closed: empty/invalid input returns an all-zero grid, so a shallow clone renders an empty-but-valid graph.
  *
  * Returns { weeks, monthLabels, weekdayLabels, total } where `weeks` is an array of columns, each a length-7
  * array of Day | null (null = a future day in the current week). A Day is { date, count, level, title }; `level`
@@ -151,9 +152,8 @@ const humanDate = (iso) => {
  * single spike). `monthLabels` is { col, label } for each column that starts a new month.
  */
 export function commitsHeatGrid(dateCounts, maxWeeks, nowMs) {
-  const cap = Math.max(1, maxWeeks | 0);
+  const numWeeks = Math.max(1, maxWeeks | 0);
   const counts = new Map();
-  let firstMs = Infinity;
   for (const entry of dateCounts || []) {
     if (!Array.isArray(entry)) continue;
     const day = entry[0];
@@ -161,16 +161,10 @@ export function commitsHeatGrid(dateCounts, maxWeeks, nowMs) {
     if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
     if (typeof c !== 'number' || !(c > 0)) continue;
     counts.set(day, (counts.get(day) || 0) + c);
-    const ms = Date.parse(`${day}T00:00:00Z`);
-    if (Number.isFinite(ms) && ms < firstMs) firstMs = ms;
   }
   const today = Math.floor(nowMs / MS_PER_DAY) * MS_PER_DAY; // 00:00Z of the current day
   const lastWeekStart = today - new Date(today).getUTCDay() * MS_PER_DAY; // Sunday of this week
-  const capStart = lastWeekStart - (cap - 1) * 7 * MS_PER_DAY;
-  const firstWeekStart = firstMs === Infinity
-    ? capStart
-    : Math.max(firstMs - new Date(firstMs).getUTCDay() * MS_PER_DAY, capStart);
-  const numWeeks = Math.round((lastWeekStart - firstWeekStart) / (7 * MS_PER_DAY)) + 1;
+  const firstWeekStart = lastWeekStart - (numWeeks - 1) * 7 * MS_PER_DAY; // a fixed rolling window of numWeeks
 
   const isoOf = (ms) => new Date(ms).toISOString().slice(0, 10);
   const weeks = [];
