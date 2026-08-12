@@ -12,6 +12,7 @@ import { GbtiElement, define, esc } from '../base.mjs';
 import { buildBell, markSeen } from '../activity-bell.mjs';
 import { canSeeShares, toMs } from '../all-merge.mjs';
 import { buildReadHash } from '../browse-hash.mjs';
+import { relTime, absTime } from '../time-core.mjs'; // sow-221 follow-up: the shared "time ago" + its tooltip
 import { prLifecycle } from '../workspace-core.mjs'; // SOW-072 P2: the shared PR-lifecycle model (rejection never silent)
 
 const SITE = 'https://gbti.network';
@@ -277,7 +278,15 @@ class GbtiActivityBell extends GbtiElement {
           const rows = g.items.slice(0, 8).map((it) => {
             const cls = un.has(it.id) ? 'it unread' : 'it';
             const ext = /^https?:\/\//.test(it.href) ? ' target="_blank" rel="noopener"' : '';
-            return `<a class="${cls}" href="${esc(it.href)}"${ext}><span class="t">${esc(it.title)}</span><span class="s">${esc(it.sub || '')}</span></a>`;
+            // sow-221 follow-up: a notification list is the surface where "when" matters most, and this one
+            // showed no time at all even though `ts` was already computed for sorting and the unread
+            // watermark. Appended to the existing subtitle rather than given its own line, so the row keeps
+            // its two-line shape. An item with no usable ts renders exactly as before, separator included.
+            const when = relTime(it.ts);
+            const abs = when ? absTime(it.ts) : '';
+            const sub = `${esc(it.sub || '')}${when ? `${it.sub ? ' · ' : ''}${esc(when)}` : ''}`;
+            return `<a class="${cls}" href="${esc(it.href)}"${ext}${abs ? ` title="${esc(abs)}"` : ''}>`
+              + `<span class="t">${esc(it.title)}</span><span class="s">${sub}</span></a>`;
           }).join('');
           const moreN = g.items.length - Math.min(g.items.length, 8);
           return `<div class="grp"><div class="grp-h">${esc(g.label)}${g.unread ? `<span class="n">${g.unread}</span>` : ''}</div>${rows}${moreN > 0 ? `<div class="it s" style="color:var(--muted)">+${moreN} more</div>` : ''}</div>`;

@@ -6,6 +6,10 @@
 // when a comment for its target is posted/edited. The token never reaches the page.
 import { GbtiElement, define, esc } from '../base.mjs';
 import { wbCacheGet, wbCacheSet } from '../workbench-cache.mjs'; // SOW-089: SWR for the thread
+// sow-221 follow-up: the private relTime that used to live here flattened everything under 24 hours to
+// "today". The shared one reports "3 hours ago", which is what the owner asked for and what the content
+// cards already did, so this surface disagreed with those for same-day items. One definition now.
+import { relTime } from '../time-core.mjs';
 import './gbti-comment-box.mjs';
 import { RANK } from '../mod-actions-core.mjs'; // SOW-071: the moderator+ gate for per-comment Hide
 
@@ -52,18 +56,6 @@ const CSS = `
   .empty { color:var(--muted); font-size:12.5px; margin:0 0 8px; }
 `;
 
-function relTime(iso) {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  const diff = Date.now() - t, day = 86400000;
-  if (diff < day) return 'today';
-  const d = Math.floor(diff / day);
-  if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`;
-  const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`;
-  return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? '' : 's'} ago`;
-}
 const lc = (s) => String(s || '').toLowerCase();
 const authorName = (a) => (a === 'gbti' ? 'GBTI Network' : a || 'A member');
 // SOW-067: the commenter's GitHub avatar (gbti/house -> the org logo). A missing author falls back to initials.

@@ -77,30 +77,39 @@ test('DRIFT: both PR row surfaces use the shared prEvent, not their own date log
   }
 });
 
-// relTime existed in three near-identical copies before this change. gbti-card-list's is now the shared one;
-// the discussion and shares-feed copies were left in place, because rewiring them changes what the comment
-// thread and the shares feed SAY, which is a UI change this feature does not authorize.
-//
-// Writing this test surfaced a real pre-existing inconsistency rather than confirming agreement. The two
-// private copies flatten everything under 24 hours to "today". The shared one reports "5 minutes ago" and
-// "3 hours ago", which the comment on it records as an explicit owner request. So that request reached the
-// card list and never reached the other two, and the same elapsed time reads differently depending on which
-// surface a member is looking at. Pinned here as KNOWN rather than asserted away, with agreement still
-// enforced from one day out so a future edit to either copy cannot drift further unnoticed.
-test('DRIFT: the private relTime copies agree with the shared one from a day out (sub-day divergence is known)', () => {
-  const NOW = Date.parse('2026-08-11T12:00:00Z');
-  const dayPlus = [NOW - 2 * 86_400_000, NOW - 45 * 86_400_000, NOW - 400 * 86_400_000];
-  for (const f of ['client-ui/src/elements/gbti-discussion.mjs', 'client-ui/src/elements/gbti-shares-feed.mjs']) {
+// relTime existed in THREE near-identical copies. The pull request work moved the definition to time-core and
+// an earlier version of this test pinned the leftover split as known: the discussion and shares-feed copies
+// flattened everything under 24 hours to "today", while the shared one says "3 hours ago", which its own
+// comment records as an owner request that had reached the card list and never reached those two. The owner
+// elected to consolidate, so the split is gone and this asserts it cannot come back.
+test('DRIFT: every surface reads elapsed time from the one shared helper, with no private copy left', () => {
+  const surfaces = [
+    'client-ui/src/elements/gbti-discussion.mjs',
+    'client-ui/src/elements/gbti-shares-feed.mjs',
+    'client-ui/src/elements/gbti-activity-bell.mjs',
+    'client-ui/src/elements/gbti-card-list.mjs',
+  ];
+  for (const f of surfaces) {
     const s = src(f);
-    const m = /function relTime\(iso\)\s*\{[\s\S]*?\n\}/.exec(s);
-    assert.ok(m, `${f} no longer defines a private relTime; if it now imports the shared one, delete this case`);
-    // eslint-disable-next-line no-new-func
-    const theirs = new Function(`${m[0]}; return relTime;`)();
-    for (const t of dayPlus) {
-      assert.equal(theirs(new Date(t).toISOString()), relTime(t, NOW), `${f} drifted from the shared relTime at ${new Date(t).toISOString()}`);
-    }
-    // The known gap, asserted so that FIXING it fails this test and forces the note above to be updated.
-    assert.equal(theirs(new Date(NOW - 3 * 3_600_000).toISOString()), 'today', `${f} sub-day behavior changed; update the known-divergence note`);
-    assert.equal(relTime(NOW - 3 * 3_600_000, NOW), '3 hours ago');
+    assert.doesNotMatch(s, /function relTime\s*\(/, `${f} defines its own relTime again; import it from time-core.mjs instead`);
+    assert.match(s, /from '\.\.\/time-core\.mjs'/, `${f} stopped reading the shared relTime`);
   }
+  // The behavior those copies used to have, now gone everywhere: a same-day item reports elapsed time.
+  const NOW = Date.parse('2026-08-11T12:00:00Z');
+  assert.equal(relTime(NOW - 3 * 3_600_000, NOW), '3 hours ago');
+  assert.equal(relTime(NOW - 5 * 60_000, NOW), '5 minutes ago');
+});
+
+// The bell renders a time only when the item carries one. Every group builds `ts` differently (a PR, a
+// comment, a contribution), so a missing one has to degrade to the row's previous appearance, not to a
+// dangling separator.
+test('the bell time degrades cleanly: no time, no separator, no Invalid Date', () => {
+  assert.equal(relTime(undefined), '');
+  assert.equal(relTime(0), '');
+  assert.equal(relTime(NaN), '');
+  assert.equal(absTime(undefined), '');
+  const s = src('client-ui/src/elements/gbti-activity-bell.mjs');
+  // The separator is inside the `when` branch, so an item with no time cannot emit a trailing " · ".
+  assert.match(s, /\$\{when \? `\$\{it\.sub \? ' · ' : ''\}\$\{esc\(when\)\}` : ''\}/);
+  assert.match(s, /\$\{abs \? ` title="\$\{esc\(abs\)\}"` : ''\}/);
 });

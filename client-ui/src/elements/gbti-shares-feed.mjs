@@ -7,6 +7,10 @@
 // A Locked account gets a splash; the key never reaches the page.
 import { GbtiElement, define, esc } from '../base.mjs';
 import { utmLink, UTM } from '../news.mjs'; // sow-145: UTM attribution on outbound share links
+// sow-221 follow-up: the private relTime that used to live here flattened everything under 24 hours to
+// "today". The shared one reports "3 hours ago", which is what the owner asked for and what the content
+// cards already did, so this surface disagreed with those for same-day items. One definition now.
+import { relTime } from '../time-core.mjs';
 import { parseBrowseHash } from '../browse-hash.mjs'; // SOW-092: the share deep link (#tab=share&read=<author>/<id>)
 import { embedUrl, isPortraitEmbed } from '../../../client/src/video-embed.mjs'; // SOW-092: a video share plays inline
 import { shareToItem, hostOf } from '../all-merge.mjs'; // SOW-042: the shared Share projection + link-host helper
@@ -69,18 +73,6 @@ const CSS = `
   .discussion-wrap h4 { margin:0 0 10px; font-size:14px; }
 `;
 
-function relTime(iso) {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  const diff = Date.now() - t, day = 86400000;
-  if (diff < day) return 'today';
-  const d = Math.floor(diff / day);
-  if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`;
-  const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`;
-  return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? '' : 's'} ago`;
-}
 const authorName = (a) => (a === 'gbti' ? 'GBTI Network' : a || 'A member');
 
 class GbtiSharesFeed extends GbtiElement {

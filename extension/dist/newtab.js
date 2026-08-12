@@ -3998,6 +3998,40 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return { replies: now, following: now, review: now, prsSeen };
   }
 
+  // client-ui/src/time-core.mjs
+  function relTime(v, now = Date.now()) {
+    if (!v) return "";
+    const ms = typeof v === "number" ? v : Date.parse(v);
+    if (!ms) return "";
+    const diff = now - ms;
+    if (diff < 6e4) return "just now";
+    const mins = Math.floor(diff / 6e4);
+    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+    const hrs = Math.floor(diff / 36e5);
+    if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+    const d = Math.floor(diff / 864e5);
+    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
+    const mo = Math.floor(d / 30);
+    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
+    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
+  }
+  function absTime(v) {
+    if (!v) return "";
+    const ms = typeof v === "number" ? v : Date.parse(v);
+    if (!ms) return "";
+    try {
+      return new Date(ms).toLocaleString(void 0, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    } catch {
+      return new Date(ms).toISOString();
+    }
+  }
+
   // client-ui/src/elements/gbti-activity-bell.mjs
   var SITE2 = "https://gbti.network";
   var POLL_MS = 12e4;
@@ -4282,7 +4316,10 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const rows = g.items.slice(0, 8).map((it) => {
           const cls = un.has(it.id) ? "it unread" : "it";
           const ext = /^https?:\/\//.test(it.href) ? ' target="_blank" rel="noopener"' : "";
-          return `<a class="${cls}" href="${esc(it.href)}"${ext}><span class="t">${esc(it.title)}</span><span class="s">${esc(it.sub || "")}</span></a>`;
+          const when = relTime(it.ts);
+          const abs = when ? absTime(it.ts) : "";
+          const sub = `${esc(it.sub || "")}${when ? `${it.sub ? " · " : ""}${esc(when)}` : ""}`;
+          return `<a class="${cls}" href="${esc(it.href)}"${ext}${abs ? ` title="${esc(abs)}"` : ""}><span class="t">${esc(it.title)}</span><span class="s">${sub}</span></a>`;
         }).join("");
         const moreN = g.items.length - Math.min(g.items.length, 8);
         return `<div class="grp"><div class="grp-h">${esc(g.label)}${g.unread ? `<span class="n">${g.unread}</span>` : ""}</div>${rows}${moreN > 0 ? `<div class="it s" style="color:var(--muted)">+${moreN} more</div>` : ""}</div>`;
@@ -8217,18 +8254,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .clocked { font-size:12.5px; color:var(--muted); } .clocked a { color:var(--brand); font-weight:600; }
   .empty { color:var(--muted); font-size:12.5px; margin:0 0 8px; }
 `;
-  function relTime(iso) {
-    if (!iso) return "";
-    const t = Date.parse(iso);
-    if (Number.isNaN(t)) return "";
-    const diff = Date.now() - t, day = 864e5;
-    if (diff < day) return "today";
-    const d = Math.floor(diff / day);
-    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
-    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
-  }
   var lc2 = (s) => String(s || "").toLowerCase();
   var authorName = (a) => a === "gbti" ? "GBTI Network" : a || "A member";
   var ghLogin = (a) => lc2(a) === "gbti" || lc2(a) === "house" ? "gbti-network" : a;
@@ -9897,40 +9922,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-content-list", GbtiContentList);
 
-  // client-ui/src/time-core.mjs
-  function relTime2(v, now = Date.now()) {
-    if (!v) return "";
-    const ms = typeof v === "number" ? v : Date.parse(v);
-    if (!ms) return "";
-    const diff = now - ms;
-    if (diff < 6e4) return "just now";
-    const mins = Math.floor(diff / 6e4);
-    if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-    const hrs = Math.floor(diff / 36e5);
-    if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
-    const d = Math.floor(diff / 864e5);
-    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
-    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
-  }
-  function absTime(v) {
-    if (!v) return "";
-    const ms = typeof v === "number" ? v : Date.parse(v);
-    if (!ms) return "";
-    try {
-      return new Date(ms).toLocaleString(void 0, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit"
-      });
-    } catch {
-      return new Date(ms).toISOString();
-    }
-  }
-
   // client-ui/src/elements/gbti-pr-list.mjs
   var GbtiPrList = class extends GbtiElement {
     async render() {
@@ -9946,7 +9937,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
            ${prs.length === 0 ? `<p class="muted">No open PRs.</p>` : ""}
            <ul class="list">${sortPullsByEvent(prs).map((pr) => {
           const ev = prEvent(pr);
-          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">· ${esc(ev.verb)} ${esc(relTime2(ev.at))}</span>` : "";
+          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">· ${esc(ev.verb)} ${esc(relTime(ev.at))}</span>` : "";
           return `<li class="row" style="justify-content:space-between" data-n="${esc(pr.number)}">
              <span><a href="${esc(pr.html_url)}" target="_blank" rel="noopener">#${esc(pr.number)}</a> ${esc(pr.title)}${when}</span>
              <span class="gate tag" data-n="${esc(pr.number)}">checking…</span>
@@ -14934,7 +14925,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // SOW-049: the meta leads with a small avatar (member -> github avatar; news -> publisher favicon); the name/source
     // is the avatar's hover tooltip (title), not a persistent label. Broken images fall back to an initial disc.
     _meta(item) {
-      const ago = relTime2(item.createdAt ?? item.publishedAt);
+      const ago = relTime(item.createdAt ?? item.publishedAt);
       const av = avatarFor(item);
       const ini = esc((av.title || "?").trim().charAt(0).toUpperCase() || "?");
       const img = av.src ? `<img class="avimg" src="${esc(av.src)}" alt="" loading="lazy">` : "";
@@ -15094,18 +15085,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .discussion-wrap { margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
   .discussion-wrap h4 { margin:0 0 10px; font-size:14px; }
 `;
-  function relTime3(iso) {
-    if (!iso) return "";
-    const t = Date.parse(iso);
-    if (Number.isNaN(t)) return "";
-    const diff = Date.now() - t, day = 864e5;
-    if (diff < day) return "today";
-    const d = Math.floor(diff / day);
-    if (d < 30) return `${d} day${d === 1 ? "" : "s"} ago`;
-    const mo = Math.floor(d / 30);
-    if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
-    return `${Math.floor(d / 365)} year${Math.floor(d / 365) === 1 ? "" : "s"} ago`;
-  }
   var authorName3 = (a) => a === "gbti" ? "GBTI Network" : a || "A member";
   var GbtiSharesFeed = class extends GbtiElement {
     connectedCallback() {
@@ -15285,7 +15264,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const mod = share.author && share.id ? `<gbti-mod-actions data-gbti-type="share" data-gbti-author="${esc(share.author)}" data-gbti-id="${esc(share.id)}"></gbti-mod-actions>` : "";
       this.set(this.css(CSS29) + `<div class="rtop"><button class="back" type="button" data-back>&larr; Back to the stream</button>${mod}</div>
       <article class="reading">
-        <div class="who"><span class="name">${esc(authorName3(share.author))}</span><span class="when">${esc(relTime3(share.createdAt))}</span>${badge}</div>
+        <div class="who"><span class="name">${esc(authorName3(share.author))}</span><span class="when">${esc(relTime(share.createdAt))}</span>${badge}</div>
         ${title}${desc}${actions}
         <div class="body" data-body><p class="empty">Loading…</p></div>
         ${link}${hero}${tags}${discussion}
@@ -16526,7 +16505,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const page2 = Math.min(this._page || 0, pages2 - 1);
         const rows2 = prs.slice(page2 * PAGE2, page2 * PAGE2 + PAGE2).map((pr) => {
           const ev = prEvent(pr);
-          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">${esc(ev.verb)} ${esc(relTime2(ev.at))}</span>` : "";
+          const when = ev.at ? ` <span class="when" title="${esc(absTime(ev.at))}">${esc(ev.verb)} ${esc(relTime(ev.at))}</span>` : "";
           return `<li class="row">
         <span class="t"><b>${esc(pr.title || "PR #" + pr.number)}</b><span class="meta"><a href="${esc(pr.html_url || "#")}" target="_blank" rel="noopener">#${esc(pr.number)}</a> on GitHub${when}</span><span class="why" data-n="${esc(pr.number)}" hidden></span></span>
         <span class="right"><span class="gate tag" data-n="${esc(pr.number)}">checking...</span></span></li>`;
