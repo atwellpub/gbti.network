@@ -20,9 +20,19 @@
 // It never KICKS. The member stays in the guild with no managed role, holding whatever @everyone allows, which
 // is the same standing rule reconcile follows for a lapsed or banned account (SOW-011).
 
-/** The managed roles, in the order they are stripped. Removing a role the member does not hold is a no-op at
- *  Discord, so all three are always attempted and the result is idempotent. */
-export const MANAGED_ROLE_KEYS = ['memberRoleId', 'trialRoleId', 'lockedRoleId'];
+/**
+ * Every role the system manages, in the order they are stripped. Removing a role the member does not hold is a
+ * no-op at Discord, so all of them are always attempted and the result is idempotent.
+ *
+ * `creatorRoleId` is in this list even though it is NOT one of the exclusive access roles, and leaving it out
+ * was a real gap in the first version of this file. The Content Creator badge is granted by us and removed by
+ * reconcile, and reconcile can only act on a member it can still SEE. Unlink without stripping the badge and a
+ * departing creator keeps it permanently, with nothing left able to take it back. That is the same ungoverned
+ * leftover this module exists to prevent; the access roles were handled and the badge was overlooked.
+ *
+ * The rule is simply: if the system can put a role ON a member, disconnecting must be able to take it OFF.
+ */
+export const MANAGED_ROLE_KEYS = ['memberRoleId', 'trialRoleId', 'lockedRoleId', 'creatorRoleId'];
 
 /**
  * Unlink `githubId`'s Discord account.

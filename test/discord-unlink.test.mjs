@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { unlinkDiscord, MANAGED_ROLE_KEYS } from '../workers/signup/discord-unlink.mjs';
 
-const CONFIG = { guildId: 'g1', memberRoleId: 'r-member', trialRoleId: 'r-trial', lockedRoleId: 'r-locked' };
+const CONFIG = { guildId: 'g1', memberRoleId: 'r-member', trialRoleId: 'r-trial', lockedRoleId: 'r-locked', creatorRoleId: 'r-creator' };
 const linked = { id: 'cus_1', metadata: { github_id: '12345', discord_user_id: 'd-987' } };
 
 function fakes({ removeRoleImpl, updateImpl, customer = linked } = {}) {
@@ -28,8 +28,8 @@ test('strips every managed role, THEN clears the link', async () => {
   const r = await unlinkDiscord({ githubId: '12345', stripe, discord, config: CONFIG });
   assert.equal(r.ok, true);
   assert.equal(r.unlinked, true);
-  assert.equal(r.rolesRemoved, 3);
-  assert.deepEqual(order, ['role:r-member', 'role:r-trial', 'role:r-locked', 'unlink'], 'the unlink is LAST');
+  assert.equal(r.rolesRemoved, 4);
+  assert.deepEqual(order, ['role:r-member', 'role:r-trial', 'role:r-locked', 'role:r-creator', 'unlink'], 'the unlink is LAST');
 });
 
 test('a failed role removal KEEPS the link, so a retry can still find the member', async () => {
@@ -93,6 +93,14 @@ test('it NEVER kicks: no guild-removal call exists on the injected client', asyn
   assert.ok(order.every((o) => o.startsWith('role:') || o === 'unlink'));
 });
 
-test('MANAGED_ROLE_KEYS covers all three managed roles', () => {
-  assert.deepEqual([...MANAGED_ROLE_KEYS].sort(), ['lockedRoleId', 'memberRoleId', 'trialRoleId']);
+test('MANAGED_ROLE_KEYS covers EVERY role the system can grant, badge included', () => {
+  // The rule: if the system can put a role ON a member, disconnecting must be able to take it OFF. The Creator
+  // badge was missed in the first version, which would have left a departing creator holding it forever, since
+  // reconcile cannot act on a member whose link it can no longer see.
+  assert.deepEqual([...MANAGED_ROLE_KEYS].sort(), ['creatorRoleId', 'lockedRoleId', 'memberRoleId', 'trialRoleId']);
+});
+
+test('the CREATOR badge is stripped on disconnect, not just the access roles', () => {
+  // Guards the specific regression: dropping creatorRoleId from the list again must fail here.
+  assert.ok(MANAGED_ROLE_KEYS.includes('creatorRoleId'));
 });
