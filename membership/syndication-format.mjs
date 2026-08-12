@@ -159,6 +159,8 @@ function hashtagList(labels) {
  *   {tags-hashtags}   the item's tags as hashtags, e.g. #AI #Prompts (SOW-120)
  *   {hashtags}       the category plus the tags, de-duplicated, as one hashtag set (SOW-120)
  *   {author-note-italic}  the intro with each line wrapped in markdown italics (for Reddit)
+ *   {author-note-quoted-italic}  the same, WITH its quotes, or empty when there is no note. Prefer this over
+ *     writing "{author-note-italic}" in a template: a template cannot omit its own punctuation.
  *   A token written in ALL CAPS uppercases its value: {CONTENT-TYPE} -> "PROMPT" (mentions excluded).
  *   {shareurl} {url} the item's link
  *   {title} {category}  the item metadata
@@ -208,6 +210,14 @@ export function renderTemplate(template, item = {}, { limit = 2000, previewMenti
     authornoteblock: String(item.authorNote || '').trim()
       ? `\n\nFrom the author:\n\n"${sanitizeMentions(String(item.authorNote).trim())}"`
       : '',
+    // {author-note-quoted-italic}: the italicized note WITH its surrounding quotes, or EMPTY. Same
+    // empty-awareness as {author-note-block} above, for a template that wants the bare quoted note rather than
+    // the labelled paragraph. 2026-08-11: the stored reddit-comment template wrote the quotes itself around
+    // {author-note-italic}, so a note-less article syndicated to Reddit as a lone "". Punctuation that belongs
+    // to an optional value has to travel WITH it; a template cannot know whether the value showed up.
+    authornotequoteditalic: String(item.authorNote || '').trim()
+      ? `"${sanitizeMentions(String(item.authorNote).trim()).split('\n').map((l) => (l.trim() ? `*${l.trim()}*` : l)).join('\n')}"`
+      : '',
     memberurl: item.author ? `https://gbti.network/members/${encodeURIComponent(String(item.author))}/` : '', // {member-url}: the public profile
     shortdescription: sanitizeMentions(item.blurb || ''), // {short-description}: the item's shortDescription (the queue item's blurb)
     // SOW-120 follow-up: {member-x-handle} is the member's OWN validated X handle rendered as a real
@@ -245,6 +255,12 @@ export function renderTemplate(template, item = {}, { limit = 2000, previewMenti
     // instead of showing the text "\n\n". Real newlines are untouched; a run of 3+ collapses to a blank line so
     // an empty token (a note-less item) does not leave a big gap.
     .replace(/\\n/g, '\n')
+    // 2026-08-11 safety net: punctuation a template wrapped around a token that resolved to NOTHING. The
+    // quotes are the case that shipped (a note-less article posted a lone "" to Reddit), but templates are
+    // owner-editable from admin settings, so the next optional token wrapped in brackets would repeat it. Only
+    // an EMPTY pair is removed, and only when it stands alone between whitespace, so a legitimately empty
+    // quotation inside prose is untouched. Runs before the blank-line collapse, which then closes the gap.
+    .replace(/(^|\s)(""|''|“”|‘’|\(\)|\[\])(?=\s|$)/g, '$1')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

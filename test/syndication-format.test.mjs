@@ -348,3 +348,44 @@ test('{member-reddit-handle}: u/name when the profile lists one, else the full n
   assert.equal(renderTemplate('By {member-reddit-handle}.', { ...item, authorReddit: null }), 'By Alice Q.');
   assert.equal(renderTemplate('By {member-reddit-handle}.', { ...item, authorReddit: 'not a handle!!' }), 'By Alice Q.');
 });
+
+// 2026-08-11 (sow-220): the AirLLM article syndicated to r/GBTI_network showing a lone "". The stored
+// reddit-comment template wrote the quotes ITSELF around {author-note-italic}, and the article had no note, so
+// the quotes survived with nothing between them. Two fixes, tested here: a token that carries its own
+// punctuation, and a render-time net for any template that wraps an optional token anyway.
+const REDDIT_TMPL = 'Shared to the community by GBTI Network member {member-reddit-handle}.\n\n{author-note-quoted-italic}\n\n---\n\nJoin us.';
+
+test('{author-note-quoted-italic}: quoted + italicized when a note exists, EMPTY when it does not', () => {
+  const withNote = { source: 'post', authorNote: 'Why I wrote this.' };
+  assert.equal(renderTemplate('{author-note-quoted-italic}', withNote), '"*Why I wrote this.*"');
+  assert.equal(renderTemplate('{author-note-quoted-italic}', { source: 'post' }), '');
+  assert.equal(renderTemplate('{author-note-quoted-italic}', { source: 'post', authorNote: '   ' }), '');
+  // Italics never span a line break, so each line is wrapped, matching {author-note-italic}.
+  assert.equal(renderTemplate('{author-note-quoted-italic}', { source: 'post', authorNote: 'One\nTwo' }), '"*One*\n*Two*"');
+});
+
+test('the Reddit comment for a NOTE-LESS item carries no empty quotes and no dangling gap', () => {
+  const out = renderTemplate(REDDIT_TMPL, { source: 'post', author: 'gbtilabs', authorName: 'GBTI Network' });
+  assert.doesNotMatch(out, /""/, 'the exact defect that reached Reddit');
+  assert.doesNotMatch(out, /\n{3,}/, 'no dangling blank paragraph where the note would have been');
+  assert.match(out, /Shared to the community by GBTI Network member GBTI Network\.\n\n---/);
+});
+
+test('the Reddit comment for a note-bearing item is unchanged', () => {
+  const out = renderTemplate(REDDIT_TMPL, { source: 'post', author: 'gbtilabs', authorName: 'GBTI Network', authorNote: 'Why I wrote this.' });
+  assert.match(out, /"\*Why I wrote this\.\*"/);
+});
+
+test('the safety net strips an empty pair a template wrapped around a missing token, in any template', () => {
+  // {unknown} renders empty, exactly as an absent optional token does.
+  assert.equal(renderTemplate('A "{unknown}" B', {}), 'A B');
+  assert.equal(renderTemplate('A ({unknown}) B', {}), 'A B');
+  assert.equal(renderTemplate('A [{unknown}] B', {}), 'A B');
+});
+
+test('the safety net leaves a NON-empty pair, and empty punctuation attached to real text, alone', () => {
+  assert.equal(renderTemplate('A "{title}" B', { title: 'T' }), 'A "T" B');
+  // Not a standalone empty pair: attached to a word, so it is prose the author meant to write.
+  assert.equal(renderTemplate('He said ok"" then left', {}), 'He said ok"" then left');
+  assert.equal(renderTemplate('Call foo() here', {}), 'Call foo() here');
+});
