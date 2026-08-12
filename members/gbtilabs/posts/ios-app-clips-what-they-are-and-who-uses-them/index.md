@@ -1,12 +1,12 @@
 ---
-title: 'App Clips let someone use part of your iOS app without installing it'
+title: App Clips let someone use part of your iOS app without installing it
 slug: ios-app-clips-what-they-are-and-who-uses-them
-status: draft
+status: published
 visibility: public
 publicStub: false
 excerpt: >-
-  An App Clip runs part of an iOS app with no install, launched from a link, a QR code, or an NFC tag.
-  Here is how it works, who is already using it, and where it might fit next.
+  An App Clip runs part of an iOS app with no install, launched from a link, a QR code, or an NFC
+  tag. Here is how it works, who is already using it, and where it might fit next.
 categories:
   - design
   - ui-ux
@@ -16,9 +16,10 @@ tags:
   - app-clips
   - apple
 layout: journal
-coverImage: "./images/iphone-laptop-airpods-on-desk.webp"
+coverImage: ./images/iphone-laptop-airpods-on-desk.webp
 coverAlt: An iPhone, a keyboard, a laptop, and a pair of AirPods lying close together on a desk
 featured: false
+updatedAt: '2026-08-12T02:14:49.635Z'
 type: post
 author: gbtilabs
 ---
