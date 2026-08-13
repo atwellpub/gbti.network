@@ -107,7 +107,9 @@ class GbtiMemberView extends GbtiElement {
 
     // The primary action: self -> edit own profile (sibling extension page, no relay); other -> follow toggle.
     const action = this._isSelf
-      ? `<a class="edit" href="profile.html">Edit your profile</a>`
+      // sow-204: the extension no longer bundles a profile page, so editing your own profile is the website
+      // WorkBench. Opened in a new tab from the extension, and in place when this component runs on the site.
+      ? `<a class="edit" href="${SITE}/workbench/" target="_blank" rel="noopener">Edit your profile</a>`
       : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
     const siteLink = utmLink(`${SITE}/members/${username}/`, { utm_source: 'gbti-network', utm_medium: 'extension', utm_campaign: 'member-profile' });
     const actions = `<div class="actions">${action}<a class="site" href="${esc(siteLink)}" target="_blank" rel="noopener">View on gbti.network</a></div>`;

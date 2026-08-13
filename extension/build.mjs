@@ -34,7 +34,8 @@ await build({ ...common, entryPoints: [src('shares.mjs')], format: 'iife', outfi
 await build({ ...common, entryPoints: [src('workspace.mjs')], format: 'iife', outfile: out('workspace.js') }); // SOW-033 Workspace page
 await build({ ...common, entryPoints: [src('admin.mjs')], format: 'iife', outfile: out('admin.js') }); // SOW-036/038 Admin page
 await build({ ...common, entryPoints: [src('account.mjs')], format: 'iife', outfile: out('account.js') }); // SOW-040 Account page
-await build({ ...common, entryPoints: [src('profile.mjs')], format: 'iife', outfile: out('profile.js') }); // SOW-129 Profile page
+// sow-204: the SOW-129 Profile page entry is REMOVED. The extension stops being an authoring host; profile
+// editing is the website WorkBench (gbti.network/workbench/).
 
 // SOW-025: the GBTI MCP server ships INSIDE the extension folder as a self-contained, zero-install NODE bundle.
 // Chrome NEVER loads it (it is not in manifest.json / web_accessible_resources) — the files just ride along in
@@ -49,7 +50,7 @@ const clientSrc = (f) => path.join(dir, '..', 'client', 'src', f);
 const nodeBundle = { bundle: true, target: 'node18', platform: 'node', format: 'esm', charset: 'utf8', legalComments: 'none' };
 await build({ ...nodeBundle, entryPoints: [clientSrc('mcp-stdio.mjs')], outfile: mcp('gbti-network-mcp.mjs') });
 
-console.log('built extension/dist/{theme-init,background,content,onboarding,newtab,shares,workspace,admin,account,profile}.js + extension/mcp/gbti-network-mcp.mjs');
+console.log('built extension/dist/{theme-init,background,content,onboarding,newtab,shares,workspace,admin,account}.js + extension/mcp/gbti-network-mcp.mjs');
 if (mode !== 'classic') {
   console.log(`  (${mode.toUpperCase()} mode inlined: client id ${values.GBTI_GITHUB_APP_CLIENT_ID}, slug ${values.GBTI_GITHUB_APP_SLUG})`);
 }

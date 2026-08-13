@@ -109,7 +109,11 @@ function mount() {
       try { localStorage.setItem('gbti-welcome-seen', '1'); } catch { /* no storage */ } // SOW-029: don't re-show on the new tab
       // Land on the Profile page (not the home feed): the welcome banner + the staged-socials prefill greet
       // them there, so the flow ends with the profile getting filled out.
-      window.location.href = chrome.runtime.getURL('profile.html') + '?welcome=1';
+      // sow-204: the extension no longer hosts a profile editor, so finishing setup hands off to the website
+      // WorkBench. The old `?welcome=1` banner is DROPPED on purpose (owner, 2026-08-12): sow-207 put a
+      // website-hosted welcome flow at /welcome/, and a fresh signup already lands there, so keeping this
+      // banner would greet the same member twice for the same moment.
+      window.location.href = 'https://gbti.network/workbench/';
     });
     w.style.cssText = 'display:block; padding:5vh 16px;'; // breathing room around the two-pane welcome panel
     const shell = document.querySelector('main.shell');

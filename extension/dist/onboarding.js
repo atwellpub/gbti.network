@@ -10177,7 +10177,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-shares", GbtiShares);
 
-  // node_modules/js-yaml/dist/js-yaml.mjs
+  // ../../../../../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -15024,8 +15024,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     _wireBody() {
       this.on("[data-profile]", "click", () => {
-        if (typeof chrome !== "undefined" && chrome.runtime?.id && typeof location !== "undefined") {
-          location.href = "profile.html";
+        if (typeof chrome !== "undefined" && chrome.runtime?.id && typeof window !== "undefined") {
+          window.open("https://gbti.network/workbench/", "_blank", "noopener");
           return;
         }
         this._openItem(this._profile?.path, "profile");
@@ -17426,7 +17426,7 @@ From the author:
           since = "";
         }
       }
-      const action = this._isSelf ? `<a class="edit" href="profile.html">Edit your profile</a>` : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
+      const action = this._isSelf ? `<a class="edit" href="${SITE16}/workbench/" target="_blank" rel="noopener">Edit your profile</a>` : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
       const siteLink = utmLink(`${SITE16}/members/${username}/`, { utm_source: "gbti-network", utm_medium: "extension", utm_campaign: "member-profile" });
       const actions = `<div class="actions">${action}<a class="site" href="${esc(siteLink)}" target="_blank" rel="noopener">View on gbti.network</a></div>`;
       const tagPills = [];
@@ -18109,7 +18109,7 @@ From the author:
           localStorage.setItem("gbti-welcome-seen", "1");
         } catch {
         }
-        window.location.href = chrome.runtime.getURL("profile.html") + "?welcome=1";
+        window.location.href = "https://gbti.network/workbench/";
       });
       w.style.cssText = "display:block; padding:5vh 16px;";
       const shell = document.querySelector("main.shell");

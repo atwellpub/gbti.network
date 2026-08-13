@@ -835,10 +835,15 @@ class GbtiWorkspace extends GbtiElement {
   }
 
   _wireBody() {
-    // SOW-129: in the extension, "Edit profile" opens the dedicated Profile page; the npm CMS (no profile.html)
-    // falls back to the generic content editor opening the profile item in place.
+    // SOW-129 / sow-204: the extension used to open a dedicated bundled Profile page. It no longer hosts one,
+    // so from the extension "Edit profile" opens the WEBSITE WorkBench in a new tab. Everywhere else (the npm
+    // CMS, and this same component running ON the website) still falls back to the generic content editor
+    // opening the profile item in place, which is what the site should do rather than navigating to itself.
     this.on('[data-profile]', 'click', () => {
-      if (typeof chrome !== 'undefined' && chrome.runtime?.id && typeof location !== 'undefined') { location.href = 'profile.html'; return; }
+      if (typeof chrome !== 'undefined' && chrome.runtime?.id && typeof window !== 'undefined') {
+        window.open('https://gbti.network/workbench/', '_blank', 'noopener');
+        return;
+      }
       this._openItem(this._profile?.path, 'profile');
     });
     // SOW-028: the Inbox tab's <gbti-contrib-inbox> emits `contrib-open` (composed) when a Review button is

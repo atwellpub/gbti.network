@@ -10177,7 +10177,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-shares", GbtiShares);
 
-  // node_modules/js-yaml/dist/js-yaml.mjs
+  // ../../../../../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -15024,8 +15024,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     }
     _wireBody() {
       this.on("[data-profile]", "click", () => {
-        if (typeof chrome !== "undefined" && chrome.runtime?.id && typeof location !== "undefined") {
-          location.href = "profile.html";
+        if (typeof chrome !== "undefined" && chrome.runtime?.id && typeof window !== "undefined") {
+          window.open("https://gbti.network/workbench/", "_blank", "noopener");
           return;
         }
         this._openItem(this._profile?.path, "profile");
@@ -17426,7 +17426,7 @@ From the author:
           since = "";
         }
       }
-      const action = this._isSelf ? `<a class="edit" href="profile.html">Edit your profile</a>` : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
+      const action = this._isSelf ? `<a class="edit" href="${SITE16}/workbench/" target="_blank" rel="noopener">Edit your profile</a>` : `<gbti-subscribe data-gbti-username="${esc(username)}"></gbti-subscribe>`;
       const siteLink = utmLink(`${SITE16}/members/${username}/`, { utm_source: "gbti-network", utm_medium: "extension", utm_campaign: "member-profile" });
       const actions = `<div class="actions">${action}<a class="site" href="${esc(siteLink)}" target="_blank" rel="noopener">View on gbti.network</a></div>`;
       const tagPills = [];
@@ -18698,8 +18698,10 @@ From the author:
     { key: "subs", href: "workspace.html#tab=subs", ico: "users", nm: "Following", sub: "Members, channels, topics" },
     { key: "earnings", href: "workspace.html#tab=earnings", ico: "coin", nm: "Earnings", sub: "Referrals + rewards" },
     { div: true },
-    { key: "profile", href: "profile.html", ico: "user", nm: "Profile", sub: "Your public profile" },
-    // SOW-129
+    // sow-204: the extension stops being an authoring host, so Profile opens the WEBSITE WorkBench instead of
+    // a bundled page. `ext` marks it as leaving the extension, which the renderer turns into target/rel.
+    { key: "profile", href: `${SITE18}/workbench/`, ext: true, ico: "user", nm: "Profile", sub: "Your public profile" },
+    // SOW-129, repointed sow-204
     { key: "settings", href: "account.html", ico: "gear", nm: "Settings", sub: "Membership + account" },
     { key: "admin", href: "admin.html", ico: "lock", nm: "Admin tools", sub: "Moderation", adminOnly: true }
   ];
@@ -18733,7 +18735,7 @@ From the author:
         <div class="me-head" data-me-head></div>
         <div class="me-sep" role="separator"></div>
         <a class="mi" role="menuitem" href="workspace.html">WorkBench</a>
-        <a class="mi" role="menuitem" href="profile.html">Profile</a>
+        <a class="mi" role="menuitem" href="${SITE18}/workbench/" target="_blank" rel="noopener">Profile</a>
         <a class="mi" role="menuitem" href="account.html">Settings</a>
         <a class="mi" role="menuitem" href="admin.html" data-admin-only hidden>Admin tools</a>
         <button class="mi" role="menuitem" type="button" data-social-queue data-super-only hidden>Social Queue</button>
@@ -18759,7 +18761,8 @@ From the author:
       const on = r.key === active ? " on" : "";
       const admin = r.adminOnly ? " data-admin-only hidden" : "";
       const sub = r.sub ? `<span class="sub">${esc2(r.sub)}</span>` : "";
-      const self = `<a class="nav-i${on}" data-key="${r.key}"${admin} href="${r.href}"><span class="gl" data-ico="${r.ico}"></span><span class="tx"><span class="nm">${esc2(r.nm)}</span>${sub}</span></a>`;
+      const ext = r.ext ? ' target="_blank" rel="noopener"' : "";
+      const self = `<a class="nav-i${on}" data-key="${r.key}"${admin} href="${r.href}"${ext}><span class="gl" data-ico="${r.ico}"></span><span class="tx"><span class="nm">${esc2(r.nm)}</span>${sub}</span></a>`;
       const kids = (r.children || []).map((c) => `<a class="nav-i nav-sub${c.key === active ? " on" : ""}" data-key="${c.key}" href="${c.href}"><span class="gl" data-ico="${c.ico}"></span><span class="tx"><span class="nm">${esc2(c.nm)}</span></span></a>`).join("");
       return self + kids;
     }).join("");

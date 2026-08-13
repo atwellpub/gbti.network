@@ -634,7 +634,9 @@ function maybeShowWelcome(signedIn) {
   const w = document.createElement('gbti-welcome');
   w.style.cssText = 'width:100%; max-width:1080px; align-self:center;'; // the redesigned two-pane welcome panel
   // Finish on the Profile page (banner + staged-socials prefill), matching the onboarding-wizard path.
-  w.addEventListener('gbti:welcome-done', () => { window.location.href = chrome.runtime.getURL('profile.html') + '?welcome=1'; });
+  // sow-204: hands off to the website WorkBench; the `?welcome=1` banner is dropped deliberately, since the
+  // sow-207 website welcome flow at /welcome/ already owns the post-signup greeting.
+  w.addEventListener('gbti:welcome-done', () => { window.location.href = 'https://gbti.network/workbench/'; });
   overlay.appendChild(w);
   document.body.appendChild(overlay);
 }

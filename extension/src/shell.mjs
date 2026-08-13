@@ -102,7 +102,9 @@ const RAIL_WORKBENCH = [
   { key: 'subs', href: 'workspace.html#tab=subs', ico: 'users', nm: 'Following', sub: 'Members, channels, topics' },
   { key: 'earnings', href: 'workspace.html#tab=earnings', ico: 'coin', nm: 'Earnings', sub: 'Referrals + rewards' },
   { div: true },
-  { key: 'profile', href: 'profile.html', ico: 'user', nm: 'Profile', sub: 'Your public profile' }, // SOW-129
+  // sow-204: the extension stops being an authoring host, so Profile opens the WEBSITE WorkBench instead of
+  // a bundled page. `ext` marks it as leaving the extension, which the renderer turns into target/rel.
+  { key: 'profile', href: `${SITE}/workbench/`, ext: true, ico: 'user', nm: 'Profile', sub: 'Your public profile' }, // SOW-129, repointed sow-204
   { key: 'settings', href: 'account.html', ico: 'gear', nm: 'Settings', sub: 'Membership + account' },
   { key: 'admin', href: 'admin.html', ico: 'lock', nm: 'Admin tools', sub: 'Moderation', adminOnly: true },
 ];
@@ -145,7 +147,7 @@ function controlsHtml() {
         <div class="me-head" data-me-head></div>
         <div class="me-sep" role="separator"></div>
         <a class="mi" role="menuitem" href="workspace.html">WorkBench</a>
-        <a class="mi" role="menuitem" href="profile.html">Profile</a>
+        <a class="mi" role="menuitem" href="${SITE}/workbench/" target="_blank" rel="noopener">Profile</a>
         <a class="mi" role="menuitem" href="account.html">Settings</a>
         <a class="mi" role="menuitem" href="admin.html" data-admin-only hidden>Admin tools</a>
         <button class="mi" role="menuitem" type="button" data-social-queue data-super-only hidden>Social Queue</button>
@@ -175,7 +177,10 @@ function railHtml(active, nav = 'feed') {
     const on = r.key === active ? ' on' : '';
     const admin = r.adminOnly ? ' data-admin-only hidden' : ''; // role-gated after /api/status resolves
     const sub = r.sub ? `<span class="sub">${esc(r.sub)}</span>` : '';
-    const self = `<a class="nav-i${on}" data-key="${r.key}"${admin} href="${r.href}"><span class="gl" data-ico="${r.ico}"></span><span class="tx"><span class="nm">${esc(r.nm)}</span>${sub}</span></a>`;
+    // sow-204: an `ext` entry leaves the extension for gbti.network, so it opens in a new tab and never
+    // hands the site a window opener over an extension page.
+    const ext = r.ext ? ' target="_blank" rel="noopener"' : '';
+    const self = `<a class="nav-i${on}" data-key="${r.key}"${admin} href="${r.href}"${ext}><span class="gl" data-ico="${r.ico}"></span><span class="tx"><span class="nm">${esc(r.nm)}</span>${sub}</span></a>`;
     // SOW-069: a rail item may carry indented child links (WorkBench -> quick deep-links into the workspace tabs).
     const kids = (r.children || []).map((c) => `<a class="nav-i nav-sub${c.key === active ? ' on' : ''}" data-key="${c.key}" href="${c.href}"><span class="gl" data-ico="${c.ico}"></span><span class="tx"><span class="nm">${esc(c.nm)}</span></span></a>`).join('');
     return self + kids;
