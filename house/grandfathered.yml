@@ -80,3 +80,10 @@ grandfathered:
     login: adbox85
     reason: coupon:CODEABLEYEAR
     until: "2027-07-21T15:20:31.034Z"
+
+  # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-13). Auto-appended.
+  - github_id: "190312419"      # github.com/metacast-entertainment
+    login: metacast-entertainment
+    reason: coupon:CODEABLEYEAR
+    until: "2027-08-12T12:56:20.498Z"
+    tier: creator
