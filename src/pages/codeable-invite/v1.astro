@@ -1,4 +1,16 @@
 ---
+// ARCHIVE (2026-08-13, owner). This is the FULL Codeable invite landing as it stood before the live page at
+// /codeable-invite/ was cut back to the hero plus the FAQ. Kept, not deleted, because the owner asked for the
+// landing-page work to be stashed rather than thrown away: the network explainer, the revenue-model split,
+// the shop-talk band and the membership benefits all live on below.
+//
+// Follows the same pattern as src/pages/home/v1.astro, which archives the pre-sow-136 marketing homepage.
+// Unlisted exactly like its parent: noindex meta plus an astro.config.mjs sitemap exclusion. Nothing links
+// to it, so it is reachable only by typing the URL.
+//
+// If any of this comes back, lift the sections from here rather than from git history, and check the copy
+// against house/membership-tiers.yml first, since the pricing and split percentages are bound to live values.
+//
 // SOW-119: the Codeable expert invite landing, rebuilt onto the owner's Claude Design handoff
 // ("GBTI Invite.dc.html", project GBTI Network Landing Redesign, imported 2026-07-18). Standalone page
 // chrome (its own sticky anchor nav + minimal footer, BaseLayout `bare`), light + dark via the site's
@@ -22,6 +34,7 @@ import {
   FIRST_TOUCH_PCT,
   LAST_TOUCH_PCT,
   COLLAB_POOL_PCT,
+  PLATFORM_RETAINED_PCT,
   INVITE_PCT,
   TURNSTILE_SITE_KEY,
   SIGNUP_BASE,
@@ -37,8 +50,22 @@ const creator = tierDisplay('creator');
 const CREATOR_LABEL = creator?.label ?? 'Content Creator';
 const CREATOR_PRICE_LABEL = `$${creator?.priceAnnual ?? 150}`;
 
+const splits = [
+  { pct: FIRST_TOUCH_PCT, cls: 'green', name: 'First touch', img: '/stock/first-touch.webp', alt: 'A person holding a coffee cup and reading on a tablet', body: 'Owner of the first eligible article, product, or prompt the member touched.' },
+  { pct: LAST_TOUCH_PCT, cls: 'green', name: 'Last touch', img: '/stock/last-touch.webp', alt: 'A hand on a laptop keyboard completing an online purchase', body: 'Owner of the final eligible item they touched before converting.' },
+  { pct: COLLAB_POOL_PCT, cls: 'amber', name: 'Collaboration pool', img: '/stock/collaboration-pool.webp', alt: 'Two people reviewing code together on a laptop', body: 'Split evenly among members who commented on or improved those items.' },
+  { pct: PLATFORM_RETAINED_PCT, cls: 'plain', name: 'Platform & community', img: '/stock/platform-community.webp', alt: 'A person with a laptop beside rows of servers in a data center', body: 'Funds hosting, tooling, the weekly sessions, and running the network.' },
+];
 
 // Card imagery: Pexels photos (free license, no attribution required), committed as 800x480 (5:3) webp.
+const benefits = [
+  { name: 'Private member community', img: '/stock/member-community.webp', alt: 'Developers talking through work together in a studio space', body: 'A private Discord where professionals share work in progress, ask questions, and build relationships away from public noise.' },
+  { name: 'Joint venture opportunities', img: '/stock/joint-ventures.webp', alt: 'Two people shaking hands over a desk', body: 'Discover aligned projects and combine skills. One member brings the idea, another the technical depth, another the distribution.' },
+  { name: 'Gated member content', img: '/stock/gated-content.webp', alt: 'A hand holding a brass padlock', body: 'Create gated articles, products, prompts, and downloads that enrich the network and give new members a reason to join.' },
+  { name: 'Network syndication', img: '/stock/network-syndication.webp', alt: 'A hand holding a phone showing social network apps', body: 'The network distributes and promotes member work across social channels, so useful work travels further than it would alone.' },
+  { name: 'Specialized member tools', img: '/stock/member-tools.webp', alt: 'A laptop on a wooden desk with a code editor open', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
+  { name: 'Shared member upside', img: '/stock/member-upside.webp', alt: 'Growth charts on paper under a magnifying glass', body: 'A portion of membership revenue is shared back with members whose published work and contributions help grow the network.' },
+];
 
 const faqs = [
   ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, distribution support, and a revenue-sharing model for member-created value.'],
@@ -73,6 +100,10 @@ const year = new Date().getFullYear();
           <span>GBTI</span>
         </a>
         <nav class="ci-links" aria-label="Sections">
+          <a href="#network">The network</a>
+          <a href="#revenue">Revenue model</a>
+          <a href="#shoptalk">Shop talk</a>
+          <a href="#benefits">Membership</a>
           <a href="#faq">FAQ</a>
         </nav>
         <button type="button" class="ci-theme" data-ci-theme aria-label="Toggle dark mode">
@@ -94,7 +125,7 @@ const year = new Date().getFullYear();
             card required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
-            <a href="/about/" class="btn-ghost">How the network works</a>
+            <a href="#network" class="btn-ghost">How the network works</a>
           </div>
           <div class="ci-ticks">
             <span>&#10003; &nbsp;Publish under your own name</span>
@@ -123,6 +154,123 @@ const year = new Date().getFullYear();
         </div>
       </div>
     </div>
+
+    <!-- ================= WHY A NETWORK ================= -->
+    <section id="network" class="ci-sec">
+      <p class="eyebrow">Why a network</p>
+      <h2 style="max-width:20ch">A home for your work, with the earning path most collectives leave out</h2>
+      <p class="sec-lead">Most independent creators want to publish and be found, without standing up a CMS
+        or paying to host and maintain a site. The network handles that, surfaces work to AI assistants, and
+        adds the one thing most publishing collectives leave out.</p>
+      <div class="grid3">
+        <div class="card lift bcard">
+          <img src="/stock/publish-without-hosting.webp" alt="A person reading an article on a laptop at a tidy desk" width="800" height="480" loading="lazy" decoding="async" />
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4z"/><path d="M4 9h16"/></svg></div>
+            <h3>No site to host or maintain</h3>
+            <p>Publish without a CMS, hosting bills, or upkeep. Your work lives on the network and renders on
+              your member profile.</p>
+          </div>
+        </div>
+        <div class="card lift bcard">
+          <img src="/stock/ai-recommendations.webp" alt="A glowing network of connected points" width="800" height="480" loading="lazy" decoding="async" />
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div>
+            <h3>Built for AI recommendations</h3>
+            <p>Content is structured so AI assistants can read and recommend it, which lifts how often your
+              work gets surfaced.</p>
+          </div>
+        </div>
+        <div class="card lift bcard">
+          <img src="/stock/earning-path.webp" alt="Gold coins on a laptop keyboard in front of a rising chart" width="800" height="480" loading="lazy" decoding="async" />
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+            <h3>Publishing with an earning path</h3>
+            <p>Most collectives stop at distribution. Here, the work that brings members in earns a share for
+              the people who made it.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= REVENUE MODEL ================= -->
+    <section id="revenue" class="ci-sec">
+      <p class="eyebrow">The revenue model</p>
+      <h2 style="max-width:22ch">Member work creates value at every touch, and each one can earn</h2>
+      <p class="sec-lead">A reader might discover the network through an article, come back through a
+        product, read the comments, and notice what members improved before they join. In this network,
+        those touches matter, and each one can earn. A portion of every membership is shared back with the
+        members whose work drove it.</p>
+      <div class="grid4">
+        {splits.map((s) => (
+          <div class="card bcard">
+            <img src={s.img} alt={s.alt} width="800" height="480" loading="lazy" decoding="async" />
+            <div class="bod">
+              <div class={`pct ${s.cls}`}>{s.pct}</div>
+              <div class="pct-name">{s.name}</div>
+              <p class="pct-body">{s.body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div class="ci-invite-lane">
+        <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
+        <p>Members can also share a personal invite link that earns a flat
+          <strong>{INVITE_PCT} lifetime commission</strong> on anyone who joins through it. It is paid out
+          of the platform share, so first-touch and last-touch content owners are never diluted.</p>
+      </div>
+      <p class="ci-more"><a href="/revenue-model/">See the full split and worked examples &rarr;</a></p>
+    </section>
+
+    <!-- ================= SHOP TALK ================= -->
+    <div id="shoptalk" class="ci-band">
+      <div class="ci-band-in">
+        <div>
+          <p class="eyebrow">Weekly shop talk</p>
+          <h2 style="max-width:18ch">Where we meet, and hold ourselves accountable to progress</h2>
+          <p class="sec-lead" style="max-width:52ch">Members gather for a recurring two-hour session to talk
+            through product development, track progress, share knowledge, set goals, and keep each other
+            accountable. It is the rhythm that turns publishing into momentum.</p>
+          <div class="ci-pills">
+            <span>Product development</span><span>Track progress</span><span>Share knowledge</span><span>Set goals</span><span>Accountability</span>
+          </div>
+        </div>
+        <div class="card ci-session bcard">
+          <img src="/stock/shop-talk-call.webp" alt="A laptop showing a group video call" width="800" height="480" loading="lazy" decoding="async" />
+          <div class="bod">
+          <div class="ci-live"><span class="dot"></span><span class="lbl">The session</span></div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <div><b>Two hours, every week</b><span>A standing time members build their week around</span></div>
+          </div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></div>
+            <div><b>Live on Google Meet</b><span>Face to face with the people building it</span></div>
+          </div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+            <div><b>Coordinated on Discord</b><span>Where the conversation continues between sessions</span></div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= BENEFITS ================= -->
+    <section id="benefits" class="ci-sec">
+      <p class="eyebrow">Why members join</p>
+      <h2 style="max-width:20ch">What membership gives you</h2>
+      <p class="sec-lead">Built for professionals who want a place to publish useful work, improve alongside
+        other members, and belong to a network that rewards contribution.</p>
+      <div class="grid3">
+        {benefits.map((b) => (
+          <div class="card lift bcard">
+            <img src={b.img} alt={b.alt} width="800" height="480" loading="lazy" decoding="async" />
+            <div class="bod"><h3>{b.name}</h3><p>{b.body}</p></div>
+          </div>
+        ))}
+      </div>
+    </section>
 
     <!-- ================= FAQ ================= -->
     <section id="faq" class="ci-sec ci-faq">
