@@ -5,8 +5,8 @@ status: draft
 visibility: public
 publicStub: false
 excerpt: >-
-  Upwork shipped an MCP server, so an agent can post a job, shortlist freelancers and draft an
-  offer without a browser. The interesting part is what it says about where agentic work stops.
+  Upwork shipped a Model Context Protocol server, so an agent can post a job, shortlist freelancers
+  and draft an offer without a browser. An agent can find a person. It still cannot judge one.
 categories:
   - ai
   - mcp
@@ -22,29 +22,35 @@ type: post
 author: gbtilabs
 ---
 
-On August 10, 2026, Upwork announced an MCP server, which means an AI agent can now post a job, shortlist freelancers, prepare an offer and summarize proposals as they arrive, without anyone opening a browser tab.[^1]
+On August 10, 2026, Upwork announced a server for the Model Context Protocol. An agent can now post a job, shortlist freelancers, prepare an offer and summarize proposals as they arrive, without anyone opening a browser tab.[^1]
 
-The company's framing of why is more interesting than the product. Peter Sanborn, Upwork's chief business officer, said they built it after noticing something in their own logs: "We started seeing something remarkable this year: AI agents attempting to log into Upwork on their users' behalf to search for the right person to hire."[^1]
+The protocol is worth understanding before the rest of this makes sense, because it is a plumbing change with consequences. An MCP server publishes a set of typed operations, things like searching jobs, sending a message or creating a milestone, and an AI agent calls them over an authenticated connection the way one program calls another. No page is fetched, nothing is rendered, and no human clicks anything. The agent asks for data, gets structured data back, and writes the result into the conversation you are already having with it.
 
-That is a marketplace watching software try to break in through the front door and deciding to install a door.
+The company's account of why is more interesting than the product. Peter Sanborn, Upwork's chief business officer, said they built it after noticing something in their own logs: "We started seeing something remarkable this year: AI agents attempting to log into Upwork on their users' behalf to search for the right person to hire."[^1]
+
+A marketplace watched software try to get in through the front door and decided to install a door.
+
+Everything below turns on one distinction, so it is worth stating plainly at the start. An agent is good at reaching a service and bad at judgment. Upwork has automated the reaching. The judgment is still yours, and judgment is where the cost was.
 
 ## Nobody enrolled, and that is the point
 
-It is tempting to read the launch as a partnership. It is not one. The Model Context Protocol is an open standard, and Anthropic donated it to the Linux Foundation in December 2025 specifically so it would stay neutral.[^2]
+The launch reads like a partnership, and the mechanism behind it is simpler than that. Anthropic donated the protocol in December 2025 to the Agentic AI Foundation, a new Linux Foundation body co-founded with Block and OpenAI, whose platinum members include Amazon Web Services, Google, Microsoft and Cloudflare.[^2] A standard governed by that many competitors at once is about as neutral as infrastructure gets.
 
-So Upwork did not sign with anyone. It built a server, and every host that already speaks the protocol can reach it. The announcement names Claude, ChatGPT and Cursor, and then adds "any MCP-compatible product," which is the operative phrase.[^1] Supporting material extends the list to Claude on web, desktop and Code, plus Cursor and Codex in both app and CLI form.[^3]
+Upwork built a server against an open standard, and every agent app that already speaks the protocol can reach it. The announcement names Claude, ChatGPT and Cursor, then adds "any MCP-compatible product," which is the operative phrase.[^1] The documentation goes further, listing Claude on web, desktop and Code, Cursor and Codex in app and CLI form, and naming Windsurf, Cline, VS Code and Goose as examples of anything else that speaks remote MCP with OAuth.[^3]
 
-The distinction matters if you are asking whether the big AI hosts are buying in. As far as the public record goes, none of them announced anything. There is no Anthropic or OpenAI press release about Upwork, no co-marketing, no revenue arrangement that anyone has disclosed. Upwork built to a standard, and the standard did the distribution.
+Upwork's own setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path and say a ChatGPT directory listing is coming soon.[^3] That is Upwork describing its presence in someone else's directory, which is not the same as either company saying anything. Neither Anthropic nor OpenAI announced a thing.
 
-That is the quieter story in this launch. A marketplace can now reach every major agent host without negotiating with any of them.
+The quieter story is the interesting one. One implementation of an open standard made a marketplace reachable from every major AI assistant at once.
 
-## Everyone gets it, immediately
+## Everyone on Upwork gets it, and the gate moves elsewhere
 
-There is no waitlist, no tier and no pilot cohort. It is "available today for every Upwork client and freelancer, at no additional cost."[^1]
+The server reached the whole marketplace at once, "available today for every Upwork client and freelancer, at no additional cost."[^1] Upwork's own documentation puts the same thing plainly: the server is "free to use with any Upwork account."[^3]
 
-Universal availability is worth sitting with, because it decides who benefits. When a capability ships to everyone at once and costs nothing, it confers no advantage by being adopted. It only confers advantage on people who restructure how they work around it. The freelancer whose agent reviews the job feed every morning is not ahead because they have access. They are ahead because they built the loop.
+Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^3] So the assistant's plan, and in one case its model setting, decides what an agent may connect to, and the gate moved rather than disappearing. That gate is a product decision by a third party and could be reversed next quarter, which is what separates it from the harder version of the same shape this piece ends on.
 
-## What it is actually for
+On the marketplace side, universal availability decides who benefits. A capability that ships to everyone at once and costs nothing confers no advantage by being adopted, only on people who restructure how they work around it. A freelancer whose agent reviews the job feed every morning is not ahead for having access. They are ahead for having built the loop.
+
+## What it is for
 
 The announcement lists the prompts it expects, and their shape is revealing:[^1]
 
@@ -53,84 +59,86 @@ The announcement lists the prompts it expects, and their shape is revealing:[^1]
 - "Show me this week's jobs that match my skills and fit my budget and availability."
 - "Summarize my Upwork client messages and flag which ones need a follow-up today."
 
-Three of those four are administration. Finding, posting, summarizing, triaging. The agent is doing the paperwork around the work, not the work. On the freelancer side the list goes slightly further, including the ability to submit completed milestone work, which is the one action that touches delivery rather than coordination.
+Three of the four are administration. Finding, posting, summarizing, triaging. The agent handles the paperwork around the work rather than the work.
 
-## How it decides who is good, and how much it will not say
+The documentation covers a third role the announcement skips. Alongside clients and freelancers, agencies get a team-wide view: one call returning every member's invitations, offers, messages and contracts.[^3] For a shop coordinating several people across many contracts, that consolidation is worth more than the hiring flow that led the launch.
 
-The trust story in the announcement is about payment and identity, not judgment. Every connection runs through an authenticated Upwork account, and the company leans on its existing identity verification, escrow and dispute protections.[^1]
+One capability does touch delivery. A freelancer can submit milestone work through the connector, which puts the agent in the path of the deliverable rather than only the negotiation.[^3]
 
-Those are real protections and they solve a real problem: an agent picking a stranger to pay is a genuinely alarming idea without them. But notice what they protect against. They protect against fraud and non-delivery. They do not tell you the shortlist is any good.
+## How it decides who is good
 
-The release says an agent can produce "a shortlist of qualified freelancers" without saying what qualifies them.[^1] Upwork has quality signals already, including Job Success Score and its various talent badges, and nothing in the announcement says whether an agent sees them, weights them, or can be asked to sort by them. We could not read the developer documentation to check, because the page returns a 403 to anything that is not a browser, which is a small irony for a product about machine access.
+The trust story is about payment and identity. Every connection runs through an authenticated Upwork account, and the company leans on existing identity verification, escrow and dispute protections.[^1] An agent picking a stranger to pay would be alarming without them.
 
-So the honest answer on quality is that the escrow question is settled and the ranking question is not. If you cannot see the signal an agent used to pick three names out of thousands, you are trusting the ranking, and the ranking is the whole product.
+Notice what they protect. They cover fraud and non-delivery. They say nothing about whether the shortlist is any good.
 
-One safeguard did survive into the customer testimonial, and it is the right one. Rohit Singh, founder of Populosof, said "every action that changes anything is previewed and requires my explicit confirmation."[^1] Reads are automatic, writes are gated. That is the correct default for an agent holding a payment instrument.
+We read the documentation looking for the ranking inputs and they are not disclosed. A client can "Pull up ranked profiles" and "review proposals received, with ranked summaries," and the page never names Job Success Score, Top Rated, or any other quality signal Upwork already publishes.[^3] The word doing the work is "ranked," and nothing says ranked by what.
+
+If you cannot see what turned thousands of freelancers into three names, you are trusting the ranking, and the ranking is the product. Escrow tells you the money is safe. It does not tell you the shortlist was.
+
+One safeguard is documented clearly, and it is the right one. Every write action is drafted for separate confirmation rather than committed in one shot, and binding financial actions complete on upwork.com rather than inside the agent.[^3] Rohit Singh, founder of Populosof and one of two customers quoted in the announcement, put the same thing in plainer terms: "every action that changes anything is previewed and requires my explicit confirmation."[^1] Reads are automatic, writes are gated. For an agent holding a payment instrument that is the correct default.
+
+The permission model is blunter than the confirmation model. Upwork's own FAQ says that "Today, connecting grants the full set of scopes," so there is no way to attach an agent to job search while withholding messaging, contracts or financial history.[^3] The confirmation gate is doing all the work, because the access grant is all or nothing.
 
 ## Can an agent be the freelancer
 
-Not as the platform describes it. Every capability in the announcement points the same way: agents act for a human on both sides of the deal, and a human is still the party to the contract.[^1] Upwork's own AI policy is reported to require that freelancers personally review and customize client communications, which forecloses a fully autonomous seller account, though we are relying on secondary reporting there rather than the policy text.[^4]
+Upwork answers this one directly. Its FAQ asks whether an AI agent can hire on your behalf without you, and answers: "Not today. In the current release, a person confirms every binding action."[^3]
 
-The result is a marketplace where agents may find, draft, negotiate toward and submit, but may not be the thing being hired. Given that Sanborn's quote describes agents already attempting to log in as their users, the server reads less as an expansion of what agents may do and more as a supervised channel for what they were doing anyway.
+Read the hedge. "Not today" and "in the current release" are the words of a company that has thought about the other version and has not shipped it.
+
+For now a human is the contracting party on both sides, and agents find, draft, negotiate toward and submit. Upwork's AI policy is reported to require that freelancers personally review and customize client communications, which would foreclose a fully autonomous seller account, though that rests on secondary reporting rather than the policy text.[^4] Given Sanborn's description of agents already attempting to log in as their users, the server reads less as an expansion of what agents may do than as a supervised channel for what they were doing anyway.
 
 ## The affiliate program has a hole in it
 
-This is the part we found most surprising, and it is a structural observation rather than something Upwork said.
+Upwork's affiliate program pays 70% of a new client's first contract spend, capped at $150, tracked through the Impact platform with a cookie window measured in weeks.[^5] Every part of that mechanism assumes a browser. A link is clicked, a cookie is set, a signup is attributed.
 
-Upwork's affiliate program pays 70% of a new client's first contract spend, capped at $150, tracked through the Impact platform with a 30-day cookie.[^5] Every word of that mechanism assumes a browser. A link is clicked, a cookie is set, a signup is attributed.
+An MCP conversation runs directly between the agent and the server, so the browser, the click and the cookie that mechanism depends on never come into existence. A founder who asks Claude to post a job and hires someone that afternoon leaves no referral trail, so whoever recommended Upwork in the first place is invisible to the attribution system.
 
-An MCP conversation has no browser, no click and no cookie. If a founder asks Claude to post a job to Upwork and hires someone that afternoon, there is no referral link anywhere in that flow to attribute the hire to whoever recommended Upwork in the first place.
+Marketplace fees are unaffected, because they are charged on the contract rather than on the traffic. Freelancers pay a service fee Upwork moved from a flat 10% to a variable 0% to 15% per contract in May 2025, and clients pay between 3% and 10% depending on plan and payment method.[^6] Those apply whether a human or an agent posted the job, which is what "no additional cost" means: the server is free, the take rate is untouched. Freelancers also still spend Connects to submit proposals through the connector, so the agent flow carries the same per-proposal cost as the website.[^3]
 
-The marketplace fees themselves are unaffected, because they are charged on the contract rather than on the traffic. Freelancers pay a service fee that Upwork moved from a flat 10% to a variable 0% to 15% per contract in May 2025, and clients pay a marketplace fee in the region of 3% to 10% depending on plan.[^6] Those apply whether the job was posted by a human or an agent, which is what "no additional cost" means: the MCP server is free, and the take rate is untouched.
+The referral layer sitting on top of those fees still assumes a person with a browser, and the agent flow offers it nothing to attribute. Anyone whose business depends on sending clients to a marketplace should be watching, because the problem generalizes. Affiliate marketing is built on the browser, and agents do not use one.
 
-But the referral layer sitting on top of that has no agent-shaped equivalent yet. Anyone whose business depends on sending clients to a marketplace should be watching this, because it is a general problem. Affiliate marketing is built on the browser, and agents do not use one.
+## Would this help a curated network like Codeable
 
-## Would this help a Codeable
+Codeable is the interesting comparison because it is the opposite bet. It is a closed WordPress network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^7]
 
-Codeable is the interesting comparison because it is the opposite bet. It is a closed WordPress network, roughly the top 2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform presents one averaged fixed price plus a 17.5% fee.[^7]
+The reflex is to say an agent-driven marketplace threatens that model. The opposite seems more likely.
 
-The reflex is to say an agent-driven marketplace threatens that model. We think the opposite is more likely.
+An agent can reach an API and cannot judge whether a stranger will deliver. On an open marketplace those two facts collide, and a human has to supply the judgment the agent lacks, which is the work the agent was supposed to remove. On a curated network the judgment happened before the agent arrived. Three names drawn from a pool already filtered to 2.2% are worth more per call than three drawn from a pool nobody filtered.
 
-An agent is very good at reaching an API and very bad at judging whether a stranger can build the thing. On an open marketplace those two facts collide, and the human has to supply the judgment the agent lacks, which is exactly the work the agent was supposed to remove. On a curated network the judgment already happened before the agent arrived. A shortlist of three from a pool that was filtered to 2% is worth more per call than a shortlist of three from a pool that was not filtered at all.
-
-The catch is that Codeable's process is deliberately conversational. The workroom discussion before pricing is not overhead, it is the mechanism, and it is the part that does not compress into a tool call. A curated network that built an MCP server would have to decide which parts of its process are load-bearing and which were only ever a user interface. That is a harder design question than Upwork faced, and a more valuable one to answer correctly.
+The catch is that the pre-pricing conversation is the mechanism rather than overhead, and it is the part that does not compress into a tool call. A curated network building an MCP server would have to decide which parts of its process are load-bearing and which were only ever a user interface. That is a harder question than Upwork faced and a more valuable one to get right.
 
 ## Where the agentic version runs out
 
-Sanborn described the other half of what Upwork is seeing, and it is the most useful sentence in the announcement: clients "are showing up with an AI-generated first pass that got them part of the way there but still need a real person to take it the rest of the way."[^1]
+Sanborn described the other half of what Upwork is seeing, and it is the most useful sentence in the announcement. Clients "are showing up with an AI-generated first pass that got them part of the way there but still need a real person to take it the rest of the way."[^1]
 
-That is a marketplace operator describing its own demand curve. The first pass is cheap now. The last mile is not, and the last mile is where the money went.
+A marketplace operator is describing its own demand curve. Sanborn's first pass got cheap. Taking it the rest of the way did not, and the rest of the way is where the money went.
 
-The pattern is familiar to anyone who has shipped software this year. Generation is solved well enough to be boring. What remains expensive is everything that requires holding the whole system in your head at once: deciding the approach is right before it is built, integrating with the thing that already exists and cannot be rewritten, knowing that the passing test suite is testing the wrong behavior, and owning the result when it reaches production. None of that is typing speed, and typing speed is what got cheap.
+The pattern is familiar to anyone who shipped software this year. Generation is solved well enough to be boring. What stays expensive is the judgment: deciding the approach is right before it is built, integrating with the system that already exists and cannot be rewritten, noticing that a passing test suite is testing the wrong behavior, and owning the result once it reaches production. None of that is typing speed, and typing speed is what got cheap.
 
-## The cost question everyone is actually asking
+Judgment is the same bottleneck here as it was on the shortlist, pointed at a system instead of a person. An agent cannot tell you the three freelancers it surfaced are the right three, and it cannot tell you the code it generated is correct. In both cases the automation stops at the point where someone has to be accountable for a call.
 
-Behind all of this sits one question: how far can AI push down the cost of building web and application software.
+The cost question everyone is asking therefore has an unsatisfying answer. AI lowers the cost of producing code and leaves the cost of deciding what is correct roughly where it was. Those are different budgets, and only one of them was ever mostly typing. If generating a component costs nearly nothing, teams generate far more of them, and the volume needing review, integration, security, deployment and operation goes up rather than down. The bottleneck moves onto whoever can say with confidence that the system does what it claims and will keep doing it on Tuesday.
 
-The honest answer is that it lowers the cost of producing code and leaves the cost of deciding what is correct almost exactly where it was. Those are different budgets, and only one of them was ever mostly typing.
+Devops management has owned that problem the whole time. Senior developers and project managers running agentic pipelines are not doing a new job with a new title. They are doing the same job at higher throughput against a codebase that grows faster than a person can read it. Knowing what is deployed, what changed and how to put it back decides whether a bad release costs an hour or a weekend, and agents push the rate of change up while pushing the number of people who have read every line down.
 
-Which produces an outcome that keeps surprising people. If generating a component costs nearly nothing, teams generate far more of them, and the volume of code that needs reviewing, integrating, securing, deploying and operating goes up rather than down. The bottleneck moves. It does not disappear. It lands on whoever can say with confidence that this system does what it claims and will keep doing it on Tuesday.
+Upwork's server is a small, sensible piece of infrastructure. It is also a marketplace admitting in its own launch copy that a cheap first pass creates demand for the person who finishes it. That admission is worth more than the feature.
 
-That is a devops management problem, and it was a devops management problem before any of this. The senior developers and project managers now running agentic pipelines are not doing a new job with a new title. They are doing the same job, at higher throughput, against a codebase that grows faster than a human can read it. The discipline of knowing what is deployed, what changed, and how to put it back is more relevant with agents in the loop, not less, because the rate of change went up and the number of people who have read every line went down.
+## What we do not know
 
-Upwork's server is a small, sensible piece of infrastructure. It is also a marketplace admitting, in its own launch copy, that the AI first pass creates demand for the human second pass. That is worth more than the feature.
+We have not connected the server, so every capability above is documentation about the product rather than observation of it. We could not confirm the Claude directory listing independently, because that page sits behind a login wall and Upwork asserting its own presence there is not the same as seeing it. The freelancer AI-policy requirement rests on secondary reporting.
 
-## What we do not know yet
+If you have wired this into a working pipeline, we would like to know what the shortlist quality was like. That is the number that decides whether any of it is useful.
 
-We could not verify several things and would rather say so than guess. We do not know which quality signals the agent actually receives, because the documentation is not machine-readable. We do not know whether Upwork appears in Anthropic's connector directory or OpenAI's app directory, only that neither company announced it. We have not connected the server ourselves.
+[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026, read August 12, 2026. Source of the launch date, the Sanborn and Singh quotes, the four example prompts, the identity, escrow and dispute language, and the "available today for every Upwork client and freelancer, at no additional cost" wording. The release carries two customer quotes; the second is from Allison Lee, an independent AI operations specialist on Upwork: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
 
-If you have wired it into a real workflow, we would like to hear what the shortlist quality was actually like. That is the number that decides whether any of this is useful.
+[^2]: Anthropic, "Donating the Model Context Protocol and establishing the Agentic AI Foundation," December 9, 2025, read August 12, 2026, corroborated by the Linux Foundation's own formation announcement and OpenAI's co-founding post. Source of the donation to the Agentic AI Foundation rather than to the Linux Foundation directly, the Anthropic, Block and OpenAI co-founding, and the platinum membership including Amazon Web Services, Google, Microsoft and Cloudflare: [anthropic.com](https://www.anthropic.com/news/donating-the-model-context-protocol-and-establishing-of-the-agentic-ai-foundation)
 
-[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026, read August 12, 2026. Source of the launch date, the Sanborn and Singh quotes, the client and freelancer capability lists, the four example prompts, the identity/escrow/dispute language, and the "available today for every Upwork client and freelancer, at no additional cost" wording: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
+[^3]: Upwork, "Upwork MCP Server," product documentation, page dated August 4, 2026, read in a browser on August 12, 2026. Source of the compatible-agent list, the client, freelancer and agency capability sets, the milestone-submission and Connects statements, the draft-confirm model, the binding-actions-on-upwork.com rule, the "Today, connecting grants the full set of scopes" line, the Claude directory install path, the ChatGPT "coming soon" note, and the FAQ answer "Not today. In the current release, a person confirms every binding action." The words "ranked profiles" and "ranked summaries" appear on this page; Job Success Score and Top Rated do not appear anywhere on it, nor does any other published quality or ranking signal. The page uses "badge" once, in "Manage your availability badge", which is an availability control rather than a measure of quality. The same page carries the per-assistant plan requirements quoted above: "Custom MCP connectors are available on Plus, Pro, Team, Business, and Enterprise plans" for ChatGPT, "Free plan users are limited to one custom connector" for Claude, and "Instant does not support MCP tool calls." Its FAQ supplies "free to use with any Upwork account." The page returns HTTP 403 to non-browser clients: [upwork.com/ai/mcp](https://www.upwork.com/ai/mcp)
 
-[^2]: Wikipedia, "Model Context Protocol," read August 12, 2026. Source of the December 9, 2025 donation of MCP to the Linux Foundation: [en.wikipedia.org](https://en.wikipedia.org/wiki/Model_Context_Protocol)
+[^4]: Secondary reporting on Upwork's 2026 AI policy, read August 12, 2026, describing a requirement that freelancers personally review and customize client communications. Upwork's policy text was not read directly, so this is reported rather than confirmed, and it is the least verified claim in this piece.
 
-[^3]: Search-result summaries of the Upwork MCP documentation at upwork.com/ai/mcp, read August 12, 2026. Source of the extended host list (Claude web/desktop/Code, Cursor app/CLI, Codex app/CLI) and the OAuth connection flow. The page itself returns HTTP 403 to non-browser clients, so this is secondary and the primary text was not read.
+[^5]: Published summaries of the Upwork affiliate program, read August 12, 2026. Source of the 70% of first-contract-spend commission, the $150 per-transaction cap and the Impact platform. Reported cookie windows vary by link type, commonly 30 days for standard links against 90 for social, and none of these figures appears on Upwork's own affiliate landing page, so the window is given as a range rather than a number. The argument here does not depend on the length, only on there being no cookie at all in an agent flow. The conclusion about MCP attribution is ours, not Upwork's: [upwork.com/affiliates](https://www.upwork.com/affiliates)
 
-[^4]: Secondary reporting on Upwork's 2026 AI policy, read August 12, 2026, describing a requirement that freelancers personally review and customize client communications. Upwork's own policy text was not read directly, so this is reported rather than confirmed.
+[^6]: Upwork, "Pricing: plans and fees for clients," read in a browser on August 12, 2026. The page states both sides: "Talent pays a service fee ranging from 0% to 15% per contract," and for clients a fee of 3% or 5% on Basic against 8% or 10% on Business Plus, where the lower figure in each pair is "available for eligible clients in the U.S. who pay with a checking account" rather than a plan difference. So the client range quoted above is four discrete rates rather than a continuum. The page also documents a one-time Contract Initiation Fee, which the body does not count: Basic plans are charged it per contract, while Business Plus plans pay it only on fixed-price contracts of $100 or less. The May 1, 2025 date for the freelancer change rests on secondary sources; the rates themselves are first-party here: [upwork.com/pricing/client](https://www.upwork.com/pricing/client)
 
-[^5]: Published summaries of the Upwork affiliate program, read August 12, 2026. Source of the 70% of first-contract-spend commission, the $150 per-transaction cap, the 30-day cookie and the Impact platform. The conclusion drawn about MCP attribution is ours, not Upwork's: [upwork.com/affiliates](https://www.upwork.com/affiliates)
-
-[^6]: Published summaries of Upwork's fee structure, read August 12, 2026. Source of the May 1, 2025 change from a flat 10% freelancer service fee to a variable 0% to 15% per contract, and the 3% to 10% client marketplace fee range. Ranges vary between sources, so the figures are given as ranges rather than as exact rates.
-
-[^7]: Codeable, company pages and pricing, read August 12, 2026. Source of the closed vetted network, the approximately 2% acceptance rate, the shared workroom and averaged single estimate, and the 17.5% service fee: [codeable.io](https://www.codeable.io/how-it-works/)
+[^7]: Codeable, "Codeable vs Upwork," read August 12, 2026, for "roughly 2.2% of applicants are accepted" and the fixed 17.5% service fee on hourly rates of $80 to $120: [codeable.io/blog/codeable-vs-upwork](https://www.codeable.io/blog/codeable-vs-upwork/). The shared workroom and the averaged single estimate are described on the company's how-it-works page.
