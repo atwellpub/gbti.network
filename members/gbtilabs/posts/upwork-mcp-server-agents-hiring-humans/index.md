@@ -32,11 +32,11 @@ Peter Sanborn, Upwork's chief business officer, described what prompted it:
 
 A marketplace watched software try to get in through the front door and decided to install a door.
 
-## Any MCP-compatible assistant can reach it, and neither Anthropic nor OpenAI announced it
+## Any MCP-compatible assistant can reach the Upwork server
 
 The announcement names Claude, ChatGPT and Cursor, then adds "any MCP-compatible product."[^1] The documentation goes further, listing Claude on web, desktop and Code, Cursor and Codex in app and CLI form, and naming Windsurf, Cline, VS Code and Goose as examples of anything else that speaks remote MCP with OAuth.[^2]
 
-Upwork's own setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path and say a ChatGPT directory listing is coming soon.[^2] That is Upwork describing its presence in someone else's directory, which is not the same as either company saying anything. Neither Anthropic nor OpenAI announced a thing.
+Upwork's setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path and say a ChatGPT directory listing is coming soon.[^2]
 
 Any assistant that speaks the protocol can reach the server, whether or not its vendor has said a word about Upwork.
 
