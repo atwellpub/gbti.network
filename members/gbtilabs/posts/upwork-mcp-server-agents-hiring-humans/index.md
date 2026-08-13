@@ -40,7 +40,7 @@ Upwork's documentation gives `claude.ai/directory/connectors/upwork` as the reco
 
 ![The Upwork entry in Claude's connector directory, labelled Community, listing 46 tools](./images/claude-connector-directory-upwork.webp)
 
-Anthropic files it under **Community** rather than verified, noting that community connectors "have undergone automated reviews" and "may not yet meet the quality tier of verified connectors". The notice beside it reads "Only use connectors from developers you trust. Anthropic does not control which tools developers make available and cannot verify that they will work as intended or that they won't change."[^3] That is about whether the connector behaves, which is a different question from whether the shortlist it returns is any good.
+Anthropic files it under **Community** rather than verified, noting that community connectors "have undergone automated reviews" and "may not yet meet the quality tier of verified connectors". The notice beside it reads "Only use connectors from developers you trust. Anthropic does not control which tools developers make available and cannot verify that they will work as intended or that they won't change."[^3]
 
 Any assistant that speaks the protocol can reach the server, whether or not its vendor has said a word about Upwork.
 
