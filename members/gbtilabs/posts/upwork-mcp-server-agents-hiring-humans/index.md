@@ -24,7 +24,7 @@ author: gbtilabs
 
 On August 10, 2026, Upwork announced a server for the Model Context Protocol. An agent can now post a job, shortlist freelancers, prepare an offer and summarize proposals as they arrive, without anyone opening a browser tab.[^1]
 
-Before getting to why Upwork built one, the protocol itself needs explaining. An MCP server resembles a REST API, and Upwork's sits on the same APIs its website and public API already use.[^2] The difference is who does the calling. A REST endpoint waits for code a developer wrote against its documentation. An MCP server publishes a typed list of what it can do, things like searching jobs, sending a message or creating a milestone, and the assistant, the agent you are talking to, puts that list in front of the model, then makes whichever calls the model picks. No page is fetched, nothing is rendered, no human clicks anything, and the result lands in the conversation you are already having. Think of an MCP server as an extension to the assistant rather than to the model: the model arrives able to converse, and the server gives the assistant a set of things it can now do on your behalf.
+Before getting to why Upwork built one, the protocol itself needs explaining. An MCP server resembles a REST API, and Upwork's sits on the same APIs its website and public API already use.[^2] The difference is who does the calling. A REST endpoint waits for code a developer wrote against its documentation. An MCP server publishes a typed list of what it can do, things like searching jobs, sending a message or creating a milestone, and the assistant, the agent app you added the server to, puts that list in front of the model, then makes whichever calls the model picks. No page is fetched, nothing is rendered, no human clicks anything, and the result lands in the conversation you are already having. Think of an MCP server as an extension to the assistant rather than to the model: the model arrives able to converse, and the server gives the assistant a set of things it can now do on your behalf.
 
 Peter Sanborn, Upwork's chief business officer, described what prompted it:
 
@@ -36,7 +36,7 @@ A marketplace watched software try to get in through the front door and decided 
 
 The announcement names Claude, ChatGPT and Cursor, then adds "any MCP-compatible product."[^1] The documentation goes further, listing Claude on web, desktop and Code, Cursor and Codex in app and CLI form, and naming Windsurf, Cline, VS Code and Goose as examples of anything else that speaks remote MCP with OAuth.[^2]
 
-Upwork's setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path and say a ChatGPT directory listing is coming soon.[^2]
+Upwork's setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path, which we could not check because that page needs a login, and say a ChatGPT directory listing is coming soon.[^2]
 
 Any assistant that speaks the protocol can reach the server, whether or not its vendor has said a word about Upwork.
 
