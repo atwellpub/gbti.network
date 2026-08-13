@@ -26,7 +26,7 @@ On August 10, 2026, Upwork announced a server for the Model Context Protocol. An
 
 Before getting to why Upwork built one, the protocol itself needs explaining. An MCP server resembles a REST API, and Upwork's sits on the same APIs its website and public API already use.[^2] The difference is who does the calling. A REST endpoint waits for code a developer wrote against its documentation. An MCP server publishes a typed list of what it can do, things like searching jobs, sending a message or creating a milestone, and the assistant, the agent app you added the server to, puts that list in front of the model, then makes whichever calls the model picks. No page is fetched, nothing is rendered, no human clicks anything, and the result lands in the conversation you are already having. Think of an MCP server as an extension to the assistant rather than to the model: the model arrives able to converse, and the server gives the assistant a set of things it can now do on your behalf.
 
-Peter Sanborn, Upwork's chief business officer, described what prompted it:
+[Peter Sanborn](https://www.linkedin.com/in/petersanborn1/), Upwork's chief business officer, described what prompted it:
 
 > We started seeing something remarkable this year: AI agents attempting to log into Upwork on their users' behalf to search for the right person to hire.[^1]
 
