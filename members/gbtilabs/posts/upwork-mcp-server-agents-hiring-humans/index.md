@@ -32,7 +32,7 @@ Peter Sanborn, Upwork's chief business officer, described what prompted it:
 
 A marketplace watched software try to get in through the front door and decided to install a door.
 
-## Which AI assistants can reach it, and what Anthropic and OpenAI have actually said
+## Which AI assistants can reach it, and what Anthropic and OpenAI have said
 
 Upwork built a server against an open standard, and every agent app that already speaks the protocol can reach it. The announcement names Claude, ChatGPT and Cursor, then adds "any MCP-compatible product," which is the operative phrase.[^1] The documentation goes further, listing Claude on web, desktop and Code, Cursor and Codex in app and CLI form, and naming Windsurf, Cline, VS Code and Goose as examples of anything else that speaks remote MCP with OAuth.[^2]
 
@@ -44,13 +44,13 @@ Any assistant that speaks the protocol can reach the server, whether or not its 
 
 The server reached the whole marketplace at once, "available today for every Upwork client and freelancer, at no additional cost."[^1] Upwork's own documentation puts the same thing plainly: the server is "free to use with any Upwork account."[^2]
 
-Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2] So the assistant's plan, and in one case its model setting, decides what an agent may connect to, and the gate moved rather than disappearing. That gate is a product decision by a third party and could be reversed next quarter.
+Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2] So the assistant's plan, and in one case its model setting, decides what an agent may connect to, and the gate moved rather than disappearing. That gate is a product decision by a third party and could be reversed next quarter, which is what separates it from the constraint this piece closes on.
 
 On the marketplace side, universal availability decides who benefits. A capability that ships to everyone at once and costs nothing confers no advantage by being adopted, only on people who restructure how they work around it. A freelancer whose agent reviews the job feed every morning is not ahead for having access. They are ahead for having built the loop.
 
-## What the agent can actually do: mostly administration, plus one delivery step
+## What the agent can do: mostly administration, plus one delivery step
 
-The announcement lists the prompts it expects, and their shape is revealing:[^1]
+The announcement lists the prompts it expects:[^1]
 
 - "My prototype is almost ready to launch. Help me find a freelancer on Upwork who can test it end-to-end before it goes live."
 - "I'm launching a new ecommerce product and need help with paid acquisition. Post a job to Upwork and summarize proposals as they arrive."
@@ -95,9 +95,9 @@ Marketplace fees are unaffected, because they are charged on the contract rather
 
 The referral layer sitting on top of those fees still assumes a person with a browser, and the agent flow offers it nothing to attribute. Anyone whose business depends on sending clients to a marketplace should be watching, because the problem generalizes. Affiliate marketing is built on the browser, and agents do not use one.
 
-## Why a vetted network is worth more to an agent, not less
+## What an agent-driven marketplace means for a vetted network like Codeable
 
-Codeable is the interesting comparison because it is the opposite bet. It is a closed WordPress network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^6]
+Codeable is the opposite bet. It is a closed WordPress network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^6]
 
 The reflex is to say an agent-driven marketplace threatens that model. The opposite seems more likely.
 
@@ -119,7 +119,7 @@ The cost question everyone is asking therefore has an unsatisfying answer. AI lo
 
 Devops management has owned that problem the whole time. Senior developers and project managers running agentic pipelines are not doing a new job with a new title. They are doing the same job at higher throughput against a codebase that grows faster than a person can read it. Knowing what is deployed, what changed and how to put it back decides whether a bad release costs an hour or a weekend, and agents push the rate of change up while pushing the number of people who have read every line down.
 
-If you are deciding where to put your own effort, the connector is not the signal worth reading. The signal is Upwork, in its own launch copy, reporting that a cheap first pass creates demand for whoever finishes it.[^1]
+If you are deciding where to put your own effort, read past the connector. Upwork, in its own launch copy, reports that a cheap first pass creates demand for whoever finishes it.[^1]
 
 ## What we could not verify
 
