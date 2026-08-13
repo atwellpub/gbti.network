@@ -48,7 +48,7 @@ Upwork's MCP server is open to every Upwork user at no additional cost: "availab
 
 Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2]
 
-On the marketplace side, universal availability decides who benefits. A capability that ships to everyone at once and costs nothing confers no advantage by being adopted, only on people who restructure how they work around it. A freelancer whose agent reviews the job feed every morning is not ahead for having access. They are ahead for having built the loop.
+On the marketplace side, universal availability decides who benefits. A capability that ships to everyone at once and costs nothing confers no advantage by being adopted, only on people who restructure how they work around it.
 
 ## What the agent can do: mostly administration, plus one delivery step
 
@@ -99,6 +99,8 @@ The referral layer sitting on top of those fees still assumes a person with a br
 
 ## What an agent-driven marketplace means for a vetted network like Codeable
 
+**Disclosure:** the [Codeable](https://gbti.network/outbound/codeable) link here is a referral link. GBTI Network is a big fan of the Codeable community for React and WordPress work.
+
 Codeable is the opposite bet. It is a closed WordPress network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^7]
 
 The reflex is to say an agent-driven marketplace threatens that model. The opposite seems more likely.
@@ -129,7 +131,7 @@ We have not connected the server, so every capability above is documentation abo
 
 If you have wired this into a working pipeline, we would like to know what the shortlist quality was like. That is the number that decides whether any of it is useful.
 
-[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026, read August 12, 2026. Source of the launch date, the Sanborn and Singh quotes, the four example prompts, the identity, escrow and dispute language, and the "available today for every Upwork client and freelancer, at no additional cost" wording. The release carries two customer quotes; the second is from Allison Lee, an independent AI operations specialist on Upwork: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
+[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026, read August 12, 2026. Source of the launch date, the Sanborn and Singh quotes, the four example prompts, the identity, escrow and dispute language, and the "available today for every Upwork client and freelancer, at no additional cost" wording. The release carries two customer quotes; the second is from Allison Lee, an independent AI operations specialist on Upwork. Sanborn's name links to his LinkedIn profile, which the author opened and confirmed on August 13, 2026; LinkedIn serves an authwall to signed-out clients, so it is not readable from the article itself: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
 
 [^2]: Upwork, "Upwork MCP Server," product documentation, page dated August 4, 2026, read in a browser on August 12, 2026. Source of the compatible-agent list, the client, freelancer and agency capability sets, the milestone-submission and Connects statements, the draft-confirm model, the binding-actions-on-upwork.com rule, the "Today, connecting grants the full set of scopes" line, the Claude directory install path, the ChatGPT "coming soon" note, and the FAQ answer "Not today. In the current release, a person confirms every binding action." The words "ranked profiles" and "ranked summaries" appear on this page; Job Success Score and Top Rated do not appear anywhere on it, nor does any other published quality or ranking signal. The page uses "badge" once, in "Manage your availability badge", which is an availability control rather than a measure of quality. The same page carries the per-assistant plan requirements quoted above: "Custom MCP connectors are available on Plus, Pro, Team, Business, and Enterprise plans" for ChatGPT, "Free plan users are limited to one custom connector" for Claude, and "Instant does not support MCP tool calls." Its FAQ supplies "free to use with any Upwork account" and, for the REST comparison drawn above, "Upwork MCP Server uses the same secure APIs you'd use through the Upwork website or public API." The page returns HTTP 403 to non-browser clients: [upwork.com/ai/mcp](https://www.upwork.com/ai/mcp)
 
