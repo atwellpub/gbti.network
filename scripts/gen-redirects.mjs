@@ -94,6 +94,37 @@ for (const row of csv) {
 const EXTRA = [
   ['/products/js-animate-hue/', '/utilities/js-animate-hue/'],
   ['/products/email-signature-generator/', '/utilities/email-signature-generator/'],
+
+  // Outbound partner links. The WordPress site cloaked its affiliate links behind /outbound/ and
+  // /outsourcing/ paths served by the Redirection plugin. The content migrated and the redirect rules did
+  // not, so seven links across five published posts have been returning 404 ever since, on both bylines,
+  // earning nothing. `check-redirects` never caught it because a path that exists in no config has no
+  // destination to fail on.
+  //
+  // Each path is restored to the destination its own legacy rule carried, recovered from
+  // .data/legacy/db (wp_redirection_items). Deliberately NOT consolidated onto one referral code: the
+  // dump has TWO enabled Codeable codes, 99TG1 on the older rules (ids 2, 11, 13) and MzT91 on the newer
+  // ones (ids 34, 44, 54). Picking one would be a guess about which account is still live, and a wrong
+  // guess sends real clicks to the wrong place. Restoring each path as it was is faithful and loses
+  // nothing; consolidating is the owner's call.
+  ['/outbound/codeable', 'https://codeable.io/?ref=MzT91'],
+  ['/outbound/codeable/wordpress-services', 'https://app.codeable.io/tasks/new?ref=MzT91'],
+  ['/codeable/naresh-devineni', 'https://www.codeable.io/developers/naresh-devineni/?ref=MzT91'],
+  // BugHerd carries four "Learn more about BugHerd" banner links across two published posts. Its legacy
+  // target, https://partners.bugherd.com/gbti-network, is DEAD AT THE VENDOR: that URL 404s and so does the
+  // bare partners.bugherd.com root, so the whole partner subdomain is gone rather than just our page.
+  // Restoring it would relocate a 404 rather than fix one. Pointed at the product so the banners work; the
+  // referral credit is not lost by this, because a dead destination was already earning nothing. Replacing
+  // this with a current partner link needs the owner's BugHerd account and is raised with them.
+  ['/outbound/bugherd', 'https://bugherd.com/'],
+  ['/codeable', 'https://codeable.io/?ref=99TG1'],
+  ['/outsourcing/codeable', 'https://codeable.io/?ref=99TG1'],
+  ['/outsource/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=99TG1'],
+  // Linked live from members/atwellpub/posts/how-to-use-wp-cli-staging-to-import-a-remote-database. It
+  // matches no legacy rule exactly: the dump has /outsourcing/codeable and /outsource/codeable/wp-cli,
+  // and this link is a hybrid of the two, so it was probably broken on WordPress as well. Pointed at the
+  // WP-CLI developers page its sibling rule used, keeping that family's code.
+  ['/outsourcing/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=99TG1'],
 ];
 for (const [oldPath, newPath] of EXTRA) { lines.push(`${oldPath} ${newPath} 301`); n++; }
 
