@@ -42,7 +42,7 @@ Any assistant that speaks the protocol can reach the server, whether or not its 
 
 ## Every Upwork account gets it free, but your assistant plan may block it
 
-The server reached the whole marketplace at once, "available today for every Upwork client and freelancer, at no additional cost."[^1] Upwork's own documentation puts the same thing plainly: the server is "free to use with any Upwork account."[^2]
+Upwork's MCP server is open to every Upwork user at no cost: "available today for every Upwork client and freelancer, at no additional cost."[^1] The documentation says the same, that it is "free to use with any Upwork account."[^2]
 
 Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2] So the assistant's plan, and in one case its model setting, decides what an agent may connect to, and the gate moved rather than disappearing. That gate is a product decision by a third party and could be reversed next quarter, which is what separates it from the constraint this piece closes on.
 
