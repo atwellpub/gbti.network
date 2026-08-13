@@ -46,7 +46,7 @@ Anthropic files it under **Community** rather than verified, noting that communi
 
 Upwork's MCP server is open to every Upwork user at no additional cost: "available today for every Upwork client and freelancer, at no additional cost."[^1] The documentation says the same, that it is "free to use with any Upwork account."[^2]
 
-Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2]
+ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2]
 
 On the marketplace side, universal availability decides who benefits. A capability that ships to everyone at once and costs nothing confers no advantage by being adopted, only on people who restructure how they work around it.
 
@@ -61,47 +61,35 @@ The announcement lists the prompts it expects:[^1]
 
 Three of the four are administration. Finding, posting, summarizing, triaging. The agent handles the paperwork around the work rather than the work.
 
-The documentation covers a third role the announcement skips. Alongside clients and freelancers, agencies get a team-wide view: one call returning every member's invitations, offers, messages and contracts.[^2] For a shop coordinating several people across many contracts, that consolidation is worth more than the hiring flow that led the launch.
+The documentation covers a third role the announcement skips. Alongside clients and freelancers, agencies get a team-wide view: one call returning every member's invitations, offers, messages and contracts.[^2]
 
-One capability does touch delivery. A freelancer can submit milestone work through the connector, which puts the agent in the path of the deliverable rather than only the negotiation.[^2]
+One capability does touch delivery. A freelancer can submit milestone work through the connector.[^2] With job posting, proposal review and client messaging already inside the agent, the only steps reserved for a person are the binding ones, and a pipeline running from brief to delivered work without anyone opening a browser starts to look like a question of policy rather than plumbing.
 
-## Escrow protects your money, and nothing tells you the shortlist is good
+## How a client is meant to de-risk the expert they pick
 
-The trust story is about payment and identity. Every connection runs through an authenticated Upwork account, and the company leans on existing identity verification, escrow and dispute protections.[^1] An agent picking a stranger to pay would be alarming without them.
+Upwork's answer is identity and money. Every connection runs through an authenticated account, and the company leans on its existing identity verification, escrow and dispute protections.[^1] Those cover fraud and non-delivery, and they say nothing about whether the three names in front of you are the right three. We read the documentation looking for the ranking inputs and they are not disclosed: a client can "Pull up ranked profiles" and "review proposals received, with ranked summaries", and the page never names Job Success Score, Top Rated, or any other quality signal Upwork already publishes.[^2] The word doing the work is "ranked", and nothing says ranked by what.
 
-Notice what they protect. They cover fraud and non-delivery. They say nothing about whether the shortlist is any good.
+The controls on the agent itself are documented far better than the ones on the shortlist. Every write action is drafted for separate confirmation, binding financial actions complete on upwork.com rather than inside the agent, and connecting nonetheless "grants the full set of scopes", so there is no way to attach an agent to job search while withholding messaging, contracts or financial history.[^2] Rohit Singh, founder of Populosof and one of two customers quoted in the announcement, put the upside plainly: "every action that changes anything is previewed and requires my explicit confirmation."[^1] So a client de-risks the transaction and picks the expert on trust.
 
-We read the documentation looking for the ranking inputs and they are not disclosed. A client can "Pull up ranked profiles" and "review proposals received, with ranked summaries," and the page never names Job Success Score, Top Rated, or any other quality signal Upwork already publishes.[^2] The word doing the work is "ranked," and nothing says ranked by what.
-
-If you cannot see what turned thousands of freelancers into three names, you are trusting the ranking, and the ranking is the product. Escrow tells you the money is safe. It does not tell you the shortlist was.
-
-One safeguard is documented clearly, and it is the right one. Every write action is drafted for separate confirmation rather than committed in one shot, and binding financial actions complete on upwork.com rather than inside the agent.[^2] Rohit Singh, founder of Populosof and one of two customers quoted in the announcement, put the same thing in plainer terms: "every action that changes anything is previewed and requires my explicit confirmation."[^1] Reads are automatic, writes are gated. For an agent holding a payment instrument that is the correct default.
-
-The permission model is blunter than the confirmation model. Upwork's own FAQ says that "Today, connecting grants the full set of scopes," so there is no way to attach an agent to job search while withholding messaging, contracts or financial history.[^2] The confirmation gate is doing all the work, because the access grant is all or nothing.
-
-## Whether an agent can be the freelancer, and why a person still confirms every binding action
+## Are AI Agents Themselves Able to Shop On Upwork?
 
 Upwork's FAQ asks whether an AI agent can hire on your behalf without you, which is the client side of the question, and answers: "Not today. In the current release, a person confirms every binding action."[^2]
 
 Read the hedge. "Not today" and "in the current release" are the words of a company that has thought about the other version and has not shipped it.
 
-For now a human is the contracting party on both sides, and agents find, draft, negotiate toward and submit. Upwork's AI policy is reported to require that freelancers personally review and customize client communications, which would foreclose a fully autonomous seller account, though that rests on secondary reporting rather than the policy text.[^4] Given Sanborn's description of agents already attempting to log in as their users, the server reads less as an expansion of what agents may do than as a supervised channel for what they were doing anyway.
+## How does the affiliate program work with MCP?
 
-## Agent-driven hires leave no referral trail, so affiliate attribution breaks
-
-Upwork's affiliate program pays 70% of a new client's first contract spend, capped at $150, tracked through the Impact platform with a cookie window measured in weeks.[^5] Every part of that mechanism assumes a browser. A link is clicked, a cookie is set, a signup is attributed.
+Upwork's affiliate program pays 70% of a new client's first contract spend, capped at $150, tracked through the Impact platform with a cookie window measured in weeks.[^4] Every part of that mechanism assumes a browser. A link is clicked, a cookie is set, a signup is attributed.
 
 An MCP conversation runs directly between the agent and the server, so the browser, the click and the cookie that mechanism depends on never come into existence. A founder who asks Claude to post a job and hires someone that afternoon leaves no referral trail, so whoever recommended Upwork in the first place is invisible to the attribution system.
 
-Marketplace fees are unaffected, because they are charged on the contract rather than on the traffic. Freelancers pay a service fee Upwork moved from a flat 10% to a variable 0% to 15% per contract in May 2025, and clients pay between 3% and 10% depending on plan and payment method.[^6] Those apply whether a human or an agent posted the job, which is what "no additional cost" means: the server is free, the take rate is untouched. Freelancers also still spend Connects to submit proposals through the connector, so the agent flow carries the same per-proposal cost as the website.[^2]
-
-The referral layer sitting on top of those fees still assumes a person with a browser, and the agent flow offers it nothing to attribute. Anyone whose business depends on sending clients to a marketplace should be watching, because the problem generalizes. Affiliate marketing is built on the browser, and agents do not use one.
+Will Anthropic and OpenAI demand a share of the profit? There are arguments for it, most certainly.
 
 ## What an agent-driven marketplace means for a vetted network like Codeable
 
 **Disclosure:** the [Codeable](https://gbti.network/outbound/codeable) link here is a referral link. GBTI Network is a big fan of the Codeable community for React and WordPress work.
 
-Codeable is the opposite bet. It is a closed WordPress network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^7]
+Codeable is the opposite bet. It is a closed talent network that accepts roughly 2.2% of applicants, where a client brief goes to a small group of pre-vetted experts who discuss it in a shared workroom and independently estimate, and the platform returns one averaged fixed price against a 17.5% fee.[^5]
 
 The reflex is to say an agent-driven marketplace threatens that model. The opposite seems more likely.
 
@@ -127,7 +115,7 @@ If you are deciding where to put your own effort, the signal is in Upwork's laun
 
 ## What we could not verify
 
-We have not connected the server, so every capability above is documentation about the product rather than observation of it. The freelancer AI-policy requirement rests on secondary reporting.
+We have not connected the server, so every capability above is documentation about the product rather than observation of it.
 
 If you have wired this into a working pipeline, we would like to know what the shortlist quality was like. That is the number that decides whether any of it is useful.
 
@@ -137,10 +125,8 @@ If you have wired this into a working pipeline, we would like to know what the s
 
 [^3]: Claude connector directory, Upwork entry, captured August 13, 2026 from a signed-in session and supplied by the author. This is the only claim in the piece resting on a logged-in view rather than a public source, so it is evidenced by the screenshot above rather than by a URL a reader can open: the directory is served inside the application, and the same address returns 403 to every signed-out client. Source of the Community label and its notice, the "Developed by Upwork" credit, the disclaimer quoted in full above, and the tool inventory. The page states 46 tools and shows eight, which reconciles: `upwork__boost_profile`, `upwork__confirm_attachment_upload`, `upwork__confirm_draft`, `upwork__end_contract`, `upwork__find_freelancers`, `upwork__find_jobs`, `upwork__find_saved_jobs` and `upwork__get_account`, plus a "+38 more" control. The remaining 38 were not seen, and one category is listed, Productivity. `upwork__confirm_draft` corroborates from a second party the draft-then-confirm design that footnote 2 sources to Upwork's own FAQ.
 
-[^4]: Secondary reporting on Upwork's 2026 AI policy, read August 12, 2026, describing a requirement that freelancers personally review and customize client communications. Upwork's policy text was not read directly, so this is reported rather than confirmed, and it is the least verified claim in this piece.
 
-[^5]: Published summaries of the Upwork affiliate program, read August 12, 2026. Source of the 70% of first-contract-spend commission, the $150 per-transaction cap and the Impact platform. Reported cookie windows vary by link type, commonly 30 days for standard links against 90 for social, and none of these figures appears on Upwork's own affiliate landing page, so the window is given as a range rather than a number. The argument here does not depend on the length, only on there being no cookie at all in an agent flow. The conclusion about MCP attribution is ours, not Upwork's: [upwork.com/affiliates](https://www.upwork.com/affiliates)
+[^4]: Published summaries of the Upwork affiliate program, read August 12, 2026. Source of the 70% of first-contract-spend commission, the $150 per-transaction cap and the Impact platform. Reported cookie windows vary by link type, commonly 30 days for standard links against 90 for social, and none of these figures appears on Upwork's own affiliate landing page, so the window is given as a range rather than a number. The argument here does not depend on the length, only on there being no cookie at all in an agent flow. The conclusion about MCP attribution is ours, not Upwork's: [upwork.com/affiliates](https://www.upwork.com/affiliates)
 
-[^6]: Upwork, "Pricing: plans and fees for clients," read in a browser on August 12, 2026. The page states both sides: "Talent pays a service fee ranging from 0% to 15% per contract," and for clients a fee of 3% or 5% on Basic against 8% or 10% on Business Plus, where the lower figure in each pair is "available for eligible clients in the U.S. who pay with a checking account" rather than a plan difference. So the client range quoted above is four discrete rates rather than a continuum. The page also documents a one-time Contract Initiation Fee, which the body does not count: Basic plans are charged it per contract, while Business Plus plans pay it only on fixed-price contracts of $100 or less. The May 1, 2025 date for the freelancer change rests on secondary sources; the rates themselves are first-party here: [upwork.com/pricing/client](https://www.upwork.com/pricing/client)
 
-[^7]: Codeable, "Codeable vs Upwork," read August 12, 2026, for "roughly 2.2% of applicants are accepted" and the fixed 17.5% service fee on hourly rates of $80 to $120: [codeable.io/blog/codeable-vs-upwork](https://www.codeable.io/blog/codeable-vs-upwork/). The shared workroom and the averaged single estimate are described on the company's how-it-works page.
+[^5]: Codeable, "Codeable vs Upwork," read August 12, 2026, for "roughly 2.2% of applicants are accepted" and the fixed 17.5% service fee on hourly rates of $80 to $120: [codeable.io/blog/codeable-vs-upwork](https://www.codeable.io/blog/codeable-vs-upwork/). The shared workroom and the averaged single estimate are described on the company's how-it-works page.
