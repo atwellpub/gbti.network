@@ -915,26 +915,63 @@ test('sow-218: a member read as holding NOTHING emits no pointless removals', ()
 // a coupon invitee needed two daily runs: run one folded a grant it could not itself see, and only run two
 // resolved them effective-paid. Until then they were not paid to the gate and not eligible for members-index
 // enrollment, so the site promised Content Creator through 2027 while every publish was rejected.
+// THESE TESTS BUILD THEIR OWN ROOT, and that is the fix for a red main rather than a nicety.
+//
+// They used to pass `root: tempRoot()`, so applyPendingCouponGrants read the LIVE
+// house/grandfathered.yml, and the fixture named a REAL member (github_id 190312419, metacast). On
+// 2026-08-13 the reconcile bot folded exactly that member's coupon grant into exactly that file (22d31cf,
+// PR #282), which is the whole point of the fold. planCouponGrants then correctly SKIPPED the redemption
+// as already granted and returned 0, and the test that asserted 1 went red on main.
+//
+// Nothing was wrong with the code. The test asked production data to stay still, and the feature under
+// test is the thing that moves it. A temp root removes the dependency entirely.
+function tempRoot({ grandfathered = 'grandfathered: []\n', coupons = null } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gbti-reconcile-'));
+  fs.mkdirSync(path.join(dir, 'house'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'house', 'grandfathered.yml'), grandfathered, 'utf8');
+  if (coupons) fs.writeFileSync(path.join(dir, 'house', 'coupons.yml'), coupons, 'utf8');
+  return dir;
+}
+
 test('sow-218: an unfolded KV grant is applied to THIS run\'s overrides', async () => {
   const overrides = { grandfathers: new Map(), bans: new Map(), roles: new Map(), membersIndex: new Map() };
   const listRedemptions = async () => ({
     available: true,
     redemptions: [{ code: 'CODEABLEYEAR', githubId: '190312419', login: 'metacast', until: '2027-08-12T00:00:00.000Z' }],
   });
-  const n = await applyPendingCouponGrants({ overrides, listRedemptions, now: new Date('2026-08-12T00:00:00Z'), root: process.cwd() });
+  const root = tempRoot({ coupons: 'coupons:\n  - code: CODEABLEYEAR\n    freeDays: 365\n    active: true\n    tier: creator\n' });
+  const n = await applyPendingCouponGrants({ overrides, listRedemptions, now: new Date('2026-08-12T00:00:00Z'), root });
   assert.equal(n, 1);
   const g = overrides.grandfathers.get('190312419');
   assert.equal(g.reason, 'coupon:CODEABLEYEAR');
   assert.equal(g.until, '2027-08-12T00:00:00.000Z');
+  // sow-185: the pre-applied grant names its tier from the coupon registry, so THIS run gates on the same
+  // tier the durable fold is about to write down. The two callers of planCouponGrants must not disagree.
+  assert.equal(g.tier, 'creator');
+});
+
+// The behaviour that broke the old test is itself worth pinning: a grant ALREADY folded into
+// house/grandfathered.yml must never be pre-applied a second time.
+test('sow-218: a grant already folded into grandfathered.yml is NOT re-applied', async () => {
+  const overrides = { grandfathers: new Map(), bans: new Map(), roles: new Map(), membersIndex: new Map() };
+  const listRedemptions = async () => ({
+    available: true,
+    redemptions: [{ code: 'CODEABLEYEAR', githubId: '190312419', login: 'metacast', until: '2027-08-12T00:00:00.000Z' }],
+  });
+  const root = tempRoot({
+    grandfathered: 'grandfathered:\n  - github_id: "190312419"\n    login: metacast-entertainment\n    reason: coupon:CODEABLEYEAR\n    until: "2027-08-12T12:56:20.498Z"\n    tier: creator\n',
+  });
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions, now: new Date('2026-08-12T00:00:00Z'), root }), 0);
+  assert.equal(overrides.grandfathers.size, 0, 'the fold is the durable record; a second apply would be a duplicate');
 });
 
 test('sow-218: an EXPIRED grant is not applied, and an empty KV is a clean no-op', async () => {
   const overrides = { grandfathers: new Map() };
   const expired = async () => ({ available: true, redemptions: [{ code: 'X', githubId: '1', until: '2020-01-01T00:00:00.000Z' }] });
-  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: expired, now: new Date('2026-08-12T00:00:00Z'), root: process.cwd() }), 0);
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: expired, now: new Date('2026-08-12T00:00:00Z'), root: tempRoot() }), 0);
   assert.equal(overrides.grandfathers.size, 0);
   const empty = async () => ({ available: true, redemptions: [] });
-  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: empty, root: process.cwd() }), 0);
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: empty, root: tempRoot() }), 0);
 });
 
 test('sow-218: a KV failure degrades to the OLD two-run behaviour rather than aborting the run', async () => {
@@ -942,9 +979,9 @@ test('sow-218: a KV failure degrades to the OLD two-run behaviour rather than ab
   // losing the same-day optimization must never cost the rest of the run.
   const overrides = { grandfathers: new Map() };
   const boom = async () => { throw new Error('KV down'); };
-  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: boom, root: process.cwd() }), 0);
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: boom, root: tempRoot() }), 0);
   const unavailable = async () => ({ available: false, reason: 'CF credentials not set' });
-  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: unavailable, root: process.cwd() }), 0);
+  assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: unavailable, root: tempRoot() }), 0);
   // and an UNREADABLE grandfathered.yml is the same story: no throw, no grants, run continues.
   const ok = async () => ({ available: true, redemptions: [{ code: 'X', githubId: '1', until: '2027-01-01T00:00:00.000Z' }] });
   assert.equal(await applyPendingCouponGrants({ overrides, listRedemptions: ok, root: '/nonexistent' }), 0);
