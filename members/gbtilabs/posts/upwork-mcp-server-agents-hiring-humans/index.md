@@ -93,31 +93,11 @@ Codeable is the opposite bet. It is a closed talent network that accepts roughly
 
 The reflex is to say an agent-driven marketplace threatens that model. The opposite seems more likely.
 
-An agent can reach an API and cannot judge whether a stranger will deliver. On an open marketplace those two facts collide, and a human has to supply the judgment the agent lacks, which is the work the agent was supposed to remove. On a curated network the judgment happened before the agent arrived. Three names drawn from a pool already filtered to 2.2% are worth more per call than three drawn from a pool nobody filtered.
+A network like Codeable has several reasons to publish one, and they are mostly the reasons Upwork did. A connector puts a vetted talent pool inside the tools its best clients already work in. It makes that same pool reachable by the network's own contractors, who could assemble a team on demand instead of routing it through a coordinator. A devops lead could pipe work straight to the embedded developer they already trust, without rebuilding the relationship each time there is something to do. And every party keeps agentic help for the transactional layer, the scoping and scheduling and status chasing, which is the part none of them wanted to be doing by hand.
 
-The catch is that the pre-pricing conversation is the mechanism rather than overhead, and it is the part that does not compress into a tool call. A curated network building an MCP server would have to decide which parts of its process are load-bearing and which were only ever a user interface. That is a harder question than Upwork faced and a more valuable one to get right.
-
-## What agents still cannot do, and why that is where the cost sits
+## Where the AI first pass runs out
 
 Sanborn described what Upwork sees on the demand side. Clients "are showing up with an AI-generated first pass that got them part of the way there but still need a real person to take it the rest of the way."[^1]
-
-A marketplace operator is describing its own demand curve. Sanborn's first pass got cheap. Taking it the rest of the way did not, and the rest of the way is where the money went.
-
-The pattern is familiar to anyone who shipped software this year. Generation is solved well enough to be boring. What stays expensive is the judgment: deciding the approach is right before it is built, integrating with the system that already exists and cannot be rewritten, noticing that a passing test suite is testing the wrong behavior, and owning the result once it reaches production. None of that is typing speed, and typing speed is what got cheap.
-
-Judgment is the same bottleneck here as it was on the shortlist, pointed at a system instead of a person. An agent cannot tell you the three freelancers it surfaced are the right three, and it cannot tell you the code it generated is correct. In both cases the automation stops at the point where someone has to be accountable for a call.
-
-The cost question everyone is asking therefore has an unsatisfying answer. AI lowers the cost of producing code and leaves the cost of deciding what is correct roughly where it was. Those are different budgets, and only one of them was ever mostly typing. If generating a component costs nearly nothing, teams generate far more of them, and the volume needing review, integration, security, deployment and operation goes up rather than down. The bottleneck moves onto whoever can say with confidence that the system does what it claims and will keep doing it on Tuesday.
-
-Devops management has owned that problem the whole time. Senior developers and project managers running agentic pipelines are not doing a new job with a new title. They are doing the same job at higher throughput against a codebase that grows faster than a person can read it. Knowing what is deployed, what changed and how to put it back decides whether a bad release costs an hour or a weekend, and agents push the rate of change up while pushing the number of people who have read every line down.
-
-If you are deciding where to put your own effort, the signal is in Upwork's launch copy rather than in the connector: a cheap first pass creates demand for whoever finishes it.[^1]
-
-## What we could not verify
-
-We have not connected the server, so every capability above is documentation about the product rather than observation of it.
-
-If you have wired this into a working pipeline, we would like to know what the shortlist quality was like. That is the number that decides whether any of it is useful.
 
 [^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026, read August 12, 2026. Source of the launch date, the Sanborn and Singh quotes, the four example prompts, the identity, escrow and dispute language, and the "available today for every Upwork client and freelancer, at no additional cost" wording. The release carries two customer quotes; the second is from Allison Lee, an independent AI operations specialist on Upwork. Sanborn's name links to his LinkedIn profile, which the author opened and confirmed on August 13, 2026; LinkedIn serves an authwall to signed-out clients, so it is not readable from the article itself: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
 
