@@ -79,7 +79,7 @@ The permission model is blunter than the confirmation model. Upwork's own FAQ sa
 
 ## Whether an agent can be the freelancer, and why a person still confirms every binding action
 
-Upwork answers this one directly. Its FAQ asks whether an AI agent can hire on your behalf without you, and answers: "Not today. In the current release, a person confirms every binding action."[^2]
+Upwork's FAQ asks whether an AI agent can hire on your behalf without you, which is the client side of the question, and answers: "Not today. In the current release, a person confirms every binding action."[^2]
 
 Read the hedge. "Not today" and "in the current release" are the words of a company that has thought about the other version and has not shipped it.
 
@@ -107,7 +107,7 @@ The catch is that the pre-pricing conversation is the mechanism rather than over
 
 ## What agents still cannot do, and why that is where the cost sits
 
-Sanborn also described what Upwork sees on the demand side. Clients "are showing up with an AI-generated first pass that got them part of the way there but still need a real person to take it the rest of the way."[^1]
+Sanborn described what Upwork sees on the demand side. Clients "are showing up with an AI-generated first pass that got them part of the way there but still need a real person to take it the rest of the way."[^1]
 
 A marketplace operator is describing its own demand curve. Sanborn's first pass got cheap. Taking it the rest of the way did not, and the rest of the way is where the money went.
 
