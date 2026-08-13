@@ -22,7 +22,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <h1 class="h1">Admin tools</h1>
           <p class="lead">Moderate content, manage member status, and assign roles across the co-op. Every action opens a gated pull request that auto-merges; the SOW-005 gate re-checks your role.</p>
         </div>
-        <nav class="adm-tabs" role="tablist" aria-label="Admin sections" data-admin-tabs hidden></nav>
+        <nav class="adm-tabs" role="tablist" aria-label="Admin sections" data-admin-tabs hidden>
+          <button type="button" role="tab" data-tab="admin" aria-selected="false">Admin tools</button>
+          <button type="button" role="tab" data-tab="quotes" data-min="admin" aria-selected="false" hidden>Splash quotes</button>
+          <button type="button" role="tab" data-tab="news-sources" data-min="admin" aria-selected="false" hidden>News sources</button>
+          <button type="button" role="tab" data-tab="coupons" data-min="admin" aria-selected="false" hidden>Coupons</button>
+        </nav>
 
         <div class="adm-card" data-panel="admin">
           <gbti-admin caps="moderation,membership,roles"></gbti-admin>
@@ -86,45 +91,41 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
 
     // sow-161 (admin-nav): break the stacked sections into a tab bar so no single long list (News sources)
-    // buries the rest. Panels map one-to-one to the cards; a tab renders only for a section the rank can see,
-    // so a moderator gets the single Admin tools section and no tab bar at all.
-    const PANELS: { name: string; label: string; min: number }[] = [
-      { name: 'admin', label: 'Admin tools', min: RANK.moderator },
-      { name: 'quotes', label: 'Splash quotes', min: RANK.admin },
-      { name: 'news-sources', label: 'News sources', min: RANK.admin },
-      { name: 'coupons', label: 'Coupons', min: RANK.admin },
-    ];
-
+    // buries the rest. The tab buttons are STATIC in the markup so the scoped component CSS styles them: a
+    // button injected at runtime via innerHTML never receives Astro's data-astro-cid, so it renders unstyled.
+    // A button carrying data-min shows only when the rank clears it, so a moderator sees the single Admin
+    // tools section and no tab bar at all.
     function setupTabs(rank: number) {
       const bar = document.querySelector('[data-admin-tabs]') as HTMLElement | null;
+      if (!bar) return;
       const cardOf = (name: string) => document.querySelector('.adm-card[data-panel="' + name + '"]') as HTMLElement | null;
-      const eligible = PANELS.filter((p) => rank >= p.min && cardOf(p.name));
+      const btns = Array.from(bar.querySelectorAll('button[data-tab]')) as HTMLElement[];
+      const eligible = btns.filter((b) => {
+        const min = b.dataset.min ? (RANK[b.dataset.min] ?? 99) : 0;
+        return rank >= min && !!cardOf(b.dataset.tab || '');
+      });
       if (!eligible.length) return;
+      eligible.forEach((b) => b.removeAttribute('hidden'));
+      const names = eligible.map((b) => b.dataset.tab as string);
 
       const hashName = (location.hash.match(/^#tab=([a-z-]+)/) || [])[1] || '';
-      const initial = (eligible.find((p) => p.name === hashName) || eligible[0]).name;
+      const initial = names.indexOf(hashName) >= 0 ? hashName : names[0];
 
       function show(name: string) {
-        for (const p of eligible) {
-          const card = cardOf(p.name);
-          if (card) card.hidden = p.name !== name;
-        }
-        if (bar) {
-          for (const b of Array.from(bar.querySelectorAll('[data-tab]'))) {
-            const on = (b as HTMLElement).dataset.tab === name;
-            b.setAttribute('aria-selected', on ? 'true' : 'false');
-            b.classList.toggle('on', on);
-          }
+        for (const n of names) { const c = cardOf(n); if (c) c.hidden = n !== name; }
+        for (const b of eligible) {
+          const on = b.dataset.tab === name;
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+          b.classList.toggle('on', on);
         }
         try { history.replaceState(null, '', '#tab=' + name); } catch { /* hash update is best-effort */ }
       }
 
-      if (bar && eligible.length > 1) {
-        bar.innerHTML = eligible.map((p) => '<button type="button" role="tab" data-tab="' + p.name + '" aria-selected="false">' + p.label + '</button>').join('');
+      if (eligible.length > 1) {
         bar.hidden = false;
         bar.addEventListener('click', (e) => {
-          const btn = (e.target as HTMLElement).closest('[data-tab]') as HTMLElement | null;
-          if (btn && btn.dataset.tab) show(btn.dataset.tab);
+          const btn = (e.target as HTMLElement).closest('button[data-tab]') as HTMLElement | null;
+          if (btn && btn.dataset.tab && names.indexOf(btn.dataset.tab) >= 0) show(btn.dataset.tab);
         });
       }
 
