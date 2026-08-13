@@ -32,6 +32,13 @@ jobs:
       # NOTE: no --omit=optional here. esbuild ships its platform binary (@esbuild/linux-x64) as an OPTIONAL
       # dependency, and the rebuild steps below need it; --ignore-scripts still keeps the job secret-free.
       - run: npm ci --ignore-scripts
+      # BEFORE the rebuild, deliberately: this checks the COMMITTED html/js pair, which is what someone gets
+      # when they clone and load the unpacked folder. Run after the rebuild it would be trivially green.
+      # It overlaps the freshness assert below but names the ACTUAL fault ("admin.html declares
+      # data-admin-panels that its bundle never wires") where `git diff --exit-code` can only say the files
+      # differ. See scripts/check-extension-hooks.mjs for the incident that prompted it.
+      - name: Assert every page's markup hooks are wired by its committed bundle
+        run: npm run check:extension-hooks
       # Rebuild the shared UI bundle + the extension (build:extension bundles then repackages the zip + latest.json).
       - run: node client-ui/build.mjs
       - run: npm run build:extension
