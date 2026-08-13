@@ -59,6 +59,7 @@ import { membershipDecrypt, membershipEncrypt } from './membership-content.mjs';
 import { membershipAdminStatuses } from './membership-admin.mjs';
 import { membershipAdminOps } from './membership-admin-ops.mjs';
 import { membershipCouponUsage } from './membership-coupons-admin.mjs'; // SOW-119
+import { membershipInviteCreate, membershipInviteList, membershipInviteUpdate } from './membership-invites-admin.mjs'; // sow-231
 import { membershipDiscordChannels } from './membership-discord-channels.mjs'; // SOW-100: channel names for the categories workspace
 import { handleActivity } from './membership-activity.mjs';
 import { handleTouch, SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1b/P1c: touch capture + session binding
@@ -869,6 +870,27 @@ export default {
         if (method === 'GET') {
           const r = await membershipCouponUsage(request, env, { allowCookie: true });
           // corsHeaders(credentials) already sets Vary: 'Origin, Authorization'; don't override it to drop Origin.
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+
+      // sow-231: admin-gated ISSUED INVITES. A campaign (house/coupons.yml) says what an invite is worth; an
+      // invite (KV) says who we handed one to. Same credentialed-CORS + allowCookie treatment as coupon-usage
+      // so the WEBSITE coupon manager can issue over the cookie session (the extension's bearer call still
+      // works). Person-keyed and note-bearing, so it is admin-gated and NEVER cached.
+      if (pathname === '/membership/admin/invites') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await membershipInviteList(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+        if (method === 'POST') {
+          const r = await membershipInviteCreate(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+        if (method === 'PATCH') {
+          const r = await membershipInviteUpdate(request, env, { allowCookie: true });
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
