@@ -22,21 +22,23 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <h1 class="h1">Admin tools</h1>
           <p class="lead">Moderate content, manage member status, and assign roles across the co-op. Every action opens a gated pull request that auto-merges; the SOW-005 gate re-checks your role.</p>
         </div>
-        <div class="adm-card">
+        <nav class="adm-tabs" role="tablist" aria-label="Admin sections" data-admin-tabs hidden></nav>
+
+        <div class="adm-card" data-panel="admin">
           <gbti-admin caps="moderation,membership,roles"></gbti-admin>
         </div>
 
         {/* Config managers (admin+). The element only upgrades when its module is imported, which the script does
             for admin+ only, so a moderator sees no card. sow-161 increment 4: quotes (the first config manager). */}
-        <div class="adm-card" data-quotes-card hidden>
+        <div class="adm-card" data-panel="quotes" hidden>
           <h2 class="h2">Splash quotes</h2>
           <gbti-quote-manager></gbti-quote-manager>
         </div>
-        <div class="adm-card" data-newssrc-card hidden>
+        <div class="adm-card" data-panel="news-sources" hidden>
           <h2 class="h2">News sources</h2>
           <gbti-news-source-manager></gbti-news-source-manager>
         </div>
-        <div class="adm-card" data-coupons-card hidden>
+        <div class="adm-card" data-panel="coupons" hidden>
           <h2 class="h2">Coupons</h2>
           <gbti-coupon-manager></gbti-coupon-manager>
         </div>
@@ -73,15 +75,60 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       // Config managers are admin+ only. Importing the module upgrades the static tag (which then renders on the
       // setClient fan-out); a moderator never imports it, so the tag stays inert and the card stays hidden.
       if (rank >= RANK.admin) {
-        (document.querySelector('[data-quotes-card]') as HTMLElement | null)?.removeAttribute('hidden');
-        (document.querySelector('[data-newssrc-card]') as HTMLElement | null)?.removeAttribute('hidden');
-        (document.querySelector('[data-coupons-card]') as HTMLElement | null)?.removeAttribute('hidden');
+        // Import the admin+ config managers so their custom elements upgrade; the tab bar controls which shows.
         await Promise.all([
           import('../../client-ui/src/elements/gbti-quote-manager.mjs'),
           import('../../client-ui/src/elements/gbti-news-source-manager.mjs'),
           import('../../client-ui/src/elements/gbti-coupon-manager.mjs'),
         ]);
       }
+      setupTabs(rank);
+    }
+
+    // sow-161 (admin-nav): break the stacked sections into a tab bar so no single long list (News sources)
+    // buries the rest. Panels map one-to-one to the cards; a tab renders only for a section the rank can see,
+    // so a moderator gets the single Admin tools section and no tab bar at all.
+    const PANELS: { name: string; label: string; min: number }[] = [
+      { name: 'admin', label: 'Admin tools', min: RANK.moderator },
+      { name: 'quotes', label: 'Splash quotes', min: RANK.admin },
+      { name: 'news-sources', label: 'News sources', min: RANK.admin },
+      { name: 'coupons', label: 'Coupons', min: RANK.admin },
+    ];
+
+    function setupTabs(rank: number) {
+      const bar = document.querySelector('[data-admin-tabs]') as HTMLElement | null;
+      const cardOf = (name: string) => document.querySelector('.adm-card[data-panel="' + name + '"]') as HTMLElement | null;
+      const eligible = PANELS.filter((p) => rank >= p.min && cardOf(p.name));
+      if (!eligible.length) return;
+
+      const hashName = (location.hash.match(/^#tab=([a-z-]+)/) || [])[1] || '';
+      const initial = (eligible.find((p) => p.name === hashName) || eligible[0]).name;
+
+      function show(name: string) {
+        for (const p of eligible) {
+          const card = cardOf(p.name);
+          if (card) card.hidden = p.name !== name;
+        }
+        if (bar) {
+          for (const b of Array.from(bar.querySelectorAll('[data-tab]'))) {
+            const on = (b as HTMLElement).dataset.tab === name;
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+            b.classList.toggle('on', on);
+          }
+        }
+        try { history.replaceState(null, '', '#tab=' + name); } catch { /* hash update is best-effort */ }
+      }
+
+      if (bar && eligible.length > 1) {
+        bar.innerHTML = eligible.map((p) => '<button type="button" role="tab" data-tab="' + p.name + '" aria-selected="false">' + p.label + '</button>').join('');
+        bar.hidden = false;
+        bar.addEventListener('click', (e) => {
+          const btn = (e.target as HTMLElement).closest('[data-tab]') as HTMLElement | null;
+          if (btn && btn.dataset.tab) show(btn.dataset.tab);
+        });
+      }
+
+      show(initial);
     }
 
     // sow-158 re-login fix: on a TRANSIENT status failure (deploy window / network blip) keep the valid session
@@ -110,9 +157,21 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   </script>
 
   <style>
-    .adm-wrap { max-width: 760px; }
+    .adm-wrap { max-width: var(--maxw); }
     .sec-head { margin-bottom: 18px; }
     .sec-head .lead { max-width: 640px; }
     .adm-card { border: 1.5px solid var(--line); border-radius: 16px; background: var(--panel); padding: 20px 24px; }
+
+    /* sow-161 (admin-nav): section tab bar, so no single long list buries the rest */
+    .adm-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 22px; }
+    .adm-tabs button {
+      font: inherit; font-weight: 600; font-size: 14px; line-height: 1; cursor: pointer;
+      padding: 10px 18px; border-radius: 999px;
+      border: 1.5px solid var(--line); background: var(--panel); color: var(--fg);
+      transition: border-color .15s ease, background .15s ease, color .15s ease;
+    }
+    .adm-tabs button:hover { border-color: var(--green); }
+    .adm-tabs button.on { background: var(--green); border-color: var(--green); color: #fff; }
+    .adm-tabs button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
   </style>
 </BaseLayout>
