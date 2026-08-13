@@ -13,6 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { z } from 'zod';
@@ -63,10 +64,37 @@ test('non-Date values are unaffected: strings, arrays, plain objects, null', () 
   assert.equal(renderValue(undefined), '');
 });
 
+// THE FIXTURE IS INLINE, AND THAT IS THE POINT. This test used to read a LIVE content file
+// (members/atwellpub/posts/every-tree-is-a-pipe-dream/index.md) and assert its publishedAt was an unquoted
+// YAML Date. Then that post was edited through the WorkBench, the repaired save path wrote the date back
+// QUOTED as '2025-06-23', js-yaml loaded it as a string, and the assertion failed on main.
+//
+// So the guard for this fix was broken by the fix working, which is about as self-defeating as a test gets.
+// A fixture that other people's ordinary content edits can rewrite is not a fixture. The blob below is that
+// post's frontmatter as it stood, minus the churn, and nothing outside this file can change it.
+const YAML_DATED_POST = `
+title: 'Every Tree is a Pipe Dream: Helping Ideas to Grow'
+slug: every-tree-is-a-pipe-dream
+status: published
+visibility: public
+publicStub: false
+excerpt: A post whose publishedAt is an UNQUOTED YAML date, which js-yaml loads as a Date object.
+categories:
+  - entertainment
+layout: journal
+coverImage: ./images/every-tree-is-a-pipe-dream-1.webp
+featured: false
+publishedAt: 2025-06-23
+updatedAt: 2026-08-13T02:01:21.668Z
+redirectFrom:
+  - /entertainment/every-tree-is-a-pipe-dream/
+type: post
+author: atwellpub
+`;
+
 // The end-to-end case, driven through the REAL schema the save path uses rather than a stand-in.
-test('a real post frontmatter with a YAML date validates once rendered through the field', () => {
-  const post = src('members/atwellpub/posts/every-tree-is-a-pipe-dream/index.md');
-  const fm = yaml.load(post.split('---')[1]);
+test('a post frontmatter with a YAML date validates once rendered through the field', () => {
+  const fm = yaml.load(YAML_DATED_POST);
   assert.ok(fm.publishedAt instanceof Date, 'the fixture must actually carry a YAML Date, or this proves nothing');
 
   const schema = schemaFor('post');
@@ -78,6 +106,38 @@ test('a real post frontmatter with a YAML date validates once rendered through t
   const bad = schema.safeParse(asOld);
   assert.equal(bad.success, false);
   assert.ok(bad.error.issues.some((i) => i.path.join('.') === 'publishedAt'));
+});
+
+// The real-world half, kept because the class of content is still very much live (47 posts carried an
+// unquoted date when this was written). Rewritten to sweep EVERY such post rather than to name one, so it
+// covers far more than the original did and CANNOT defeat itself: as posts are re-saved through the editor
+// the set shrinks, and when it finally reaches zero this passes trivially rather than failing. An empty
+// sweep means the migration finished, not that a regression appeared.
+test('every post still carrying an unquoted YAML date renders through the field into a valid value', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const dirs = [];
+  for (const base of ['members', 'house']) {
+    const abs = path.join(root, base);
+    if (!fs.existsSync(abs)) continue;
+    for (const owner of fs.readdirSync(abs)) {
+      const posts = path.join(abs, owner, 'posts');
+      if (!fs.existsSync(posts)) continue;
+      for (const slug of fs.readdirSync(posts)) dirs.push(path.join(posts, slug, 'index.md'));
+    }
+  }
+
+  const schema = schemaFor('post');
+  let swept = 0;
+  for (const file of dirs) {
+    if (!fs.existsSync(file)) continue;
+    let fm;
+    try { fm = yaml.load(fs.readFileSync(file, 'utf8').split('---')[1]); } catch { continue; }
+    if (!(fm?.publishedAt instanceof Date)) continue; // already quoted, or no date: not this test's subject
+    swept += 1;
+    const asRendered = { ...fm, publishedAt: renderValue(fm.publishedAt), updatedAt: renderValue(fm.updatedAt) };
+    assert.equal(schema.safeParse(asRendered).success, true, `${file} does not survive the save path`);
+  }
+  assert.ok(swept >= 0, `swept ${swept} posts carrying an unquoted YAML date`);
 });
 
 // DRIFT: the expression above is a copy. If the component's own changes, this test would keep passing while the
