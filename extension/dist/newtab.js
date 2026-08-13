@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // ../../../../../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
+  // node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -9237,7 +9237,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       }
     }
     fieldHtml(f, value, visible = true) {
-      const v = value == null ? "" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+      const v = value == null ? "" : Array.isArray(value) ? value.join(", ") : value instanceof Date ? Number.isNaN(value.getTime()) ? "" : value.toISOString().slice(0, 10) : typeof value === "object" ? JSON.stringify(value) : String(value);
       const label = `<label>${esc(f.label || f.key)}${f.required ? ' <span class="req">*</span>' : ""}${f.hint ? ` <span class="hint">· ${esc(f.hint)}</span>` : ""}</label>`;
       const wrap = (inner, cls = "") => `<div class="fld${cls ? " " + cls : ""}" data-fkey="${f.key}"${visible ? "" : " hidden"}>${inner}</div>`;
       if (f.kind === "enum" && f.key === "visibility") {

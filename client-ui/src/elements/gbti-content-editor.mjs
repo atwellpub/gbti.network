@@ -761,7 +761,18 @@ class GbtiContentEditor extends GbtiElement {
   }
 
   fieldHtml(f, value, visible = true) {
-    const v = value == null ? '' : Array.isArray(value) ? value.join(', ') : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    // A Date must be handled BEFORE the generic object branch. YAML parses an unquoted `publishedAt: 2025-06-23`
+    // into a Date, and `typeof aDate === 'object'`, so it used to fall through to JSON.stringify and render as
+    // `"2025-06-23T00:00:00.000Z"` WITH the quote characters. Reading that back gives Invalid Date, and since
+    // publishedAt is a preserved hidden field, saving ANY item with a YAML-dated frontmatter failed with
+    // "invalid post: publishedAt: Invalid input" and no way for the author to see or fix the offending value.
+    // 46 published posts carry that shape. ISO date-only matches fmtD's convention in this file and round-trips
+    // cleanly, unlike String(date), which renders a UTC date in local time ("Jun 22" for a Jun 23 post).
+    const v = value == null ? ''
+      : Array.isArray(value) ? value.join(', ')
+      : value instanceof Date ? (Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10))
+      : typeof value === 'object' ? JSON.stringify(value)
+      : String(value);
     const label = `<label>${esc(f.label || f.key)}${f.required ? ' <span class="req">*</span>' : ''}${f.hint ? ` <span class="hint">· ${esc(f.hint)}</span>` : ''}</label>`;
     const wrap = (inner, cls = '') => `<div class="fld${cls ? ' ' + cls : ''}" data-fkey="${f.key}"${visible ? '' : ' hidden'}>${inner}</div>`;
 
