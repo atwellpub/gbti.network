@@ -72,9 +72,11 @@
   .prose-gbti .embed-wrap { position: relative; margin: 1.5em 0; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: var(--ink, #000); }
   .prose-gbti .embed-wrap iframe { width: 100%; height: 100%; margin: 0; border: 0; }
   /* GFM footnotes (remark-gfm): superscript refs in the body; the generated end section gets a rule +
-     smaller muted type (its own "Footnotes" h2 ships sr-only, so the separation must come from us). */
+     smaller muted type (its own "Footnotes" h2 ships sr-only, so the separation must come from us).
+     Sized in em (a proportion of the article body) rather than rem, so the reduction holds at every
+     breakpoint instead of collapsing toward body size when the body scales down. */
   .prose-gbti sup a { text-decoration: none; font-weight: 700; padding: 0 1px; }
-  .prose-gbti section[data-footnotes] { margin-top: 2.5em; padding-top: 1.2em; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--fg-mute); }
+  .prose-gbti section[data-footnotes] { margin-top: 2.5em; padding-top: 1.2em; border-top: 1px solid var(--line); font-size: 0.8em; color: var(--fg-mute); }
   .prose-gbti section[data-footnotes] p { margin: 0 0 0.5em; }
   .prose-gbti section[data-footnotes] p:last-child { margin: 0; }
   .prose-gbti section[data-footnotes] li { margin: 0.5em 0; }
