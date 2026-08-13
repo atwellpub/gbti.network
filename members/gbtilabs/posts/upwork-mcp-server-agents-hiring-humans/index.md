@@ -119,7 +119,7 @@ The cost question everyone is asking therefore has an unsatisfying answer. AI lo
 
 Devops management has owned that problem the whole time. Senior developers and project managers running agentic pipelines are not doing a new job with a new title. They are doing the same job at higher throughput against a codebase that grows faster than a person can read it. Knowing what is deployed, what changed and how to put it back decides whether a bad release costs an hour or a weekend, and agents push the rate of change up while pushing the number of people who have read every line down.
 
-If you are deciding where to put your own effort, read past the connector. Upwork, in its own launch copy, reports that a cheap first pass creates demand for whoever finishes it.[^1]
+If you are deciding where to put your own effort, the signal is in Upwork's launch copy rather than in the connector: a cheap first pass creates demand for whoever finishes it.[^1]
 
 ## What we could not verify
 
