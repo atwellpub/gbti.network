@@ -5484,8 +5484,12 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   /* Discord step. */
   .dhead { display:flex; align-items:center; gap:13px; margin-bottom:16px; }
   .dhead .ico-tile { width:46px; height:46px; }
-  .dhead h3 { font-family:var(--font-display); font-size:20px; font-weight:600; margin:0; line-height:1.1; color:var(--wf-fg); }
-  .dhead p { font-size:12.5px; color:var(--wf-mute); margin:2px 0 0; }
+  /* The card used to repeat the step heading ("Connect Discord") beside the icon, so the words appeared twice
+     on one screen. The icon stays, the duplicate heading is gone, and the line beside it now does the actual
+     work of inviting the member in. It is a <p> rather than a heading on purpose: the step already owns the
+     only heading on this panel, and a second one saying nearly the same thing is noise for a screen reader.
+     Sized between the old h3 and the old sub-line so it still carries next to a 46px tile. */
+  .dhead .dlede { font-family:var(--font-display); font-size:16.5px; font-weight:600; margin:0; line-height:1.25; color:var(--wf-fg); }
   .dbtn { display:inline-flex; align-items:center; gap:8px; font:inherit; font-weight:600; font-size:13.5px;
     color:#fff; background:var(--wf-green); border:1.5px solid transparent; border-radius:7px; padding:11px 18px; cursor:pointer; }
   .dbtn.on, .dbtn[disabled] { color:var(--wf-soft); background:var(--wf-raise); border-color:var(--wf-line); cursor:default; }
@@ -5997,7 +6001,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       return `
       <div class="dhead">
         <span class="ico-tile">${discordIco}</span>
-        <div><h3>Connect Discord</h3><p>The heartbeat of the co-op</p></div>
+        <p class="dlede">Come participate in our Discord community.</p>
       </div>
       <p class="intro" style="max-width:58ch">Announcements and agile discussions frequently occur here, and it is the best place to network in real time with network members. Connect Discord to join the server and claim your member role.</p>
       ${btn}
