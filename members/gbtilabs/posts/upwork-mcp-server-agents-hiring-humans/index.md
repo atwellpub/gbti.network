@@ -36,13 +36,13 @@ A marketplace watched software try to get in through the front door and decided 
 
 The announcement names Claude, ChatGPT and Cursor, then adds "any MCP-compatible product."[^1] The documentation goes further, listing Claude on web, desktop and Code, Cursor and Codex in app and CLI form, and naming Windsurf, Cline, VS Code and Goose as examples of anything else that speaks remote MCP with OAuth.[^2]
 
-Upwork's setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path, which we could not check because that page needs a login, and say a ChatGPT directory listing is coming soon.[^2]
+Upwork's setup instructions point at `claude.ai/directory/connectors/upwork` as the recommended install path, which we could not check, because that page does not load for a signed-out reader, and say a ChatGPT directory listing is coming soon.[^2]
 
 Any assistant that speaks the protocol can reach the server, whether or not its vendor has said a word about Upwork.
 
 ## Every Upwork account gets it free, but your assistant plan may block it
 
-Upwork's MCP server is open to every Upwork user at no cost: "available today for every Upwork client and freelancer, at no additional cost."[^1] The documentation says the same, that it is "free to use with any Upwork account."[^2]
+Upwork's MCP server is open to every Upwork user at no additional cost: "available today for every Upwork client and freelancer, at no additional cost."[^1] The documentation says the same, that it is "free to use with any Upwork account."[^2]
 
 Upwork's side of that is genuinely universal. The assistant's side runs on three different rules. ChatGPT offers custom MCP connectors on Plus, Pro, Team, Business and Enterprise, which leaves a free ChatGPT account unable to add the Upwork server at all; a Claude free account can add it, but only as its one permitted connector; and ChatGPT's Instant mode cannot make MCP tool calls whatever the plan.[^2] So the assistant's plan, and in one case its model setting, decides what an agent may connect to, and the gate moved rather than disappearing. That gate is a product decision by a third party and could be reversed next quarter, which is what separates it from the constraint this piece closes on.
 
@@ -123,7 +123,7 @@ If you are deciding where to put your own effort, the signal is in Upwork's laun
 
 ## What we could not verify
 
-We have not connected the server, so every capability above is documentation about the product rather than observation of it. We could not confirm the Claude directory listing independently, because that page sits behind a login wall and Upwork asserting its own presence there is not the same as seeing it. The freelancer AI-policy requirement rests on secondary reporting.
+We have not connected the server, so every capability above is documentation about the product rather than observation of it. We could not confirm the Claude directory listing independently, because that page does not load for a signed-out reader, and Upwork asserting its own presence there is not the same as seeing it. The freelancer AI-policy requirement rests on secondary reporting.
 
 If you have wired this into a working pipeline, we would like to know what the shortlist quality was like. That is the number that decides whether any of it is useful.
 
