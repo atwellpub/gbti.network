@@ -1864,3 +1864,18 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
   .art-j-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .art-j-rail { position: static; }
 }
+
+/* ---------------------------------------------------------------------------
+   App surfaces (welcome, account, workbench) vs marketing bands.
+
+   `.band` is 104px top and bottom (64px under 760px), which is right for a marketing section that wants
+   air above its heading. An APP surface is not that: the member arrived to DO something, the card is the
+   content, and the same 104px reads as a large empty gap between the header and the thing they came for.
+
+   Written as `.band.band-app` rather than `.band-app` deliberately. The responsive `.band` override lives
+   further up this file, so a single-class rule here would win on the desktop declaration and LOSE to the
+   media query on mobile, which is exactly the kind of half-applied fix that looks correct on the machine
+   it was written on. Two classes outrank one at any viewport, so source order stops mattering.
+   --------------------------------------------------------------------------- */
+.band.band-app { padding-top: 40px; }
+@media (max-width: 760px) { .band.band-app { padding-top: 26px; } }
