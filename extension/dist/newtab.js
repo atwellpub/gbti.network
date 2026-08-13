@@ -5414,7 +5414,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   /* THE PANEL: a two-pane modal (rail + main) on the 7px house radius. */
   .wf { display:flex; width:100%; max-width:1080px; margin:0 auto; height:min(72vh, 640px); min-height:480px;
     background:var(--wf-surface); border:1px solid var(--wf-line); border-radius:7px; overflow:hidden;
-    box-shadow:0 50px 130px -30px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.25);
+    /* Lightened for the light /welcome/ page; the ring is faint so it does not double the border above. */
+    box-shadow:0 14px 38px -22px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.05);
     animation:wf-in .34s cubic-bezier(.2,.8,.2,1) both; color:var(--wf-fg); }
   .rail { width:264px; flex:none; background:var(--wf-panel); border-right:1.5px solid var(--wf-line);
     padding:26px 20px; display:flex; flex-direction:column; box-sizing:border-box; }
