@@ -9,6 +9,11 @@
 // link carries a plain visible ?coupon=CODEABLEYEAR, which prefills the chip (still editable, applied
 // badge while it matches); with no param the chip is a hand-editable field (manual entry at signup).
 // The CTA is the same Turnstile-gated /signup/start flow as /membership/, plus the coupon parameter.
+// TITLE: pass the BARE title, with no brand suffix. BaseLayout builds `fullTitle` as `${title} | GBTI
+// Network` and uses it for BOTH <title> and og:title, so a title that carries the brand itself double-brands
+// the page. This one shipped as "Codeable experts: your first year on us · GBTI Network | GBTI Network" and
+// was caught in a Slack unfurl of a real invite (owner, 2026-08-13), which is the worst place to find it:
+// og:title is what every share preview shows.
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { REF_COOKIE, REF_VIA_COOKIE } from '../../lib/referral';
 import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../../lib/touch.mjs';
@@ -67,7 +72,7 @@ const year = new Date().getFullYear();
 ---
 
 <BaseLayout
-  title="Codeable experts: your first year on us · GBTI Network"
+  title="Codeable experts: your first year on us"
   description="A private invitation for Codeable experts: a full year of Content Creator membership, the network's top tier, first year free with your coupon."
   noindex
   bare
