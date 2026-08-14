@@ -19,6 +19,9 @@ await build({
   target: 'es2022',
   charset: 'utf8',
   legalComments: 'none',
+  // sow-237: see extension/build.mjs for why this is load-bearing. Keeps emitted module
+  // comments repo-relative so a worktree build matches a CI build byte for byte.
+  preserveSymlinks: true,
 });
 
 console.log('built client-ui/dist/gbti-ui.js');

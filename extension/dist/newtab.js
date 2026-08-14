@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // ../../../../../../mnt/d/_Outfits/GBTI/Repos/gbti.network/node_modules/js-yaml/dist/js-yaml.mjs
+  // node_modules/js-yaml/dist/js-yaml.mjs
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;

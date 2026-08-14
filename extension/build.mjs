@@ -22,7 +22,15 @@ const out = (f) => path.join(dir, 'dist', f);
 // (writes the config), or ad-hoc: `GBTI_AUTH_MODE=app GBTI_GITHUB_APP_CLIENT_ID=.. GBTI_GITHUB_APP_SLUG=.. node extension/build.mjs`.
 const { define, mode, values } = resolveExtensionDefine({ config: readBuildConfig(), env: process.env });
 
-const common = { bundle: true, target: 'es2022', platform: 'browser', charset: 'utf8', legalComments: 'none', define };
+// LOAD-BEARING, DO NOT REMOVE AS COSMETIC (sow-237, 2026-08-14). esbuild RESOLVES symlinks by default, so
+// building from a detached worktree with `node_modules` symlinked in makes every emitted module comment escape
+// the build root and bake in the builder's ABSOLUTE path (e.g. /mnt/d/.../node_modules/js-yaml/...). That
+// shipped ~168 such paths into the committed bundles and the public zip, and it made the committed artifacts
+// permanently unable to match a fresh CI build ("Extension build drift" red on b0b9777 and f3ef24f).
+// Measured: 81 absolute-path comments -> 0. The honest trade-off: this changes module RESOLUTION, not just an
+// emitted string, so nested duplicate packages dedupe differently. It is a NO-OP wherever `node_modules` is
+// real (CI, the repo root) and only takes effect where a symlink is involved, which is exactly the case it fixes.
+const common = { bundle: true, target: 'es2022', platform: 'browser', charset: 'utf8', legalComments: 'none', preserveSymlinks: true, define };
 
 // The no-flash theme setter, loaded in every page <head> via <script src> (MV3 CSP forbids inline scripts).
 await build({ ...common, entryPoints: [src('theme-init.mjs')], format: 'iife', outfile: out('theme-init.js') });
@@ -47,7 +55,7 @@ const clientSrc = (f) => path.join(dir, '..', 'client', 'src', f);
 // shebang, and esbuild preserves that ENTRY shebang at line 1 of the bundle (so the file is directly
 // executable, and the install prompt's `node <file>` invocation also works). A banner shebang would be a SECOND
 // shebang placed AFTER esbuild's prelude (past line 1), which node rejects as a syntax error.
-const nodeBundle = { bundle: true, target: 'node18', platform: 'node', format: 'esm', charset: 'utf8', legalComments: 'none' };
+const nodeBundle = { bundle: true, target: 'node18', platform: 'node', format: 'esm', charset: 'utf8', legalComments: 'none', preserveSymlinks: true }; // sow-237: see the note above `common`
 await build({ ...nodeBundle, entryPoints: [clientSrc('mcp-stdio.mjs')], outfile: mcp('gbti-network-mcp.mjs') });
 
 console.log('built extension/dist/{theme-init,background,content,onboarding,newtab,shares,workspace,admin,account}.js + extension/mcp/gbti-network-mcp.mjs');
