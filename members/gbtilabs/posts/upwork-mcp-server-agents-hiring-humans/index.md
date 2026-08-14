@@ -1,7 +1,7 @@
 ---
 title: Upwork will now take a job post from your AI agent
 slug: upwork-mcp-server-agents-hiring-humans
-status: draft
+status: published
 visibility: public
 publicStub: false
 excerpt: >-
@@ -20,6 +20,7 @@ layout: journal
 coverImage: ./images/upwork-mcp-cover.webp
 coverAlt: Two people working side by side on laptops at a table
 featured: false
+updatedAt: '2026-08-14T01:44:52.515Z'
 type: post
 author: gbtilabs
 ---
