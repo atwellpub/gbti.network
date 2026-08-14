@@ -14,8 +14,13 @@ on:
       mode:
         description: 'publish (upload + go live), upload-only (upload a draft to review in the dashboard), or check (verify creds only)'
         type: choice
-        default: publish
-        options: [publish, upload-only, check]
+        # sow-238: the default is `check` ON PURPOSE, and it must stay the safe one. `publish` uploads AND
+        # goes live, shipping executable code into every installed browser, so a default of `publish` meant
+        # "open the workflow, click Run" was a live release. THE SAFE ACTION HAS TO BE THE LAZY ACTION.
+        # `check` only exchanges the OAuth token and returns before any upload, so the zero-thought path
+        # verifies credentials and ships nothing. Choosing to publish should require choosing it.
+        default: check
+        options: [check, upload-only, publish]
 
 permissions:
   contents: read
