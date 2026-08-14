@@ -563,7 +563,9 @@ test('GET /signup/start fails closed (403) when Turnstile rejects', async () => 
 
 test('GET /signup/github/callback completes the trial signup on GitHub ALONE (Discord deferred)', async () => {
   const env = fakeEnv();
-  const startState = await packState({ ref: 'bob', nonce: 'n1' }, env);
+  // sow-236: a real state now carries a one-time jti, KV-consumed at the callback. The fixture reflects the new
+  // state shape rather than the assertion being relaxed; a state without one is rejected, which is its own test.
+  const startState = await packState({ ref: 'bob', nonce: 'n1', jti: 'jti-happy-path' }, env);
   await withFetch(
     (url) => {
       if (url.includes('login/oauth/access_token')) return { status: 200, body: { access_token: 'gho_token' } };
@@ -575,7 +577,7 @@ test('GET /signup/github/callback completes the trial signup on GitHub ALONE (Di
     },
     async () => {
       const res = await worker.fetch(
-        req('GET', `/signup/github/callback?code=ghcode&state=${encodeURIComponent(startState)}`, { headers: { Cookie: 'gbti_oauth_nonce=n1' } }),
+        req('GET', `/signup/github/callback?code=ghcode&state=${encodeURIComponent(startState)}`, { headers: { Cookie: 'gbti_oauth_nonce=n1', 'CF-Connecting-IP': '9.9.9.9' } }),
         env,
         {},
       );
@@ -593,9 +595,15 @@ test('GET /signup/github/callback completes the trial signup on GitHub ALONE (Di
   );
 });
 
-test('GET /signup/github/callback REJECTS a replayed state with no matching nonce cookie (login-CSRF / session-fixation defense)', async () => {
+// sow-236 RENAMED. This was called "REJECTS a replayed state with no matching nonce cookie", and it never tested
+// replay: it tests a state TRANSPLANTED into a different browser. The nonce is client-held, so it cannot defend
+// against a client replaying its OWN state, and the old name is why nobody looked for the missing consume. Anyone
+// grepping for replay coverage found this and stopped. Real replay is covered in test/oauth-state-replay.test.mjs.
+test('GET /signup/github/callback REJECTS a state TRANSPLANTED into another browser (login-CSRF / session-fixation defense)', async () => {
   const env = fakeEnv();
-  const startState = await packState({ ref: 'bob', nonce: 'n1' }, env); // a legitimately-signed state...
+  // Carries a valid jti, so the nonce mismatch is the ONLY thing that can reject it. Without one this would 400 for
+  // the sow-236 reason instead and would silently stop testing the nonce at all.
+  const startState = await packState({ ref: 'bob', nonce: 'n1', jti: 'jti-transplant' }, env); // legitimately signed...
   // ...delivered into a DIFFERENT browser, which lacks the matching gbti_oauth_nonce cookie. Rejected BEFORE any
   // code exchange or session mint (no global fetch needed -- the handler returns 400 first).
   const res = await worker.fetch(
@@ -604,7 +612,8 @@ test('GET /signup/github/callback REJECTS a replayed state with no matching nonc
     {},
   );
   assert.equal(res.status, 400);
-  assert.ok(!res.headers.get('Set-Cookie'), 'no session is minted for a replayed state');
+  assert.ok(!res.headers.get('Set-Cookie'), 'no session is minted for a transplanted state');
+  assert.equal(env.SIGNUP_KV.store.get('statejti:jti-transplant'), undefined, 'a rejected state does NOT burn its jti');
 });
 
 // ---- sow-158 Phase 1b: website cookie session + CSRF (router integration; these paths short-circuit before Stripe/KV) ----
@@ -805,7 +814,7 @@ test('sow-158 Phase 2: an open-redirect return_to is dropped from the state', as
 
 test('sow-158 Phase 2: the github callback lands on SITE_BASE_URL + return_to when present', async () => {
   const env = fakeEnv();
-  const startState = await packState({ ref: 'bob', nonce: 'n1', returnTo: '/account/' }, env);
+  const startState = await packState({ ref: 'bob', nonce: 'n1', jti: 'jti-return-to', returnTo: '/account/' }, env);
   await withFetch(
     (url) => {
       if (url.includes('login/oauth/access_token')) return { status: 200, body: { access_token: 'gho_token' } };
@@ -817,7 +826,7 @@ test('sow-158 Phase 2: the github callback lands on SITE_BASE_URL + return_to wh
     },
     async () => {
       const res = await worker.fetch(
-        req('GET', `/signup/github/callback?code=ghcode&state=${encodeURIComponent(startState)}`, { headers: { Cookie: 'gbti_oauth_nonce=n1' } }),
+        req('GET', `/signup/github/callback?code=ghcode&state=${encodeURIComponent(startState)}`, { headers: { Cookie: 'gbti_oauth_nonce=n1', 'CF-Connecting-IP': '9.9.9.9' } }),
         env, {},
       );
       assert.equal(res.status, 302);

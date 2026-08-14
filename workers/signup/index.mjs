@@ -180,6 +180,32 @@ export async function unpackState(token, env) {
   }
 }
 
+// sow-236: the OAuth state's one-time consume. The 600s TTL was the only bound on replaying an issued state, and a
+// TTL bounds the WINDOW, never the COUNT. Same construction as the Discord link token's jti (see /discord/link/start),
+// with one deliberate difference: that consume is best-effort on the write, which is defensible for a token that only
+// binds an account the caller already holds. This one guards signup itself, so it FAILS CLOSED on every uncertainty.
+//
+// The record's TTL deliberately EXCEEDS the 600s state TTL, so the evidence of a consume always outlives the token it
+// guards. A shorter record would let a still-valid state become fresh again.
+//
+// HONEST RESIDUAL, stated rather than implied: Cloudflare KV is eventually consistent and caches reads per colo, so
+// two callbacks racing from DIFFERENT colos can both observe a miss. Same-colo reads are read-your-writes, so the
+// common case is caught immediately. This takes the attack from "unlimited redemptions for the state's whole TTL"
+// down to "bounded by the cross-colo consistency window", which is a large reduction and not a closed door. The
+// callback rate limit added alongside is what bounds that remainder. A strictly serialized consume needs a Durable
+// Object; that is the escalation path if the residual ever justifies the infrastructure.
+export async function consumeStateJti(kv, jti) {
+  if (!kv || typeof jti !== 'string' || !jti) return false; // no store or no jti -> cannot prove single use -> deny
+  const key = `statejti:${jti}`;
+  try {
+    if (await kv.get(key)) return false; // already redeemed
+    await kv.put(key, '1', { expirationTtl: 900 }); // > the 600s state TTL
+    return true;
+  } catch {
+    return false; // KV unreachable -> deny rather than fall through to "not used, therefore allowed"
+  }
+}
+
 // SOW security fix: a per-flow nonce, set as a cookie at /signup/start AND embedded in the signed state, binds the
 // state to the initiating browser. The callback requires both to match before minting a session, closing the
 // login-CSRF / session-fixation hole (a signed-but-fungible state replayed into a victim's browser). A SameSite=Lax
@@ -237,7 +263,13 @@ async function handleStart(request, env) {
   // sow-158 Phase 2: a website "Sign in" carries return_to (the path to land on after login). Validated to a
   // same-site path here, then carried in the HMAC-signed state (tamper-proof between the OAuth hops).
   const returnTo = safeReturnTo(url.searchParams.get('return_to') || '');
-  const state = await packState({ ref, via, sid, nonce, ...(coupon ? { coupon } : {}), ...(returnTo ? { returnTo } : {}) }, env);
+  // sow-236: a ONE-TIME jti, KV-consumed at the callback. The nonce above binds the state to THIS BROWSER, which
+  // defends a state transplanted into someone else's; it does NOTHING against an attacker replaying their OWN state,
+  // because the cookie is theirs. Turnstile and the IP rate limit are the entire economic control on coupon abuse and
+  // both live HERE, at /signup/start, so without a consume one solve bought unlimited signups for the state's whole
+  // TTL. The controls were not bypassed, they were amortized to zero. Same construction the Discord link token uses.
+  const jti = crypto.randomUUID();
+  const state = await packState({ ref, via, sid, nonce, jti, ...(coupon ? { coupon } : {}), ...(returnTo ? { returnTo } : {}) }, env);
   const location = githubAuthorizeUrl({
     clientId: env.GITHUB_OAUTH_CLIENT_ID,
     redirectUri: `${env.PUBLIC_BASE_URL}/signup/github/callback`,
@@ -252,9 +284,24 @@ async function handleGithubCallback(request, env) {
   const state = await unpackState(url.searchParams.get('state'), env);
   if (!code || !state) return json({ error: 'bad_oauth_state' }, 400);
   // SOW security fix: require the per-browser nonce (the cookie set at /signup/start) to match the state's nonce. A
-  // state replayed into a DIFFERENT browser lacks the matching cookie, so it is rejected (login-CSRF / session-fixation).
+  // state transplanted into a DIFFERENT browser lacks the matching cookie, so it is rejected (login-CSRF /
+  // session-fixation). NOTE: the nonce is CLIENT-HELD state, so it can never defend against the client replaying its
+  // own state. That is the jti's job, below. Having this check is what made the missing consume easy to overlook.
   const cookieNonce = readOauthNonce(request.headers.get('Cookie'));
   if (!state.nonce || !cookieNonce || state.nonce !== cookieNonce) return json({ error: 'bad_oauth_state' }, 400);
+
+  // sow-236: rate-limit the CALLBACK by IP, not just /signup/start. This bounds the residual the KV consume below
+  // cannot close on its own (see consumeStateJti), and it is independent of KV read consistency. The limit is
+  // deliberately loose: legitimate signups share IPs behind carrier and office NAT, and this is a backstop, not the
+  // primary control. A blocked caller retries; nothing is consumed before this point.
+  const ip = request.headers.get('CF-Connecting-IP') || '';
+  const rl = await rateLimit({ kv: env.SIGNUP_KV, ip, limit: 20, windowSeconds: 600, prefix: 'rl:oauth-callback:' });
+  if (!rl.allowed) return json({ error: 'rate_limited' }, 429);
+
+  // sow-236: CONSUME THE ONE-TIME STATE. Before the code exchange, so a replay costs no GitHub or Stripe work.
+  // Fails closed: an absent jti (including a state minted by the previous deploy, within its 600s TTL), an
+  // unreachable KV, or an already-consumed jti all reject. A member caught by the deploy rollover restarts signup.
+  if (!(await consumeStateJti(env.SIGNUP_KV, state.jti))) return json({ error: 'bad_oauth_state' }, 400);
 
   const accessToken = await githubExchangeCode(
     {
