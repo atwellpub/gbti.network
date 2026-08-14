@@ -17,6 +17,8 @@ tags:
   - freelancing
   - devops
 layout: journal
+coverImage: ./images/person-holding-laptops.webp
+coverAlt: Two people working side by side on laptops at a table
 featured: false
 type: post
 author: gbtilabs
@@ -93,6 +95,8 @@ Codeable is a closed talent network that accepts roughly 2.2% of applicants, whe
 
 A network like Codeable has several reasons to publish an MCP server of its own, and they are mostly the reasons Upwork did. A connector puts a vetted talent pool inside the tools its best clients already work in. It makes that same pool reachable by the network's own contractors, who could assemble a team on demand instead of routing it through a coordinator. A devops lead could pipe work straight to the embedded developer they already trust, without rebuilding the relationship each time there is something to do. And every party keeps agentic help for the transactional layer, the scoping and scheduling and status chasing, which is the part none of them wanted to be doing by hand.
 
+Cover photograph by Polina Zimmerman on Pexels.[^6]
+
 [^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026. Source of the launch date, the example prompts, the escrow and dispute language, and the quotes from Sanborn and from Singh, who is one of two customers quoted; the other is Allison Lee. Sanborn's linked profile was opened and confirmed on August 13, 2026: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
 
 [^2]: Upwork, "Upwork MCP Server," product documentation dated August 4, 2026, read in a browser on August 12, 2026; the page returns 403 to non-browser clients. Source of the compatible-agent list, the capability sets, the draft-confirm and binding-actions rules, the per-assistant plan requirements, the full-scopes line, the same-APIs comparison and the FAQ answers quoted above. It says "ranked profiles" and "ranked summaries" and names no quality signal anywhere on the page, neither Job Success Score nor Top Rated: [upwork.com/ai/mcp](https://www.upwork.com/ai/mcp)
@@ -102,3 +106,5 @@ A network like Codeable has several reasons to publish an MCP server of its own,
 [^4]: Published summaries of the Upwork affiliate program, read August 12, 2026. Source of the 70% first-contract commission, the $150 cap and the Impact platform. Reported cookie windows vary by link type and none of these figures appears on Upwork's own affiliate page, so the window is given as a range. The conclusion drawn about MCP attribution is ours: [upwork.com/affiliates](https://www.upwork.com/affiliates)
 
 [^5]: Codeable, "Codeable vs Upwork," read August 12, 2026, for "roughly 2.2% of applicants are accepted" and the fixed 17.5% fee on hourly rates of $80 to $120: [codeable.io/blog/codeable-vs-upwork](https://www.codeable.io/blog/codeable-vs-upwork/). The workroom and the averaged estimate are described on the company's how-it-works page.
+
+[^6]: Cover photograph, "Person Holding Black And Silver Laptops", by Polina Zimmerman on Pexels, used under the [Pexels License](https://www.pexels.com/license/): [pexels.com/photo/3747130](https://www.pexels.com/photo/person-holding-black-and-silver-laptops-3747130/)
