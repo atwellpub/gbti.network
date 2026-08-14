@@ -83,7 +83,7 @@ Upwork's affiliate program pays 70% of a new client's first contract spend, capp
 
 An MCP conversation runs directly between the agent and the server, so the browser, the click and the cookie that mechanism depends on never come into existence. A founder who asks Claude to post a job and hires someone that afternoon leaves no referral trail, so whoever recommended Upwork in the first place is invisible to the attribution system.
 
-Will Anthropic and OpenAI demand a share of the profit? There are arguments for it, most certainly.
+Will Anthropic and OpenAI demand a share of the profit? There are arguments for it, most certainly, however there does not seem to be any sign of merchants needing to register with large language models for commission sharing. It is not a crazy model. We would break off a point for the right of representation.
 
 ## What an agent-driven marketplace means for a vetted network like Codeable
 
