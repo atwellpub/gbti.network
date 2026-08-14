@@ -193,10 +193,43 @@ export function tableAlignments(line) {
   return cells.map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : c.startsWith(':') ? 'left' : ''));
 }
 
+/**
+ * sow-235: render a document AND report where each emitted block came from in the source.
+ *
+ * The WorkBench preview needs to make one block editable without giving up the guarantee that it renders
+ * exactly like the published page. Three cheaper approaches were tried and each fails:
+ *   - rendering block by block loses footnote references, since `[^1]` only resolves against a document
+ *     that also carries its definition;
+ *   - matching rendered elements to `parseBlocks` output by position does not hold, because the two parse
+ *     independently and the footnote section corresponds to no source block;
+ *   - injecting `<!--blk:N-->` sentinels does not survive, because raw HTML is escaped to text.
+ *
+ * So the renderer that actually produces the DOM reports its own boundaries. `blocks[n]` gives the
+ * inclusive source line range for the nth emitted block, and with `ids` on, each block carries
+ * `data-blk="n"`. An ATTRIBUTE rather than an extra element, so nothing reflows.
+ *
+ * @returns {{ html: string, blocks: Array<{start:number,end:number}|null> }} null range = synthesized
+ *          (the footnotes section), which has no source lines and is not editable.
+ */
+export function renderMarkdownWithBlocks(md) {
+  return renderDoc(md, true);
+}
+
 export function renderMarkdown(md) {
+  return renderDoc(md, false).html;
+}
+
+function renderDoc(md, ids) {
   const lines = String(md ?? '').replace(/\r\n/g, '\n').split('\n');
   const out = [];
+  const ranges = [];
+  // Stamp the block index onto the emitted element's opening tag. Attribute only: an added element would
+  // change layout and break the very equivalence this exists to preserve.
+  const stamp = (html, n) => (ids ? String(html).replace(/^(\s*<[a-zA-Z][a-zA-Z0-9-]*)/, `$1 data-blk="${n}"`) : html);
+  const emit = (html, start, end) => { out.push(stamp(html, out.length)); ranges.push(start == null ? null : { start, end }); };
   let codeFence = 3;
+  let fenceStart = 0;   // sow-235: first line of the open fence, for its source range
+  let listStart = null; // first line of the run of list items being gathered
   let inCode = false;
   let codeBuf = [];
   let codeLang = '';
@@ -207,9 +240,10 @@ export function renderMarkdown(md) {
   const linkKeep = []; // attributed <a> tags extracted by escapeKeepingLinks, restored in one pass at the end
   const flushList = () => {
     if (listType) {
-      out.push(`<${listType}>${listBuf.join('')}</${listType}>`);
+      emit(`<${listType}>${listBuf.join('')}</${listType}>`, listStart, i - 1);
       listType = null;
       listBuf = [];
+      listStart = null;
     }
   };
 
@@ -218,10 +252,10 @@ export function renderMarkdown(md) {
     const line = lines[i];
     const fence = /^(`{3,})(.*)$/.exec(line);
     if (fence) {
-      if (!inCode) { inCode = true; codeBuf = []; codeFence = fence[1].length; codeLang = fence[2]; i++; continue; }
+      if (!inCode) { inCode = true; fenceStart = i; codeBuf = []; codeFence = fence[1].length; codeLang = fence[2]; i++; continue; }
       // CommonMark: a fence closes only on a fence of >= the OPENING length with no info string, so a
       // ````markdown block can carry ``` fences as CONTENT (the /ci skill prompt broke on this).
-      if (fence[1].length >= codeFence && !fence[2].trim()) { inCode = false; flushList(); out.push(renderFence(codeLang, codeBuf, fn)); codeLang = ''; i++; continue; }
+      if (fence[1].length >= codeFence && !fence[2].trim()) { inCode = false; flushList(); emit(renderFence(codeLang, codeBuf, fn), fenceStart, i); codeLang = ''; i++; continue; }
       codeBuf.push(line); i++; continue;
     }
     if (inCode) { codeBuf.push(line); i++; continue; }
@@ -240,16 +274,17 @@ export function renderMarkdown(md) {
 
     const esc = escapeKeepingLinks(line, linkKeep);
     let m;
-    if ((m = /^(#{1,6})\s+(.*)$/.exec(esc))) { flushList(); out.push(`<h${m[1].length}>${inline(m[2], fn)}</h${m[1].length}>`); i++; continue; }
-    if (/^\s*[-*]\s+/.test(line)) { if (listType !== 'ul') { flushList(); listType = 'ul'; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*[-*]\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
-    if (/^\s*\d+\.\s+/.test(line)) { if (listType !== 'ol') { flushList(); listType = 'ol'; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*\d+\.\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
-    if (/^\s*>\s?/.test(line)) { flushList(); out.push(`<blockquote>${inline(escapeKeepingLinks(line.replace(/^\s*>\s?/, ''), linkKeep), fn)}</blockquote>`); i++; continue; }
-    if (/^\s*(---|\*\*\*)\s*$/.test(line)) { flushList(); out.push('<hr/>'); i++; continue; }
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(esc))) { flushList(); emit(`<h${m[1].length}>${inline(m[2], fn)}</h${m[1].length}>`, i, i); i++; continue; }
+    if (/^\s*[-*]\s+/.test(line)) { if (listType !== 'ul') { flushList(); listType = 'ul'; listStart = i; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*[-*]\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
+    if (/^\s*\d+\.\s+/.test(line)) { if (listType !== 'ol') { flushList(); listType = 'ol'; listStart = i; } listBuf.push(`<li>${inline(escapeKeepingLinks(line.replace(/^\s*\d+\.\s+/, ''), linkKeep), fn)}</li>`); i++; continue; }
+    if (/^\s*>\s?/.test(line)) { flushList(); emit(`<blockquote>${inline(escapeKeepingLinks(line.replace(/^\s*>\s?/, ''), linkKeep), fn)}</blockquote>`, i, i); i++; continue; }
+    if (/^\s*(---|\*\*\*)\s*$/.test(line)) { flushList(); emit('<hr/>', i, i); i++; continue; }
     // GFM table: a header row followed by a delimiter row, then body rows until a blank line or a row with
     // no pipe. Without this the pipes fell through to the paragraph gather and rendered as literal text,
     // while the site build (Astro + GFM) rendered a real table, so the preview disagreed with the page.
     const aligns = i + 1 < lines.length ? tableAlignments(lines[i + 1]) : null;
     if (aligns && line.includes('|')) {
+      const tableStart = i;
       flushList();
       const cell = (c) => inline(escapeKeepingLinks(c, linkKeep), fn);
       const cols = (row, tag) => row
@@ -260,23 +295,24 @@ export function renderMarkdown(md) {
       const rows = [];
       while (i < lines.length && lines[i].includes('|') && !/^\s*$/.test(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
       const body = rows.length ? `<tbody>${rows.map((r) => `<tr>${cols(r, 'td')}</tr>`).join('')}</tbody>` : '';
-      out.push(`<table>${head}${body}</table>`);
+      emit(`<table>${head}${body}</table>`, tableStart, i - 1);
       continue;
     }
     if (/^\s*$/.test(line)) { flushList(); i++; continue; }
 
     // paragraph: gather consecutive plain lines
     flushList();
+    const paraStart = i;
     const para = [esc];
     i++;
     while (i < lines.length && !/^\s*$/.test(lines[i]) && !new RegExp(`^(#{1,6})\\s|^\\s*[-*]\\s|^\\s*\\d+\\.\\s|^\`\`\`|^\\s*>|^\\[\\^${FN_ID}\\]:`).test(lines[i])) {
       para.push(escapeKeepingLinks(lines[i], linkKeep));
       i++;
     }
-    out.push(`<p>${inline(para.join(' '), fn)}</p>`);
+    emit(`<p>${inline(para.join(' '), fn)}</p>`, paraStart, i - 1);
   }
   flushList();
-  if (inCode) out.push(renderFence(codeLang, codeBuf, fn));
+  if (inCode) emit(renderFence(codeLang, codeBuf, fn), fenceStart, lines.length - 1);
   // The footnote section: only REFERENCED definitions render (GFM drops the rest), with one back arrow per
   // reference occurrence (matching the disambiguated fnref ids), so every jump down has a jump back.
   const referenced = footnotes.filter((f) => (fn.counts.get(f.id) ?? 0) > 0);
@@ -289,8 +325,9 @@ export function renderMarkdown(md) {
         return `<li id="fn-${f.id}">${f.html} ${backs}</li>`;
       })
       .join('');
-    out.push(`<section class="md-footnotes"><h2>Footnotes</h2><ol>${items}</ol></section>`);
+    emit(`<section class="md-footnotes"><h2>Footnotes</h2><ol>${items}</ol></section>`, null, null);
   }
   const joined = out.join('\n');
-  return linkKeep.length ? joined.replace(/(\d+)/g, (_m, i) => linkKeep[Number(i)] ?? '') : joined;
+  const html = linkKeep.length ? joined.replace(/(\d+)/g, (_m, i) => linkKeep[Number(i)] ?? '') : joined;
+  return { html, blocks: ranges };
 }
