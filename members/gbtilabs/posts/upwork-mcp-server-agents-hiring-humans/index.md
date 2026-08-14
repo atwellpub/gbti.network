@@ -17,7 +17,7 @@ tags:
   - freelancing
   - devops
 layout: journal
-coverImage: ./images/person-holding-laptops.webp
+coverImage: ./images/upwork-mcp-cover.webp
 coverAlt: Two people working side by side on laptops at a table
 featured: false
 type: post
