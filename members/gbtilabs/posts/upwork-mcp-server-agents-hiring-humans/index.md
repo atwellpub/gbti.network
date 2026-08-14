@@ -72,13 +72,11 @@ One capability does touch delivery. A freelancer can submit milestone work throu
 
 Upwork's answer is identity and money. Every connection runs through an authenticated account, and the company leans on its existing identity verification, escrow and dispute protections.[^1] Those cover fraud and non-delivery, and they say nothing about whether the three names in front of you are the right three. We read the documentation looking for the ranking inputs and they are not disclosed: a client can "Pull up ranked profiles" and "review proposals received, with ranked summaries", and the page never names Job Success Score, Top Rated, or any other quality signal Upwork already publishes.[^2] The word doing the work is "ranked", and nothing says ranked by what.
 
-The controls on the agent itself are documented far better than the ones on the shortlist. Every write action is drafted for separate confirmation, binding financial actions complete on upwork.com rather than inside the agent, and connecting nonetheless "grants the full set of scopes", so there is no way to attach an agent to job search while withholding messaging, contracts or financial history.[^2] Rohit Singh, founder of Populosof and one of two customers quoted in the announcement, put the upside plainly: "every action that changes anything is previewed and requires my explicit confirmation."[^1] So a client de-risks the transaction and picks the expert on trust.
+The controls on the agent are better documented than the ranking. Every write action is drafted for you to confirm, and binding financial actions complete on upwork.com rather than inside the agent. Connecting still "grants the full set of scopes", so there is no way to give an agent job search while withholding messaging, contracts or financial history.[^2]
 
 ## Are AI Agents Themselves Able to Shop On Upwork?
 
 Upwork's FAQ asks whether an AI agent can hire on your behalf without you, which is the client side of the question, and answers: "Not today. In the current release, a person confirms every binding action."[^2]
-
-Read the hedge. "Not today" and "in the current release" are the words of a company that has thought about the other version and has not shipped it.
 
 ## How does the affiliate program work with MCP?
 
@@ -98,7 +96,7 @@ A network like Codeable has several reasons to publish an MCP server of its own,
 
 Cover photograph by Polina Zimmerman on Pexels.[^6]
 
-[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026. Source of the launch date, the example prompts, the escrow and dispute language, and the quotes from Sanborn and from Singh, who is one of two customers quoted; the other is Allison Lee. Sanborn's linked profile was opened and confirmed on August 13, 2026: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
+[^1]: Upwork Inc., "Upwork Talent Is Now Everywhere AI Works," press release via GlobeNewswire, August 10, 2026. Source of the launch date, the example prompts, the escrow and dispute language, and and the Sanborn quote. Sanborn's linked profile was opened and confirmed on August 13, 2026: [globenewswire.com](https://www.globenewswire.com/news-release/2026/08/10/3342153/0/en/upwork-talent-is-now-everywhere-ai-works.html)
 
 [^2]: Upwork, "Upwork MCP Server," product documentation dated August 4, 2026, read in a browser on August 12, 2026; the page returns 403 to non-browser clients. Source of the compatible-agent list, the capability sets, the draft-confirm and binding-actions rules, the per-assistant plan requirements, the full-scopes line, the same-APIs comparison and the FAQ answers quoted above. It says "ranked profiles" and "ranked summaries" and names no quality signal anywhere on the page, neither Job Success Score nor Top Rated: [upwork.com/ai/mcp](https://www.upwork.com/ai/mcp)
 
