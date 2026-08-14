@@ -1,5 +1,5 @@
 ---
-title: Upwork will now take a job post from your AI agent
+title: "A Deeper Look: Upwork's move to offer MCP access to its platform"
 slug: upwork-mcp-server-agents-hiring-humans
 status: published
 visibility: public
