@@ -35,6 +35,14 @@ const labelOf = CATEGORY_LABELS;
           <button type="button" class="on" data-pv-as="visitor">As a visitor</button>
           <button type="button" data-pv-as="member">As a member</button>
         </div>
+        <!-- sow-235: editing is OFF by default, so the default preview renders byte-identically to what it
+             always did. Only a committed repo draft can be edited, because that is the only store this page
+             can read back and write to, so the control stays hidden otherwise. -->
+        <div class="pv-view pv-edit-ctl" role="group" aria-label="Edit" hidden data-pv-editctl>
+          <button type="button" data-pv-edit-toggle>Edit</button>
+          <button type="button" data-pv-save hidden>Save draft</button>
+        </div>
+        <span class="pv-note pv-edit-msg" data-pv-edit-msg></span>
       </div>
     </div>
 
@@ -116,6 +124,17 @@ const labelOf = CATEGORY_LABELS;
     .pv-view button.on { background: var(--ink-3); color: #fff; }
     .pv-inert { color: var(--fg-mute); font-size: 13px; font-style: italic; }
     @media (max-width: 640px) { .pv-note { order: 3; flex-basis: 100%; } }
+    /* sow-235 edit chrome. Every rule here is OUTLINE or a fixed-position overlay, never border, margin or
+       padding, because the preview's whole value is that it renders exactly like the published page. An
+       outline paints outside the box and takes no space, so it cannot reflow the article. If a rule below
+       ever needs to change spacing, the rule is wrong rather than the guarantee. */
+    .pv-edit-msg { flex: 0 1 auto; }
+    [data-pv-body].pv-editing [data-blk] { cursor: text; }
+    [data-pv-body].pv-editing [data-blk]:hover { outline: 2px dashed var(--ink-3); outline-offset: 4px; }
+    [data-pv-body].pv-editing [data-blk][contenteditable="true"] { outline: 2px solid var(--green-700); outline-offset: 4px; }
+    /* The footnotes section is synthesized from definitions elsewhere in the document, so it has no source
+       lines to edit and carries no data-blk. It is excluded by that alone; this only removes the cursor. */
+    [data-pv-body].pv-editing .md-footnotes { cursor: default; }
     /* The published page's .pd-toc and .pd-rail-links (gbti-v3.css) apply flex-direction:column straight to
        their <a> children, because Astro renders those as direct children. Here every rail list lands one
        level deeper, inside a [data-pv-*] wrapper the runtime script fills in, so each wrapper needs the same
@@ -428,6 +447,27 @@ const labelOf = CATEGORY_LABELS;
       const bodyEl = $('[data-pv-body]');
       const membersOnly = fm.visibility === 'members';
 
+      // sow-235: the body is re-rendered from source on every edit, so the source is the state and the DOM is
+      // only ever a view of it. renderMarkdownWithBlocks returns the same HTML the read view uses plus each
+      // block's inclusive source line range, which is what makes one block editable without rendering the
+      // document in pieces. Rendering in pieces loses footnote references, since [^1] only resolves against a
+      // document that also carries its definition.
+      let editing = false;
+      let blockRanges: Array<{ start: number; end: number } | null> = [];
+      const renderFromSource = async () => {
+        const { renderMarkdownWithBlocks, renderMarkdown } = await import('../../../client/src/markdown.mjs');
+        const src = String(draft.body || '');
+        if (editing) {
+          const r = renderMarkdownWithBlocks(src);
+          blockRanges = r.blocks;
+          draft.__html = r.html;
+        } else {
+          blockRanges = [];
+          draft.__html = renderMarkdown(src);
+        }
+        draft.__html = String(draft.__html).replace(/src="(\.\/[^"]+)"/g, (_m: string, q: string) => `src="${asset(q, itemPath)}"`);
+      };
+
       try {
         const { renderMarkdown } = await import('../../../client/src/markdown.mjs');
         draft.__html = renderMarkdown(String(draft.body || ''));
@@ -543,6 +583,109 @@ const labelOf = CATEGORY_LABELS;
         apply();
       }));
       apply();
+
+      // ---- sow-235: edit in place -------------------------------------------------------------------
+      // Only a committed repo draft is editable: it is the one store this page can read a canonical file
+      // from and write back to. A KV or fork draft would need a second write path to the same item, which
+      // is how two stores start disagreeing about one draft.
+      const editCtl = $('[data-pv-editctl]') as HTMLElement | null;
+      const editBtn = $('[data-pv-edit-toggle]') as HTMLButtonElement | null;
+      const saveBtn = $('[data-pv-save]') as HTMLButtonElement | null;
+      const editMsg = $('[data-pv-edit-msg]') as HTMLElement | null;
+      const canEdit = store === 'repo' && Boolean(repoPath);
+      if (editCtl && canEdit) editCtl.hidden = false;
+
+      let dirty = false;
+      const setMsg = (t: string) => { if (editMsg) editMsg.textContent = t; };
+      const markDirty = () => { dirty = true; if (saveBtn) saveBtn.hidden = false; setMsg('Unsaved changes.'); };
+
+      // Commit one edited block back into the SOURCE, then re-render the whole document. Editing the source
+      // rather than the DOM is what keeps footnotes, reference numbering and every other cross-block
+      // construct correct, and it is why the range matters more than the element.
+      const commitBlock = async (el: HTMLElement) => {
+        const n = Number(el.dataset.blk);
+        const range = blockRanges[n];
+        if (!range) return;
+        const { inlineHtmlToMd } = await import('../../../client-ui/src/markdown-blocks.mjs');
+        const lines = String(draft.body || '').replace(/\r\n/g, '\n').split('\n');
+        const before = lines.slice(range.start, range.end + 1).join('\n');
+        // Only the inline run is read back. The block's own markdown prefix (heading hashes, quote marker,
+        // list bullets) is preserved from the source, so a paragraph cannot silently become a heading.
+        const prefix = /^(\s{0,3}(?:#{1,6}\s+|>\s?|[-*]\s+|\d+\.\s+))/.exec(before);
+        const edited = (prefix ? prefix[1] : '') + inlineHtmlToMd(el.innerHTML).trim();
+        if (edited === before) return;
+        lines.splice(range.start, range.end - range.start + 1, edited);
+        draft.body = lines.join('\n');
+        markDirty();
+        await renderFromSource();
+        apply();
+        wireEditing();
+      };
+
+      const wireEditing = () => {
+        if (!bodyEl) return;
+        bodyEl.classList.toggle('pv-editing', editing);
+        bodyEl.querySelectorAll('[data-blk]').forEach((raw) => {
+          const el = raw as HTMLElement;
+          if (!editing) { el.removeAttribute('contenteditable'); return; }
+          // ONLY paragraphs and headings, which is what the toggle's own message promises. commitBlock
+          // replaces a block's whole source range with ONE line, so anything spanning several lines loses
+          // the rest: a two-item list collapses to a single bullet, and a fenced code block is replaced by
+          // its own body with the fences gone. Multi-line editing needs a different commit path, not a
+          // wider selector here.
+          const range = blockRanges[Number(el.dataset.blk)];
+          const single = !!range && range.start === range.end;
+          if (!single || !/^(P|H[1-6])$/.test(el.tagName)) return;
+          el.addEventListener('click', () => {
+            if (el.getAttribute('contenteditable') === 'true') return;
+            el.setAttribute('contenteditable', 'true');
+            el.focus();
+          }, { once: false });
+          el.addEventListener('blur', () => {
+            el.removeAttribute('contenteditable');
+            void commitBlock(el);
+          });
+        });
+      };
+
+      editBtn?.addEventListener('click', async () => {
+        editing = !editing;
+        editBtn.textContent = editing ? 'Done editing' : 'Edit';
+        editBtn.classList.toggle('on', editing);
+        setMsg(editing ? 'Click a paragraph or heading to edit it.' : (dirty ? 'Unsaved changes.' : ''));
+        await renderFromSource();
+        apply();
+        wireEditing();
+      });
+
+      // Saves through the SAME path the editor uses. A second write path to one draft is how a save starts
+      // disagreeing with itself, so this reuses saveDraft rather than posting the file itself.
+      saveBtn?.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        setMsg('Saving…');
+        try {
+          // The client is identity-scoped, so it needs the signed-in member rather than being constructed
+          // bare. Same source the rest of the site uses (sow-030's member signal), so a save from here is
+          // attributed exactly as a save from the editor is.
+          const { createWorkbenchClient } = await import('../../lib/workbench-client');
+          const { readMemberSignal } = await import('../../lib/member-signal');
+          const who = readMemberSignal();
+          if (!who?.login) { setMsg('Sign in to save this draft.'); return; }
+          const client: any = createWorkbenchClient({
+            signupBase: base,
+            login: String(who.login),
+            githubId: who.githubId != null ? String(who.githubId) : null,
+          });
+          await client.saveDraft({ type, input: fm, body: String(draft.body || ''), path: itemPath });
+          dirty = false;
+          saveBtn.hidden = true;
+          setMsg('Saved.');
+        } catch (e: any) {
+          setMsg(`Could not save: ${e?.message || 'unknown error'}`);
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
     })();
   </script>
 </BaseLayout>
