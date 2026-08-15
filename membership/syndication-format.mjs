@@ -254,10 +254,15 @@ export function renderTemplate(template, item = {}, { limit = 2000, previewMenti
     // 2-char backslash-n, not a real break) becomes an actual newline, so the paragraph breaks post as intended
     // instead of showing the text "\n\n". Real newlines are untouched; a run of 3+ collapses to a blank line so
     // an empty token (a note-less item) does not leave a big gap.
-    // SOW-223 (2026-08-12): the per-type template fields became textareas, so a break is now typed directly
-    // and nothing in house/syndication-config.yml still uses the 2-char form. KEEP THIS ANYWAY. It reads as
-    // dead code precisely because no current template needs it, and deleting it would silently flatten any
-    // template still authored the old way. It is a legacy fallback, not a leftover.
+    // SOW-223 (2026-08-12), CORRECTED sow-240 (2026-08-15): the original note here said "nothing in
+    // house/syndication-config.yml still uses the 2-char form" and called this a legacy fallback that merely
+    // "reads as dead code". BOTH CLAIMS WERE FALSE. The four channel_templates.linkedin.* values
+    // (post, product, prompt, share) are authored as YAML folded scalars and DO carry literal 2-char \n
+    // sequences today, LinkedIn is a manual-capability channel, and its Social Queue text is rendered through
+    // this exact replace. So this line is LIVE, not legacy.
+    // The conclusion was right and the stated reason was wrong, which is the harder failure to catch: a
+    // comment written to stop someone deleting a line, resting on a premise that would not survive the check
+    // it invites. If you verify the premise and find it false, do NOT conclude the line is safe to remove.
     .replace(/\\n/g, '\n')
     // 2026-08-11 safety net: punctuation a template wrapped around a token that resolved to NOTHING. The
     // quotes are the case that shipped (a note-less article posted a lone "" to Reddit), but templates are

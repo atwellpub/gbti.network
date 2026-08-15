@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readZipEntries } from '../extension/package.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ZIP = path.join(ROOT, 'public/extension/gbti-network-extension.zip');
@@ -65,8 +66,18 @@ async function itemVersion({ appId, token, fetchImpl }) {
   return typeof body.crxVersion === 'string' && body.crxVersion ? body.crxVersion : null;
 }
 
-/** The version we are about to ship, read from the manifest that was packaged. */
-function localVersion() {
+/** The version inside the ZIP WE ARE ABOUT TO UPLOAD. This is the only version that is true about the
+ *  artifact; the working-tree manifest describes a package that may never have been built. */
+export function zipManifestVersion(zipBuf) {
+  try {
+    const entry = readZipEntries(zipBuf).find((e) => e.name === 'manifest.json');
+    if (!entry) return null;
+    return JSON.parse(new TextDecoder().decode(entry.data)).version || null;
+  } catch { return null; }
+}
+
+/** The version in the working-tree manifest. Used ONLY to cross-check the zip, never as the shipped truth. */
+function manifestVersion() {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'extension/manifest.json'), 'utf8')).version || null; }
   catch { return null; }
 }
@@ -93,6 +104,30 @@ async function publishItem({ appId, token, target, fetchImpl }) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Chrome Web Store publish failed (${res.status}): ${(body.error?.message) || JSON.stringify(body).slice(0, 200)}`);
   return body; // { status: ['OK'] | ['ITEM_PENDING_REVIEW'], statusDetail: [...] }
+}
+
+/**
+ * PURE publish gate (sow-240). Every version decision lives here so it can be tested without a zip, a token
+ * or a network. The wiring below only supplies the three facts.
+ *   zip      the version INSIDE the package about to be uploaded (the only version true about the artifact)
+ *   manifest the version in the working-tree extension/manifest.json (a cross-check, never the shipped truth)
+ *   item     the version already on the store item, or null when it could not be read
+ * @returns {{ ok: true, note?: string } | { ok: false, error: string }}
+ */
+export function decidePublish({ zip, manifest, item }) {
+  if (zip && manifest && compareVersions(zip, manifest) !== 0) {
+    return { ok: false, error: `refusing to upload: the package is ${zip} but extension/manifest.json is ${manifest}. `
+      + 'The zip is stale relative to the manifest, so a build was skipped. '
+      + 'Run `npm run build:extension` (from a worktree at origin) and commit the artifacts before publishing.' };
+  }
+  // FAIL OPEN when the item version is unreadable: a failed read must never block a legitimate release.
+  if (!zip || !item) return { ok: true, note: 'could not read both versions; proceeding and letting the upload decide.' };
+  if (compareVersions(zip, item) <= 0) {
+    return { ok: false, error: `refusing to upload: the store item already holds ${item} and this package is ${zip}. `
+      + 'The store requires a strictly greater version per upload. Run `npm run release -- minor` '
+      + '(from a worktree at origin), commit, then dispatch again.' };
+  }
+  return { ok: true, note: `item holds ${item}, shipping ${zip}.` };
 }
 
 export async function main({ env: e = process.env, fetchImpl = globalThis.fetch, checkOnly = CHECK_ONLY, uploadOnly = UPLOAD_ONLY } = {}) {
@@ -123,20 +158,15 @@ export async function main({ env: e = process.env, fetchImpl = globalThis.fetch,
   // without a version bump" is the NORMAL state during development, so a CI guard would either red main
   // constantly or need an arbitrary threshold. The publish call is the one moment the version is genuinely
   // required to be correct. Fails OPEN on an unreadable item version: a read failure must not block a release.
-  const local = localVersion();
-  const onItem = await itemVersion({ appId, token, fetchImpl });
-  if (local && onItem) {
-    if (compareVersions(local, onItem) <= 0) {
-      throw new Error(
-        `refusing to upload: the store item already holds ${onItem} and this package is ${local}. ` +
-        'The store requires a strictly greater version per upload. Run `npm run release -- minor` ' +
-        '(from a worktree at origin), commit, then dispatch again.',
-      );
-    }
-    console.log(`publish-cws: item holds ${onItem}, shipping ${local}.`);
-  } else if (!onItem) {
-    console.log('publish-cws: could not read the version on the item; proceeding and letting the upload decide.');
-  }
+  // sow-239/240: every version decision is in decidePublish (pure, above) so it is testable without a zip,
+  // a token or a network. The zip is the truth about what ships; the manifest is only a cross-check.
+  const decision = decidePublish({
+    zip: zipManifestVersion(zipBuf),
+    manifest: manifestVersion(),
+    item: await itemVersion({ appId, token, fetchImpl }),
+  });
+  if (!decision.ok) throw new Error(decision.error);
+  if (decision.note) console.log(`publish-cws: ${decision.note}`);
 
   const up = await uploadPackage({ appId, token, zipBuf, fetchImpl });
   console.log(`publish-cws: uploaded (uploadState=${up.uploadState || 'unknown'}).`);

@@ -64,6 +64,11 @@ test('hook extraction handles the real attribute spellings', () => {
   assert.deepEqual(hooksInMarkup('<i data-b >'), ['b'], 'bare attribute followed by space');
   assert.deepEqual(hooksInMarkup('<i data-c>'), ['c'], 'bare attribute closing the tag');
   assert.deepEqual(hooksInMarkup('<i data-multi-part-name="x">'), ['multi-part-name'], 'dashed name');
+  // TWO DIFFERENT adjacent names. The previous fixture used the SAME name twice, so the Set dedup made the
+  // assertion pass whether or not the second attribute was ever extracted: it could not fail, and it hid a
+  // real extraction bug through seven reviewers and a live guard run. Keep these names distinct.
+  assert.deepEqual(hooksInMarkup('<i data-a data-b>'), ['a', 'b'], 'ADJACENT attributes: the terminator must not be consumed');
+  assert.deepEqual(hooksInMarkup('<div data-shell data-active="x">'), ['active', 'shell'], 'the real markup shape on account/newtab/workspace');
   assert.deepEqual(hooksInMarkup('<i data-a data-a="dup">'), ['a'], 'deduplicated');
 });
 

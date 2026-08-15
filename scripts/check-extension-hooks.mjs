@@ -41,7 +41,11 @@ export function stripNonMarkup(html) {
 /** The distinct `data-*` attribute names a page's static markup declares. */
 export function hooksInMarkup(html) {
   const seen = new Set();
-  for (const m of stripNonMarkup(html).matchAll(/\sdata-([a-z0-9-]+)[=\s>]/g)) seen.add(m[1]);
+  // The terminator is a LOOKAHEAD, not a consumed character. Consuming it ate the whitespace that the NEXT
+  // attribute's leading \s needs, so `<div data-shell data-active="x">` yielded only `shell` and three real
+  // pages had a hook that was never scanned. Found 2026-08-15 by an adversarial review; the unit test had
+  // missed it because its fixture used the SAME attribute name twice, so the Set dedup passed either way.
+  for (const m of stripNonMarkup(html).matchAll(/\sdata-([a-z0-9-]+)(?=[=\s>/])/g)) seen.add(m[1]);
   return [...seen].sort();
 }
 
