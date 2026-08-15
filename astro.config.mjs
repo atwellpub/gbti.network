@@ -49,7 +49,11 @@ export default defineConfig({
     mdx(),
     // Keep the auth shell / noindex stubs (and the archived v1 homepage) out of the sitemap so crawl
     // budget goes to public content.
-    sitemap({ filter: (page) => !/\/(account|welcome|codeable-invite(\/v1)?|home\/v1|news\/item)\/?$/.test(page) }),
+    // sow-230: linkedin-invite joins the unlisted set for the same reason codeable-invite is in it. An invite
+    // landing carries a live free-year coupon in plain sight, so indexing it turns a private invitation into a
+    // public giveaway. Both pages also set a noindex meta; this filter is the second half, and they are not
+    // redundant (the meta asks a crawler, the sitemap stops advertising the URL in the first place).
+    sitemap({ filter: (page) => !/\/(account|welcome|codeable-invite(\/v1)?|linkedin-invite|home\/v1|news\/item)\/?$/.test(page) }),
   ],
   image: {
     // The legacy archive includes oversized animated GIFs (~40 MB across 12 files). Don't let

@@ -62,3 +62,23 @@ coupons:
     note: Codeable experts, first year free (SOW-119)
     maxRedemptions: null
     expiresAt: null
+  # sow-230: the LinkedIn intake. TIER IS `member`, NOT `creator`, and the difference is the whole reason
+  # this entry needs reading rather than copying. The owner asked for "the $50/yr membership", and
+  # membership/tiers.mjs:17 records member as $5 monthly / $50 annual against creator at $15 / $150. So the
+  # two live campaigns now confer DIFFERENT tiers from the same mechanism, and the landing page copy is where
+  # that goes wrong: the Codeable page calls its grant "the network's top tier", which is true of creator and
+  # false of member. Copying that page without moving its tier constants would advertise the wrong tier at
+  # the wrong price while granting the right one.
+  #
+  # UNCAPPED AND SHARED, by owner decision, the same posture as CODEABLEYEAR and consistent with their
+  # 2026-08-11 ruling that manual moderation beats an artificial cap. The gap named at the top of this file
+  # applies here with a LARGER blast radius: CODEABLEYEAR faces a bounded professional network, this faces
+  # LinkedIn. Same zero control, bigger and more public audience. Lower value per redemption ($50 rather than
+  # $150), plausibly much higher volume.
+  - code: LINKEDINCONNECT
+    freeDays: 365
+    active: true
+    tier: member
+    note: LinkedIn intake, first year free (sow-230)
+    maxRedemptions: null
+    expiresAt: null

@@ -1,0 +1,526 @@
+---
+// sow-230: the LinkedIn invite landing. A COPY of /codeable-invite/, which is a deliberate, recorded debt
+// rather than an accident: see the duplication note below. Same Claude Design handoff chrome ("GBTI
+// Invite.dc.html", imported 2026-07-18), standalone page chrome (its own sticky anchor nav + minimal footer,
+// BaseLayout `bare`), light + dark via html[data-theme]. Unlisted by design: noindex meta + excluded from
+// the sitemap (astro.config.mjs filter).
+//
+// THIS PAGE AND /codeable-invite/ ARE THE SAME PAGE WITH DIFFERENT COPY AND A DIFFERENT TIER. That is
+// KNOWN duplication, taken knowingly on 2026-08-15 because the owner needed a real link the same evening
+// and the alternative was restructuring a live page they had edited twice that day. The extraction is filed
+// as a DEBT with its own number, not as a someday. If you are here to change the coupon chip, the CTA, the
+// Turnstile flow, or the stylesheet, the change belongs in BOTH files until that lands, and noticing that is
+// annoying is the correct reaction: it is the debt asking to be paid.
+//
+// The SOW-119 mechanics under the skin, per the 2026-07-18 QA feedback: NO secret token links. A shared
+// link carries a plain visible ?coupon=LINKEDINCONNECT, which prefills the chip (still editable, applied
+// badge while it matches); with no param the chip is a hand-editable field (manual entry at signup).
+// The CTA is the same Turnstile-gated /signup/start flow as /membership/, plus the coupon parameter.
+// TITLE: pass the BARE title, with no brand suffix. BaseLayout builds `fullTitle` as `${title} | GBTI
+// Network` and uses it for BOTH <title> and og:title, so a title that carries the brand itself double-brands
+// the page. This one shipped as "Codeable experts: your first year on us · GBTI Network | GBTI Network" and
+// was caught in a Slack unfurl of a real invite (owner, 2026-08-13), which is the worst place to find it:
+// og:title is what every share preview shows.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { REF_COOKIE, REF_VIA_COOKIE } from '../../lib/referral';
+import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../../lib/touch.mjs';
+import {
+  BILLING_PERIOD,
+  FIRST_TOUCH_PCT,
+  LAST_TOUCH_PCT,
+  COLLAB_POOL_PCT,
+  PLATFORM_RETAINED_PCT,
+  INVITE_PCT,
+  TURNSTILE_SITE_KEY,
+  SIGNUP_BASE,
+} from '../../lib/membership';
+import { tierDisplay } from '../../lib/tiers';
+
+// sow-230: THIS INVITE CONFERS `member`, NOT `creator`, AND THAT IS THE WHOLE DIFFERENCE FROM THE PAGE THIS
+// WAS COPIED FROM. The owner asked for "the $50/yr membership"; membership/tiers.mjs:17 records member as
+// $5 monthly / $50 annual against creator at $15 / $150. `house/coupons.yml` names `tier: member` on
+// LINKEDINCONNECT, and since aa22db3 that tier is stamped into the redemption record and written into the
+// fold rather than re-derived, so the grant and this page agree only if BOTH say member.
+//
+// The failure mode this guards is a copy bug, not a config bug: the Codeable page calls its grant "the
+// network's top tier", which is TRUE of creator and FALSE of member. Copying that sentence onto a member
+// coupon advertises the wrong tier at the wrong price while granting the right one, which is worse than
+// either mistake alone because the config looks correct.
+//
+// The constants are RENAMED rather than left as `creator`. `const creator = tierDisplay('member')` would
+// work and would be a false name, which is the exact defect class this repo has been chasing all week.
+// Bound to the single source of truth (house/membership-tiers.yml via tierDisplay) so the label and the
+// "if you stay" price can never drift from it.
+const memberTier = tierDisplay('member');
+const TIER_LABEL = memberTier?.label ?? 'Network Member';
+const TIER_PRICE_LABEL = `$${memberTier?.priceAnnual ?? 50}`;
+
+const splits = [
+  { pct: FIRST_TOUCH_PCT, cls: 'green', name: 'First touch', body: 'Owner of the first eligible article, product, or prompt the member touched.' },
+  { pct: LAST_TOUCH_PCT, cls: 'green', name: 'Last touch', body: 'Owner of the final eligible item they touched before converting.' },
+  { pct: COLLAB_POOL_PCT, cls: 'amber', name: 'Collaboration pool', body: 'Split evenly among members who commented on or improved those items.' },
+  { pct: PLATFORM_RETAINED_PCT, cls: 'plain', name: 'Platform & community', body: 'Funds hosting, tooling, the weekly sessions, and running the network.' },
+];
+
+// Card imagery: Pexels photos (free license, no attribution required), committed as 800x480 (5:3) webp.
+const benefits = [
+  { name: 'Private member community', body: 'A private Discord where professionals share work in progress, ask questions, and build relationships away from public noise.' },
+  { name: 'Joint venture opportunities', body: 'Discover aligned projects and combine skills. One member brings the idea, another the technical depth, another the distribution.' },
+  { name: 'Gated member content', body: 'Create gated articles, products, prompts, and downloads that enrich the network and give new members a reason to join.' },
+  { name: 'Network syndication', body: 'The network distributes and promotes member work across social channels, so useful work travels further than it would alone.' },
+  { name: 'Specialized member tools', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
+  { name: 'Shared member upside', body: 'A portion of membership revenue is shared back with members whose published work and contributions help grow the network.' },
+];
+
+const faqs = [
+  ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, distribution support, and a revenue-sharing model for member-created value.'],
+  ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
+  ['What kind of content does the editorial team accept?', 'As a brand, GBTI can support a wide range of ideas and creative work. Our initial content will explore entertainment, education, technology, health, blockchain, developer relations, artificial intelligence, music, gaming, homesteading, and other subjects that interest our members. Members interested in publishing through GBTI can find our participation handbook inside the members area.'],
+  ['How is my content and data stored?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo, and members publish by opening a pull request, by hand or through their own AI agents. There is no traditional CMS and no separate content database. The static site is the published read-view, and each member's client is their authoring node. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
+  ['How does revenue sharing work?', `Every conversion is divided the same way: ${FIRST_TOUCH_PCT} to the first-touch content owner, ${LAST_TOUCH_PCT} to the last-touch owner, ${COLLAB_POOL_PCT} to a collaboration pool for those who commented or contributed, and the rest to the platform. Content owners do not decide what counts. If a contribution is accepted or a comment is published, the model pays it automatically.`],
+  ['Do members earn for inviting people?', `Yes. A personal invite link earns a flat ${INVITE_PCT} lifetime commission when someone joins through it, paid out of the platform share so content owners are never diluted. If you already earn a content share on the same conversion, you take the larger content share instead.`],
+  ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
+  ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
+  ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
+  // The founding story is REUSED verbatim in substance (owner, 2026-08-15: it is true for this audience
+  // too), because it is a fact about GBTI rather than a claim about the reader. The Codeable version's next
+  // sentence complimented the audience ("the expertise at Codeable is well known and respected"). There is
+  // no sourced equivalent for this one, so it is OMITTED and nothing is substituted for it. Inventing
+  // audience flattery is what put a fabricated origin story live and into syndication on 2026-07-30.
+  // "The network's top tier" is also GONE: true of creator, false of member. See the tier note above.
+  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. Your invite covers a full year at the ${TIER_LABEL} tier, with no card required, and nothing bills automatically. If you choose to stay, it is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD}.`],
+];
+
+const year = new Date().getFullYear();
+---
+
+<BaseLayout
+  title="Your first year on us"
+  description="A private invitation: a full year at the Network Member tier, first year free with your coupon."
+  noindex
+  bare
+>
+  <div class="ci">
+
+    <!-- ================= NAV ================= -->
+    <div class="ci-nav">
+      <div class="ci-nav-in">
+        <a class="ci-brand" href="/" aria-label="GBTI Network home">
+          <img src="/brand/logo/mark-green.png" alt="" width="30" height="30" class="mark-light" />
+          <img src="/brand/logo/mark-mint.png" alt="" width="30" height="30" class="mark-dark" />
+          <span>GBTI</span>
+        </a>
+        <nav class="ci-links" aria-label="Sections">
+          <a href="#network">The network</a>
+          <a href="#revenue">Revenue model</a>
+          <a href="#shoptalk">Shop talk</a>
+          <a href="#benefits">Membership</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <button type="button" class="ci-theme" data-ci-theme aria-label="Toggle dark mode">
+          <svg class="ico-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <svg class="ico-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= HERO ================= -->
+    <div class="ci-hero">
+      <div class="ci-hero-in">
+        <div>
+          <p class="eyebrow">Your invitation</p>
+          <h1>Welcome to GBTI Network</h1>
+          <p class="lead">GBTI is a professional publishing network for developers. Publish under your own
+            name, share in the revenue, and build with people who ship. Your invite covers a full
+            year at the Network Member tier: full network participation, no card required.</p>
+          <div class="ci-cta-row">
+            <a href="#claim" class="btn-primary">Claim your free year</a>
+            <a href="#network" class="btn-ghost">How the network works</a>
+          </div>
+          <div class="ci-ticks">
+            <span>&#10003; &nbsp;Publish under your own name</span>
+            <span>&#10003; &nbsp;Revenue share built in</span>
+            <span>&#10003; &nbsp;Weekly shop talk</span>
+          </div>
+        </div>
+        <div id="claim" class="ci-claim">
+          <p class="eyebrow tcenter" style="margin-bottom:0">{TIER_LABEL}</p>
+          <div class="ci-price">Year one free</div>
+          <div class="ci-sub">then {TIER_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
+          <div class="ci-rule"></div>
+          <div class="ci-coupon-label">Coupon</div>
+          <div class="ci-chip" data-coupon-chip>
+            <input id="ci-coupon" type="text" autocomplete="off" spellcheck="false" placeholder="Enter your coupon code" aria-label="Coupon code" />
+            <span class="applied" data-coupon-applied hidden>&#10003; applied</span>
+          </div>
+          <div class="signup-cta">
+            <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-callback="gbtiTurnstileOk" data-expired-callback="gbtiTurnstileReset" data-error-callback="gbtiTurnstileFail" data-theme="auto"></div>
+            <button id="signup-go" type="button" class="btn-primary btn-claim" disabled>Claim your free year</button>
+            <p class="ci-ts-note" data-ts-note hidden>The human verification did not load, so the button stays
+              disabled. If you use a content blocker, allow challenges.cloudflare.com and refresh this page.</p>
+          </div>
+          <p class="ci-fine">Sign in with GitHub. No card at any point during the free year, and nothing
+            bills automatically.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= WHY A NETWORK ================= -->
+    <section id="network" class="ci-sec">
+      <p class="eyebrow">Why a network</p>
+      <h2 style="max-width:20ch">A home for your work, with the earning path most collectives leave out</h2>
+      <p class="sec-lead">Most independent creators want to publish and be found, without standing up a CMS
+        or paying to host and maintain a site. The network handles that, surfaces work to AI assistants, and
+        adds the one thing most publishing collectives leave out.</p>
+      <div class="grid3">
+        <div class="card lift bcard">
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4z"/><path d="M4 9h16"/></svg></div>
+            <h3>No site to host or maintain</h3>
+            <p>Publish without a CMS, hosting bills, or upkeep. Your work lives on the network and renders on
+              your member profile.</p>
+          </div>
+        </div>
+        <div class="card lift bcard">
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div>
+            <h3>Built for AI recommendations</h3>
+            <p>Content is structured so AI assistants can read and recommend it, which lifts how often your
+              work gets surfaced.</p>
+          </div>
+        </div>
+        <div class="card lift bcard">
+          <div class="bod">
+            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+            <h3>Publishing with an earning path</h3>
+            <p>Most collectives stop at distribution. Here, the work that brings members in earns a share for
+              the people who made it.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= REVENUE MODEL ================= -->
+    <section id="revenue" class="ci-sec">
+      <p class="eyebrow">The revenue model</p>
+      <h2 style="max-width:22ch">Member work creates value at every touch, and each one can earn</h2>
+      <p class="sec-lead">A reader might discover the network through an article, come back through a
+        product, read the comments, and notice what members improved before they join. In this network,
+        those touches matter, and each one can earn. A portion of every membership is shared back with the
+        members whose work drove it.</p>
+      <div class="grid4">
+        {splits.map((s) => (
+          <div class="card bcard">
+            <div class="bod">
+              <div class={`pct ${s.cls}`}>{s.pct}</div>
+              <div class="pct-name">{s.name}</div>
+              <p class="pct-body">{s.body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div class="ci-invite-lane">
+        <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
+        <p>Members can also share a personal invite link that earns a flat
+          <strong>{INVITE_PCT} lifetime commission</strong> on anyone who joins through it. It is paid out
+          of the platform share, so first-touch and last-touch content owners are never diluted.</p>
+      </div>
+      <p class="ci-more"><a href="/revenue-model/">See the full split and worked examples &rarr;</a></p>
+    </section>
+
+    <!-- ================= SHOP TALK ================= -->
+    <div id="shoptalk" class="ci-band">
+      <div class="ci-band-in">
+        <div>
+          <p class="eyebrow">Weekly shop talk</p>
+          <h2 style="max-width:18ch">Where we meet, and hold ourselves accountable to progress</h2>
+          <p class="sec-lead" style="max-width:52ch">Members gather for a recurring two-hour session to talk
+            through product development, track progress, share knowledge, set goals, and keep each other
+            accountable. It is the rhythm that turns publishing into momentum.</p>
+          <div class="ci-pills">
+            <span>Product development</span><span>Track progress</span><span>Share knowledge</span><span>Set goals</span><span>Accountability</span>
+          </div>
+        </div>
+        <div class="card ci-session bcard">
+          <div class="bod">
+          <div class="ci-live"><span class="dot"></span><span class="lbl">The session</span></div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+            <div><b>Two hours, every week</b><span>A standing time members build their week around</span></div>
+          </div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></div>
+            <div><b>Live on Google Meet</b><span>Face to face with the people building it</span></div>
+          </div>
+          <div class="ci-srow">
+            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+            <div><b>Coordinated on Discord</b><span>Where the conversation continues between sessions</span></div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= BENEFITS ================= -->
+    <section id="benefits" class="ci-sec">
+      <p class="eyebrow">Why members join</p>
+      <h2 style="max-width:20ch">What membership gives you</h2>
+      <p class="sec-lead">Built for professionals who want a place to publish useful work, improve alongside
+        other members, and belong to a network that rewards contribution.</p>
+      <div class="grid3">
+        {benefits.map((b) => (
+          <div class="card lift bcard">
+            <div class="bod"><h3>{b.name}</h3><p>{b.body}</p></div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- ================= FAQ ================= -->
+    <section id="faq" class="ci-sec ci-faq">
+      <p class="eyebrow tcenter">Questions and answers</p>
+      <h2 class="tcenter">Network FAQ</h2>
+      <div class="ci-faq-list">
+        {faqs.map(([q, a]) => (
+          <div class="ci-q card">
+            <button type="button" data-faq aria-expanded="false">
+              <span>{q}</span><span class="sign" aria-hidden="true">+</span>
+            </button>
+            <div class="ci-a" hidden>{a}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- ================= FOOTER ================= -->
+    <div class="ci-foot">
+      <div class="ci-foot-in">
+        <span class="ci-brand"><img src="/brand/logo/mark-green.png" alt="" width="26" height="26" class="mark-light" /><img src="/brand/logo/mark-mint.png" alt="" width="26" height="26" class="mark-dark" /><span class="god">GOD BLESS THE INTERNET</span></span>
+        <span class="cr">&copy; {year} GBTI Network</span>
+      </div>
+    </div>
+
+  </div>
+</BaseLayout>
+
+<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script define:vars={{ signupBase: SIGNUP_BASE, refCookie: REF_COOKIE, viaCookie: REF_VIA_COOKIE, sidCookie: TOUCH_SID_COOKIE, touchEnabled: TOUCH_CAPTURE_ENABLED }}>
+  // The SOW-119 mechanics under the design skin: token -> locked "applied" chip; otherwise manual entry.
+  // The CTA is the same Turnstile-gated /signup/start navigation as /membership/, plus the coupon param.
+  (function () {
+    function cookie(name) {
+      var c = document.cookie.split('; ').find(function (x) { return x.indexOf(name + '=') === 0; });
+      return c ? decodeURIComponent(c.split('=').slice(1).join('=')) : '';
+    }
+    var input = document.getElementById('ci-coupon');
+    var chip = document.querySelector('[data-coupon-chip]');
+    var applied = document.querySelector('[data-coupon-applied]');
+    // A visible ?coupon=CODE prefills the chip (QA 2026-07-18: no secret token links). The field stays
+    // editable; the applied badge shows while the value matches the shared code.
+    var shared = (new URLSearchParams(location.search).get('coupon') || '').trim().toUpperCase();
+    function syncApplied() {
+      var match = shared && input && input.value.trim().toUpperCase() === shared;
+      chip.classList.toggle('locked', Boolean(match));
+      if (applied) applied.hidden = !match;
+    }
+    if (shared && /^[A-Z0-9]{3,32}$/.test(shared) && input) {
+      input.value = shared;
+      syncApplied();
+      input.addEventListener('input', syncApplied);
+    }
+
+    var btn = document.getElementById('signup-go');
+    var tsNote = document.querySelector('[data-ts-note]');
+    window.gbtiTurnstileOk = function (token) {
+      if (btn) { btn.disabled = false; btn.dataset.token = token; }
+      if (tsNote) tsNote.hidden = true;
+    };
+    window.gbtiTurnstileReset = function () { if (btn) { btn.disabled = true; delete btn.dataset.token; } };
+    // Widget error (network failure, blocked frame): reset the button and explain why it is disabled.
+    window.gbtiTurnstileFail = function () {
+      window.gbtiTurnstileReset();
+      if (tsNote) tsNote.hidden = false;
+      return true;
+    };
+    // Blocked script: api.js never arrives, no callback ever fires, the button would stay silently dead.
+    setTimeout(function () {
+      if (!window.turnstile && tsNote && btn && btn.disabled) tsNote.hidden = false;
+    }, 8000);
+    if (btn) btn.addEventListener('click', function () {
+      var token = btn.dataset.token;
+      if (!token) return;
+      var u = new URL(signupBase + '/signup/start');
+      u.searchParams.set('cf-turnstile-response', token);
+      var code = input && input.value ? input.value.trim() : '';
+      if (code) u.searchParams.set('coupon', code);
+      var ref = cookie(refCookie); if (ref) u.searchParams.set('ref', ref);
+      var via = cookie(viaCookie); if (via) u.searchParams.set('via', via);
+      if (touchEnabled) { var sid = cookie(sidCookie); if (sid) u.searchParams.set('sid', sid); }
+      window.location.href = u.toString();
+    });
+
+    // The design's theme toggle, wired to the site's html[data-theme] + the persisted gbti-theme key.
+    document.querySelector('[data-ci-theme]')?.addEventListener('click', function () {
+      var root = document.documentElement;
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('gbti-theme', next); } catch (e) { /* no storage */ }
+    });
+
+    // FAQ accordion: one open at a time, the +/- sign mirrors state.
+    var qs = Array.prototype.slice.call(document.querySelectorAll('[data-faq]'));
+    qs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = b.nextElementSibling;
+        var open = a && a.hidden === false;
+        qs.forEach(function (o) {
+          var oa = o.nextElementSibling;
+          if (oa) oa.hidden = true;
+          o.setAttribute('aria-expanded', 'false');
+          var s = o.querySelector('.sign'); if (s) s.textContent = '+';
+        });
+        if (!open && a) {
+          a.hidden = false;
+          b.setAttribute('aria-expanded', 'true');
+          var s2 = b.querySelector('.sign'); if (s2) s2.textContent = '−';
+        }
+      });
+    });
+  })();
+</script>
+
+<style>
+  /* The design's surface palette mapped onto the site's html[data-theme] switch. Light is the default. */
+  .ci {
+    --ci-surface: #ffffff; --ci-hero: #fbfbfa; --ci-panel: #f5f4f2; --ci-sunk: #f5f4f2; --ci-chip: #ffffff;
+    --ci-line: rgba(20,17,26,.10); --ci-line2: rgba(20,17,26,.2); --ci-navline: rgba(20,17,26,.08);
+    --ci-fg: #1a1720; --ci-soft: #55505c; --ci-mute: #847f8d; --ci-faint: #a7a2ad;
+    --ci-green: #178a50; --ci-green-ink: #1f9e5f; --ci-amber: #a9781c; --ci-pill: #ffffff; --ci-bg: #f2f0ee;
+    background: var(--ci-bg); color: var(--ci-fg); min-height: 100vh;
+  }
+  :global(html[data-theme="dark"]) .ci {
+    --ci-surface: #232029; --ci-hero: #232029; --ci-panel: #2a2731; --ci-sunk: #1d1a23; --ci-chip: #17151c;
+    --ci-line: rgba(255,255,255,.09); --ci-line2: rgba(255,255,255,.16); --ci-navline: rgba(255,255,255,.07);
+    --ci-fg: #f3f2f0; --ci-soft: #bdbac4; --ci-mute: #847f8d; --ci-faint: #5c5865;
+    --ci-green: #5fd49a; --ci-amber: #f0c883; --ci-pill: #2a2731; --ci-bg: #17151c;
+  }
+  .ci .mark-dark { display: none; }
+  :global(html[data-theme="dark"]) .ci .mark-light { display: none; }
+  :global(html[data-theme="dark"]) .ci .mark-dark { display: inline; }
+  .ci .ico-moon { display: none; }
+  :global(html[data-theme="dark"]) .ci .ico-sun { display: none; }
+  :global(html[data-theme="dark"]) .ci .ico-moon { display: inline; }
+
+  .ci a { color: var(--ci-green); text-decoration: none; }
+  .ci a:hover { color: var(--ci-green-ink); }
+  .ci .eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .16em; color: var(--ci-green); margin: 0 0 14px; }
+  .ci .tcenter { text-align: center; }
+  .ci h2 { font-family: var(--f-display); font-weight: 700; font-size: clamp(30px, 4.4vw, 40px); line-height: 1.08; letter-spacing: -0.015em; color: var(--ci-fg); margin: 0 0 16px; }
+  .ci .sec-lead { font-size: 17px; line-height: 1.6; color: var(--ci-soft); max-width: 66ch; margin: 0 0 44px; }
+
+  .btn-primary { background: #1f9e5f; color: #fff; font-weight: 700; border-radius: 7px; border: 0; cursor: pointer; display: inline-block; font-size: 15px; padding: 15px 26px; box-shadow: 0 6px 20px rgba(31,158,95,.35); transition: transform .12s, box-shadow .2s; }
+  .btn-primary:hover:not(:disabled) { color: #fff; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(31,158,95,.45); }
+  .btn-primary:disabled { opacity: .55; cursor: default; }
+  .btn-ghost { border: 1px solid var(--ci-line2); color: var(--ci-fg); font-weight: 600; border-radius: 7px; font-size: 15px; padding: 14px 24px; }
+  .btn-ghost:hover { color: var(--ci-fg); border-color: var(--ci-green); }
+  /* The hero CTAs are anchors, and `.ci a` outranks `.btn-*` on specificity, so re-assert the button ink. */
+  .ci a.btn-primary, .ci a.btn-primary:hover { color: #fff; }
+  .ci a.btn-ghost, .ci a.btn-ghost:hover { color: var(--ci-fg); }
+  .lift { transition: transform .15s, border-color .2s; }
+  .lift:hover { transform: translateY(-3px); border-color: rgba(31,158,95,.45); }
+  .card { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 7px; }
+
+  /* nav */
+  .ci-nav { position: sticky; top: 0; z-index: 20; background: var(--ci-surface); border-bottom: 1px solid var(--ci-navline); }
+  /* the sticky nav is ~63px tall; without this every anchor jump lands the section under the bar */
+  .ci-sec, .ci-band, .ci-claim { scroll-margin-top: 78px; }
+  .ci-nav-in { max-width: 1160px; margin: 0 auto; display: flex; align-items: center; gap: 28px; padding: 14px 40px; }
+  .ci-brand { display: flex; align-items: center; gap: 11px; font-family: var(--f-display); font-weight: 700; font-size: 19px; color: var(--ci-fg) !important; letter-spacing: -0.01em; }
+  .ci-links { display: flex; gap: 24px; font-size: 14px; margin-left: 8px; }
+  .ci-links a { color: var(--ci-soft); }
+  .ci-links a:hover { color: var(--ci-fg); }
+  .ci-theme { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ci-line); background: var(--ci-pill); color: var(--ci-soft); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  @media (max-width: 760px) { .ci-links { display: none; } }
+
+  /* hero + claim card */
+  .ci-hero { background: var(--ci-hero); border-bottom: 1px solid var(--ci-navline); }
+  .ci-hero-in { max-width: 1160px; margin: 0 auto; display: grid; grid-template-columns: 1fr 400px; gap: 56px; padding: 72px 40px 76px; }
+  @media (max-width: 960px) { .ci-hero-in { grid-template-columns: 1fr; padding: 48px 24px 56px; } }
+  .ci-hero h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(40px, 6vw, 64px); line-height: 1.02; letter-spacing: -0.02em; color: var(--ci-fg); margin: 0 0 24px; text-wrap: balance; }
+  .ci-hero .eyebrow { margin-bottom: 22px; }
+  .ci-hero .lead { font-size: 18px; line-height: 1.6; color: var(--ci-soft); max-width: 46ch; margin: 0 0 34px; }
+  .ci-cta-row { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; }
+  .ci-ticks { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 38px; font-size: 13.5px; color: var(--ci-mute); }
+
+  .ci-claim { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 7px; padding: 30px 28px; align-self: start; }
+  .ci-price { font-family: var(--f-display); font-weight: 700; font-size: 34px; color: var(--ci-fg); text-align: center; margin-top: 6px; }
+  .ci-sub { text-align: center; color: var(--ci-mute); font-size: 13.5px; margin-top: 4px; }
+  .ci-rule { height: 1px; background: var(--ci-line); margin: 24px 0; }
+  .ci-coupon-label { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ci-mute); margin-bottom: 9px; }
+  .ci-chip { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--ci-chip); border: 1.5px solid var(--ci-line2); border-radius: 7px; padding: 3px 15px 3px 3px; }
+  .ci-chip.locked { border-color: #1f9e5f; box-shadow: 0 0 0 3px rgba(31,158,95,.14); }
+  .ci-chip input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-family: var(--f-mono); font-size: 14px; color: var(--ci-fg); letter-spacing: .05em; text-transform: uppercase; padding: 10px 12px; }
+  .ci-chip input::placeholder { color: var(--ci-mute); text-transform: none; letter-spacing: 0; }
+  .ci-chip .applied { flex: none; color: var(--ci-green); font-size: 13px; font-weight: 600; }
+  .signup-cta .cf-turnstile { margin: 16px auto 0; min-height: 65px; }
+  .btn-claim { width: 100%; text-align: center; font-size: 15.5px; padding: 15px; margin-top: 12px; box-shadow: 0 6px 20px rgba(31,158,95,.3); }
+  .ci-fine { font-size: 11.5px; line-height: 1.5; color: var(--ci-mute); text-align: center; margin: 14px 0 0; }
+  .ci-ts-note { font-size: 12px; line-height: 1.5; color: var(--ci-amber); text-align: center; margin: 10px 0 0; }
+
+  /* sections */
+  .ci-sec { max-width: 1160px; margin: 0 auto; padding: 84px 40px 20px; }
+  @media (max-width: 760px) { .ci-sec { padding: 56px 24px 12px; } }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 960px) { .grid3 { grid-template-columns: 1fr; } .grid4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid4 { grid-template-columns: 1fr; } }
+  .card { padding: 26px 24px; }
+  .card h3 { font-family: var(--f-display); font-weight: 600; font-size: 19px; color: var(--ci-fg); margin: 0 0 8px; }
+  .card p { font-size: 14.5px; line-height: 1.55; color: var(--ci-soft); margin: 0; }
+  /* benefits cards carry a 5:3 photo above the copy */
+  .card.bcard { padding: 0; overflow: hidden; }
+  .bcard .bod { padding: 22px 24px 26px; }
+  .ic { width: 40px; height: 40px; border-radius: 7px; background: rgba(31,158,95,.14); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; flex: none; }
+
+  .pct { font-family: var(--f-display); font-weight: 700; font-size: 30px; }
+  .pct.green { color: var(--ci-green); } .pct.amber { color: var(--ci-amber); } .pct.plain { color: var(--ci-fg); }
+  .pct-name { font-weight: 600; font-size: 14.5px; color: var(--ci-fg); margin: 6px 0 5px; }
+  .pct-body { font-size: 13px; line-height: 1.5; color: var(--ci-soft); margin: 0; }
+  .ci-invite-lane { display: flex; gap: 14px; align-items: flex-start; background: var(--ci-sunk); border: 1px solid var(--ci-line); border-radius: 7px; padding: 20px 22px; margin-top: 18px; }
+  .ci-invite-lane .ic { width: 38px; height: 38px; margin: 0; }
+  .ci-invite-lane p { font-size: 14px; line-height: 1.6; color: var(--ci-soft); margin: 0; }
+  .ci-invite-lane strong { color: var(--ci-fg); }
+  .ci-more { margin-top: 22px; }
+  .ci-more a { font-weight: 600; font-size: 15px; }
+
+  /* shop talk band */
+  .ci-band { background: var(--ci-surface); border-top: 1px solid var(--ci-navline); border-bottom: 1px solid var(--ci-navline); margin-top: 84px; }
+  .ci-band-in { max-width: 1160px; margin: 0 auto; display: grid; grid-template-columns: 1fr 440px; gap: 56px; padding: 80px 40px; align-items: center; }
+  @media (max-width: 960px) { .ci-band-in { grid-template-columns: 1fr; padding: 56px 24px; } }
+  .ci-pills { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ci-pills span { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 999px; padding: 8px 15px; font-size: 13.5px; color: var(--ci-fg); }
+  .ci-session { padding: 28px; }
+  .ci-live { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; }
+  .ci-live .dot { width: 9px; height: 9px; border-radius: 50%; background: #1f9e5f; box-shadow: 0 0 0 4px rgba(31,158,95,.2); }
+  .ci-live .lbl { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ci-mute); }
+  .ci-srow { display: flex; gap: 13px; align-items: center; margin-top: 16px; }
+  .ci-srow:first-of-type { margin-top: 0; }
+  .ci-srow .ic { width: 36px; height: 36px; margin: 0; }
+  .ci-srow b { display: block; font-weight: 600; font-size: 15px; color: var(--ci-fg); }
+  .ci-srow span { display: block; font-size: 13px; color: var(--ci-mute); }
+
+  /* FAQ */
+  .ci-faq h2 { margin-bottom: 36px; }
+  .ci-faq-list { display: flex; flex-direction: column; gap: 12px; }
+  .ci-q { padding: 0; overflow: hidden; }
+  .ci-q button { width: 100%; text-align: left; background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 16px; padding: 19px 22px; color: var(--ci-fg); font-family: var(--f-sans); font-weight: 600; font-size: 16.5px; }
+  .ci-q button span:first-child { flex: 1; }
+  .ci-q .sign { flex: none; color: var(--ci-green); font-size: 22px; line-height: 1; }
+  .ci-a { padding: 0 22px 20px; font-size: 15px; line-height: 1.6; color: var(--ci-soft); }
+
+  /* footer */
+  .ci-foot { max-width: 1160px; margin: 0 auto; padding: 56px 40px 48px; }
+  .ci-foot-in { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; }
+  .ci-foot .god { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; color: var(--ci-mute); }
+  .ci-foot .cr { font-size: 13px; color: var(--ci-faint); }
+</style>
