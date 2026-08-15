@@ -21,6 +21,7 @@ import { sessionCookieHeader } from '../workers/signup/session.mjs';
 import { verifyTurnstile } from '../workers/signup/abuse.mjs';
 import { isDuplicateEvent, markEventSeen, handleStripeEvent } from '../workers/signup/webhook.mjs';
 import worker, { packState, unpackState, safeReturnTo } from '../workers/signup/index.mjs';
+import { wlog } from '../workers/signup/wlog.mjs'; // the guard tests read its ring rather than capturing console
 
 const SECRET = 'test-session-secret-0123456789';
 
@@ -1468,4 +1469,105 @@ test('sow-218: the Creator badge is INERT until the role id is provisioned', asy
   const touched = [...discord.calls.addRole, ...discord.calls.removeRole].map((c) => c.roleId);
   assert.ok(!touched.includes(undefined), 'never sends an undefined role id');
   assert.ok(!touched.includes('r-creator'));
+});
+
+// ---------------------------------------------------------------------------
+// The guild calls are guarded: a transient Discord error must not discard a completed signup
+//
+// The incident these encode: a live member's Discord link returned `internal_error`, and their unchanged
+// retry succeeded. Every durable write (Customer, discord_user_id, coupon redemption) had already landed;
+// only the guild call failed, and throwing there threw the whole thing away.
+// ---------------------------------------------------------------------------
+
+// A Discord double that fails whichever calls it is told to, the way the real client does (DiscordError
+// carries a numeric `.status`), so the guard is tested against the error SHAPE it will actually meet.
+function failingDiscord(failing = [], status = 500) {
+  const calls = { addGuildMember: [], addRole: [], removeRole: [] };
+  const maybeThrow = (name) => {
+    if (!failing.includes(name)) return;
+    const err = new Error(`discord error ${status}: upstream hiccup`);
+    err.status = status;
+    throw err;
+  };
+  return {
+    calls,
+    async addGuildMember(guildId, userId, opts) { calls.addGuildMember.push({ guildId, userId, opts }); maybeThrow('addGuildMember'); return null; },
+    async addRole(guildId, userId, roleId) { calls.addRole.push({ guildId, userId, roleId }); maybeThrow('addRole'); return null; },
+    async removeRole(guildId, userId, roleId) { calls.removeRole.push({ guildId, userId, roleId }); maybeThrow('removeRole'); return null; },
+  };
+}
+
+test('a failing guild JOIN no longer throws away a completed signup', async () => {
+  const discord = failingDiscord(['addGuildMember']);
+  const result = await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  // The whole point: the call still returns, and it returns the REAL customer, because that half succeeded.
+  assert.equal(result.customerId, 'cus_1');
+  assert.equal(result.discordOutcome.joined, false, 'and it says plainly that the join did not happen');
+});
+
+test('a failing guild join does not stop the role assignment or the stale-role strip', async () => {
+  // The failure mode a bare try/catch around the whole block would have introduced. addGuildMember is only
+  // needed for a member who is not in the guild YET; for one already there it 204s. So a join error must not
+  // skip the role work, or a returning member whose join errors silently keeps whatever role they had.
+  const discord = failingDiscord(['addGuildMember']);
+  const result = await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  assert.deepEqual(discord.calls.addRole.map((c) => c.roleId), ['role-member'], 'the role is still assigned');
+  assert.deepEqual(discord.calls.removeRole.map((c) => c.roleId).sort(), ['role-locked', 'role-trial'], 'and the stale roles are still stripped');
+  assert.equal(result.discordOutcome.roleAssigned, true);
+});
+
+test('a failing role assignment is reported separately from the join', async () => {
+  const discord = failingDiscord(['addRole']);
+  const result = await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord,
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  assert.deepEqual(result.discordOutcome, { joined: true, roleAssigned: false, role: 'member' });
+});
+
+test('each guild failure logs WHICH call failed, with its status', async () => {
+  // The hour the incident cost was spent not knowing which of the two calls produced the 500, because this
+  // file logged nothing at all. A guard that only swallows would have made that permanent.
+  wlog.clear();
+  await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord: failingDiscord(['addGuildMember'], 502),
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  const [entry] = wlog.recent().filter((e) => e.area === 'signup');
+  assert.equal(entry.msg, 'discord addGuildMember failed', 'the message names the call');
+  assert.equal(entry.data.status, 502, 'and carries the upstream status');
+  assert.equal(entry.data.githubId, '12345', 'and says who it happened to');
+
+  wlog.clear();
+  await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord: failingDiscord(['addRole'], 403),
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  const [roleEntry] = wlog.recent().filter((e) => e.area === 'signup');
+  assert.equal(roleEntry.msg, 'discord addRole failed');
+  assert.equal(roleEntry.data.access, 'member', 'and which role it was trying to grant');
+});
+
+test('a clean link reports both halves done, and a GitHub-only signup reports nothing attempted', async () => {
+  // `discordOutcome` is null rather than false for the GitHub-only path on purpose: "never attempted" and
+  // "attempted and failed" are different facts, and reading both as falsy is how the first one hides.
+  const ok = await runSignup({
+    identity: IDENTITY, stripe: fakeStripe({ searchHit: paidCustomer }), discord: fakeDiscord(),
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  assert.deepEqual(ok.discordOutcome, { joined: true, roleAssigned: true, role: 'member' });
+
+  const githubOnly = await runSignup({
+    identity: { ...IDENTITY, discordUserId: null, discordAccessToken: null },
+    stripe: fakeStripe({ searchHit: paidCustomer }), discord: fakeDiscord(),
+    kv: mirrorKv(freshMirror()), config: CONFIG, now: NOW,
+  });
+  assert.equal(githubOnly.discordLinked, false);
+  assert.equal(githubOnly.discordOutcome, null);
 });

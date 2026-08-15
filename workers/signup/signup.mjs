@@ -8,8 +8,13 @@
 //   5. returns the customer id + a flag for the caller to mint a signed session cookie.
 //
 // Pure-ish: all side-effecting collaborators (stripe, discord, kv) are injected, so the whole chain
-// is fixture-testable with no network. Fail closed only applies to membership STATUS decisions; here
-// we surface errors to the caller so a failed signup is retried (the customer step is idempotent).
+// is fixture-testable with no network. Fail closed only applies to membership STATUS decisions.
+//
+// WHICH ERRORS ESCAPE, because the two halves of this function differ and used not to. The Stripe and KV
+// steps still throw to the caller: they are the durable record, they are idempotent, and a retry is the
+// right answer. The Discord guild calls at the end do NOT, because by the time they run the durable work is
+// already committed, so throwing discarded a finished signup to report its least important step. They record
+// their outcome in `discordOutcome` and log which call failed instead.
 //
 // This module imports the frozen Stripe + Discord client contracts via the orchestrator's injected
 // instances; it does not construct them itself (the Worker entrypoint wires them with real secrets).
@@ -23,6 +28,7 @@ import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs
 import { effectiveStatus } from '../../membership/overrides-core.mjs';
 import { overridesFromMirror } from '../../membership/usage-bucket.mjs';
 import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs';
+import { wlog } from './wlog.mjs'; // SOW-124: Worker diagnostic logger (redacted, retained via [observability])
 
 /**
  * sow-218: WHICH managed Discord role this member should hold, resolved from what they actually are.
@@ -264,6 +270,10 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
   // nowhere and the member role allows it on 12, so access comes from HOLDING the member role rather than from
   // any deny. That is why resolving this correctly matters, and why every failure path returns `locked`:
   // withholding the grant is the safe direction and needs no channel overwrite to exist.
+
+  // null when this signup had no Discord identity at all (the GitHub-only path), so a caller can tell
+  // "never attempted" apart from "attempted and failed" instead of reading both as falsy.
+  let discordOutcome = null;
   if (hasDiscord) {
     const { access, creator } = await resolveSignupRole({
       kv, githubId, customer: existing, couponGrant, priceTierMap: config.priceTierMap ?? null, now,
@@ -273,11 +283,43 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
     // malformed one. Sending [undefined] is the shape that turns a missing config value into an API error
     // (or worse, a silent partial success) instead of a visible no-op.
     const signupRoleId = roleIdFor[access] || null;
-    await discord.addGuildMember(config.guildId, discordUserId, {
-      accessToken: discordAccessToken,
-      ...(signupRoleId ? { roles: [signupRoleId] } : {}),
-    });
-    if (signupRoleId) await discord.addRole(config.guildId, discordUserId, signupRoleId);
+
+    // GUARDED (2026-08-13 incident). Both of these were BARE awaits, so any Discord hiccup threw straight out of
+    // runSignup and 500ed the member's entire Discord link, even though every DURABLE write above it had already
+    // succeeded: the Customer exists, discord_user_id is attached, the coupon is redeemed. A live member hit exactly
+    // that as `internal_error`, and their unchanged retry then succeeded, which is what proves it was transient.
+    // Throwing here therefore threw away a completed signup to report a failure in its last, least durable step.
+    //
+    // THE TWO CALLS ARE NOT EQUALLY RECOVERABLE, so they do not get the same one-word excuse:
+    //   addGuildMember needs the MEMBER'S OAuth access token (guilds.join), which exists only inside this request.
+    //     Reconcile holds the bot token alone and can NEVER retry it. Recovery is the member: this callback
+    //     redirects to DISCORD_INVITE_URL, so a failed programmatic join lands them on a real invite they can
+    //     accept by hand, and reconcile grants the role once they are in the guild.
+    //   addRole IS reconcile-recoverable, the same as the stale-role strip and the creator badge below.
+    //
+    // Both log the CALL NAME. The cost of the incident was never the error itself, it was the hour spent not
+    // knowing which of these two produced it, because this whole file logs nothing.
+    let discordJoined = true;
+    try {
+      await discord.addGuildMember(config.guildId, discordUserId, {
+        accessToken: discordAccessToken,
+        ...(signupRoleId ? { roles: [signupRoleId] } : {}),
+      });
+    } catch (err) {
+      discordJoined = false;
+      wlog('signup', 'discord addGuildMember failed', { githubId, status: err?.status ?? null, message: err?.message ?? null });
+    }
+
+    let discordRoleAssigned = Boolean(signupRoleId);
+    if (signupRoleId) {
+      try {
+        await discord.addRole(config.guildId, discordUserId, signupRoleId);
+      } catch (err) {
+        discordRoleAssigned = false;
+        wlog('signup', 'discord addRole failed', { githubId, access, status: err?.status ?? null, message: err?.message ?? null });
+      }
+    }
+    discordOutcome = { joined: discordJoined, roleAssigned: discordRoleAssigned, role: access };
 
     // SWAP, do not merely add. Signup used to only ever add, so the roles ACCUMULATED: the test account ended
     // up holding Applicant (from its first signup) AND Locked (from a later Discord link), because nothing
@@ -308,6 +350,9 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
     created,
     referredBy: created ? (referredBy ?? null) : null,
     discordLinked: hasDiscord,
+    // What the guild side ACTUALLY did, rather than what it was asked to do. `discordLinked` only ever meant
+    // "a Discord identity was present", and it stays that way; this is the outcome of acting on it.
+    discordOutcome,
     couponApplied: Boolean(couponGrant), // SOW-119
     couponUntil: couponGrant?.until ?? null,
   };
