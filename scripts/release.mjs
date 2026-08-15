@@ -110,7 +110,12 @@ export async function main({ argv = process.argv.slice(2) } = {}) {
 
   stdout.write(`\nRelease ${next} staged.`);
   stdout.write('\n\nRemaining steps (each is an outward action, so left for you to run):\n');
-  stdout.write(`  1. Review the diff, then commit:  git add -A && git commit -m "Release extension v${next}"\n`);
+  // sow-239: do NOT print `git add -A`. Several agent sessions share this clone and one index, so a broad
+  // stage sweeps whatever anyone else has in flight; two published articles were once found staged as
+  // drafts that way. Print the explicit paths a release actually touches.
+  stdout.write('  1. Review the diff, then stage EXPLICIT paths (never `git add -A` in this shared clone):\n');
+  stdout.write('       git add extension/manifest.json src/lib/extension.ts public/extension\n');
+  stdout.write(`       git commit -m "Release extension v${next}"\n`);
   stdout.write('  2. Push (instantly ships the site + the direct-zip channel):  git push\n');
   if (!flags.has('--publish')) {
     stdout.write('  3. Publish to the Chrome Web Store (the step that reaches installed owners):\n');

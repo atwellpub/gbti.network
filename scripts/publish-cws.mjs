@@ -41,6 +41,36 @@ async function accessTokenFrom({ clientId, clientSecret, refreshToken, fetchImpl
   return body.access_token;
 }
 
+
+/** Semver compare for X.Y.Z: 1 when a > b, -1 when a < b, 0 when equal. Non-numeric segments sort as 0. */
+export function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/** The version currently sitting on the store item (the DRAFT projection, so it reflects an upload that has
+ *  not cleared review yet). Returns null when the API does not report one; a missing value must NOT block. */
+async function itemVersion({ appId, token, fetchImpl }) {
+  const res = await fetchImpl(`https://www.googleapis.com/chromewebstore/v1.1/items/${appId}?projection=DRAFT`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}`, 'x-goog-api-version': '2' },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return null; // read failure is not a publish failure: fall through and let the upload answer
+  return typeof body.crxVersion === 'string' && body.crxVersion ? body.crxVersion : null;
+}
+
+/** The version we are about to ship, read from the manifest that was packaged. */
+function localVersion() {
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'extension/manifest.json'), 'utf8')).version || null; }
+  catch { return null; }
+}
+
 async function uploadPackage({ appId, token, zipBuf, fetchImpl }) {
   const res = await fetchImpl(`https://www.googleapis.com/upload/chromewebstore/v1.1/items/${appId}?uploadType=media`, {
     method: 'PUT',
@@ -84,6 +114,29 @@ export async function main({ env: e = process.env, fetchImpl = globalThis.fetch,
 
   const token = await accessTokenFrom({ clientId, clientSecret, refreshToken, fetchImpl });
   if (checkOnly) { console.log('publish-cws: credentials valid and package present. No upload/publish performed (--check).'); return { ok: true, checked: true }; }
+
+  // sow-239: REFUSE a version the item already holds, before spending an upload on a Google-side rejection.
+  // The store requires each upload to carry a STRICTLY GREATER version. We learned this the expensive way:
+  // v0.2.0 sat on the item while 83 commits landed under that unchanged number, so the next publish would
+  // have been rejected with a message about versions rather than about the real problem, which is that a
+  // release stopped re-asserting its label. This check is deliberately HERE and not in CI: "source changed
+  // without a version bump" is the NORMAL state during development, so a CI guard would either red main
+  // constantly or need an arbitrary threshold. The publish call is the one moment the version is genuinely
+  // required to be correct. Fails OPEN on an unreadable item version: a read failure must not block a release.
+  const local = localVersion();
+  const onItem = await itemVersion({ appId, token, fetchImpl });
+  if (local && onItem) {
+    if (compareVersions(local, onItem) <= 0) {
+      throw new Error(
+        `refusing to upload: the store item already holds ${onItem} and this package is ${local}. ` +
+        'The store requires a strictly greater version per upload. Run `npm run release -- minor` ' +
+        '(from a worktree at origin), commit, then dispatch again.',
+      );
+    }
+    console.log(`publish-cws: item holds ${onItem}, shipping ${local}.`);
+  } else if (!onItem) {
+    console.log('publish-cws: could not read the version on the item; proceeding and letting the upload decide.');
+  }
 
   const up = await uploadPackage({ appId, token, zipBuf, fetchImpl });
   console.log(`publish-cws: uploaded (uploadState=${up.uploadState || 'unknown'}).`);
