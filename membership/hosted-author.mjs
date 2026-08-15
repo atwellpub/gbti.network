@@ -155,7 +155,7 @@ const ANY_MEMBER_FOLDER_RE = /^members\/[a-z0-9][a-z0-9-]{0,63}\//;
 export function validateHostedRequest({ files, itemId, folder, allowAnyFolder = false } = {}) {
   const bad = (error, status = 400) => ({ ok: false, error, status });
   if (!FOLDER_RE.test(String(folder ?? ''))) return bad('no member folder resolved for this account', 409);
-  if (!ITEM_ID_RE.test(String(itemId ?? ''))) return bad('itemId must be lowercase letters, digits, and hyphens (max 64)');
+  if (!ITEM_ID_RE.test(String(itemId ?? ''))) return bad('itemId must be lowercase letters, digits, and hyphens (max 80)');
   if (!Array.isArray(files) || files.length === 0) return bad('files must be a non-empty array');
   if (files.length > HOSTED_MAX_FILES) return bad(`too many files (max ${HOSTED_MAX_FILES})`);
   const ownPrefix = `members/${folder}/`;
