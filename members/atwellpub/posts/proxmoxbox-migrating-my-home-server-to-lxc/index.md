@@ -67,6 +67,14 @@ under a second. A VM takes 15 to 30 seconds to boot.
 **Unprivileged** matters too. An unprivileged container maps its root user to an unprivileged user on the
 host, so root inside the container is nobody in particular outside it. Both of mine are unprivileged.
 
+Separating the two applications was worth as much to me as the efficiency was. Under the old setup they
+shared one Linux environment, which meant they shared their dependencies, their failure modes and their
+fate: whatever took one down was liable to take the other with it. Now each application is its own
+container, with its own packages, its own resource ceiling and its own restart. The radio can crash
+without the cameras noticing. Proxmox also snapshots and backs up each container independently, on a
+schedule, which replaces the previous arrangement of remembering to export the whole thing by hand and
+usually not doing it.
+
 Here is the part I originally described, incorrectly, as load balancing. Proxmox does not balance load
 between containers. What actually happens is subtler and more useful: **the `cores` setting is a ceiling,
 not a reservation.** I have allocated 10 cores across 8 threads, deliberately overlapping, because each
