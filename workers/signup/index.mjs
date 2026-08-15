@@ -165,6 +165,26 @@ function discordConfig(env) {
 // github_login slot. A short 600-second TTL bounds replay of an issued state token.
 const STATE_SUBJECT = 'state';
 
+// THE SIGNUP FUNNEL IS INSTRUMENTED (2026-08-13 incident). A real prospect could not complete signup, the owner
+// asked "is this happening to other people?", and the honest answer was that we could not know: handleStart and
+// handleGithubCallback made zero log calls between them, so the only record of a failed signup was the member
+// saying so. A funnel with no denominator cannot answer a rate question, and that is the question that gets asked.
+//
+// WHY THIS IS WORTH THE RETENTION, given wlog.mjs says to log at genuine diagnostic points and NOT per request:
+// these two endpoints are reached once per signup attempt, not once per page view, so the whole funnel costs a
+// handful of lines a day. The denominator IS the point; sampling it would defeat the purpose.
+//
+// EVERY REJECTION REASON IS DISTINCT HERE, and that is the real content of this change. The callback answers a
+// single opaque `bad_oauth_state` to SEVEN different causes, and sow-236 added to that pile rather than
+// subtracting from it. The client response stays byte-identical (a caller must not learn which check it tripped);
+// the log is where they separate. Without that, "the invite is broken" and "someone is replaying states" and "a
+// browser dropped our cookie" are the same line.
+//
+// NOTHING IDENTIFYING GOES IN. No jti (it is a bearer value), no coupon CODE (per-invite codes are bearer
+// secrets since sow-231, and the owner reversed their own ruling to allow those), no token, no email. Presence
+// booleans and a github_id after it is established, which is the same key the rest of the system logs.
+const funnel = (event, data) => wlog('signup-funnel', event, data);
+
 export async function packState(payload, env, ttlSeconds = 600) {
   return signSession({ githubId: STATE_SUBJECT, githubLogin: JSON.stringify(payload) }, env.SESSION_SECRET, {
     ttlSeconds,
@@ -194,15 +214,26 @@ export async function unpackState(token, env) {
 // down to "bounded by the cross-colo consistency window", which is a large reduction and not a closed door. The
 // callback rate limit added alongside is what bounds that remainder. A strictly serialized consume needs a Durable
 // Object; that is the escalation path if the residual ever justifies the infrastructure.
+// It LOGS WHICH of its four denials fired, because this function is the only place that can tell them apart: the
+// caller sees one `false` for a misconfigured binding, a pre-deploy state, a genuine replay and a KV outage, and
+// those are four different operational facts with four different responses. The boolean contract is unchanged, so
+// the security property and its tests are untouched; only the record improves. Note that "already redeemed" is
+// NOT necessarily an attack: a back button, a refresh or a bfcache restore of the callback URL reaches here too,
+// and looks identical to the member. If that turns out to be common, the fix is a friendlier page, not a weaker
+// consume, and this log is how we would find out.
 export async function consumeStateJti(kv, jti) {
-  if (!kv || typeof jti !== 'string' || !jti) return false; // no store or no jti -> cannot prove single use -> deny
+  if (!kv) { funnel('state consume denied', { reason: 'no_kv_binding' }); return false; }
+  if (typeof jti !== 'string' || !jti) { funnel('state consume denied', { reason: 'no_jti' }); return false; } // pre-sow-236 state, or shape drift
   const key = `statejti:${jti}`;
   try {
-    if (await kv.get(key)) return false; // already redeemed
+    if (await kv.get(key)) { funnel('state consume denied', { reason: 'already_redeemed' }); return false; } // replay, OR a back/refresh
     await kv.put(key, '1', { expirationTtl: 900 }); // > the 600s state TTL
     return true;
-  } catch {
-    return false; // KV unreachable -> deny rather than fall through to "not used, therefore allowed"
+  } catch (err) {
+    // KV unreachable -> deny rather than fall through to "not used, therefore allowed". This one is an INCIDENT,
+    // not a user error: it fails every signup in flight, and it used to be indistinguishable from a replay.
+    funnel('state consume denied', { reason: 'kv_error', message: err?.message ?? null });
+    return false;
   }
 }
 
@@ -240,10 +271,15 @@ async function handleStart(request, env) {
   // Abuse checks FIRST, before any OAuth or registry work.
   const turnstileToken = url.searchParams.get('cf-turnstile-response') || '';
   const ok = await verifyTurnstile({ token: turnstileToken, secret: env.TURNSTILE_SECRET_KEY, remoteIp: ip });
-  if (!ok) return json({ error: 'turnstile_failed' }, 403);
+  // `hadResponse` separates a bot or an expired widget (a solution was sent, it did not verify) from a client that
+  // never solved at all, which is what a broken or blocked Turnstile widget on our OWN page looks like. The second
+  // is our fault and the first is not, and they are the same 403 to the caller.
+  // NOT named hadToken: devlog-core redacts any key matching /token|secret|.../i, so that name would have logged
+  // "<redacted>" forever and the distinction this line exists to draw would never have appeared.
+  if (!ok) { funnel('start rejected', { reason: 'turnstile', hadResponse: Boolean(turnstileToken) }); return json({ error: 'turnstile_failed' }, 403); }
 
   const rl = await rateLimit({ kv: env.SIGNUP_KV, ip });
-  if (!rl.allowed) return json({ error: 'rate_limited' }, 429);
+  if (!rl.allowed) { funnel('start rejected', { reason: 'rate_limited' }); return json({ error: 'rate_limited' }, 429); }
 
   const ref = url.searchParams.get('ref') || '';
   // The content the reader first landed on (SOW-007/008). Carried alongside ?ref so the payout job can
@@ -275,6 +311,10 @@ async function handleStart(request, env) {
     redirectUri: `${env.PUBLIC_BASE_URL}/signup/github/callback`,
     state,
   });
+  // THE DENOMINATOR. Every completed signup is preceded by exactly one of these, so starts minus completes is the
+  // drop-off, and `coupon` splits the invite funnel from the walk-up one, which is the split the owner actually
+  // asks about. Booleans only: the coupon CODE is a bearer secret since sow-231.
+  funnel('start', { coupon: Boolean(coupon), ref: Boolean(ref), returnTo: Boolean(returnTo) });
   return redirect(location, { 'Set-Cookie': `${OAUTH_NONCE_COOKIE}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`, 'Referrer-Policy': 'no-referrer' });
 }
 
@@ -282,13 +322,28 @@ async function handleGithubCallback(request, env) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = await unpackState(url.searchParams.get('state'), env);
-  if (!code || !state) return json({ error: 'bad_oauth_state' }, 400);
+  // Split, because these mean opposite things. No `code` is usually the MEMBER declining GitHub's consent screen,
+  // which is not an error at all; an unusable `state` is expired (past the 600s TTL), tampered with, or truncated
+  // by something in the middle. One is a person changing their mind, the other is a bug or an attack.
+  if (!code || !state) {
+    funnel('callback rejected', { reason: !code ? 'no_code' : 'bad_state', hasState: Boolean(url.searchParams.get('state')) });
+    return json({ error: 'bad_oauth_state' }, 400);
+  }
   // SOW security fix: require the per-browser nonce (the cookie set at /signup/start) to match the state's nonce. A
   // state transplanted into a DIFFERENT browser lacks the matching cookie, so it is rejected (login-CSRF /
   // session-fixation). NOTE: the nonce is CLIENT-HELD state, so it can never defend against the client replaying its
   // own state. That is the jti's job, below. Having this check is what made the missing consume easy to overlook.
   const cookieNonce = readOauthNonce(request.headers.get('Cookie'));
-  if (!state.nonce || !cookieNonce || state.nonce !== cookieNonce) return json({ error: 'bad_oauth_state' }, 400);
+  if (!state.nonce || !cookieNonce || state.nonce !== cookieNonce) {
+    // Three causes, and only one of them is the attack this check exists for. `no_cookie_nonce` is the one to
+    // WATCH: the state is ours and intact but the browser sent no nonce cookie back, which is what a blocked
+    // cookie, an ITP-style purge, or a trip through the consent screen longer than the cookie's 600s Max-Age
+    // looks like. That is a legitimate member being turned away, and without this line it is indistinguishable
+    // from an attack.
+    const reason = !state.nonce ? 'no_state_nonce' : (!cookieNonce ? 'no_cookie_nonce' : 'nonce_mismatch');
+    funnel('callback rejected', { reason });
+    return json({ error: 'bad_oauth_state' }, 400);
+  }
 
   // sow-236: rate-limit the CALLBACK by IP, not just /signup/start. This bounds the residual the KV consume below
   // cannot close on its own (see consumeStateJti), and it is independent of KV read consistency. The limit is
@@ -296,14 +351,28 @@ async function handleGithubCallback(request, env) {
   // primary control. A blocked caller retries; nothing is consumed before this point.
   const ip = request.headers.get('CF-Connecting-IP') || '';
   const rl = await rateLimit({ kv: env.SIGNUP_KV, ip, limit: 20, windowSeconds: 600, prefix: 'rl:oauth-callback:' });
-  if (!rl.allowed) return json({ error: 'rate_limited' }, 429);
+  // Worth watching rather than assuming: the limit is deliberately loose, but carrier and office NAT put many
+  // legitimate members behind one IP, so a cluster of these is as likely to be a shared egress as an attacker.
+  if (!rl.allowed) { funnel('callback rejected', { reason: 'rate_limited' }); return json({ error: 'rate_limited' }, 429); }
 
   // sow-236: CONSUME THE ONE-TIME STATE. Before the code exchange, so a replay costs no GitHub or Stripe work.
   // Fails closed: an absent jti (including a state minted by the previous deploy, within its 600s TTL), an
   // unreachable KV, or an already-consumed jti all reject. A member caught by the deploy rollover restarts signup.
-  if (!(await consumeStateJti(env.SIGNUP_KV, state.jti))) return json({ error: 'bad_oauth_state' }, 400);
+  // consumeStateJti logs WHICH of its four denials fired; this line only records that the gate closed.
+  if (!(await consumeStateJti(env.SIGNUP_KV, state.jti))) { funnel('callback rejected', { reason: 'state_not_consumed' }); return json({ error: 'bad_oauth_state' }, 400); }
 
-  const accessToken = await githubExchangeCode(
+  // NAME THE STEP THAT THREW. Everything below talks to GitHub or Stripe, and a throw from any of it lands in the
+  // router's single top-level catch, which reports the method, the path and a message. That is enough to know a
+  // signup 500ed and nothing about where, so a Stripe outage and a GitHub outage read identically. `step` logs the
+  // step name and RETHROWS, so the 500 and its response are unchanged: this adds a record, not a behaviour.
+  const step = async (name, fn) => {
+    try { return await fn(); } catch (err) {
+      funnel('callback failed', { step: name, status: err?.status ?? null, message: err?.message ?? null });
+      throw err;
+    }
+  };
+
+  const accessToken = await step('github_exchange_code', () => githubExchangeCode(
     {
       clientId: env.GITHUB_OAUTH_CLIENT_ID,
       clientSecret: env.GITHUB_OAUTH_CLIENT_SECRET,
@@ -311,15 +380,15 @@ async function handleGithubCallback(request, env) {
       redirectUri: `${env.PUBLIC_BASE_URL}/signup/github/callback`,
     },
     globalThis.fetch,
-  );
-  const { githubId, githubLogin } = await githubFetchUser(accessToken, globalThis.fetch);
-  const email = await githubFetchPrimaryEmail(accessToken, globalThis.fetch); // best-effort; Discord is deferred
+  ));
+  const { githubId, githubLogin } = await step('github_fetch_user', () => githubFetchUser(accessToken, globalThis.fetch));
+  const email = await githubFetchPrimaryEmail(accessToken, globalThis.fetch); // genuinely best-effort: it swallows and returns '' itself
 
   // SOW: Discord is DEFERRED. Complete the signup on GitHub ALONE -- create the trial Customer (no discord_user_id,
   // no guild join) and sign the session. The member links Discord later from the extension welcome (which re-runs
   // the same Discord OAuth + idempotently attaches discord_user_id + the role to this Customer).
   const { stripe, discord } = clientsFromEnv(env);
-  const signup = await runSignup({
+  const signup = await step('run_signup', () => runSignup({
     identity: { githubId, githubLogin, discordUserId: null, email, discordAccessToken: null },
     stripe,
     discord,
@@ -330,7 +399,12 @@ async function handleGithubCallback(request, env) {
     via: state.via,
     touchSession: state.sid, // SOW-059: bind the touch session to this new Customer (new-customer-only)
     coupon: state.coupon, // SOW-119: a pre-validated code from the signed state (absent for a plain signup)
-  });
+  }));
+
+  // THE NUMERATOR, and the first line in this flow that can name a person. `created` distinguishes a genuinely new
+  // member from a returning one re-running signup, and `couponApplied` says whether the invite actually converted,
+  // which until now could only be answered by reading KV after the fact and asking the member.
+  funnel('complete', { githubId, created: signup.created, couponApplied: signup.couponApplied });
 
   const session = await signSession({ githubId, githubLogin }, env.SESSION_SECRET);
   // sow-207: a fresh signup (a trial OR a SOW-119 coupon invitee) lands on the WEBSITE welcome flow (/welcome/).
