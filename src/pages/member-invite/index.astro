@@ -1,16 +1,18 @@
 ---
-// sow-230: the LinkedIn invite landing. A COPY of /codeable-invite/, which is a deliberate, recorded debt
-// rather than an accident: see the duplication note below. Same Claude Design handoff chrome ("GBTI
-// Invite.dc.html", imported 2026-07-18), standalone page chrome (its own sticky anchor nav + minimal footer,
-// BaseLayout `bare`), light + dark via html[data-theme]. Unlisted by design: noindex meta + excluded from
-// the sitemap (astro.config.mjs filter).
+// sow-230: THE MEMBER-TIER INVITE LANDING. Audience-neutral on purpose: any campaign points at this one URL
+// with its own ?coupon=, so a new invite audience needs a coupon and a link rather than a new page. That is
+// why this replaced /linkedin-invite/ rather than sitting beside it.
 //
-// THIS PAGE AND /codeable-invite/ ARE THE SAME PAGE WITH DIFFERENT COPY AND A DIFFERENT TIER. That is
-// KNOWN duplication, taken knowingly on 2026-08-15 because the owner needed a real link the same evening
-// and the alternative was restructuring a live page they had edited twice that day. The extraction is filed
-// as sow-243, a DEBT with its own number rather than a someday. If you are here to change the coupon chip, the CTA, the
-// Turnstile flow, or the stylesheet, the change belongs in BOTH files until that lands, and noticing that is
-// annoying is the correct reaction: it is the debt asking to be paid.
+// IT EXISTS BECAUSE THE PAGE BEFORE IT ADVERTISED CREATOR BENEFITS WHILE GRANTING THE MEMBER TIER. The tier
+// label and price were correct (both come from tierDisplay), but the benefit PROSE was inherited from the
+// Creator page it was copied from, so a $50 member invite promised publishing, syndication, a creator
+// profile, weekly shop talk and the first-touch revenue program. The owner caught it. See the note above
+// memberBenefits for why the fix is structural rather than editorial.
+//
+// SECTIONS DELETED RATHER THAN REWRITTEN: "why a network" (sells publishing), the four-way revenue splits
+// (the Creator program; a Member earns through invites only), and the shop-talk band (a Creator benefit).
+// Rewriting them means hand-writing benefit claims again, which is exactly what failed. A short honest page
+// beats a long one with landmines.
 //
 // The SOW-119 mechanics under the skin, per the 2026-07-18 QA feedback: NO secret token links. A shared
 // link carries a plain visible ?coupon=LINKEDINCONNECT, which prefills the chip (still editable, applied
@@ -26,10 +28,6 @@ import { REF_COOKIE, REF_VIA_COOKIE } from '../../lib/referral';
 import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../../lib/touch.mjs';
 import {
   BILLING_PERIOD,
-  FIRST_TOUCH_PCT,
-  LAST_TOUCH_PCT,
-  COLLAB_POOL_PCT,
-  PLATFORM_RETAINED_PCT,
   INVITE_PCT,
   TURNSTILE_SITE_KEY,
   SIGNUP_BASE,
@@ -55,39 +53,45 @@ const memberTier = tierDisplay('member');
 const TIER_LABEL = memberTier?.label ?? 'Network Member';
 const TIER_PRICE_LABEL = `$${memberTier?.priceAnnual ?? 50}`;
 
-const splits = [
-  { pct: FIRST_TOUCH_PCT, cls: 'green', name: 'First touch', body: 'Owner of the first eligible article, product, or prompt the member touched.' },
-  { pct: LAST_TOUCH_PCT, cls: 'green', name: 'Last touch', body: 'Owner of the final eligible item they touched before converting.' },
-  { pct: COLLAB_POOL_PCT, cls: 'amber', name: 'Collaboration pool', body: 'Split evenly among members who commented on or improved those items.' },
-  { pct: PLATFORM_RETAINED_PCT, cls: 'plain', name: 'Platform & community', body: 'Funds hosting, tooling, the weekly sessions, and running the network.' },
-];
+// THE BENEFIT LIST IS RENDERED FROM house/membership-tiers.yml AND IS NOT WRITTEN HERE. That is the whole
+// point of this file existing, and it is a correction rather than a style preference.
+//
+// The page this replaced (/linkedin-invite/) got the tier LABEL and the PRICE right, because both came from
+// tierDisplay(). Its benefit PROSE was hand-written and stayed on the Creator page it was copied from, so a
+// member-tier invite went live promising publishing, syndication, a creator profile, weekly shop talk and
+// the first-touch revenue program. NONE of those are member benefits. The config was correct and only the
+// sentences lied, which is the hardest version to catch: the checks that scanned for "Content Creator",
+// "top tier" and "$150" all came back clean, because prose that promises publishing never names the tier.
+//
+// house/membership-tiers.yml states the rule about itself in its own header: "BENEFIT COPY IS A LEGAL LINE
+// ON A PAID PAGE ... it must NEVER advertise a benefit that does not exist." So the fix is not better
+// proofreading, it is removing the ability to type a benefit here at all. If a claim is not a bullet in
+// that file, it cannot reach this page.
+//
+// Member, as of writing: post comments, full Discord, read members-only content and comment bodies, curate
+// your feed. Revenue is the INVITE lane only. If you are about to add a card here because the page looks
+// thin, add the benefit to the yml (where it is reviewed) or leave the page thin.
+const memberBenefits = memberTier?.benefits ?? [];
+const memberRevenue = memberTier?.revenue ?? '';
 
-// Card imagery: Pexels photos (free license, no attribution required), committed as 800x480 (5:3) webp.
-const benefits = [
-  { name: 'Private member community', body: 'A private Discord where professionals share work in progress, ask questions, and build relationships away from public noise.' },
-  { name: 'Joint venture opportunities', body: 'Discover aligned projects and combine skills. One member brings the idea, another the technical depth, another the distribution.' },
-  { name: 'Gated member content', body: 'Create gated articles, products, prompts, and downloads that enrich the network and give new members a reason to join.' },
-  { name: 'Network syndication', body: 'The network distributes and promotes member work across social channels, so useful work travels further than it would alone.' },
-  { name: 'Specialized member tools', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
-  { name: 'Shared member upside', body: 'A portion of membership revenue is shared back with members whose published work and contributions help grow the network.' },
-];
-
+// Every FAQ that sold a Creator benefit is GONE rather than reworded, because rewording means hand-writing
+// claims again one file away from the thing that just broke. Cut: the editorial-submissions answer and the
+// weekly-shop-talk answer (both Creator), and the revenue-splits answer (the first-touch/last-touch program
+// is Creator; a Member earns through invites and nothing else). Kept and reworded to the READER side: what
+// the network is, and how member-only content works. Kept unchanged: comments, the invite lane, and the
+// founding story.
 const faqs = [
-  ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, distribution support, and a revenue-sharing model for member-created value.'],
+  ['What is the GBTI Network?', 'A professional publishing network for developers. Members read and discuss the work published across it, take part in a private community, and earn on the members they bring in. Publishing your own articles, products and prompts is the Content Creator tier.'],
   ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
-  ['What kind of content does the editorial team accept?', 'As a brand, GBTI can support a wide range of ideas and creative work. Our initial content will explore entertainment, education, technology, health, blockchain, developer relations, artificial intelligence, music, gaming, homesteading, and other subjects that interest our members. Members interested in publishing through GBTI can find our participation handbook inside the members area.'],
-  ['How is my content and data stored?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo, and members publish by opening a pull request, by hand or through their own AI agents. There is no traditional CMS and no separate content database. The static site is the published read-view, and each member's client is their authoring node. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
-  ['How does revenue sharing work?', `Every conversion is divided the same way: ${FIRST_TOUCH_PCT} to the first-touch content owner, ${LAST_TOUCH_PCT} to the last-touch owner, ${COLLAB_POOL_PCT} to a collaboration pool for those who commented or contributed, and the rest to the platform. Content owners do not decide what counts. If a contribution is accepted or a comment is published, the model pays it automatically.`],
-  ['Do members earn for inviting people?', `Yes. A personal invite link earns a flat ${INVITE_PCT} lifetime commission when someone joins through it, paid out of the platform share so content owners are never diluted. If you already earn a content share on the same conversion, you take the larger content share instead.`],
-  ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
+  ['How is the network built?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo. There is no traditional CMS and no separate content database, and the static site is the published read-view. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
+  ['Do members earn for inviting people?', `Yes. A personal invite link earns a flat ${INVITE_PCT} lifetime commission when someone joins through it, for as long as they keep paying.`],
+  ['Is all content public or private?', 'Both. Some work is published openly, and some is network-only. For network-only work, a stub with a short description appears on the public website, while the full content is readable by members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
-  ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
   // The founding story is REUSED verbatim in substance (owner, 2026-08-15: it is true for this audience
   // too), because it is a fact about GBTI rather than a claim about the reader. The Codeable version's next
   // sentence complimented the audience ("the expertise at Codeable is well known and respected"). There is
-  // no sourced equivalent for this one, so it is OMITTED and nothing is substituted for it. Inventing
-  // audience flattery is what put a fabricated origin story live and into syndication on 2026-07-30.
-  // "The network's top tier" is also GONE: true of creator, false of member. See the tier note above.
+  // no sourced equivalent here, so it is OMITTED and nothing is substituted for it. Inventing audience
+  // flattery is what put a fabricated origin story live and into syndication on 2026-07-30.
   ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. Your invite covers a full year at the ${TIER_LABEL} tier, with no card required, and nothing bills automatically. If you choose to stay, it is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD}.`],
 ];
 
@@ -111,10 +115,7 @@ const year = new Date().getFullYear();
           <span>GBTI</span>
         </a>
         <nav class="ci-links" aria-label="Sections">
-          <a href="#network">The network</a>
-          <a href="#revenue">Revenue model</a>
-          <a href="#shoptalk">Shop talk</a>
-          <a href="#benefits">Membership</a>
+          <a href="#benefits">What you get</a>
           <a href="#faq">FAQ</a>
         </nav>
         <button type="button" class="ci-theme" data-ci-theme aria-label="Toggle dark mode">
@@ -130,17 +131,17 @@ const year = new Date().getFullYear();
         <div>
           <p class="eyebrow">Your invitation</p>
           <h1>Welcome to GBTI Network</h1>
-          <p class="lead">GBTI is a professional publishing network for developers. Publish under your own
-            name, share in the revenue, and build with people who ship. Your invite covers a full
-            year at the Network Member tier: full network participation, no card required.</p>
+          <p class="lead">GBTI is a professional publishing network for developers. Read the work published
+            across it, join the conversation, and earn on the members you bring in. Your invite covers a full
+            year at the {TIER_LABEL} tier, with no card required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
-            <a href="#network" class="btn-ghost">How the network works</a>
+            <a href="#benefits" class="btn-ghost">What you get</a>
           </div>
+          <!-- The ticks are the FIRST THREE YML BULLETS, not a hand-picked summary. A summary is prose, and
+               prose is what put Creator benefits on a member page. -->
           <div class="ci-ticks">
-            <span>&#10003; &nbsp;Publish under your own name</span>
-            <span>&#10003; &nbsp;Revenue share built in</span>
-            <span>&#10003; &nbsp;Weekly shop talk</span>
+            {memberBenefits.slice(0, 3).map((b) => (<span>&#10003; &nbsp;{b}</span>))}
           </div>
         </div>
         <div id="claim" class="ci-claim">
@@ -165,115 +166,25 @@ const year = new Date().getFullYear();
       </div>
     </div>
 
-    <!-- ================= WHY A NETWORK ================= -->
-    <section id="network" class="ci-sec">
-      <p class="eyebrow">Why a network</p>
-      <h2 style="max-width:20ch">A home for your work, with the earning path most collectives leave out</h2>
-      <p class="sec-lead">Most independent creators want to publish and be found, without standing up a CMS
-        or paying to host and maintain a site. The network handles that, surfaces work to AI assistants, and
-        adds the one thing most publishing collectives leave out.</p>
-      <div class="grid3">
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4z"/><path d="M4 9h16"/></svg></div>
-            <h3>No site to host or maintain</h3>
-            <p>Publish without a CMS, hosting bills, or upkeep. Your work lives on the network and renders on
-              your member profile.</p>
-          </div>
-        </div>
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div>
-            <h3>Built for AI recommendations</h3>
-            <p>Content is structured so AI assistants can read and recommend it, which lifts how often your
-              work gets surfaced.</p>
-          </div>
-        </div>
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
-            <h3>Publishing with an earning path</h3>
-            <p>Most collectives stop at distribution. Here, the work that brings members in earns a share for
-              the people who made it.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================= REVENUE MODEL ================= -->
-    <section id="revenue" class="ci-sec">
-      <p class="eyebrow">The revenue model</p>
-      <h2 style="max-width:22ch">Member work creates value at every touch, and each one can earn</h2>
-      <p class="sec-lead">A reader might discover the network through an article, come back through a
-        product, read the comments, and notice what members improved before they join. In this network,
-        those touches matter, and each one can earn. A portion of every membership is shared back with the
-        members whose work drove it.</p>
-      <div class="grid4">
-        {splits.map((s) => (
-          <div class="card bcard">
-            <div class="bod">
-              <div class={`pct ${s.cls}`}>{s.pct}</div>
-              <div class="pct-name">{s.name}</div>
-              <p class="pct-body">{s.body}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div class="ci-invite-lane">
-        <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
-        <p>Members can also share a personal invite link that earns a flat
-          <strong>{INVITE_PCT} lifetime commission</strong> on anyone who joins through it. It is paid out
-          of the platform share, so first-touch and last-touch content owners are never diluted.</p>
-      </div>
-      <p class="ci-more"><a href="/revenue-model/">See the full split and worked examples &rarr;</a></p>
-    </section>
-
-    <!-- ================= SHOP TALK ================= -->
-    <div id="shoptalk" class="ci-band">
-      <div class="ci-band-in">
-        <div>
-          <p class="eyebrow">Weekly shop talk</p>
-          <h2 style="max-width:18ch">Where we meet, and hold ourselves accountable to progress</h2>
-          <p class="sec-lead" style="max-width:52ch">Members gather for a recurring two-hour session to talk
-            through product development, track progress, share knowledge, set goals, and keep each other
-            accountable. It is the rhythm that turns publishing into momentum.</p>
-          <div class="ci-pills">
-            <span>Product development</span><span>Track progress</span><span>Share knowledge</span><span>Set goals</span><span>Accountability</span>
-          </div>
-        </div>
-        <div class="card ci-session bcard">
-          <div class="bod">
-          <div class="ci-live"><span class="dot"></span><span class="lbl">The session</span></div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-            <div><b>Two hours, every week</b><span>A standing time members build their week around</span></div>
-          </div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></div>
-            <div><b>Live on Google Meet</b><span>Face to face with the people building it</span></div>
-          </div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-            <div><b>Coordinated on Discord</b><span>Where the conversation continues between sessions</span></div>
-          </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
       <p class="eyebrow">Why members join</p>
-      <h2 style="max-width:20ch">What membership gives you</h2>
-      <p class="sec-lead">Built for professionals who want a place to publish useful work, improve alongside
-        other members, and belong to a network that rewards contribution.</p>
+      <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
+      <p class="sec-lead">{memberTier?.tagline}</p>
       <div class="grid3">
-        {benefits.map((b) => (
+        {memberBenefits.map((b) => (
           <div class="card lift bcard">
-            <div class="bod"><h3>{b.name}</h3><p>{b.body}</p></div>
+            <div class="bod"><h3>{b}</h3></div>
           </div>
         ))}
       </div>
+      {memberRevenue && (
+        <div class="ci-invite-lane">
+          <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
+          <p><strong>{memberRevenue}</strong></p>
+        </div>
+      )}
     </section>
 
     <!-- ================= FAQ ================= -->

@@ -53,7 +53,7 @@ export default defineConfig({
     // landing carries a live free-year coupon in plain sight, so indexing it turns a private invitation into a
     // public giveaway. Both pages also set a noindex meta; this filter is the second half, and they are not
     // redundant (the meta asks a crawler, the sitemap stops advertising the URL in the first place).
-    sitemap({ filter: (page) => !/\/(account|welcome|codeable-invite(\/v1)?|linkedin-invite|home\/v1|news\/item)\/?$/.test(page) }),
+    sitemap({ filter: (page) => !/\/(account|welcome|codeable-invite(\/v1)?|member-invite|home\/v1|news\/item)\/?$/.test(page) }),
   ],
   image: {
     // The legacy archive includes oversized animated GIFs (~40 MB across 12 files). Don't let

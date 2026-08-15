@@ -92,6 +92,15 @@ for (const row of csv) {
 // from the `product` collection to the `applet` collection, so their old /products/<slug>/ detail URLs now
 // 301 to the running tool at /utilities/<slug>/ (which is also each applet card's launchUrl).
 const EXTRA = [
+  // sow-230: /linkedin-invite/ is RETIRED into /member-invite/. It shipped 2026-08-15 with benefit prose
+  // inherited from the Creator page it was copied from, so a member-tier invite advertised publishing,
+  // syndication, a creator profile, weekly shop talk and the first-touch revenue program, none of which a
+  // Member gets. Redirected rather than deleted because the link was created to be SENT to a specific
+  // person: a 404 is the worst outcome for anyone already holding it, and leaving it up was not an option
+  // while it made claims the tier does not support. The replacement is audience-neutral, so there is
+  // nothing LinkedIn-specific to preserve at the old path.
+  ['/linkedin-invite/', '/member-invite/'],
+
   ['/products/js-animate-hue/', '/utilities/js-animate-hue/'],
   ['/products/email-signature-generator/', '/utilities/email-signature-generator/'],
 
