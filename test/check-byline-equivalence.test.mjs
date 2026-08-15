@@ -83,6 +83,28 @@ test('RED when dist is empty, since the guard cannot prove anything without a bu
   assert.match(errors[0], /no built HTML/);
 });
 
+// The matcher's boundary behaviour, asserted rather than left as a comment. `\b` treats a hyphen as a word
+// boundary, so a SUFFIXED rename still matches and an unrelated class does not. @UnifiedWorker's first
+// attempt to prove the partial-rename hole picked cm-name-v2 and failed for exactly this reason, so the
+// behaviour is checked here instead of only being described above the regex.
+test('the class matcher tolerates a suffixed rename but not an unrelated class', () => {
+  const still = fixture({
+    profiles: { atwellpub: 'Hudson Atwell' },
+    pages: { 'x/index.html': '<main><a href="/members/atwellpub/" class="cm-name-v2">atwellpub</a></main>' },
+  });
+  const a = checkBylineEquivalence({ root: still });
+  assert.equal(a.checked, 1, 'cm-name-v2 must still be matched, which is why it is a poor negative fixture');
+  assert.equal(a.errors.length, 1, 'and the wrong name inside it must still bite');
+
+  const gone = fixture({
+    profiles: { atwellpub: 'Hudson Atwell' },
+    pages: { 'x/index.html': '<main><a href="/members/atwellpub/" class="byline-name">atwellpub</a></main>' },
+  });
+  const b = checkBylineEquivalence({ root: gone });
+  assert.equal(b.checked, 0, 'an unrelated class is NOT matched');
+  assert.match(b.errors[0], /ZERO bylines/, 'and that is caught only because zero coverage is red');
+});
+
 // The class the guard keys on is the one thing that silently disables it, so pin the coupling.
 test('RED if the byline class changes, because the guard would otherwise silently stop checking', () => {
   const root = fixture({

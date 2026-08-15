@@ -85,6 +85,10 @@ export function checkBylineEquivalence({ root }) {
     let m;
     while ((m = ANCHOR.exec(html)) !== null) {
       const [, attrs, inner] = m;
+      // `\b` treats a hyphen as a word boundary, so this matches `cm-name` AND `cm-name-v2` (deliberately
+      // tolerant of a suffixed rename) but NOT `byline-name` or `cmname`. Worth knowing before writing a
+      // negative fixture: @UnifiedWorker's first attempt to prove the partial-rename hole used `cm-name-v2`
+      // and failed because the guard still matched it.
       if (!/class="[^"]*\bcm-name\b[^"]*"/.test(attrs)) continue;
       const href = HREF.exec(attrs)?.[1];
       if (!href) continue;
