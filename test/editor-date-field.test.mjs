@@ -134,10 +134,23 @@ test('every post still carrying an unquoted YAML date renders through the field 
     try { fm = yaml.load(fs.readFileSync(file, 'utf8').split('---')[1]); } catch { continue; }
     if (!(fm?.publishedAt instanceof Date)) continue; // already quoted, or no date: not this test's subject
     swept += 1;
-    const asRendered = { ...fm, publishedAt: renderValue(fm.publishedAt), updatedAt: renderValue(fm.updatedAt) };
-    assert.equal(schema.safeParse(asRendered).success, true, `${file} does not survive the save path`);
+    // Render ONLY the keys the source actually has. Rendering `updatedAt` unconditionally set it to '' on
+    // posts that never carried one, and the schema rejects '' for an optional date, so the harness invented
+    // the invalid value and then blamed the save path for it. A post with an unquoted publishedAt and no
+    // updatedAt (the ProxMoxBox draft was the first) failed a test the editor had nothing to do with.
+    const asRendered = { ...fm, publishedAt: renderValue(fm.publishedAt) };
+    if ('updatedAt' in fm) asRendered.updatedAt = renderValue(fm.updatedAt);
+
+    const parsed = schema.safeParse(asRendered);
+    // Name the offending FIELD. The old message pointed at "the save path", which sent the first reader
+    // (@SowMaster) to audit code that was working correctly.
+    const why = parsed.success ? '' : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    assert.equal(parsed.success, true, `${file} -> ${why}`);
   }
-  assert.ok(swept >= 0, `swept ${swept} posts carrying an unquoted YAML date`);
+  // NOT `swept >= 0`, which is true of every possible run and so could never fail. The comment above claims
+  // an empty sweep is a finished migration rather than a regression; that is only safe to assert once the
+  // sweep is known to have subjects, so prove there are some.
+  assert.ok(swept > 0, `swept ${swept} posts carrying an unquoted YAML date, so this test proved nothing`);
 });
 
 // DRIFT: the expression above is a copy. If the component's own changes, this test would keep passing while the
