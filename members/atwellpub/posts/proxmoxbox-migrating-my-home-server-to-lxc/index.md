@@ -22,7 +22,7 @@ until a human intervened.
 So the acceptance test for the whole project was a single sentence. **Come back unattended from cold.**
 Everything below serves that.
 
-## Working out what was actually running
+## What was actually running, which took longer to establish than it should have
 
 The closet machine ran Windows 10 Enterprise LTSC, with the real work happening inside WSL. It powered two
 things: [SavePoint](https://savepoint.fm), an online radio management platform that streams to Discord and
@@ -50,9 +50,9 @@ the server, headless, which is the reason it fits in a container at all.
 
 So Windows and WSL both disappear, and the workloads run natively on Linux.
 
-## How an LXC container differs from a virtual machine
+## What LXC is, and how it differs from a virtual machine
 
-The difference is not a detail, and it decides how many services fit on one box.
+The difference decides how many services fit on one box.
 
 A virtual machine emulates a computer. It boots its own kernel, runs its own device drivers through
 QEMU, and holds its own memory. When you give a VM 4 GB, that 4 GB is allocated to it and the host cannot
@@ -117,7 +117,7 @@ they need. The host uses ext4 with LVM-thin instead.
 **Bulk storage over USB under a service that writes continuously** is the weak point of the build, and it
 caused real trouble.
 
-## Two things that went wrong
+## Two things that went wrong, and what they taught
 
 The machine would not complete POST with the USB disk attached. I chased a kernel USB quirk first, then
 suspected the hub. Both theories were wrong, and the giveaway was that the F11 boot menu would not open
@@ -139,7 +139,7 @@ filesystem, the hub, the cable and both machines, and I still cannot explain it.
 streaming, which needs roughly 1 MB/s, and only painful for bulk copies. I would rather say that than
 invent a cause.
 
-## Reaching it over Tailscale
+## Reaching it: Tailscale, and what actually provides the security
 
 Both services stay off the public internet entirely: no forwarded port on my router, no reverse proxy
 with a certificate facing the world. Everything is reached over
