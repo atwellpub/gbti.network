@@ -5,7 +5,7 @@
 export const EXTENSION = {
   name: 'GBTI Network',
   /** Mirrors public/extension/latest.json (written by `npm run build:extension`). */
-  version: '0.2.0',
+  version: '0.3.0',
   /** Set to the Chrome Web Store listing URL after the M0 submission. Empty = fall back to the install page. */
   webStoreUrl: 'https://chromewebstore.google.com/detail/gbti-network-extension/iffjdmifgnjgkdjoodapjciddibmifka',
   /** The install/download page that hosts the download button + the unpacked-install guide. */
