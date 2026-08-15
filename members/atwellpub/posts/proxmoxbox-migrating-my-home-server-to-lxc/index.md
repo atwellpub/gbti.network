@@ -14,15 +14,15 @@ tags: ["proxmox", "lxc", "tailscale", "self-hosting", "home-server", "wsl"]
 A power cut took my radio station down and nothing brought it back. It sat dead until I noticed, which
 was not the same day.
 
-That is the honest reason this migration happened. The other half of the machine was no better. The camera
-system's own README described its setup as a stopgap and said plainly that it could not survive a reboot.
-Two services, running on the same box in my closet, sharing exactly one flaw: they ran until something
-interrupted them, and then they stayed down until a human intervened.
+The other half of the machine was no better. The camera system's own README described its setup as a
+stopgap and said plainly that it could not survive a reboot. Two services ran on the same box in my
+closet and shared exactly one flaw: each carried on until something interrupted it, then stayed down
+until a human intervened.
 
 So the acceptance test for the whole project was a single sentence. **Come back unattended from cold.**
 Everything below serves that.
 
-## What was actually running, which took longer to establish than it should have
+## Working out what was actually running
 
 The closet machine ran Windows 10 Enterprise LTSC, with the real work happening inside WSL. It powered two
 things: [SavePoint](https://savepoint.fm), an online radio management platform that streams to Discord and
@@ -40,7 +40,7 @@ of migrating a home server is often working out what you actually have.**
 ## Why this is not a physical-to-virtual conversion
 
 The obvious reading of "move the machine to Proxmox" is to image the Windows install into a virtual
-machine and carry on. I did not do that, and the reason is worth stating.
+machine and carry on. I did not do that.
 
 Imaging Windows into a VM preserves the exact thing I was trying to escape. WSL2 is itself a virtual
 machine, so running it inside another virtual machine means nested virtualization for no benefit
@@ -50,9 +50,9 @@ the server, headless, which is the reason it fits in a container at all.
 
 So Windows and WSL both disappear, and the workloads run natively on Linux.
 
-## What LXC is, and how it differs from a virtual machine
+## How an LXC container differs from a virtual machine
 
-This is the part most worth understanding, because the difference is not a detail.
+The difference is not a detail, and it decides how many services fit on one box.
 
 A virtual machine emulates a computer. It boots its own kernel, runs its own device drivers through
 QEMU, and holds its own memory. When you give a VM 4 GB, that 4 GB is allocated to it and the host cannot
@@ -64,8 +64,9 @@ process tree. In practice a bare Debian container idles at something like 30 to 
 run anything, where the same services in a VM cost 200 to 400 MB just to exist. A container starts in
 under a second. A VM takes 15 to 30 seconds to boot.
 
-**Unprivileged** matters too. An unprivileged container maps its root user to an unprivileged user on the
-host, so root inside the container is nobody in particular outside it. Both of mine are unprivileged.
+**Unprivileged** changes the blast radius. An unprivileged container maps its root user to an unprivileged
+user on the host, so root inside the container is nobody in particular outside it. Both of mine are
+unprivileged.
 
 Separating the two applications was worth as much to me as the efficiency was. Under the old setup they
 shared one Linux environment, which meant they shared their dependencies, their failure modes and their
@@ -82,10 +83,10 @@ service can burst up to its ceiling whenever the other is idle. Container memory
 way, where VM memory is not without ballooning. On top of that, `cpuunits` gives the cameras priority over
 the radio when both want the CPU at once.
 
-That distinction is the real efficiency argument, and it is more interesting than "load balancing"
-suggests.
+Ceilings rather than reservations is what lets two services share 12 GB without either being starved,
+which is not what "load balancing" describes.
 
-## Proxmox, and yes, try saying it three times fast
+## Proxmox and the ProxMoxBox box
 
 [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) is a Debian-based
 virtualization platform that manages both VMs and LXC containers behind one web interface. I am running
@@ -98,7 +99,7 @@ have a large and active community of people solving the same problems, publishin
 answering questions from someone running exactly your hardware. That is worth a great deal when something
 does not work at two in the morning.
 
-## The hardware, which shaped every decision
+## The hardware shaped every decision
 
 The host is an i7-7700 with 12 GB of RAM on an ASRock H110 Pro BTC+. That is a crypto mining motherboard,
 which is exactly as odd as it sounds and is the reason several things below are the way they are.
@@ -116,7 +117,7 @@ they need. The host uses ext4 with LVM-thin instead.
 **Bulk storage over USB under a service that writes continuously** is the weak point of the build, and it
 caused real trouble.
 
-## Two things that went wrong, and what they taught
+## Two things that went wrong
 
 The machine would not complete POST with the USB disk attached. I chased a kernel USB quirk first, then
 suspected the hub. Both theories were wrong, and the giveaway was that the F11 boot menu would not open
@@ -130,17 +131,18 @@ exFAT, it came back dirty, demanded a full repair, and recovered 8.5 GB of orpha
 as ext4 and abused identically, `e2fsck` replayed the journal and reported zero errors across all five
 passes.
 
-Same drive, same mistake, different filesystem, entirely different outcome. exFAT has no journal.
+The same drive met the same mistake on two filesystems and came back differently each time, because
+exFAT has no journal.
 
 One honest loose end: that drive is rated for 550 MB/s and delivers about 40. I tested and eliminated the
 filesystem, the hub, the cable and both machines, and I still cannot explain it. It is fast enough for
 streaming, which needs roughly 1 MB/s, and only painful for bulk copies. I would rather say that than
 invent a cause.
 
-## Reaching it: Tailscale, and what actually provides the security
+## Reaching it over Tailscale
 
-Neither service is exposed on the public internet. There is no port forwarded on my router, and there is
-no reverse proxy with a certificate facing the world. Everything is reached over
+Both services stay off the public internet entirely: no forwarded port on my router, no reverse proxy
+with a certificate facing the world. Everything is reached over
 [Tailscale](https://tailscale.com/), running 1.102.2 in both containers.
 
 Tailscale builds a private mesh network between your own devices. Its MagicDNS feature gives each machine
