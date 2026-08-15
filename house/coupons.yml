@@ -82,3 +82,24 @@ coupons:
     note: LinkedIn intake, first year free (sow-230)
     maxRedemptions: null
     expiresAt: null
+  # sow-230: the owner's personal invite code, same terms and the same member tier as LINKEDINCONNECT, and
+  # it points at the same lander (/member-invite/?coupon=HUDSINVITE). It exists so a hand-issued invite is
+  # DISTINGUISHABLE FROM the LinkedIn campaign at redemption: both write `reason: coupon:<CODE>` into
+  # house/grandfathered.yml, so a separate code is the only thing that later says which route a member came
+  # in by. Two codes are also two things to retire independently.
+  #
+  # TIER IS `member`, matching the lander it is sent with. A creator-tier invite belongs on
+  # /curator-invite/ with a creator-tier code; sending a member code to a creator lander (or the reverse) is
+  # the defect that produced the /linkedin-invite/ retirement, so the pairing is not cosmetic.
+  #
+  # Uncapped and non-expiring like its siblings, which means the notification gap at the top of this file
+  # applies to it too. This one is lower risk in practice because it is issued by hand to named people
+  # rather than published, but nothing in the code enforces that: it is a bearer code like any other, and a
+  # forwarded link is a transferred free year.
+  - code: HUDSINVITE
+    freeDays: 365
+    active: true
+    tier: member
+    note: Owner personal invites, first year free (sow-230)
+    maxRedemptions: null
+    expiresAt: null
