@@ -93,9 +93,13 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
   // neither paid (nothing to add) nor banned (ban outranks everything, including a coupon).
   if (effective.status !== 'paid' && effective.status !== 'banned') {
     const grant = await readCouponGrant(kv, githubId, now);
-    // A coupon is the free-year full-membership deal, so it grants creator (matching the grandfather default +
-    // the coupon-fold carry-through). The durable git grant may later carry an explicit tier.
-    if (grant) return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon', tier: TIER.creator };
+    // A coupon grants the tier its campaign confers: the record's tier when present (sow-230 added member-tier
+    // campaigns like LINKEDINCONNECT), with creator as the fallback for a legacy tierless grant (matching the
+    // grandfather default + the coupon-fold carry-through).
+    if (grant) {
+      const couponTier = (grant.tier === TIER.member || grant.tier === TIER.creator) ? grant.tier : TIER.creator;
+      return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon', tier: couponTier };
+    }
   }
 
   return { ok: true, githubId, login, via: id.via, status: effective.status, source: effective.source, tier };

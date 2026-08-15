@@ -69,9 +69,10 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
   // (the durable git grant lands at the next reconcile). The client still folds its own overrides on top,
   // so a ban keeps outranking this exactly as it outranks a real subscription.
   let couponUntil = null;
+  let couponTier = null; // sow-142: the tier the coupon confers, honored below instead of assuming creator
   if (!stripePaid) {
     const grant = await readCouponGrant(env.SIGNUP_KV, githubId, now);
-    if (grant) { status = 'paid'; couponUntil = grant.until ?? null; }
+    if (grant) { status = 'paid'; couponUntil = grant.until ?? null; couponTier = grant.tier ?? null; }
   }
   const mirror = await readFreshMirror(env, now); // one read, reused for the curator hint + the analytics bucket
   // SOW-119 QA: the grant end date also resolves from the folded-in git grant (the mirror grandfather entry
@@ -83,7 +84,7 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
       : null;
     if (entry?.until && String(entry.reason ?? '').startsWith('coupon:')) {
       const until = new Date(entry.until);
-      if (!Number.isNaN(until.getTime()) && now.getTime() < until.getTime()) couponUntil = until.toISOString();
+      if (!Number.isNaN(until.getTime()) && now.getTime() < until.getTime()) { couponUntil = until.toISOString(); couponTier = entry.tier ?? null; }
     }
   }
   const canCurate = computeCanCurate(mirror, githubId); // SOW-046 C: UI hint only; the Worker re-checks on publish
@@ -106,10 +107,13 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
     const eff = effectiveStatusOf(githubId, derivedStatus, overrides, now); // { status, source }
     const gfGrant = overrides.grandfathers.get(String(githubId));
     paidTier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant: gfGrant });
-    // A fresh coupon is the free-year full membership -> creator, guarded exactly as resolveEffective: only when
-    // the pre-coupon effective status is neither paid (nothing to add) nor banned (a ban outranks a coupon).
-    if (couponUntil && eff.status !== 'paid' && eff.status !== 'banned' && !meetsTier(paidTier, TIER.creator)) {
-      paidTier = TIER.creator;
+    // A fresh coupon grants the tier its campaign confers (sow-230 added member-tier campaigns like
+    // LINKEDINCONNECT), with creator as the fallback for a legacy tierless grant. Guarded exactly as
+    // resolveEffective: only when the pre-coupon effective status is neither paid (nothing to add) nor banned
+    // (a ban outranks a coupon), and never a downgrade (the meetsTier guard keeps a higher existing tier).
+    const couponPaidTier = (couponTier === TIER.member || couponTier === TIER.creator) ? couponTier : TIER.creator;
+    if (couponUntil && eff.status !== 'paid' && eff.status !== 'banned' && !meetsTier(paidTier, couponPaidTier)) {
+      paidTier = couponPaidTier;
     }
   }
   recordUsage(env, { tier: effectiveStatus, event: 'status_check', request });

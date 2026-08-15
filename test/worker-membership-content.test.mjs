@@ -336,6 +336,24 @@ test('authorizeCreator: a grandfathered member pinned to tier:member is DENIED (
   assert.match(r.body.message, /Content Creator/);
 });
 
+// sow-142: the coupon fast-path must honor the campaign tier, not assume creator. A member-tier campaign
+// (LINKEDINCONNECT) redeemer is a Network Member, so the write gate must DENY creator; a legacy tierless
+// grant still falls back to creator.
+test('authorizeCreator: a MEMBER-tier coupon redeemer is DENIED creator (sow-142; the fast-path honors grant.tier)', async () => {
+  const coupon = { until: new Date(Date.now() + 86_400_000).toISOString(), tier: 'member' };
+  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? freshMirror() : coupon) };
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ ...PRICE_ENV, SIGNUP_KV: kv }), deps('7', () => null));
+  assert.equal(r.ok, false, 'a member-tier coupon must not confer creator on the write gate');
+  assert.equal(r.status, 403);
+});
+test('authorizeCreator: a legacy TIERLESS coupon redeemer is admitted as creator (fallback preserved)', async () => {
+  const coupon = { until: new Date(Date.now() + 86_400_000).toISOString() }; // no tier field
+  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? freshMirror() : coupon) };
+  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ ...PRICE_ENV, SIGNUP_KV: kv }), deps('7', () => null));
+  assert.equal(r.ok, true);
+  assert.equal(r.tier, 'creator');
+});
+
 test('authorizeCreator: a non-paid caller gets the paid-required message; a banned caller is not permitted', async () => {
   const none = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV), deps('9', () => null));
   assert.equal(none.status, 403);

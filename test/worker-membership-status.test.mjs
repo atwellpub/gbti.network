@@ -148,9 +148,13 @@ test('paidTier: a grandfather grant confers creator by default; an explicit tier
   assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1' }] }) }), 'creator');
   assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1', tier: 'member' }] }) }), 'member');
 });
-test('paidTier: a fresh coupon grant (non-banned) confers creator', async () => {
+test('paidTier: a fresh TIERLESS coupon grant (legacy) falls back to creator', async () => {
   const coupon = { until: new Date(NOW.getTime() + 86_400_000).toISOString() };
   assert.equal(await tierOf({ coupon, customer: null }), 'creator');
+});
+test('paidTier: a MEMBER-tier coupon grant confers member, not creator (sow-142; LINKEDINCONNECT is member)', async () => {
+  const coupon = { until: new Date(NOW.getTime() + 86_400_000).toISOString(), tier: 'member' };
+  assert.equal(await tierOf({ coupon, customer: null }), 'member');
 });
 test('paidTier: a BAN outranks everything -> none, even with a creator sub OR a coupon', async () => {
   assert.equal(await tierOf({ mirror: freshMirror({ bans: [{ github_id: '1' }] }), customer: subWithPrice('price_ca') }), 'none');
