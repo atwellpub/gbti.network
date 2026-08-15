@@ -1,12 +1,11 @@
 ---
-// Visitor / Trial / Paid capability comparison. Single source for the tier matrix, used on the homepage
-// flywheel (compact) and the /membership/ conversion page (detailed). Rows mirror the canonical three-tier
-// model in CLAUDE.md + SOW-011: the trial is view-only community + stage-on-fork; paid unlocks publishing,
-// the public profile/directory, commenting, member-only sections, weekly sessions, and revenue share.
-import { TRIAL_DAYS_SITE } from '../lib/membership';
-
+// Free vs Paid capability comparison, rendered ONLY on the archived /home/v1/ page (its single importer).
+// The 90-day trial was retired (sow-201), so the middle Trial column was removed; this now contrasts the
+// free tier with paid membership. Paid unlocks publishing, the public profile and directory, commenting,
+// member-only sections, weekly sessions, and revenue share. The LIVE membership page uses MembershipTiers,
+// not this component.
 interface Props {
-  /** When true, render the full capability matrix (membership page) instead of the compact summary. */
+  /** When true, render the full capability matrix instead of the compact summary. */
   detailed?: boolean;
 }
 const { detailed = false } = Astro.props;
@@ -15,30 +14,29 @@ type Cell = 'yes' | 'no' | string; // a string value renders as a soft label (e.
 interface Row {
   name: string;
   v: Cell;
-  t: Cell;
   p: Cell;
 }
 
 const compact: Row[] = [
-  { name: 'Browse the public site', v: 'yes', t: 'yes', p: 'yes' },
-  { name: 'Discord & weekly sessions', v: 'no', t: 'view only', p: 'full access' },
-  { name: 'Author drafts (on your own fork)', v: 'no', t: 'yes', p: 'yes' },
-  { name: 'Profile & work go public', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Revenue-share eligibility', v: 'no', t: 'no', p: 'yes' },
+  { name: 'Browse the public site', v: 'yes', p: 'yes' },
+  { name: 'Discord & weekly sessions', v: 'no', p: 'full access' },
+  { name: 'Author drafts (on your own fork)', v: 'no', p: 'yes' },
+  { name: 'Profile & work go public', v: 'no', p: 'yes' },
+  { name: 'Revenue-share eligibility', v: 'no', p: 'yes' },
 ];
 
 const full: Row[] = [
-  { name: 'Browse the public site', v: 'yes', t: 'yes', p: 'yes' },
-  { name: 'GBTI extension: new-tab member hub', v: 'yes', t: 'yes', p: 'yes' },
-  { name: 'View news, member activity & shares', v: 'yes', t: 'yes', p: 'yes' },
-  { name: 'Private Discord community', v: 'no', t: 'view only', p: 'full access' },
-  { name: 'Weekly build sessions & coaching', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Stage drafts (articles, products, prompts)', v: 'no', t: 'yes', p: 'yes' },
-  { name: 'Publish articles, products & prompts', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Listing in member directory', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Comment on articles, products & prompts', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Read member-only content sections', v: 'no', t: 'no', p: 'yes' },
-  { name: 'Share URLs to our internal community', v: 'no', t: 'no', p: 'yes' },
+  { name: 'Browse the public site', v: 'yes', p: 'yes' },
+  { name: 'GBTI extension: new-tab member hub', v: 'yes', p: 'yes' },
+  { name: 'View news, member activity & shares', v: 'yes', p: 'yes' },
+  { name: 'Private Discord community', v: 'no', p: 'full access' },
+  { name: 'Weekly build sessions & coaching', v: 'no', p: 'yes' },
+  { name: 'Stage drafts (articles, products, prompts)', v: 'no', p: 'yes' },
+  { name: 'Publish articles, products & prompts', v: 'no', p: 'yes' },
+  { name: 'Listing in member directory', v: 'no', p: 'yes' },
+  { name: 'Comment on articles, products & prompts', v: 'no', p: 'yes' },
+  { name: 'Read member-only content sections', v: 'no', p: 'yes' },
+  { name: 'Share URLs to our internal community', v: 'no', p: 'yes' },
 ];
 
 const rows = detailed ? full : compact;
@@ -46,14 +44,13 @@ const rows = detailed ? full : compact;
 <div class="tbl-grid">
   <div class="th"></div>
   <div class="th center">Free Tier</div>
-  <div class="th center">{TRIAL_DAYS_SITE}-day limited-access trial</div>
   <div class="th center col-hi">Paid member</div>
 
   {rows.map((r) => (
     <Fragment>
       <div class="td rowname">{r.name}</div>
-      {([r.v, r.t, r.p] as Cell[]).map((val, i) => (
-        <div class:list={['td', 'center', i === 2 && 'col-hi']}>
+      {([r.v, r.p] as Cell[]).map((val, i) => (
+        <div class:list={['td', 'center', i === 1 && 'col-hi']}>
           {val === 'yes' ? (
             <svg viewBox="0 0 24 24" width="20" height="20" class="yes" role="img" aria-label="Included"><use href="#ico-check"/></svg>
           ) : val === 'no' ? (
