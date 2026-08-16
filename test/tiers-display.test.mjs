@@ -26,7 +26,33 @@ test('parseTierDisplay: a valid file yields the three tiers in canonical order',
   assert.equal(member.priceMonthly, 5);
   assert.equal(member.priceAnnual, 50);
   assert.deepEqual({ ...member.priceEnv }, { monthly: 'M_M', annual: 'M_A' });
-  assert.deepEqual([...member.benefits], ['Comments']);
+  // sow-230: a benefit normalizes to { label, description }. A bare string in the yml is still valid and
+  // yields an empty description, which is what keeps every existing entry and every other surface working.
+  assert.deepEqual([...member.benefits], [{ label: 'Comments', description: '' }]);
+});
+
+test('parseTierDisplay: a benefit may be {label, description}, and a bare string still works', () => {
+  // sow-230. The description exists so the invite lander can show a supporting line WITHOUT writing benefit
+  // prose into the page, which is how a member-tier invite came to advertise Creator benefits. Both forms
+  // normalize to one shape so no consumer has to branch.
+  const mixed = { tiers: [
+    OK.tiers[0],
+    { ...OK.tiers[1], benefits: [{ label: 'Comments', description: 'Reply anywhere.' }, 'Discord'] },
+    OK.tiers[2],
+  ] };
+  const member = parseTierDisplay(mixed).find((t) => t.key === 'member');
+  assert.deepEqual([...member.benefits], [
+    { label: 'Comments', description: 'Reply anywhere.' },
+    { label: 'Discord', description: '' },
+  ]);
+});
+
+test('parseTierDisplay: a benefit object with no label is DROPPED, not rendered blank', () => {
+  // An entry that names nothing would render an empty card on the lander. Dropping it matches how the bare
+  // string form has always treated '' and keeps the non-empty check meaningful.
+  const bad = { tiers: [OK.tiers[0], { ...OK.tiers[1], benefits: [{ description: 'orphan' }, 'Discord'] }, OK.tiers[2]] };
+  const member = parseTierDisplay(bad).find((t) => t.key === 'member');
+  assert.deepEqual([...member.benefits], [{ label: 'Discord', description: '' }]);
 });
 
 test('parseTierDisplay: canonical order regardless of file order', () => {

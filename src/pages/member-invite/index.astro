@@ -117,6 +117,7 @@ const year = new Date().getFullYear();
         <nav class="ci-links" aria-label="Sections">
           <a href="#benefits">What you get</a>
           <a href="#faq">FAQ</a>
+          <a href="#claim" class="ci-nav-cta">Claim free year</a>
         </nav>
         <button type="button" class="ci-theme" data-ci-theme aria-label="Toggle dark mode">
           <svg class="ico-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
@@ -129,31 +130,51 @@ const year = new Date().getFullYear();
     <div class="ci-hero">
       <div class="ci-hero-in">
         <div>
-          <p class="eyebrow">Your invitation</p>
-          <h1>Welcome to GBTI Network</h1>
+          <p class="ci-pill"><span class="dot" aria-hidden="true"></span>Private invitation</p>
+          <h1>Your first year<br />on us.</h1>
           <p class="lead">GBTI is a professional publishing network for developers. Read the work published
-            across it, join the conversation, and earn on the members you bring in. Your invite covers a full
-            year at the {TIER_LABEL} tier, with no card required.</p>
+            across it, join the conversation, and earn on the members you bring in: a full year at the
+            {' '}{TIER_LABEL} tier, no card required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
             <a href="#benefits" class="btn-ghost">What you get</a>
           </div>
-          <!-- The ticks are the FIRST THREE YML BULLETS, not a hand-picked summary. A summary is prose, and
-               prose is what put Creator benefits on a member page. -->
-          <div class="ci-ticks">
-            {memberBenefits.slice(0, 3).map((b) => (<span>&#10003; &nbsp;{b}</span>))}
+          <!-- The design's four mono chips. These are facts about the OFFER (how billing works), not benefit
+               claims about the tier, which is why they are allowed to be literal text here while every
+               benefit sentence comes from the yml. -->
+          <div class="ci-meta">
+            <span>no card</span><span>no auto-bill</span><span>cancel anytime</span><span>github sign-in</span>
           </div>
         </div>
+        <!-- STICKY on desktop, per the design. It is the only place the coupon is confirmed, so it should
+             stay on screen while the reader scrolls the benefits. -->
         <div id="claim" class="ci-claim">
-          <p class="eyebrow tcenter" style="margin-bottom:0">{TIER_LABEL}</p>
+          <div class="ci-claim-top">
+            <span class="eyebrow">{TIER_LABEL}</span>
+            <span class="ci-was">{TIER_PRICE_LABEL}/yr</span>
+          </div>
           <div class="ci-price">Year one free</div>
           <div class="ci-sub">then {TIER_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
-          <div class="ci-rule"></div>
-          <div class="ci-coupon-label">Coupon</div>
-          <div class="ci-chip" data-coupon-chip>
-            <input id="ci-coupon" type="text" autocomplete="off" spellcheck="false" placeholder="Enter your coupon code" aria-label="Coupon code" />
-            <span class="applied" data-coupon-applied hidden>&#10003; applied</span>
+
+          <!-- THE COUPON BLOCK IS TWO STATES, AND THE DESIGN ONLY DRAWS ONE OF THEM. It renders a static
+               "coupon applied" panel because its preview always has a coupon prop. A real visitor can arrive
+               with NO ?coupon=, and the live page has always let them type one, so dropping the input would
+               strand anyone who followed a bare link or lost the parameter. The applied panel is the design's;
+               the input is kept underneath it and the script swaps which one is shown. -->
+          <div class="ci-applied" data-coupon-applied hidden>
+            <div class="ci-applied-body">
+              <div class="ci-applied-label">Coupon applied</div>
+              <div class="ci-applied-code" data-coupon-code></div>
+            </div>
+            <span class="ci-applied-tick" aria-hidden="true">&#10003;</span>
           </div>
+          <div class="ci-entry" data-coupon-entry>
+            <div class="ci-coupon-label">Coupon</div>
+            <div class="ci-chip" data-coupon-chip>
+              <input id="ci-coupon" type="text" autocomplete="off" spellcheck="false" placeholder="Enter your coupon code" aria-label="Coupon code" />
+            </div>
+          </div>
+
           <div class="signup-cta">
             <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-callback="gbtiTurnstileOk" data-expired-callback="gbtiTurnstileReset" data-error-callback="gbtiTurnstileFail" data-theme="auto"></div>
             <button id="signup-go" type="button" class="btn-primary btn-claim" disabled>Claim your free year</button>
@@ -162,6 +183,14 @@ const year = new Date().getFullYear();
           </div>
           <p class="ci-fine">Sign in with GitHub. No card at any point during the free year, and nothing
             bills automatically.</p>
+
+          <!-- The design's three quick wins. Taken from the yml labels rather than written out, so they
+               cannot drift from the benefit list they summarize. -->
+          <div class="ci-wins">
+            {memberBenefits.slice(0, 3).map((b) => (
+              <div class="ci-win"><span class="tick" aria-hidden="true">&#10003;</span><span>{b.label}</span></div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -171,18 +200,27 @@ const year = new Date().getFullYear();
     <section id="benefits" class="ci-sec">
       <p class="eyebrow">Why members join</p>
       <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
-      <p class="sec-lead">{memberTier?.tagline}</p>
-      <div class="grid3">
-        {memberBenefits.map((b) => (
+      <!-- Numbered two-up cards, per the design. The number is presentation (the position in the list); the
+           title and body are both yml fields, so nothing here writes a benefit claim. -->
+      <div class="grid2 ci-bnum">
+        {memberBenefits.map((b, i) => (
           <div class="card lift bcard">
-            <div class="bod"><h3>{b}</h3></div>
+            <div class="bod">
+              <div class="ci-n">{String(i + 1).padStart(2, '0')}</div>
+              <h3>{b.label}</h3>
+              {b.description && <p>{b.description}</p>}
+            </div>
           </div>
         ))}
       </div>
       {memberRevenue && (
-        <div class="ci-invite-lane">
-          <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
-          <p><strong>{memberRevenue}</strong></p>
+        <div class="ci-lane">
+          <div class="ci-lane-pct">{INVITE_PCT}</div>
+          <div class="ci-lane-body">
+            <h3>Earn for life on everyone you invite</h3>
+            <!-- The claim itself is the yml revenue line. The heading above is framing, not a new promise. -->
+            <p>{memberRevenue}</p>
+          </div>
         </div>
       )}
     </section>
@@ -200,6 +238,20 @@ const year = new Date().getFullYear();
             <div class="ci-a" hidden>{a}</div>
           </div>
         ))}
+      </div>
+    </section>
+
+    <!-- ================= CLOSING CTA ================= -->
+    <section class="ci-sec">
+      <div class="ci-close">
+        <h2>Ready when you are</h2>
+        <p>Your coupon covers the first year. Sign in with GitHub and you are in: commenting, Discord,
+          members-only reading, and your referral link.</p>
+        <a href="#claim" class="btn-primary">Claim your free year</a>
+        <!-- The design ended this line with "expires when the invite closes". DROPPED, because it is not
+             true: every live coupon carries `expiresAt: null`, so none of them expires. The code is shown
+             when there is one, and nothing is claimed about its shelf life. -->
+        <div class="ci-close-code" data-close-code hidden>coupon <span data-coupon-echo></span></div>
       </div>
     </section>
 
@@ -224,20 +276,24 @@ const year = new Date().getFullYear();
       return c ? decodeURIComponent(c.split('=').slice(1).join('=')) : '';
     }
     var input = document.getElementById('ci-coupon');
-    var chip = document.querySelector('[data-coupon-chip]');
+    var entry = document.querySelector('[data-coupon-entry]');
     var applied = document.querySelector('[data-coupon-applied]');
-    // A visible ?coupon=CODE prefills the chip (QA 2026-07-18: no secret token links). The field stays
-    // editable; the applied badge shows while the value matches the shared code.
+    var appliedCode = document.querySelector('[data-coupon-code]');
+    var closeWrap = document.querySelector('[data-close-code]');
+    var closeEcho = document.querySelector('[data-coupon-echo]');
+    // A visible ?coupon=CODE (QA 2026-07-18: no secret token links) switches the card into the design's
+    // "coupon applied" panel and hides the manual field. WITHOUT a parameter the panel stays hidden and the
+    // field is shown, because a visitor can arrive on a bare link and must still be able to enter a code.
+    // The design draws only the applied state, since its preview always has a coupon prop.
     var shared = (new URLSearchParams(location.search).get('coupon') || '').trim().toUpperCase();
-    function syncApplied() {
-      var match = shared && input && input.value.trim().toUpperCase() === shared;
-      chip.classList.toggle('locked', Boolean(match));
-      if (applied) applied.hidden = !match;
-    }
-    if (shared && /^[A-Z0-9]{3,32}$/.test(shared) && input) {
-      input.value = shared;
-      syncApplied();
-      input.addEventListener('input', syncApplied);
+    var hasShared = Boolean(shared) && /^[A-Z0-9]{3,32}$/.test(shared);
+    if (hasShared) {
+      if (input) input.value = shared;
+      if (appliedCode) appliedCode.textContent = shared;
+      if (applied) applied.hidden = false;
+      if (entry) entry.hidden = true;
+      if (closeEcho) closeEcho.textContent = shared;
+      if (closeWrap) closeWrap.hidden = false;
     }
 
     var btn = document.getElementById('signup-go');
@@ -363,9 +419,33 @@ const year = new Date().getFullYear();
   .ci-cta-row { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; }
   .ci-ticks { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 38px; font-size: 13.5px; color: var(--ci-mute); }
 
-  .ci-claim { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 7px; padding: 30px 28px; align-self: start; }
-  .ci-price { font-family: var(--f-display); font-weight: 700; font-size: 34px; color: var(--ci-fg); text-align: center; margin-top: 6px; }
-  .ci-sub { text-align: center; color: var(--ci-mute); font-size: 13.5px; margin-top: 4px; }
+  /* STICKY, per the design: the claim card is the only place the coupon is confirmed, so it stays on screen
+     while the benefits scroll past. `align-self: start` is what lets position:sticky work inside the grid.
+     Below the hero breakpoint the grid collapses to one column and sticky is dropped, or the card would
+     pin over the content on a phone. */
+  .ci-claim { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 7px; padding: 26px; align-self: start; position: sticky; top: 88px; }
+  @media (max-width: 960px) { .ci-claim { position: static; } }
+  .ci-claim-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .ci-claim-top .eyebrow { margin: 0; letter-spacing: .09em; }
+  .ci-was { font-family: var(--f-mono); font-size: 13px; color: var(--ci-mute); text-decoration: line-through; }
+  .ci-price { font-family: var(--f-display); font-weight: 700; font-size: 40px; line-height: 1.1; color: var(--ci-fg); margin-top: 8px; }
+  .ci-sub { color: var(--ci-mute); font-size: 14px; margin-top: 6px; }
+
+  /* The design's applied panel. Shown only when a ?coupon= is present; otherwise the manual entry below it
+     is shown instead, because a visitor on a bare link still has to be able to type a code. */
+  .ci-applied { margin-top: 22px; border: 1.5px solid var(--ci-green-ink); background: color-mix(in srgb, var(--ci-green-ink) 10%, transparent); padding: 12px 14px; display: flex; align-items: center; gap: 12px; border-radius: 7px; }
+  .ci-applied[hidden] { display: none !important; }
+  .ci-applied-body { flex: 1; min-width: 0; }
+  .ci-applied-label { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ci-green); font-weight: 600; }
+  .ci-applied-code { font-family: var(--f-mono); font-size: 16px; font-weight: 600; letter-spacing: .02em; color: var(--ci-fg); overflow: hidden; text-overflow: ellipsis; }
+  .ci-applied-tick { color: var(--ci-green); font-size: 20px; line-height: 1; flex: none; }
+  .ci-entry { margin-top: 22px; }
+  .ci-entry[hidden] { display: none !important; }
+
+  /* Quick wins under the CTA, from the yml labels. */
+  .ci-wins { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--ci-line); }
+  .ci-win { display: flex; gap: 9px; align-items: flex-start; color: var(--ci-mute); font-size: 14px; }
+  .ci-win .tick { color: var(--ci-green); flex: none; }
   .ci-rule { height: 1px; background: var(--ci-line); margin: 24px 0; }
   .ci-coupon-label { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ci-mute); margin-bottom: 9px; }
   .ci-chip { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--ci-chip); border: 1.5px solid var(--ci-line2); border-radius: 7px; padding: 3px 15px 3px 3px; }
@@ -381,6 +461,45 @@ const year = new Date().getFullYear();
   /* sections */
   .ci-sec { max-width: 1160px; margin: 0 auto; padding: 84px 40px 20px; }
   @media (max-width: 760px) { .ci-sec { padding: 56px 24px 12px; } }
+  /* sow-230 design: benefits are TWO-UP with a mono index, a title and a supporting line. Two columns
+     rather than three so the body copy has room; the fourth card no longer orphans onto its own row, which
+     is what made the live grid look ragged. */
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  .ci-bnum .card.bcard { padding: 0; }
+  .ci-bnum .bod { padding: 20px; }
+  .ci-bnum .ci-n { font-family: var(--f-mono); font-size: 12px; color: var(--ci-green); }
+  .ci-bnum h3 { font-size: 18px; font-weight: 700; margin: 8px 0 0; color: var(--ci-fg); }
+  .ci-bnum p { color: var(--ci-mute); font-size: 14.5px; margin: 6px 0 0; }
+
+  /* The referral band. The percentage is the shared INVITE_PCT constant, not a literal, so it cannot drift
+     from the revenue model the rest of the site quotes. */
+  .ci-lane { margin-top: 14px; border: 1.5px solid var(--ci-green-ink); background: linear-gradient(100deg, color-mix(in srgb, var(--ci-green-ink) 16%, transparent), color-mix(in srgb, var(--ci-green-ink) 4%, transparent)); padding: 24px 26px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; border-radius: 7px; }
+  .ci-lane-pct { font-family: var(--f-display); font-weight: 700; font-size: 44px; color: var(--ci-green); line-height: 1; }
+  .ci-lane-body { flex: 1; min-width: 260px; }
+  .ci-lane-body h3 { font-size: 19px; font-weight: 700; margin: 0; color: var(--ci-fg); }
+  .ci-lane-body p { color: var(--ci-mute); font-size: 14.5px; margin: 4px 0 0; }
+
+  /* Hero pill + mono meta row. */
+  .ci-pill { display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--ci-green-ink); background: color-mix(in srgb, var(--ci-green-ink) 12%, transparent); color: var(--ci-green); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; padding: 5px 11px; margin: 0; border-radius: 7px; }
+  .ci-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: ciPulse 2.4s ease-in-out infinite; }
+  @keyframes ciPulse { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .ci-pill .dot { animation: none; } }
+  .ci-meta { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--ci-line); }
+  .ci-meta span { color: var(--ci-mute); font-size: 13.5px; font-family: var(--f-mono); }
+
+  /* Closing CTA. */
+  .ci-close { border: 1px solid var(--ci-line); border-radius: 7px; background: var(--ci-surface); padding: 36px; text-align: center; }
+  .ci-close h2 { font-family: var(--f-display); font-weight: 700; font-size: 32px; margin: 0; color: var(--ci-fg); }
+  .ci-close p { color: var(--ci-mute); font-size: 16px; margin: 8px auto 0; max-width: 54ch; }
+  .ci-close .btn-primary { margin-top: 20px; }
+  .ci-close-code { font-family: var(--f-mono); font-size: 12.5px; color: var(--ci-mute); margin-top: 12px; }
+  .ci-close-code[hidden] { display: none !important; }
+
+  /* The nav CTA the design adds beside the section links. */
+  .ci-nav-cta { background: var(--ci-green-ink); color: #fff !important; font-weight: 600; padding: 8px 16px; border-radius: 7px; }
+  .ci-nav-cta:hover { background: var(--ci-green); color: #fff !important; }
+
   .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
   .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   @media (max-width: 960px) { .grid3 { grid-template-columns: 1fr; } .grid4 { grid-template-columns: repeat(2, 1fr); } }

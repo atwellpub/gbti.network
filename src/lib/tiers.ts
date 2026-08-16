@@ -19,7 +19,8 @@ export interface TierDisplay {
   priceMonthly: number;
   priceAnnual: number;
   priceEnv: { monthly?: string; annual?: string };
-  benefits: readonly string[];
+  /** sow-230: a benefit is `{label, description}`. `description` is '' unless the yml gives one. */
+  benefits: readonly { label: string; description: string }[];
   revenue: string;
 }
 

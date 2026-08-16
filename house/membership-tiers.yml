@@ -37,11 +37,21 @@ tiers:
     priceEnv:
       monthly: STRIPE_PRICE_MEMBER_MONTHLY
       annual: STRIPE_PRICE_MEMBER_ANNUAL
+    # sow-230: these four carry a `description` as well as a `label`. The label is the one-line bullet every
+    # other surface renders; the description is the supporting line the invite lander shows under it. Both are
+    # benefit copy and both are governed by this file's header rule, which is exactly why the description
+    # lives here rather than in the page that displays it: a member invite went live advertising Creator
+    # benefits because its prose was written into the template, and writing these lines into a template would
+    # have reopened that hole one field over. A bare string is still valid for every other entry.
     benefits:
-      - Post comments across the network
-      - Full Discord access
-      - Read members-only content and comment bodies
-      - Curate your feed (compact, detailed, and card views plus source selection)
+      - label: Post comments across the network
+        description: Reply anywhere on the network under your own handle, not a walled-off forum.
+      - label: Full Discord access
+        description: The members' Discord, where the day-to-day conversation and help actually happens.
+      - label: Read members-only content and comment bodies
+        description: Read the posts and comment bodies that are hidden from logged-out visitors.
+      - label: Curate your feed
+        description: Compact, detailed, and card views, plus source selection so you follow what you care about.
     revenue: Earn 10% for life on the paid revenue of members you invite.
 
   - key: creator

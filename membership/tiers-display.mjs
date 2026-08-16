@@ -15,6 +15,30 @@ export class TierDisplayError extends Error {
   constructor(message) { super(message); this.name = 'TierDisplayError'; }
 }
 
+/**
+ * A benefit is either a bare string or `{ label, description }`, and BOTH normalize to the object form so
+ * every consumer reads one shape. The string form stays valid on purpose: most surfaces (the pricing
+ * accordion, the membership table) render a one-line bullet and have nothing to do with a description, so
+ * requiring one everywhere would be churn for no reader.
+ *
+ * WHY A DESCRIPTION BELONGS HERE AND NOT ON THE PAGE THAT SHOWS IT. sow-230: a member-tier invite went live
+ * advertising Creator benefits because its benefit prose was hand-written into the page and inherited from
+ * the page it was copied from. The fix was to render benefits from this file, so no page types a benefit
+ * sentence. A design then asked for a headline plus a supporting line per benefit, and the tempting shortcut
+ * was to write those lines into the template, which would have reopened exactly that hole one field over.
+ * The description is benefit copy, it is a legal line under this file's own header rule, and it lives where
+ * the rest of the benefit copy is reviewed.
+ */
+function normalizeBenefit(raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return Object.freeze({
+      label: String(raw.label ?? '').trim(),
+      description: String(raw.description ?? '').trim(),
+    });
+  }
+  return Object.freeze({ label: String(raw ?? '').trim(), description: '' });
+}
+
 function normalizeTier(raw, i) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TierDisplayError(`tiers[${i}] must be an object`);
   const key = String(raw.key ?? '');
@@ -25,7 +49,7 @@ function normalizeTier(raw, i) {
   const priceAnnual = Number(raw.priceAnnual);
   if (!Number.isFinite(priceMonthly) || priceMonthly < 0) throw new TierDisplayError(`${key}: priceMonthly must be a number >= 0`);
   if (!Number.isFinite(priceAnnual) || priceAnnual < 0) throw new TierDisplayError(`${key}: priceAnnual must be a number >= 0`);
-  const benefits = Array.isArray(raw.benefits) ? raw.benefits.map((b) => String(b).trim()).filter(Boolean) : [];
+  const benefits = Array.isArray(raw.benefits) ? raw.benefits.map(normalizeBenefit).filter((b) => b.label) : [];
   if (benefits.length === 0) throw new TierDisplayError(`${key}: benefits[] must be a non-empty list`);
   const rawEnv = raw.priceEnv && typeof raw.priceEnv === 'object' && !Array.isArray(raw.priceEnv) ? raw.priceEnv : {};
   const priceEnv = Object.freeze({
