@@ -32,7 +32,11 @@ export const BACKUP_PREFIX = 'backup:';
 //   TTL, cleared at conversion -- backing it up would EXTEND its retention, GDPR-adverse), gh: (the Stripe-lookup
 //   cache) + overrides:mirror (both regenerable), redemptions: (the per-code counter, recomputable by counting
 //   redemption: records), and the erasure-audit log (write-once, handled separately).
-export const BACKED_UP_PREFIXES = ['activity:', 'follows:', 'prefs:', 'conv:', 'coupon-grant:', 'redemption:'];
+//   invite: (sow-231 issued invite links -- the ONLY record that a seat was given to a named person, carrying
+//   the superadmin's administration note about the outreach. It cannot be rebuilt from git or Stripe: the
+//   campaign is in house/coupons.yml but WHO was invited, when, by whom and with what note exists nowhere
+//   else, and losing it also un-burns every single-use link that had already been redeemed).
+export const BACKED_UP_PREFIXES = ['activity:', 'follows:', 'prefs:', 'conv:', 'coupon-grant:', 'redemption:', 'invite:'];
 export const DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60; // 30 days
 export const SNAPSHOT_KEY = (iso) => `${BACKUP_PREFIX}${iso}`;
 

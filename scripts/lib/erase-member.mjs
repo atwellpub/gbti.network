@@ -17,6 +17,7 @@ import yaml from 'js-yaml';
 import { flipStatus } from '../reconcile.mjs';
 import { buildAuditRecord, storeAuditRecord } from './erase-audit.mjs';
 import { scrubVoter } from '../../membership/share-votes.mjs';
+import { INVITE_KEY_PREFIX } from '../../membership/invites.mjs'; // sow-231 Phase 2
 import { scrubOpener } from '../../membership/news-opens.mjs'; // SOW-111: per-item news detail-open sets
 import { scrubOpener as scrubContentOpener } from '../../membership/content-opens.mjs'; // SOW-126: per-item content-open sets
 import { scrubCounterpart } from '../../workers/signup/conversion-snapshot-store.mjs'; // SOW-059 P1c
@@ -290,6 +291,41 @@ export async function eraseCouponRedemptions({ githubId, env = process.env, fetc
   return { scrubbed };
 }
 
+/**
+ * sow-231 Phase 2: MINIMIZE the issued invites this member redeemed.
+ *
+ * WHY THIS NEEDS A SWEEP RATHER THAN A COMPUTED KEY. Every other record here is keyed by the github_id, so
+ * erasure computes the exact key and deletes it. An invite is keyed by its CODE, and the member's id appears
+ * only INSIDE the record as `redeemedBy`, so there is no key to compute. This mirrors eraseCouponRedemptions,
+ * which has the same problem for the same reason and solves it by listing the prefix and filtering.
+ *
+ * MINIMIZED, NOT DELETED, per the standing owner ruling that the one-coupon-per-member lock survives erasure
+ * while the identifying record does not. The invite must keep saying it was issued and used, or a superadmin
+ * loses the audit trail of a seat they gave away and the campaign's own accounting silently changes. What is
+ * removed is WHO used it: `redeemedBy` and `redeemedByLogin` are nulled, `redeemedAt` is kept because a date
+ * with no person attached identifies nobody.
+ *
+ * The administration note is deliberately NOT touched here. It is superadmin-authored text about the
+ * OUTREACH ("sent to the lead at X"), it may name a person, and it is exactly the sort of field an erasure
+ * should consider. It is left because deciding that is the owner's call and quietly redacting an admin's
+ * own note is not a decision a cleanup step should make on its own. Flagged in the SOW rather than done.
+ */
+export async function minimizeRedeemedInvites({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  const listed = await listKvByPrefix({ prefix: INVITE_KEY_PREFIX, env, fetchImpl });
+  if (!listed.available) return { skipped: true, reason: listed.reason };
+  const id = String(githubId);
+  let minimized = 0;
+  // listKvByPrefix returns { key, value } with the value ALREADY PARSED, and it drops anything that did not
+  // parse as an object, so a corrupt record is skipped upstream rather than needing a second read here.
+  for (const { key, value } of listed.entries ?? []) {
+    if (String(value?.redeemedBy ?? '') !== id) continue;
+    await putKvValue({ key, value: JSON.stringify({ ...value, redeemedBy: null, redeemedByLogin: null }), env, fetchImpl });
+    minimized++;
+  }
+  return { minimized };
+}
+
 /** Hard-delete the member's OWN frozen conversion snapshot (SOW-059: their attribution + invite/collaboration record). */
 export async function eraseConversionSnapshot({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
@@ -561,6 +597,7 @@ export async function runErasure({
   await runStep('content-opens', () => eraseContentOpens({ githubId, env, fetchImpl })); // SOW-126: per-item content-open sets
   await runStep('coupon-grant', () => minimizeCouponGrant({ githubId, env, fetchImpl })); // SOW-119: minimize, never delete (owner ruling)
   await runStep('coupon-redemptions', () => eraseCouponRedemptions({ githubId, env, fetchImpl })); // SOW-119: id-in-key records + counter
+  await runStep('redeemed-invites', () => minimizeRedeemedInvites({ githubId, env, fetchImpl })); // sow-231: person-keyed by redeemedBy, so it needs a sweep
   await runStep('conv-snapshot', () => eraseConversionSnapshot({ githubId, env, fetchImpl })); // SOW-059: own frozen snapshot
   await runStep('conv-counterpart', () => scrubConversionSnapshots({ githubId, env, fetchImpl })); // SOW-059: scrub as counterpart
   await runStep('discord', () => eraseDiscordRoles({ githubId, stripe, discord, env }));

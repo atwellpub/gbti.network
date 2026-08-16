@@ -110,7 +110,13 @@ export function planCouponGrants({ redemptions = [], grandfatheredParsed = null,
     // converting a permanent comp changes only the time BOUND (permanent -> free year); the owner's tier
     // choice is orthogonal and must survive the conversion, else renderGrantBlock would drop it and
     // grantTier would silently revert the grant to the creator default. Only ever a real paid tier.
-    const tier = [entry?.tier, r?.tier, couponTier(couponsParsed, r.code)].find((t) => PAID_GRANT_TIERS.includes(t)) ?? null;
+    // sow-231 Phase 2 adds the FOURTH step, and it exists because of a gap the first three do not cover for
+    // an invite. A per-invite code (CODEABLE-7F3Q) is not in the registry, so `couponTier(registry, r.code)`
+    // MISSES for it, leaving an invite grant with only the redemption record's own stamp between it and no
+    // tier at all. `r.campaign` is the campaign the invite was minted against, which the registry CAN
+    // resolve, so the registry fallback works again for invites as it always has for campaign codes.
+    const tier = [entry?.tier, r?.tier, couponTier(couponsParsed, r.code), couponTier(couponsParsed, r.campaign)]
+      .find((t) => PAID_GRANT_TIERS.includes(t)) ?? null;
     grants.push({
       githubId,
       login: typeof r.login === 'string' && /^[a-z0-9-]+$/i.test(r.login) ? r.login.toLowerCase() : null,

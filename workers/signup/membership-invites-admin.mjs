@@ -16,6 +16,7 @@
 // the SOW-024 erasure inventory before this ships past Phase 1.
 
 import { authorizeAdmin } from './membership-admin.mjs';
+import { readInvite } from './invites-store.mjs'; // sow-231 Phase 2: shared with the redemption path
 import { readCouponsConfig } from './coupons.mjs';
 import { couponByCode, normalizeCouponCode } from '../../membership/coupons.mjs';
 import { roleLoginsFromParsed } from '../../membership/overrides-core.mjs';
@@ -46,14 +47,6 @@ function issuerLogin(auth) {
 }
 
 /** Read one invite record, or null. A malformed value reads as null so a caller can never act on junk. */
-async function readInvite(kv, code) {
-  try {
-    const rec = await kv.get(inviteKey(code), 'json');
-    return rec && typeof rec === 'object' ? rec : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * POST /membership/admin/invites -> mint ONE invite against a campaign.

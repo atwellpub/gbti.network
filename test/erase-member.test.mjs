@@ -8,6 +8,7 @@ import {
   deleteKvKey, eraseActivity, eraseFollows, eraseLookupCache, eraseShareVotes, eraseNewsOpens, planErasure, runErasure,
   eraseDiscordRoles, eraseContent, eraseStripeCustomer, ACTIVITY_KEY, FOLLOWS_KEY, LOOKUP_KEY, MEMBERS_INDEX_PATH,
   eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY, minimizeCouponGrant, eraseCouponLock,
+  minimizeRedeemedInvites,
 } from '../scripts/lib/erase-member.mjs';
 import { GRANDFATHERED_PATH } from '../scripts/lib/coupon-grants.mjs';
 import { couponLockKey } from '../membership/coupon-lock.mjs';
@@ -247,6 +248,38 @@ function fakeKvFetch({ keys, values }) {
   };
   return { fetchImpl, calls };
 }
+
+test('sow-231: minimizeRedeemedInvites nulls the redeemer on THIS member\'s invites only', async () => {
+  // An invite is keyed by its CODE and names the member only INSIDE the record, so there is no key to
+  // compute from a github_id and erasure has to sweep the prefix and filter, exactly as the redemption
+  // records do. This test exists because that asymmetry is the easy thing to miss.
+  const { fetchImpl, calls } = fakeKvFetch({
+    keys: ['invite:AAA', 'invite:BBB', 'invite:CCC'],
+    // Values are JSON STRINGS: readKvValue reads the raw body, and an object here would stringify to
+    // "[object Object]" and be skipped as corrupt, which would make this test pass for the wrong reason.
+    values: {
+      'invite:AAA': JSON.stringify({ code: 'AAA', campaign: 'CODEABLEYEAR', note: 'sent to the lead', redeemedBy: '9', redeemedByLogin: 'nine', redeemedAt: '2026-08-01T00:00:00.000Z' }),
+      'invite:BBB': JSON.stringify({ code: 'BBB', campaign: 'CODEABLEYEAR', redeemedBy: '10', redeemedByLogin: 'ten' }),
+      'invite:CCC': JSON.stringify({ code: 'CCC', campaign: 'CODEABLEYEAR', redeemedBy: null }),
+    },
+  });
+  const res = await minimizeRedeemedInvites({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(res.minimized, 1, 'only the one this member redeemed');
+
+  assert.equal(calls.put.length, 1, 'exactly one record rewritten');
+  const rec = JSON.parse(calls.put[0].body);
+  assert.equal(calls.put[0].key, 'invite:AAA');
+  assert.equal(rec.code, 'AAA', 'the invite still exists and still says which link it was');
+  assert.equal(rec.redeemedBy, null, 'the redeemer is gone');
+  assert.equal(rec.redeemedByLogin, null);
+  assert.ok(rec.redeemedAt, 'the date stays: it identifies nobody on its own and it is the audit trail');
+  assert.equal(rec.note, 'sent to the lead', 'the admin note is NOT touched here (owner call, flagged in the SOW)');
+});
+
+test('sow-231: minimizeRedeemedInvites is a reported no-op without CF credentials', async () => {
+  const r = await minimizeRedeemedInvites({ githubId: '9', env: {}, fetchImpl: async () => { throw new Error('should not fetch'); } });
+  assert.equal(r.skipped, true);
+});
 
 test('eraseCouponRedemptions deletes only THIS member\'s records and decrements the shared counter', async () => {
   const { fetchImpl, calls } = fakeKvFetch({
