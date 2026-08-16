@@ -59,22 +59,33 @@ const benefits = [
   { name: 'Specialized member tools', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
 ];
 
+// THE FAQ ANSWERS THE OFFER, not the network in general. Someone reading this was sent a link by a person;
+// what they need first is what they are getting, whether they will be charged, what happens when the year
+// ends, and how to claim it. Network context follows, and for a publishing tier that legitimately includes
+// how content is stored and what the editorial team takes, because those bear on whether the offer is worth
+// accepting.
+//
+// NO BENEFIT LIST HERE: "what does this give me" points at the cards above rather than restating them.
+// Restating benefits in prose is what put Creator copy on the member lander. Tier name and price come from
+// tierDisplay(), so no answer can quote a stale figure.
+//
+// NO REVENUE OR EARNINGS COPY (banned-patterns.md #2).
 const faqs = [
+  ['What does this invite give me?', `A full year at the ${TIER_LABEL} tier, with everything listed above, at no cost. It is a normal membership for the year, not a limited preview.`],
+  ['Do I need a card to claim it?', 'No. No card is collected at any point during the free year, and nothing bills automatically.'],
+  ['What happens when the free year ends?', `Nothing happens on its own. ${TIER_LABEL} is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD} if you decide to continue, and you will not be charged unless you choose to.`],
+  ['How do I claim it?', 'Sign in with GitHub from this page. Your coupon is already applied, so there is nothing to enter or remember.'],
+  ['Can I pass this on to someone else?', 'It is meant for you, but the link works for whoever opens it first, so treat it as personal rather than forwardable.'],
   ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, and distribution support.'],
-  ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
   ['What kind of content does the editorial team accept?', 'As a brand, GBTI can support a wide range of ideas and creative work. Our initial content will explore entertainment, education, technology, health, blockchain, developer relations, artificial intelligence, music, gaming, homesteading, and other subjects that interest our members. Members interested in publishing through GBTI can find our participation handbook inside the members area.'],
   ['How is my content and data stored?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo, and members publish by opening a pull request, by hand or through their own AI agents. There is no traditional CMS and no separate content database. The static site is the published read-view, and each member's client is their authoring node. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
   ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
   ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
-  // The founding story is REUSED verbatim in substance (owner, 2026-08-15: it is true for this audience
-  // too), because it is a fact about GBTI rather than a claim about the reader. The Codeable version's next
-  // sentence complimented the audience ("the expertise at Codeable is well known and respected"). There is
-  // no sourced equivalent for this one, so it is OMITTED and nothing is substituted for it. Inventing
-  // audience flattery is what put a fabricated origin story live and into syndication on 2026-07-30.
-  // "The network's top tier" is also GONE: true of creator, false of member. See the tier note above.
-  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. Your invite covers a full year at the ${TIER_LABEL} tier, with no card required, and nothing bills automatically. If you choose to stay, it is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD}.`],
+  ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
+  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. This is a private invitation, so your first year at the ${TIER_LABEL} tier is on us.`],
 ];
+
 
 const year = new Date().getFullYear();
 ---
