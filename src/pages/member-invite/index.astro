@@ -196,13 +196,13 @@ const year = new Date().getFullYear();
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
       <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
-      <!-- Numbered two-up cards, per the design. The number is presentation (the position in the list); the
-           title and body are both yml fields, so nothing here writes a benefit claim. -->
+      <!-- Two-up cards. The design numbered them 01-04 above each title; those indices are EYEBROWS by the
+           banned-patterns.md test (small kicker above a heading, and removing it loses nothing, since the
+           cards are already in visual order), so they are gone. Title and body are both yml fields. -->
       <div class="grid2 ci-bnum">
-        {memberBenefits.map((b, i) => (
+        {memberBenefits.map((b) => (
           <div class="card lift bcard">
             <div class="bod">
-              <div class="ci-n">{String(i + 1).padStart(2, '0')}</div>
               <h3>{b.label}</h3>
               {b.description && <p>{b.description}</p>}
             </div>
@@ -453,8 +453,7 @@ const year = new Date().getFullYear();
   @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
   .ci-bnum .card.bcard { padding: 0; }
   .ci-bnum .bod { padding: 20px; }
-  .ci-bnum .ci-n { font-family: var(--f-mono); font-size: 12px; color: var(--ci-green); }
-  .ci-bnum h3 { font-size: 18px; font-weight: 700; margin: 8px 0 0; color: var(--ci-fg); }
+  .ci-bnum h3 { font-size: 18px; font-weight: 700; margin: 0; color: var(--ci-fg); }
   .ci-bnum p { color: var(--ci-mute); font-size: 14.5px; margin: 6px 0 0; }
 
   /* Hero pill + mono meta row. */
