@@ -28,7 +28,6 @@ import { REF_COOKIE, REF_VIA_COOKIE } from '../../lib/referral';
 import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../../lib/touch.mjs';
 import {
   BILLING_PERIOD,
-  INVITE_PCT,
   TURNSTILE_SITE_KEY,
   SIGNUP_BASE,
 } from '../../lib/membership';
@@ -72,7 +71,6 @@ const TIER_PRICE_LABEL = `$${memberTier?.priceAnnual ?? 50}`;
 // your feed. Revenue is the INVITE lane only. If you are about to add a card here because the page looks
 // thin, add the benefit to the yml (where it is reviewed) or leave the page thin.
 const memberBenefits = memberTier?.benefits ?? [];
-const memberRevenue = memberTier?.revenue ?? '';
 
 // Every FAQ that sold a Creator benefit is GONE rather than reworded, because rewording means hand-writing
 // claims again one file away from the thing that just broke. Cut: the editorial-submissions answer and the
@@ -81,10 +79,9 @@ const memberRevenue = memberTier?.revenue ?? '';
 // the network is, and how member-only content works. Kept unchanged: comments, the invite lane, and the
 // founding story.
 const faqs = [
-  ['What is the GBTI Network?', 'A professional publishing network for developers. Members read and discuss the work published across it, take part in a private community, and earn on the members they bring in. Publishing your own articles, products and prompts is the Content Creator tier.'],
+  ['What is the GBTI Network?', 'A professional publishing network for developers. Members read and discuss the work published across it and take part in a private community. Publishing your own articles, products and prompts is the Content Creator tier.'],
   ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
   ['How is the network built?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo. There is no traditional CMS and no separate content database, and the static site is the published read-view. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
-  ['Do members earn for inviting people?', `Yes. A personal invite link earns a flat ${INVITE_PCT} lifetime commission when someone joins through it, for as long as they keep paying.`],
   ['Is all content public or private?', 'Both. Some work is published openly, and some is network-only. For network-only work, a stub with a short description appears on the public website, while the full content is readable by members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
   // The founding story is REUSED verbatim in substance (owner, 2026-08-15: it is true for this audience
@@ -133,8 +130,8 @@ const year = new Date().getFullYear();
           <p class="ci-pill"><span class="dot" aria-hidden="true"></span>Private invitation</p>
           <h1>Your first year<br />on us.</h1>
           <p class="lead">GBTI is a professional publishing network for developers. Read the work published
-            across it, join the conversation, and earn on the members you bring in: a full year at the
-            {' '}{TIER_LABEL} tier, no card required.</p>
+            across it and join the conversation: a full year at the{' '}{TIER_LABEL} tier, no card
+            required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
             <a href="#benefits" class="btn-ghost">What you get</a>
@@ -150,7 +147,7 @@ const year = new Date().getFullYear();
              stay on screen while the reader scrolls the benefits. -->
         <div id="claim" class="ci-claim">
           <div class="ci-claim-top">
-            <span class="eyebrow">{TIER_LABEL}</span>
+            <span class="ci-tier">{TIER_LABEL}</span>
             <span class="ci-was">{TIER_PRICE_LABEL}/yr</span>
           </div>
           <div class="ci-price">Year one free</div>
@@ -198,7 +195,6 @@ const year = new Date().getFullYear();
 
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
-      <p class="eyebrow">Why members join</p>
       <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
       <!-- Numbered two-up cards, per the design. The number is presentation (the position in the list); the
            title and body are both yml fields, so nothing here writes a benefit claim. -->
@@ -213,21 +209,10 @@ const year = new Date().getFullYear();
           </div>
         ))}
       </div>
-      {memberRevenue && (
-        <div class="ci-lane">
-          <div class="ci-lane-pct">{INVITE_PCT}</div>
-          <div class="ci-lane-body">
-            <h3>Earn for life on everyone you invite</h3>
-            <!-- The claim itself is the yml revenue line. The heading above is framing, not a new promise. -->
-            <p>{memberRevenue}</p>
-          </div>
-        </div>
-      )}
     </section>
 
     <!-- ================= FAQ ================= -->
     <section id="faq" class="ci-sec ci-faq">
-      <p class="eyebrow tcenter">Questions and answers</p>
       <h2 class="tcenter">Network FAQ</h2>
       <div class="ci-faq-list">
         {faqs.map(([q, a]) => (
@@ -246,7 +231,7 @@ const year = new Date().getFullYear();
       <div class="ci-close">
         <h2>Ready when you are</h2>
         <p>Your coupon covers the first year. Sign in with GitHub and you are in: commenting, Discord,
-          members-only reading, and your referral link.</p>
+          and members-only reading.</p>
         <a href="#claim" class="btn-primary">Claim your free year</a>
         <!-- The design ended this line with "expires when the invite closes". DROPPED, because it is not
              true: every live coupon carries `expiresAt: null`, so none of them expires. The code is shown
@@ -426,7 +411,7 @@ const year = new Date().getFullYear();
   .ci-claim { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 7px; padding: 26px; align-self: start; position: sticky; top: 88px; }
   @media (max-width: 960px) { .ci-claim { position: static; } }
   .ci-claim-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .ci-claim-top .eyebrow { margin: 0; letter-spacing: .09em; }
+  .ci-tier { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--ci-green); }
   .ci-was { font-family: var(--f-mono); font-size: 13px; color: var(--ci-mute); text-decoration: line-through; }
   .ci-price { font-family: var(--f-display); font-weight: 700; font-size: 40px; line-height: 1.1; color: var(--ci-fg); margin-top: 8px; }
   .ci-sub { color: var(--ci-mute); font-size: 14px; margin-top: 6px; }
@@ -471,14 +456,6 @@ const year = new Date().getFullYear();
   .ci-bnum .ci-n { font-family: var(--f-mono); font-size: 12px; color: var(--ci-green); }
   .ci-bnum h3 { font-size: 18px; font-weight: 700; margin: 8px 0 0; color: var(--ci-fg); }
   .ci-bnum p { color: var(--ci-mute); font-size: 14.5px; margin: 6px 0 0; }
-
-  /* The referral band. The percentage is the shared INVITE_PCT constant, not a literal, so it cannot drift
-     from the revenue model the rest of the site quotes. */
-  .ci-lane { margin-top: 14px; border: 1.5px solid var(--ci-green-ink); background: linear-gradient(100deg, color-mix(in srgb, var(--ci-green-ink) 16%, transparent), color-mix(in srgb, var(--ci-green-ink) 4%, transparent)); padding: 24px 26px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; border-radius: 7px; }
-  .ci-lane-pct { font-family: var(--f-display); font-weight: 700; font-size: 44px; color: var(--ci-green); line-height: 1; }
-  .ci-lane-body { flex: 1; min-width: 260px; }
-  .ci-lane-body h3 { font-size: 19px; font-weight: 700; margin: 0; color: var(--ci-fg); }
-  .ci-lane-body p { color: var(--ci-mute); font-size: 14.5px; margin: 4px 0 0; }
 
   /* Hero pill + mono meta row. */
   .ci-pill { display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--ci-green-ink); background: color-mix(in srgb, var(--ci-green-ink) 12%, transparent); color: var(--ci-green); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; padding: 5px 11px; margin: 0; border-radius: 7px; }

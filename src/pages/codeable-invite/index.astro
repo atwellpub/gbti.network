@@ -19,11 +19,6 @@ import { REF_COOKIE, REF_VIA_COOKIE } from '../../lib/referral';
 import { TOUCH_CAPTURE_ENABLED, TOUCH_SID_COOKIE } from '../../lib/touch.mjs';
 import {
   BILLING_PERIOD,
-  FIRST_TOUCH_PCT,
-  LAST_TOUCH_PCT,
-  COLLAB_POOL_PCT,
-  PLATFORM_RETAINED_PCT,
-  INVITE_PCT,
   TURNSTILE_SITE_KEY,
   SIGNUP_BASE,
 } from '../../lib/membership';
@@ -38,12 +33,6 @@ const creator = tierDisplay('creator');
 const CREATOR_LABEL = creator?.label ?? 'Content Creator';
 const CREATOR_PRICE_LABEL = `$${creator?.priceAnnual ?? 150}`;
 
-const splits = [
-  { pct: FIRST_TOUCH_PCT, cls: 'green', name: 'First touch', body: 'Owner of the first eligible article, product, or prompt the member touched.' },
-  { pct: LAST_TOUCH_PCT, cls: 'green', name: 'Last touch', body: 'Owner of the final eligible item they touched before converting.' },
-  { pct: COLLAB_POOL_PCT, cls: 'amber', name: 'Collaboration pool', body: 'Split evenly among members who commented on or improved those items.' },
-  { pct: PLATFORM_RETAINED_PCT, cls: 'plain', name: 'Platform & community', body: 'Funds hosting, tooling, the weekly sessions, and running the network.' },
-];
 
 // Card imagery: Pexels photos (free license, no attribution required), committed as 800x480 (5:3) webp.
 const benefits = [
@@ -52,16 +41,13 @@ const benefits = [
   { name: 'Gated member content', body: 'Create gated articles, products, prompts, and downloads that enrich the network and give new members a reason to join.' },
   { name: 'Network syndication', body: 'The network distributes and promotes member work across social channels, so useful work travels further than it would alone.' },
   { name: 'Specialized member tools', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
-  { name: 'Shared member upside', body: 'A portion of membership revenue is shared back with members whose published work and contributions help grow the network.' },
 ];
 
 const faqs = [
-  ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, distribution support, and a revenue-sharing model for member-created value.'],
+  ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, and distribution support.'],
   ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
   ['What kind of content does the editorial team accept?', 'As a brand, GBTI can support a wide range of ideas and creative work. Our initial content will explore entertainment, education, technology, health, blockchain, developer relations, artificial intelligence, music, gaming, homesteading, and other subjects that interest our members. Members interested in publishing through GBTI can find our participation handbook inside the members area.'],
   ['How is my content and data stored?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo, and members publish by opening a pull request, by hand or through their own AI agents. There is no traditional CMS and no separate content database. The static site is the published read-view, and each member's client is their authoring node. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
-  ['How does revenue sharing work?', `Every conversion is divided the same way: ${FIRST_TOUCH_PCT} to the first-touch content owner, ${LAST_TOUCH_PCT} to the last-touch owner, ${COLLAB_POOL_PCT} to a collaboration pool for those who commented or contributed, and the rest to the platform. Content owners do not decide what counts. If a contribution is accepted or a comment is published, the model pays it automatically.`],
-  ['Do members earn for inviting people?', `Yes. A personal invite link earns a flat ${INVITE_PCT} lifetime commission when someone joins through it, paid out of the platform share so content owners are never diluted. If you already earn a content share on the same conversion, you take the larger content share instead.`],
   ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
   ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
@@ -89,7 +75,6 @@ const year = new Date().getFullYear();
         </a>
         <nav class="ci-links" aria-label="Sections">
           <a href="#network">The network</a>
-          <a href="#revenue">Revenue model</a>
           <a href="#shoptalk">Shop talk</a>
           <a href="#benefits">Membership</a>
           <a href="#faq">FAQ</a>
@@ -105,10 +90,9 @@ const year = new Date().getFullYear();
     <div class="ci-hero">
       <div class="ci-hero-in">
         <div>
-          <p class="eyebrow">Your Codeable invite</p>
           <h1>Welcome, Codeable experts!</h1>
           <p class="lead">GBTI is a professional publishing network for developers. Publish under your own
-            name, share in the revenue, and build with people who ship. Your Codeable invite covers a full
+            name and build with people who ship. Your Codeable invite covers a full
             year of Content Creator membership: full network participation, including content creation, no
             card required.</p>
           <div class="ci-cta-row">
@@ -117,12 +101,10 @@ const year = new Date().getFullYear();
           </div>
           <div class="ci-ticks">
             <span>&#10003; &nbsp;Publish under your own name</span>
-            <span>&#10003; &nbsp;Revenue share built in</span>
             <span>&#10003; &nbsp;Weekly shop talk</span>
           </div>
         </div>
         <div id="claim" class="ci-claim">
-          <p class="eyebrow tcenter" style="margin-bottom:0">{CREATOR_LABEL} membership</p>
           <div class="ci-price">Year one free</div>
           <div class="ci-sub">then {CREATOR_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
           <div class="ci-rule"></div>
@@ -145,8 +127,7 @@ const year = new Date().getFullYear();
 
     <!-- ================= WHY A NETWORK ================= -->
     <section id="network" class="ci-sec">
-      <p class="eyebrow">Why a network</p>
-      <h2 style="max-width:20ch">A home for your work, with the earning path most collectives leave out</h2>
+      <h2 style="max-width:20ch">A home for your work, without a site to run</h2>
       <p class="sec-lead">Most independent creators want to publish and be found, without standing up a CMS
         or paying to host and maintain a site. The network handles that, surfaces work to AI assistants, and
         adds the one thing most publishing collectives leave out.</p>
@@ -170,47 +151,18 @@ const year = new Date().getFullYear();
         <div class="card lift bcard">
           <div class="bod">
             <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
-            <h3>Publishing with an earning path</h3>
-            <p>Most collectives stop at distribution. Here, the work that brings members in earns a share for
-              the people who made it.</p>
+            <h3>Built around the people who ship</h3>
+            <p>A working network of professionals, not an audience. Members read each other, comment, and
+              improve each other's work.</p>
           </div>
         </div>
       </div>
-    </section>
-
-    <!-- ================= REVENUE MODEL ================= -->
-    <section id="revenue" class="ci-sec">
-      <p class="eyebrow">The revenue model</p>
-      <h2 style="max-width:22ch">Member work creates value at every touch, and each one can earn</h2>
-      <p class="sec-lead">A reader might discover the network through an article, come back through a
-        product, read the comments, and notice what members improved before they join. In this network,
-        those touches matter, and each one can earn. A portion of every membership is shared back with the
-        members whose work drove it.</p>
-      <div class="grid4">
-        {splits.map((s) => (
-          <div class="card bcard">
-            <div class="bod">
-              <div class={`pct ${s.cls}`}>{s.pct}</div>
-              <div class="pct-name">{s.name}</div>
-              <p class="pct-body">{s.body}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div class="ci-invite-lane">
-        <div class="ic"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/></svg></div>
-        <p>Members can also share a personal invite link that earns a flat
-          <strong>{INVITE_PCT} lifetime commission</strong> on anyone who joins through it. It is paid out
-          of the platform share, so first-touch and last-touch content owners are never diluted.</p>
-      </div>
-      <p class="ci-more"><a href="/revenue-model/">See the full split and worked examples &rarr;</a></p>
     </section>
 
     <!-- ================= SHOP TALK ================= -->
     <div id="shoptalk" class="ci-band">
       <div class="ci-band-in">
         <div>
-          <p class="eyebrow">Weekly shop talk</p>
           <h2 style="max-width:18ch">Where we meet, and hold ourselves accountable to progress</h2>
           <p class="sec-lead" style="max-width:52ch">Members gather for a recurring two-hour session to talk
             through product development, track progress, share knowledge, set goals, and keep each other
@@ -241,7 +193,6 @@ const year = new Date().getFullYear();
 
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
-      <p class="eyebrow">Why members join</p>
       <h2 style="max-width:20ch">What membership gives you</h2>
       <p class="sec-lead">Built for professionals who want a place to publish useful work, improve alongside
         other members, and belong to a network that rewards contribution.</p>
@@ -256,7 +207,6 @@ const year = new Date().getFullYear();
 
     <!-- ================= FAQ ================= -->
     <section id="faq" class="ci-sec ci-faq">
-      <p class="eyebrow tcenter">Questions and answers</p>
       <h2 class="tcenter">Network FAQ</h2>
       <div class="ci-faq-list">
         {faqs.map(([q, a]) => (
@@ -464,10 +414,6 @@ const year = new Date().getFullYear();
   .pct.green { color: var(--ci-green); } .pct.amber { color: var(--ci-amber); } .pct.plain { color: var(--ci-fg); }
   .pct-name { font-weight: 600; font-size: 14.5px; color: var(--ci-fg); margin: 6px 0 5px; }
   .pct-body { font-size: 13px; line-height: 1.5; color: var(--ci-soft); margin: 0; }
-  .ci-invite-lane { display: flex; gap: 14px; align-items: flex-start; background: var(--ci-sunk); border: 1px solid var(--ci-line); border-radius: 7px; padding: 20px 22px; margin-top: 18px; }
-  .ci-invite-lane .ic { width: 38px; height: 38px; margin: 0; }
-  .ci-invite-lane p { font-size: 14px; line-height: 1.6; color: var(--ci-soft); margin: 0; }
-  .ci-invite-lane strong { color: var(--ci-fg); }
   .ci-more { margin-top: 22px; }
   .ci-more a { font-weight: 600; font-size: 15px; }
 
