@@ -340,15 +340,18 @@ test('authorizeCreator: a grandfathered member pinned to tier:member is DENIED (
 // (LINKEDINCONNECT) redeemer is a Network Member, so the write gate must DENY creator; a legacy tierless
 // grant still falls back to creator.
 test('authorizeCreator: a MEMBER-tier coupon redeemer is DENIED creator (sow-142; the fast-path honors grant.tier)', async () => {
+  const mirror = freshMirror(); // create once, so generatedAt precedes resolveEffective's captured now (avoids the ageMs<0 fail-closed guard)
   const coupon = { until: new Date(Date.now() + 86_400_000).toISOString(), tier: 'member' };
-  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? freshMirror() : coupon) };
+  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? mirror : coupon) };
   const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ ...PRICE_ENV, SIGNUP_KV: kv }), deps('7', () => null));
   assert.equal(r.ok, false, 'a member-tier coupon must not confer creator on the write gate');
   assert.equal(r.status, 403);
+  assert.match(r.body.message, /Content Creator/, 'denied for TIER (creator-gated), not a fail-closed mirror error');
 });
 test('authorizeCreator: a legacy TIERLESS coupon redeemer is admitted as creator (fallback preserved)', async () => {
+  const mirror = freshMirror(); // create once, so generatedAt precedes resolveEffective's captured now (avoids the ageMs<0 fail-closed guard)
   const coupon = { until: new Date(Date.now() + 86_400_000).toISOString() }; // no tier field
-  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? freshMirror() : coupon) };
+  const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? mirror : coupon) };
   const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ ...PRICE_ENV, SIGNUP_KV: kv }), deps('7', () => null));
   assert.equal(r.ok, true);
   assert.equal(r.tier, 'creator');
