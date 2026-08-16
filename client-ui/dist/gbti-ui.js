@@ -4864,6 +4864,25 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     };
   }
 
+  // membership/tiers.mjs
+  var TIER = Object.freeze({
+    none: "none",
+    // not paid, or paid for something we cannot identify (see tierForPrice)
+    member: "member",
+    // Network Member: $5 monthly / $50 annual
+    creator: "creator"
+    // Content Creator: $15 monthly / $150 annual
+  });
+  var TIER_LABEL = Object.freeze({
+    [TIER.none]: "",
+    [TIER.member]: "Network Member",
+    [TIER.creator]: "Content Creator"
+  });
+  function tierLabel(tier) {
+    return TIER_LABEL[tier] ?? "";
+  }
+  var RANK3 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
+
   // client-ui/src/elements/gbti-superadmin-dashboard.mjs
   var SITE3 = "https://gbti.network";
   var CSS9 = `
@@ -4885,6 +4904,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .tag.staff { background:rgba(31,158,95,.14); color:var(--accent); }
   .tag.gf { background:rgba(201,150,43,.16); color:#a1741a; }
   .tag.ban { background:rgba(224,108,108,.16); color:var(--danger); }
+  .tag.tier { background:rgba(31,158,95,.12); color:var(--accent); } /* sow-229: the effective membership tier */
+  .tag.gf.soon { box-shadow:inset 0 0 0 1px rgba(201,150,43,.7); } /* sow-229: a bounded grant expiring soon */
+  /* sow-229: a coupon grant redeemed in KV but not yet folded into git. DASHED, so a pending (edge-state)
+     grant never reads the same as a folded (authoritative) one. */
+  .tag.pending { background:transparent; color:var(--muted); border:1px dashed var(--line); font-weight:600; }
   .stat { font-size:11.5px; font-weight:700; border-radius:999px; padding:2px 10px; white-space:nowrap; background:var(--hover); color:var(--muted); }
   .stat.ok { background:rgba(31,158,95,.14); color:var(--accent); }
   .stat.tr { background:rgba(201,150,43,.16); color:#a1741a; }
@@ -5094,8 +5118,21 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const av = m.username ? `<img class="av" src="https://github.com/${encodeURIComponent(m.username)}.png?size=52" alt="" loading="lazy" data-avfor="${u}" />` : `<span class="av"></span>`;
         const tags = [];
         if (m.banned) tags.push(`<span class="tag ban">banned</span>`);
+        const tierName = tierLabel(m.tier);
+        if (tierName) tags.push(`<span class="tag tier">${esc(tierName)}</span>`);
         if ((ROLE_RANK[m.role] ?? 0) > 0) tags.push(`<span class="tag staff">${esc(m.role)}</span>`);
-        if (m.grandfathered) tags.push(`<span class="tag gf">grandfathered${m.grandfatherUntil ? ` · until ${esc(String(m.grandfatherUntil).slice(0, 10))}` : ""}</span>`);
+        if (m.grandfathered) {
+          const prov = m.couponCode ? ` · ${esc(m.couponCode)}` : "";
+          const until = m.grandfatherUntil ? ` · until ${esc(String(m.grandfatherUntil).slice(0, 10))}` : "";
+          const soon = typeof m.expiresInDays === "number" && m.expiresInDays >= 0 && m.expiresInDays <= 30 ? " soon" : "";
+          tags.push(`<span class="tag gf${soon}">grandfathered${prov}${until}</span>`);
+        }
+        if (m.pendingGrant) {
+          const pt = tierLabel(m.pendingGrant.tier);
+          const pc = m.pendingGrant.code ? ` ${esc(m.pendingGrant.code)}` : "";
+          const pu = m.pendingGrant.until ? ` · until ${esc(String(m.pendingGrant.until).slice(0, 10))}` : "";
+          tags.push(`<span class="tag pending" title="Redeemed but not yet recorded in git. Reconcile folds it within a day.">pending${pt ? " " + esc(pt) : ""}${pc}${pu}</span>`);
+        }
         if (!tags.length) tags.push(`<span class="dash">—</span>`);
         const n = this._counts && m.username ? this._counts[m.username.toLowerCase()] || 0 : null;
         const content = n == null ? `<span class="dash">—</span>` : esc(n);
@@ -5105,8 +5142,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         return main + panel;
       }).join("");
       this.set(this.css(CSS9) + `${chips}
-      <table><thead><tr><th>Member</th><th>Status</th><th>Overrides</th><th>Content</th><th>github_id</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No members known yet.</td></tr>'}</tbody></table>
-      <p class="note">Effective status follows ban &gt; staff &gt; grandfather &gt; Stripe. Member actions open a house PR and take effect once it merges. The live Stripe tier shows when the admin Stripe endpoint is reachable; the override tiers (ban / staff / grandfather) are always authoritative from the public repo.</p>
+      <table><thead><tr><th>Member</th><th>Status</th><th>Tier &amp; flags</th><th>Content</th><th>github_id</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No members known yet.</td></tr>'}</tbody></table>
+      <p class="note">Effective status and tier follow ban &gt; staff &gt; grandfather &gt; Stripe. The override tiers (ban / staff / grandfather) are always authoritative from the public repo; the live Stripe tier shows when the admin Stripe endpoint is reachable. A <b>pending</b> (dashed) tag is a coupon grant a member has redeemed but reconcile has not yet folded into the repo: it is an annotation, not effective access yet, and it clears once the grant is recorded. Member actions open a house PR and take effect once it merges.</p>
       ${this._pullsSection()}
       ${this._opsSection()}`);
       this.$$("[data-avfor]").forEach((img) => img.addEventListener("error", () => {
@@ -7682,8 +7719,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     _autoshareCard() {
       const e = this._engagement;
       if (!e) return "";
-      const tierLabel = { paid: "Paid members only", "paid-trial": "Trial + paid", "signed-in": "Any signed-in member" };
-      const tierOpts = (this._tiers || []).map((t) => `<option value="${esc(t)}"${e.tier === t ? " selected" : ""}>${esc(tierLabel[t] || t)}</option>`).join("");
+      const tierLabel2 = { paid: "Paid members only", "paid-trial": "Trial + paid", "signed-in": "Any signed-in member" };
+      const tierOpts = (this._tiers || []).map((t) => `<option value="${esc(t)}"${e.tier === t ? " selected" : ""}>${esc(tierLabel2[t] || t)}</option>`).join("");
       return `<section class="card" id="sec-autoshare" data-sec>
       <div class="card-h"><span class="hi"><svg viewBox="0 0 24 24"><use href="#c-share"/></svg></span>
         <div><h2>News auto-share</h2><p>Posts a news item to its mapped category channel once engagement crosses a threshold.</p></div>
@@ -7718,8 +7755,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     _contentEngagementCard() {
       const e = this._contentEng;
       if (!e) return "";
-      const tierLabel = { paid: "Paid members only", "paid-trial": "Trial + paid", "signed-in": "Any signed-in member" };
-      const tierOpts = (this._contentTiers || []).map((t) => `<option value="${esc(t)}"${e.tier === t ? " selected" : ""}>${esc(tierLabel[t] || t)}</option>`).join("");
+      const tierLabel2 = { paid: "Paid members only", "paid-trial": "Trial + paid", "signed-in": "Any signed-in member" };
+      const tierOpts = (this._contentTiers || []).map((t) => `<option value="${esc(t)}"${e.tier === t ? " selected" : ""}>${esc(tierLabel2[t] || t)}</option>`).join("");
       const signalLabel = { opens: "Opens", favorites: "Favorites", upvotes: "Upvotes", comments: "Comments" };
       const signals = e.signals || {};
       const sigChips = (this._contentSignals || ["opens", "favorites", "upvotes", "comments"]).map((s) => `<span class="chan${signals[s] ? " on" : ""}" data-ceng-signal="${esc(s)}" role="checkbox" aria-checked="${signals[s] ? "true" : "false"}" tabindex="0"><span class="cbx"><svg viewBox="0 0 24 24"><use href="#c-check"/></svg></span>${esc(signalLabel[s] || s)}</span>`).join("");
@@ -12576,7 +12613,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 
   // client/src/roles.mjs
   var ROLE = Object.freeze({ member: "member", moderator: "moderator", admin: "admin", superadmin: "superadmin" });
-  var RANK3 = Object.freeze({ member: 0, moderator: 1, admin: 2, superadmin: 3 });
+  var RANK4 = Object.freeze({ member: 0, moderator: 1, admin: 2, superadmin: 3 });
 
   // client/src/membership.mjs
   var STAFF = /* @__PURE__ */ new Set([ROLE.moderator, ROLE.admin, ROLE.superadmin]);
@@ -17761,7 +17798,7 @@ From the author:
     { id: "settings", label: "Settings", tag: "gbti-settings" },
     { id: "admin", label: "Admin", tag: "gbti-admin", minRole: "moderator" }
   ];
-  var RANK4 = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
+  var RANK5 = { member: 0, moderator: 1, admin: 2, superadmin: 3 };
   var GbtiApp = class extends GbtiElement {
     constructor() {
       super();
@@ -17778,7 +17815,7 @@ From the author:
       } catch {
         this.role = "member";
       }
-      const tabs = TABS3.filter((t) => !t.minRole || RANK4[this.role] >= RANK4[t.minRole]);
+      const tabs = TABS3.filter((t) => !t.minRole || RANK5[this.role] >= RANK5[t.minRole]);
       const active = tabs.find((t) => t.id === this.active) ? this.active : "author";
       this.set(
         this.css(`

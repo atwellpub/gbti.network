@@ -9,8 +9,10 @@ export class AdminClientError extends Error {}
 
 /**
  * The Stripe roster maps for the superadmin dashboard. Admin-only (the Worker enforces it). Returns
- * { statuses: { github_id -> stripe status }, logins: { github_id -> github_login } }; the logins feed the
- * SOW-091 username fallback for a paid/trial member with no published content.
+ * { statuses: { github_id -> stripe status }, tiers: { github_id -> tier }, logins: { github_id -> github_login },
+ * pendingGrants: { github_id -> { code, until, tier } } }. `logins` feeds the SOW-091 username fallback;
+ * `tiers` is the live Stripe tier (sow-229); `pendingGrants` are coupon redemptions in KV that reconcile has
+ * not yet folded into git (sow-229, a display annotation only).
  */
 export async function getRosterStatuses({ token, signupBase, fetch = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError('not signed in');
@@ -21,7 +23,7 @@ export async function getRosterStatuses({ token, signupBase, fetch = globalThis.
   let data = null;
   try { data = await res.json(); } catch { /* ignore */ }
   if (!res.ok) throw new AdminClientError(data?.message || data?.error || `admin statuses request failed (${res.status})`);
-  return { statuses: data?.statuses ?? {}, logins: data?.logins ?? {} };
+  return { statuses: data?.statuses ?? {}, tiers: data?.tiers ?? {}, logins: data?.logins ?? {}, pendingGrants: data?.pendingGrants ?? {} };
 }
 
 /** SOW-100: the guild's Discord channels (id, name, type, parentId) for the categories workspace.

@@ -18934,6 +18934,11 @@ var TIER = Object.freeze({
   creator: "creator"
   // Content Creator: $15 monthly / $150 annual
 });
+var TIER_LABEL = Object.freeze({
+  [TIER.none]: "",
+  [TIER.member]: "Network Member",
+  [TIER.creator]: "Content Creator"
+});
 var RANK2 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
 
 // membership/classify-pr.mjs
@@ -18954,6 +18959,16 @@ function isContributionToFolder(paths, ownerFolder) {
     return CONTENT_DIRS.includes(p.slice(prefix.length).split("/")[0]);
   });
 }
+
+// membership/checkout-prices.mjs
+var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
+var PRICE_ENV = Object.freeze({
+  [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
+  [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
+});
+
+// membership/tier-gate.mjs
+var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
 
 // client/src/operations.mjs
 var CLIENT_VERSION = "0.1.0";

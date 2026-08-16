@@ -1799,8 +1799,8 @@ export async function getOnboardingStatus(ctx) {
 // OVERRIDE-derived effective status (ban > staff > grandfather). ADMIN-gated: the caller's own role is derived
 // from the roles.yml this op already reads, so it needs no host role() and works in both hosts. Governance status
 // (who is banned/grandfathered) is sensitive, so it is never published — it only flows to an admin+ caller here.
-// Live per-member Stripe paid/trial is NOT included (it needs a Stripe-key Worker endpoint); buildRoster marks
-// that tier 'unknown'.
+// The live per-member Stripe status + tier and any pending KV coupon grant come from the admin Worker endpoint
+// below (best-effort); without it the override-derived status still renders and the Stripe status is 'unknown'.
 // Admin gate for the superadmin surfaces. Derives the caller's OWN role from the roles.yml it reads (no
 // dependency on a host-provided role(), so it works identically in both hosts), fail-closed. Returns the parsed
 // roles + a reader so a caller that also needs the other house files does not re-read roles.yml.
@@ -1820,20 +1820,25 @@ export async function getOverridesRoster(ctx) {
     readText('house/grandfathered.yml').then((t) => yaml.load(t) || {}),
     readText('house/members-index.yml').then((t) => yaml.load(t) || {}),
   ]);
-  // Best-effort: merge the live Stripe tier from the admin Worker endpoint (SOW-038 P2). On any failure (the
-  // Worker is down, test mode, or the caller is not admin to it) the roster still renders with 'unknown' Stripe
-  // tiers — the override-derived status (the authoritative part) never depends on this call.
+  // Best-effort: merge the live Stripe status + tier (sow-185/sow-229) and any pending KV coupon grant (sow-229)
+  // from the admin Worker endpoint. On any failure (the Worker is down, test mode, or the caller is not admin to
+  // it) the roster still renders with 'unknown' Stripe status and no tier/pending annotation — the
+  // override-derived status (the authoritative part) never depends on this call.
   let stripeStatuses = null;
   let stripeLogins = null; // SOW-091: the github_id -> github_login map, to name a member with no content
+  let stripeTiers = null;   // sow-229: the live Stripe tier per member
+  let pendingGrants = null; // sow-229: redeemed-but-unfolded coupon grants (KV), a display annotation only
   try {
     const token = ctx.store?.get?.('githubToken');
     if (token) {
       const r = await workerGetRosterStatuses({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
       stripeStatuses = r?.statuses ?? null;
       stripeLogins = r?.logins ?? null;
+      stripeTiers = r?.tiers ?? null;
+      pendingGrants = r?.pendingGrants ?? null;
     }
-  } catch { stripeStatuses = null; stripeLogins = null; }
-  return buildRoster({ roles: rolesParsed, bans: bansParsed, grandfathered: gfParsed, membersIndex: idxParsed, stripeStatuses, stripeLogins });
+  } catch { stripeStatuses = null; stripeLogins = null; stripeTiers = null; pendingGrants = null; }
+  return buildRoster({ roles: rolesParsed, bans: bansParsed, grandfathered: gfParsed, membersIndex: idxParsed, stripeStatuses, stripeLogins, stripeTiers, pendingGrants });
 }
 
 // SOW-038 P2: the open content-PR queue for the superadmin dashboard. Admin-gated. Lists every OPEN upstream PR

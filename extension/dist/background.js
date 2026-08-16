@@ -19047,7 +19047,13 @@ var TIER = Object.freeze({
   creator: "creator"
   // Content Creator: $15 monthly / $150 annual
 });
+var TIER_LABEL = Object.freeze({
+  [TIER.none]: "",
+  [TIER.member]: "Network Member",
+  [TIER.creator]: "Content Creator"
+});
 var RANK2 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
+var isTier = (t) => Object.prototype.hasOwnProperty.call(RANK2, t);
 
 // membership/classify-pr.mjs
 var CONTENT_DIRS = ["posts", "products", "prompts", "comments"];
@@ -19068,8 +19074,43 @@ function isContributionToFolder(paths, ownerFolder) {
   });
 }
 
+// membership/checkout-prices.mjs
+var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
+var PRICE_ENV = Object.freeze({
+  [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
+  [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
+});
+
+// membership/tier-gate.mjs
+var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
+function grantTier(grant) {
+  const t = grant?.tier;
+  return isTier(t) && t !== TIER.none ? t : TIER.creator;
+}
+function resolveEffectiveTier({ source, status, stripeTier = TIER.none, grant = null } = {}) {
+  switch (source) {
+    case "ban":
+      return TIER.none;
+    case "staff":
+      return TIER.creator;
+    case "grandfather":
+      return grantTier(grant);
+    case "stripe":
+      return status === "paid" && isTier(stripeTier) ? stripeTier : TIER.none;
+    default:
+      return TIER.none;
+  }
+}
+
 // membership/superadmin-roster.mjs
-function buildRoster({ roles, bans, grandfathered, membersIndex, stripeStatuses, stripeLogins } = {}, now = /* @__PURE__ */ new Date()) {
+var COUPON_REASON_RE = /^coupon:([A-Z0-9]{3,32})$/;
+function daysUntil(until, now) {
+  if (until === void 0 || until === null || String(until).trim() === "") return null;
+  const d = new Date(until);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - now.getTime()) / 864e5);
+}
+function buildRoster({ roles, bans, grandfathered, membersIndex, stripeStatuses, stripeLogins, stripeTiers, pendingGrants } = {}, now = /* @__PURE__ */ new Date()) {
   const roleMap = rolesFromParsed2(roles);
   const roleLogins = roleLoginsFromParsed(roles);
   const banMap = bansFromParsed(bans);
@@ -19077,12 +19118,19 @@ function buildRoster({ roles, bans, grandfathered, membersIndex, stripeStatuses,
   const idx = membersIndexFromParsed(membersIndex);
   const stripe = stripeStatuses && typeof stripeStatuses === "object" ? stripeStatuses : {};
   const stripeLoginMap = stripeLogins && typeof stripeLogins === "object" ? stripeLogins : {};
+  const stripeTierMap = stripeTiers && typeof stripeTiers === "object" ? stripeTiers : {};
+  const pendingMap = pendingGrants && typeof pendingGrants === "object" ? pendingGrants : {};
   const overrides = { bans: banMap, grandfathers: gfMap, roles: roleMap };
-  const ids = /* @__PURE__ */ new Set([...idx.keys(), ...roleMap.keys(), ...banMap.keys(), ...gfMap.keys(), ...Object.keys(stripe)]);
+  const ids = /* @__PURE__ */ new Set([...idx.keys(), ...roleMap.keys(), ...banMap.keys(), ...gfMap.keys(), ...Object.keys(stripe), ...Object.keys(pendingMap)]);
   const roster = [...ids].map((id) => {
     const derived = stripe[id] || "unknown";
     const eff = effectiveStatus(id, derived, overrides, now);
     const gf = gfMap.get(id);
+    const tier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier: stripeTierMap[id] ?? TIER.none, grant: gf ?? null });
+    const grantReason = gf?.reason ?? null;
+    const couponCode = typeof grantReason === "string" ? grantReason.match(COUPON_REASON_RE)?.[1] ?? null : null;
+    const pend = pendingMap[id];
+    const pendingGrant = pend && !(typeof gf?.reason === "string" && gf.reason.startsWith("coupon:")) ? { code: pend.code ?? null, until: pend.until ?? null, tier: pend.tier ?? null } : null;
     return {
       githubId: id,
       // SOW-091: resolve the display username through every known source before falling back to the raw id, so a
@@ -19092,6 +19140,16 @@ function buildRoster({ roles, bans, grandfathered, membersIndex, stripeStatuses,
       banned: isBanned(id, banMap),
       grandfathered: grandfatherActive2(id, gfMap, now),
       grandfatherUntil: gf?.until ?? null,
+      expiresInDays: daysUntil(gf?.until, now),
+      // sow-229: derived days to expiry (null = permanent / none), for the expiry treatment
+      tier,
+      // sow-229: none | member | creator (fail closed to none)
+      grantReason,
+      // sow-229: the raw grant reason
+      couponCode,
+      // sow-229: the coupon code parsed from a `coupon:<CODE>` reason, else null
+      pendingGrant,
+      // sow-229: { code, until, tier } | null — redeemed in KV, not yet folded into git (annotation only)
       stripeStatus: stripe[id] || null,
       // the raw Stripe-derived tier (null when the admin endpoint was not consulted)
       status: eff.status,
@@ -19190,7 +19248,7 @@ async function getRosterStatuses({ token, signupBase, fetch: fetch2 = globalThis
   } catch {
   }
   if (!res.ok) throw new AdminClientError(data?.message || data?.error || `admin statuses request failed (${res.status})`);
-  return { statuses: data?.statuses ?? {}, logins: data?.logins ?? {} };
+  return { statuses: data?.statuses ?? {}, tiers: data?.tiers ?? {}, logins: data?.logins ?? {}, pendingGrants: data?.pendingGrants ?? {} };
 }
 async function getDiscordChannels({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
@@ -20733,18 +20791,24 @@ async function getOverridesRoster(ctx) {
   ]);
   let stripeStatuses = null;
   let stripeLogins = null;
+  let stripeTiers = null;
+  let pendingGrants = null;
   try {
     const token = ctx.store?.get?.("githubToken");
     if (token) {
       const r = await getRosterStatuses({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
       stripeStatuses = r?.statuses ?? null;
       stripeLogins = r?.logins ?? null;
+      stripeTiers = r?.tiers ?? null;
+      pendingGrants = r?.pendingGrants ?? null;
     }
   } catch {
     stripeStatuses = null;
     stripeLogins = null;
+    stripeTiers = null;
+    pendingGrants = null;
   }
-  return buildRoster({ roles: rolesParsed, bans: bansParsed, grandfathered: gfParsed, membersIndex: idxParsed, stripeStatuses, stripeLogins });
+  return buildRoster({ roles: rolesParsed, bans: bansParsed, grandfathered: gfParsed, membersIndex: idxParsed, stripeStatuses, stripeLogins, stripeTiers, pendingGrants });
 }
 async function getOpenPulls(ctx) {
   await requireAdmin(ctx);
@@ -22354,16 +22418,6 @@ function setSyndicationSettings(doc, { enabled, requireApproval, holdMinutes, ch
   if (!changed) return { next: doc, changed: false, audit: null };
   return { next: d, changed: true, audit: { ...auditEntry6(ctx, "settings", detail), action: "syndication-settings.set" } };
 }
-
-// membership/checkout-prices.mjs
-var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
-var PRICE_ENV = Object.freeze({
-  [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
-  [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
-});
-
-// membership/tier-gate.mjs
-var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
 
 // client/src/admin-ops.mjs
 async function adminPublish(ctx, opts) {

@@ -141,6 +141,41 @@ test('membershipAdminStatuses: a Stripe error fails closed to 502 (no partial da
   assert.equal(r.status, 502);
 });
 
+test('sow-229: statuses endpoint returns tiers (from the subscription price) and pendingGrants (from the KV binding)', async () => {
+  const customers = [
+    { metadata: { github_id: '2' }, subscriptions: { data: [{ status: 'active', items: { data: [{ price: { id: 'price_creator' } }] } }] } },
+  ];
+  const makeStripe = () => ({ async *listCustomers() { for (const c of customers) yield c; } });
+  const mirror = freshMirror();
+  // a KV that answers BOTH the auth mirror get and the redemption list/get (the Worker binding shape)
+  const kv = {
+    async get(key) {
+      if (key === 'redemption:CODEABLEYEAR:190312419') return { until: '2027-08-16T00:00:00Z', tier: 'creator', login: 'metacast' };
+      return mirror; // OVERRIDES_KV_KEY (the auth path)
+    },
+    async list({ prefix } = {}) {
+      return prefix === 'redemption:' ? { keys: [{ name: 'redemption:CODEABLEYEAR:190312419' }], list_complete: true } : { keys: [], list_complete: true };
+    },
+  };
+  const env = { SIGNUP_KV: kv, STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_ID: 'price_creator' }; // seeds price_creator -> creator
+  const r = await membershipAdminStatuses(req('admin'), env, { fetchUser, makeStripe, now });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.statuses['2'], 'paid');
+  assert.equal(r.body.tiers['2'], 'creator'); // derived from the active subscription's price
+  assert.deepEqual(r.body.pendingGrants['190312419'], { code: 'CODEABLEYEAR', until: '2027-08-16T00:00:00Z', tier: 'creator' });
+});
+
+test('sow-229: a KV list failure omits pendingGrants without failing the roster', async () => {
+  const customers = [{ metadata: { github_id: '2' }, subscriptions: { data: [{ status: 'active' }] } }];
+  const makeStripe = () => ({ async *listCustomers() { for (const c of customers) yield c; } });
+  const mirror = freshMirror();
+  const kv = { async get() { return mirror; }, async list() { throw new Error('kv down'); } };
+  const env = { SIGNUP_KV: kv, STRIPE_SECRET_KEY: 'sk_test_x' };
+  const r = await membershipAdminStatuses(req('admin'), env, { fetchUser, makeStripe, now });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.pendingGrants, {}); // fail-soft: no pending annotation, roster still renders
+});
+
 // sow-183: authorizeSuperadmin gates the hosted-authoring endpoint's cross-folder write (house/ or another
 // member's folder, for content authorship reassignment). Same fail-closed mirror gate as authorizeAdmin, but
 // the floor is superadmin, not admin -- an admin alone must NOT pass.

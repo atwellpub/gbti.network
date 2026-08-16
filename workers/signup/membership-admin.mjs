@@ -12,7 +12,9 @@
 import { githubFetchUser } from './oauth.mjs';
 import { resolveIdentity } from './identity.mjs'; // sow-161: cookie-session identity for the website admin surface
 import { rolesFromParsed, roleOf, isAdminRole, curatorsFromParsed, isCurator, canCurateNews, bansFromParsed, isBanned } from '../../membership/overrides-core.mjs';
-import { deriveStatusFromCustomer } from '../../membership/derive-status.mjs';
+import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs'; // sow-229: both axes (status + tier) from one customer
+import { buildEnvPriceTierMap } from '../../membership/tier-gate.mjs'; // sow-229: env price -> tier map for the live Stripe tier
+import { TIER } from '../../membership/tiers.mjs';
 import { createStripeClient } from '../../clients/stripe.mjs';
 import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs';
 import { wlog } from './wlog.mjs'; // SOW-124: Worker diagnostic logger (redacted)
@@ -129,10 +131,44 @@ export async function authorizeCurator(request, env, deps = {}) {
   return { ok: true, githubId: r.githubId, role: r.role, isCurator: r.isCurator };
 }
 
+// sow-229: list coupon redemptions from the Worker KV BINDING. This is deliberately NOT the REST-based
+// scripts/lib/coupon-grants.mjs listCouponRedemptions (that reader is for the Node reconcile and speaks the
+// Cloudflare KV REST API); inside the Worker we read the binding. Returns { github_id -> { code, until, tier } }
+// for every `redemption:<CODE>:<id>` record, so the roster can annotate a grant a member has redeemed but
+// reconcile has not yet folded into house/grandfathered.yml. Best-effort and fail-soft: any KV error yields {}
+// (the roster still renders, just without the pending annotation). Billing-class data, so it never leaves the
+// admin gate this endpoint already enforces.
+const REDEMPTION_KEY_RE = /^redemption:([A-Z0-9]{3,32}):(\d+)$/;
+async function listPendingGrants(env) {
+  const out = {};
+  try {
+    let cursor;
+    do {
+      const page = await env.SIGNUP_KV.list({ prefix: 'redemption:', ...(cursor ? { cursor } : {}) });
+      for (const k of page?.keys ?? []) {
+        const m = REDEMPTION_KEY_RE.exec(k.name);
+        if (!m) continue; // an unexpected key shape contributes nothing (fail closed)
+        const [, code, id] = m;
+        let value = null;
+        try { value = await env.SIGNUP_KV.get(k.name, 'json'); } catch { value = null; }
+        if (!value?.until) continue; // no recorded bound -> nothing to annotate
+        out[id] = { code, until: value.until, tier: value.tier ?? null }; // last record wins for a member with two codes
+      }
+      cursor = page?.list_complete ? '' : (page?.cursor || '');
+    } while (cursor);
+  } catch {
+    return {}; // a KV failure must not break the roster; the pending annotation is simply omitted
+  }
+  return out;
+}
+
 /**
- * GET /membership/admin/statuses — admin-only. Enumerate Stripe customers and return a { github_id -> status }
- * map (the same deriveStatusFromCustomer the reconcile job uses). A customer with no github_id metadata is
- * skipped (not a membership customer). Stripe errors fail closed to a 502 (no partial/guessed data).
+ * GET /membership/admin/statuses — admin-only. Enumerate Stripe customers and return, per github_id, the derived
+ * Stripe `status` AND `tier` (deriveMembershipFromCustomer, the same customer/subscription the reconcile job
+ * reads), plus `logins` (SOW-091) and `pendingGrants` (sow-229: redeemed-but-unfolded coupon grants read from
+ * the KV binding, an annotation for the roster). A customer with no github_id metadata is skipped. Stripe errors
+ * fail closed to a 502 (no partial/guessed data); the tier is omitted for any id that does not resolve to a real
+ * paid tier, so the roster fails closed to `none` rather than guessing creator.
  */
 export async function membershipAdminStatuses(request, env, deps = {}) {
   const auth = await authorizeAdmin(request, env, deps);
@@ -142,18 +178,23 @@ export async function membershipAdminStatuses(request, env, deps = {}) {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const stripe = (deps.makeStripe ?? createStripeClient)({ apiKey: env.STRIPE_SECRET_KEY, fetch: fetchImpl });
   const now = deps.now ?? new Date();
+  const priceTierMap = buildEnvPriceTierMap(env); // sow-229: resolve the live Stripe tier from the subscription's price
   const statuses = {};
+  const tiers = {}; // sow-229: github_id -> tier, only when a paid subscription resolves to a real tier
   const logins = {}; // SOW-091: github_id -> github_login (captured at signup) so the roster names a member with no content
   try {
     for await (const customer of stripe.listCustomers()) {
       const gid = String(customer?.metadata?.github_id ?? '');
       if (!gid) continue; // not a membership customer
-      statuses[gid] = deriveStatusFromCustomer(customer, now);
+      const { status, tier } = deriveMembershipFromCustomer(customer, { priceTierMap, now });
+      statuses[gid] = status;
+      if (tier && tier !== TIER.none) tiers[gid] = tier; // omit `none` so the roster fails closed rather than guessing
       const login = String(customer?.metadata?.github_login ?? '').trim();
       if (login) logins[gid] = login;
     }
   } catch {
     return { status: 502, body: { error: 'stripe_unavailable', message: 'could not read membership statuses' } };
   }
-  return { status: 200, body: { ok: true, statuses, logins } };
+  const pendingGrants = await listPendingGrants(env); // sow-229: best-effort; {} on any KV failure
+  return { status: 200, body: { ok: true, statuses, tiers, logins, pendingGrants } };
 }

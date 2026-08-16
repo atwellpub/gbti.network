@@ -128,3 +128,83 @@ test('buildRoster: members-index wins over the roles login; an unknown member ke
   assert.equal(by['5'].username, 'index-name'); // members-index still wins
   assert.equal(by['99'].username, null); // no login source -> null (the dashboard falls back to the raw id)
 });
+
+// sow-229: the roster now carries the TIER axis, grant provenance, expiry, and a pending-KV-grant annotation.
+test('sow-229: buildRoster resolves tier per source (staff creator, grandfather creator/member, ban none)', () => {
+  const { roster } = buildRoster({
+    roles: { superadmins: [{ github_id: '1', login: 'sa' }], admins: [{ github_id: '2', login: 'ad' }], moderators: [] },
+    bans: { bans: [{ github_id: '9', login: 'baddie' }] },
+    grandfathered: { grandfathered: [
+      { github_id: '3', login: 'founder', until: null },              // default grant -> creator
+      { github_id: '7', login: 'memb', until: null, tier: 'member' }, // explicit member grant
+    ] },
+    membersIndex: { members: { 1: 'sa', 2: 'ad', 3: 'founder', 7: 'memb', 9: 'baddie' } },
+  }, new Date('2026-06-17'));
+  const by = Object.fromEntries(roster.map((r) => [r.githubId, r]));
+  assert.equal(by['1'].tier, 'creator'); // superadmin (staff)
+  assert.equal(by['2'].tier, 'creator'); // admin (staff)
+  assert.equal(by['3'].tier, 'creator'); // grandfather, default tier
+  assert.equal(by['7'].tier, 'member');  // grandfather, explicit tier survives
+  assert.equal(by['9'].tier, 'none');    // banned -> none
+});
+
+test('sow-229: a stripe-source paid member takes its stripeTiers tier; without the map it fails closed to none', () => {
+  const withTier = buildRoster({
+    membersIndex: { members: {} },
+    stripeStatuses: { 50: 'paid', 51: 'paid' },
+    stripeTiers: { 50: 'creator' }, // 51 is absent from the tier map
+  });
+  const a = Object.fromEntries(withTier.roster.map((r) => [r.githubId, r]));
+  assert.equal(a['50'].source, 'stripe');
+  assert.equal(a['50'].tier, 'creator');
+  assert.equal(a['51'].tier, 'none'); // paid but tier unknown -> fail closed to none, never creator
+
+  const noTier = buildRoster({ membersIndex: { members: {} }, stripeStatuses: { 50: 'paid' } });
+  assert.equal(noTier.roster.find((r) => r.githubId === '50').tier, 'none'); // no stripeTiers map at all -> none
+});
+
+test('sow-229: grant provenance (couponCode) and expiresInDays are surfaced', () => {
+  const now = new Date('2026-06-17T00:00:00Z');
+  const { roster } = buildRoster({
+    grandfathered: { grandfathered: [
+      { github_id: '20', login: 'invited', until: '2027-06-17T00:00:00Z', reason: 'coupon:CODEABLEYEAR', tier: 'creator' },
+      { github_id: '21', login: 'comp', until: null, reason: 'complimentary access' },
+    ] },
+    membersIndex: { members: { 20: 'invited', 21: 'comp' } },
+  }, now);
+  const by = Object.fromEntries(roster.map((r) => [r.githubId, r]));
+  assert.equal(by['20'].grantReason, 'coupon:CODEABLEYEAR');
+  assert.equal(by['20'].couponCode, 'CODEABLEYEAR'); // parsed from the reason
+  assert.equal(by['20'].expiresInDays, 365);         // one year out
+  assert.equal(by['20'].tier, 'creator');
+  assert.equal(by['21'].couponCode, null);           // a non-coupon reason yields no code
+  assert.equal(by['21'].expiresInDays, null);        // a permanent grant -> null
+});
+
+test('sow-229: a pending KV grant is an annotation, not effective state, and is suppressed once folded', () => {
+  const now = new Date('2026-08-16T00:00:00Z');
+  // metacast: a redemption in KV; the member is otherwise only a Stripe customer (trialing), NOT yet folded.
+  const pending = buildRoster({
+    membersIndex: { members: {} },
+    stripeStatuses: { 190312419: 'trialing' },
+    pendingGrants: { 190312419: { code: 'CODEABLEYEAR', until: '2027-08-16T00:00:00Z', tier: 'creator' } },
+  }, now);
+  const row = pending.roster.find((r) => r.githubId === '190312419');
+  assert.ok(row, 'a pure-pending member is enumerated');
+  assert.deepEqual(row.pendingGrant, { code: 'CODEABLEYEAR', until: '2027-08-16T00:00:00Z', tier: 'creator' });
+  assert.equal(row.status, 'trialing'); // effective status stays Stripe-derived
+  assert.equal(row.source, 'stripe');
+  assert.equal(row.tier, 'none');       // NOT upgraded to creator by the pending grant (annotation only)
+
+  // once folded (a `coupon:` reason exists in grandfathered.yml), the pending marker is suppressed and the
+  // grant becomes effective via the grandfather source.
+  const folded = buildRoster({
+    grandfathered: { grandfathered: [{ github_id: '190312419', login: 'metacast', until: '2027-08-16T00:00:00Z', reason: 'coupon:CODEABLEYEAR', tier: 'creator' }] },
+    membersIndex: { members: { 190312419: 'metacast' } },
+    pendingGrants: { 190312419: { code: 'CODEABLEYEAR', until: '2027-08-16T00:00:00Z', tier: 'creator' } },
+  }, now);
+  const frow = folded.roster.find((r) => r.githubId === '190312419');
+  assert.equal(frow.pendingGrant, null);         // folded -> no pending marker
+  assert.equal(frow.couponCode, 'CODEABLEYEAR'); // shown as a folded coupon grant
+  assert.equal(frow.tier, 'creator');            // now effective (grandfather source)
+});

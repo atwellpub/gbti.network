@@ -1,10 +1,13 @@
 // <gbti-superadmin-dashboard> (SOW-038 P2): the admin read-view. Calls client.overrides() (GET /api/overrides,
 // admin-gated) for a roster of every known member with their OVERRIDE-derived effective status (ban > staff >
 // grandfather), computed from the public house/*.yml. Self-gates: a non-admin caller gets a quiet notice (the
-// route is the real boundary). Live per-member Stripe paid/trial is NOT shown here — that needs a Stripe-key
-// Worker endpoint (called out in the footnote). Inert in public (no client). The token never reaches the page.
+// route is the real boundary). sow-229: each row also carries the effective TIER (bound to the tierLabel
+// constant), a grant's provenance (coupon code) + expiry, and a distinct PENDING tag for a coupon redeemed in
+// KV but not yet folded into git (an annotation, never effective state). Inert in public (no client). The token
+// never reaches the page.
 import { GbtiElement, define, esc } from '../base.mjs';
 import { indexFileFor, SAVED_TYPES } from '../saved-core.mjs';
+import { tierLabel } from '../../../membership/tiers.mjs'; // sow-229: the node-free tier label; bind to the constant, never a literal (sow-226 renames it in one place)
 
 const SITE = 'https://gbti.network';
 
@@ -27,6 +30,11 @@ const CSS = `
   .tag.staff { background:rgba(31,158,95,.14); color:var(--accent); }
   .tag.gf { background:rgba(201,150,43,.16); color:#a1741a; }
   .tag.ban { background:rgba(224,108,108,.16); color:var(--danger); }
+  .tag.tier { background:rgba(31,158,95,.12); color:var(--accent); } /* sow-229: the effective membership tier */
+  .tag.gf.soon { box-shadow:inset 0 0 0 1px rgba(201,150,43,.7); } /* sow-229: a bounded grant expiring soon */
+  /* sow-229: a coupon grant redeemed in KV but not yet folded into git. DASHED, so a pending (edge-state)
+     grant never reads the same as a folded (authoritative) one. */
+  .tag.pending { background:transparent; color:var(--muted); border:1px dashed var(--line); font-weight:600; }
   .stat { font-size:11.5px; font-weight:700; border-radius:999px; padding:2px 10px; white-space:nowrap; background:var(--hover); color:var(--muted); }
   .stat.ok { background:rgba(31,158,95,.14); color:var(--accent); }
   .stat.tr { background:rgba(201,150,43,.16); color:#a1741a; }
@@ -224,8 +232,27 @@ class GbtiSuperadminDashboard extends GbtiElement {
         : `<span class="av"></span>`;
       const tags = [];
       if (m.banned) tags.push(`<span class="tag ban">banned</span>`);
+      // sow-229: the effective TIER, bound to the label constant (never a literal). Suppressed for `none`.
+      const tierName = tierLabel(m.tier);
+      if (tierName) tags.push(`<span class="tag tier">${esc(tierName)}</span>`);
       if ((ROLE_RANK[m.role] ?? 0) > 0) tags.push(`<span class="tag staff">${esc(m.role)}</span>`);
-      if (m.grandfathered) tags.push(`<span class="tag gf">grandfathered${m.grandfatherUntil ? ` · until ${esc(String(m.grandfatherUntil).slice(0, 10))}` : ''}</span>`);
+      if (m.grandfathered) {
+        // sow-229: surface the grant's provenance (a coupon code) and its expiry, and emphasise a bounded grant
+        // expiring within 30 days so a renewal is not missed (the full expiry column/sort is Phase 4).
+        const prov = m.couponCode ? ` · ${esc(m.couponCode)}` : '';
+        const until = m.grandfatherUntil ? ` · until ${esc(String(m.grandfatherUntil).slice(0, 10))}` : '';
+        const soon = (typeof m.expiresInDays === 'number' && m.expiresInDays >= 0 && m.expiresInDays <= 30) ? ' soon' : '';
+        tags.push(`<span class="tag gf${soon}">grandfathered${prov}${until}</span>`);
+      }
+      // sow-229: a coupon grant redeemed in KV that reconcile has not yet folded into git. An ANNOTATION only
+      // (the row's effective status/tier above are unchanged); shown distinct (dashed) so it never reads as a
+      // folded, authoritative grant.
+      if (m.pendingGrant) {
+        const pt = tierLabel(m.pendingGrant.tier);
+        const pc = m.pendingGrant.code ? ` ${esc(m.pendingGrant.code)}` : '';
+        const pu = m.pendingGrant.until ? ` · until ${esc(String(m.pendingGrant.until).slice(0, 10))}` : '';
+        tags.push(`<span class="tag pending" title="Redeemed but not yet recorded in git. Reconcile folds it within a day.">pending${pt ? ' ' + esc(pt) : ''}${pc}${pu}</span>`);
+      }
       if (!tags.length) tags.push(`<span class="dash">—</span>`);
       const n = this._counts && m.username ? (this._counts[m.username.toLowerCase()] || 0) : null;
       const content = n == null ? `<span class="dash">—</span>` : esc(n);
@@ -236,8 +263,8 @@ class GbtiSuperadminDashboard extends GbtiElement {
     }).join('');
 
     this.set(this.css(CSS) + `${chips}
-      <table><thead><tr><th>Member</th><th>Status</th><th>Overrides</th><th>Content</th><th>github_id</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No members known yet.</td></tr>'}</tbody></table>
-      <p class="note">Effective status follows ban &gt; staff &gt; grandfather &gt; Stripe. Member actions open a house PR and take effect once it merges. The live Stripe tier shows when the admin Stripe endpoint is reachable; the override tiers (ban / staff / grandfather) are always authoritative from the public repo.</p>
+      <table><thead><tr><th>Member</th><th>Status</th><th>Tier &amp; flags</th><th>Content</th><th>github_id</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="muted">No members known yet.</td></tr>'}</tbody></table>
+      <p class="note">Effective status and tier follow ban &gt; staff &gt; grandfather &gt; Stripe. The override tiers (ban / staff / grandfather) are always authoritative from the public repo; the live Stripe tier shows when the admin Stripe endpoint is reachable. A <b>pending</b> (dashed) tag is a coupon grant a member has redeemed but reconcile has not yet folded into the repo: it is an annotation, not effective access yet, and it clears once the grant is recorded. Member actions open a house PR and take effect once it merges.</p>
       ${this._pullsSection()}
       ${this._opsSection()}`);
 

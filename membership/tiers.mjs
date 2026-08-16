@@ -18,6 +18,24 @@ export const TIER = Object.freeze({
   creator: 'creator', // Content Creator: $15 monthly / $150 annual
 });
 
+/**
+ * The human display label per tier, for any UI that NAMES a member's tier. This is the node-free source of
+ * the label (src/lib/tiers.ts `tierDisplay` is the site-only TypeScript copy for Astro pages). UI must bind
+ * to this constant, never to a string literal, so a future rename (sow-226, creator -> curator) changes the
+ * DISPLAYED label in one place. Note this covers the label ONLY: sow-226 must still migrate STORED `creator`
+ * values, because an unrecognized tier ranks -1 (tierRank) and satisfies no gate. `none` carries no label.
+ */
+export const TIER_LABEL = Object.freeze({
+  [TIER.none]: '',
+  [TIER.member]: 'Network Member',
+  [TIER.creator]: 'Content Creator',
+});
+
+/** The display label for a tier key. Fail soft: an unrecognized value (or `none`) yields ''. */
+export function tierLabel(tier) {
+  return TIER_LABEL[tier] ?? '';
+}
+
 // Rank is the ONLY place the ordering lives. An unknown string ranks below everything, so a typo or a value from
 // an older deploy can never satisfy a gate.
 const RANK = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
