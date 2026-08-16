@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listBuiltDetailPages, sectionBuilt, distHasHtml } from './lib/dist-pages.mjs';
 
 // Each marker is a literal HTML substring that appears ONLY when the real element renders (never inside a
 // <style> block's selector text, which is how an earlier debugging session was misled by "community-invite"
@@ -51,18 +52,34 @@ export function checkArticleClosingSlot({ root, distDir = path.join(root, 'dist'
   const errors = [];
   const notes = [];
   let checked = 0;
-  const articlesDir = path.join(distDir, 'articles');
 
-  if (!fs.existsSync(articlesDir)) {
-    notes.push('dist/articles not found, skipped the closing-slot guard (run after `npm run build`).');
+  // ZERO COVERAGE IS A FAILURE, IN EVERY SHAPE IT COMES IN. This guard previously pushed a NOTE and returned
+  // clean when dist/articles was absent, so running it without a build printed
+  // "✓ article closing-slot guard passed (0 article pages checked)" and exited 0. It is the last-but-one step
+  // of verify:dist in the Pages deploy, which means the deploy gate has been reporting an assurance nobody
+  // held for as long as it has been broken. An advisory line is exactly how that went unnoticed.
+  //
+  // The three shapes are separated because they have different causes and different fixes, and collapsing
+  // them into one message sends the reader to the wrong place.
+  if (!distHasHtml(distDir)) {
+    errors.push('no built HTML found in dist/ -- run the build before this guard, since it can prove nothing without it.');
+    return { errors, notes, checked };
+  }
+  if (!sectionBuilt(distDir, 'articles')) {
+    errors.push('dist/ was built but contains NO dist/articles section at all, so this guard had no subjects and proved nothing. Either the articles route stopped building or the build is partial; do not ignore this line.');
+    return { errors, notes, checked };
+  }
+
+  const slugs = listBuiltDetailPages(distDir, 'articles');
+  if (slugs.length === 0) {
+    errors.push('dist/articles exists but contains ZERO built article pages, so this guard proved nothing. Either every article stopped being published or the build is partial; fix the build, do not ignore this line.');
     return { errors, notes, checked };
   }
 
   const layoutsSeen = new Set();
-  const slugs = fs.readdirSync(articlesDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+
   for (const slug of slugs) {
-    const file = path.join(articlesDir, slug, 'index.html');
-    if (!fs.existsSync(file)) continue;
+    const file = path.join(distDir, 'articles', slug, 'index.html');
     checked++;
     const html = fs.readFileSync(file, 'utf8');
     for (const [label, marker] of CLOSING_SLOT_MARKERS) {
@@ -74,14 +91,15 @@ export function checkArticleClosingSlot({ root, distDir = path.join(root, 'dist'
     for (const [name, sig] of LAYOUT_SIGNATURES) if (html.includes(sig)) layoutsSeen.add(name);
   }
 
-  if (checked === 0) {
-    notes.push('no built article pages found under dist/articles, nothing to check.');
-  } else {
-    const missingLayouts = ['journal', 'editorial', 'card'].filter((l) => !layoutsSeen.has(l) && ![...layoutsSeen].some((s) => s.startsWith(l)));
-    if (missingLayouts.length) {
-      notes.push(`this run only exercised ${[...layoutsSeen].join(', ') || 'no recognized layout'} -- ${missingLayouts.join('/')} got zero live coverage from this guard (no published post currently uses ${missingLayouts.length > 1 ? 'them' : 'it'}).`);
-    }
+
+  const missingLayouts = ['journal', 'editorial', 'card'].filter((l) => !layoutsSeen.has(l) && ![...layoutsSeen].some((s) => s.startsWith(l)));
+  if (missingLayouts.length) {
+    // Still a NOTE, and deliberately so: no published post uses these layouts, which is a fact about the
+    // content rather than a defect in the build or the guard. It is reported so the coverage claim is not
+    // overstated, which is the honest version of the limitation in this file's header.
+    notes.push(`this run only exercised ${[...layoutsSeen].join(', ') || 'no recognized layout'} -- ${missingLayouts.join('/')} got zero live coverage from this guard (no published post currently uses ${missingLayouts.length > 1 ? 'them' : 'it'}).`);
   }
+
   return { errors, notes, checked };
 }
 

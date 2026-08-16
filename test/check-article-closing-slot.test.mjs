@@ -72,13 +72,40 @@ test('checks multiple pages independently, one error set per broken page', () =>
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('no dist/articles: reports a note, no errors', () => {
+// THESE THREE REPLACE A TEST THAT ASSERTED THE DEFECT. It read "no dist/articles: reports a note, no
+// errors" and it passed, which is why the hole survived: the guard exited 0 having inspected nothing, as the
+// last-but-one step of verify:dist in the Pages deploy, and a test certified that as correct. Zero coverage
+// is now a FAILURE in each of its three shapes, and they are separate cases because the causes differ.
+
+test('ZERO COVERAGE: an unbuilt dist FAILS rather than passing with nothing checked', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
-  const { errors, checked, notes } = checkArticleClosingSlot({ root });
-  assert.deepEqual(errors, []);
+  const { errors, checked } = checkArticleClosingSlot({ root });
   assert.equal(checked, 0);
-  assert.ok(notes.some((n) => n.includes('dist/articles not found')));
+  assert.ok(errors.length > 0, 'a run that inspected nothing must not report success');
+  assert.match(errors.join(' '), /no built HTML/i);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('ZERO COVERAGE: a built dist with no articles SECTION fails, and says which', () => {
+  // Distinct from the above: the site built, so "run the build" would be the wrong advice. This means the
+  // articles route stopped emitting, which is a real regression rather than an operator error.
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dist', 'index.html'), '<html><body>home</body></html>');
+  const { errors, checked } = checkArticleClosingSlot({ root });
+  assert.equal(checked, 0);
+  assert.match(errors.join(' '), /NO dist\/articles section/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('ZERO COVERAGE: an articles section with no built pages fails', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'dist', 'articles'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'dist', 'index.html'), '<html><body>home</body></html>');
+  const { errors, checked } = checkArticleClosingSlot({ root });
+  assert.equal(checked, 0);
+  assert.match(errors.join(' '), /ZERO built article pages/);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
