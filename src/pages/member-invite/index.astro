@@ -127,14 +127,12 @@ const year = new Date().getFullYear();
     <div class="ci-hero">
       <div class="ci-hero-in">
         <div>
-          <p class="ci-pill"><span class="dot" aria-hidden="true"></span>Private invitation</p>
           <h1>Your first year<br />on us.</h1>
           <p class="lead">GBTI is a professional publishing network for developers. Read the work published
             across it and join the conversation: a full year at the{' '}{TIER_LABEL} tier, no card
             required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
-            <a href="#benefits" class="btn-ghost">What you get</a>
           </div>
           <!-- The design's four mono chips. These are facts about the OFFER (how billing works), not benefit
                claims about the tier, which is why they are allowed to be literal text here while every
@@ -456,11 +454,7 @@ const year = new Date().getFullYear();
   .ci-bnum h3 { font-size: 18px; font-weight: 700; margin: 0; color: var(--ci-fg); }
   .ci-bnum p { color: var(--ci-mute); font-size: 14.5px; margin: 6px 0 0; }
 
-  /* Hero pill + mono meta row. */
-  .ci-pill { display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--ci-green-ink); background: color-mix(in srgb, var(--ci-green-ink) 12%, transparent); color: var(--ci-green); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; padding: 5px 11px; margin: 0; border-radius: 7px; }
-  .ci-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: ciPulse 2.4s ease-in-out infinite; }
-  @keyframes ciPulse { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
-  @media (prefers-reduced-motion: reduce) { .ci-pill .dot { animation: none; } }
+  /* Mono meta row. */
   .ci-meta { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--ci-line); }
   .ci-meta span { color: var(--ci-mute); font-size: 13.5px; font-family: var(--f-mono); }
 
