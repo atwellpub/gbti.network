@@ -11,44 +11,49 @@ categories: ["devops", "tooling"]
 tags: ["proxmox", "lxc", "tailscale", "self-hosting", "home-server", "wsl"]
 ---
 
-A power cut took my radio station down and nothing brought it back. It sat dead until I noticed, which
-was not the same day.
+I'm not unfamiliar with a home server. I've been sitting on an ASRock H110 Pro BTC+ since Ethereum
+was POW (Proof of Work). For anyone curious, 4 1060 Zotecs managed to earn quite a bit of coin
+before Ethereum moved to the POS (proof of stake model).
 
-The other half of the machine was no better. The camera system's own README described its setup as a
-stopgap and said plainly that it could not survive a reboot. Two services ran on the same box in my
-closet and shared exactly one flaw: each carried on until something interrupted it, then stayed down
-until a human intervened.
+In 2026, however, GPU mining is out, and the home server in my closet has shamefully been running
+Windows 10 with WSL (Windows Subsystem for Linux) managing my node servers.
 
-So the acceptance test for the whole project was a single sentence. **Come back unattended from cold.**
-Everything below serves that.
+12gb ram, 100gb SSD, 1TB external HD. i7-7700 CPU. 🤌 Getting the home server job done.
 
-## What was actually running, which took longer to establish than it should have
+Times are changing though. Seemed like 40gb of that 100GB SSD goes to the Windows OS.
+Cross-filesystem performance is known to struggle on WSL environments; sizes of volumes grow without
+automated garbage collection and a tall list of inefficiencies all trying to have me admit the WSL
+might never be the right choice for a home server that runs mostly standalone, linux apps.
 
-The closet machine ran Windows 10 Enterprise LTSC, with the real work happening inside WSL. It powered two
-things: [SavePoint](https://savepoint.fm), an online radio management platform that streams to Discord and
-YouTube, and a home surveillance system I wrote myself for a doorbell camera and a driveway camera.
+One of those apps being my SavePoint Radio Station that I keep online for a discord community I
+operate.
 
-Working out which machine ran which service was the hard part, and I got it wrong twice. I first concluded
-that both workloads lived on the closet machine, then that both lived on my workstation. Neither was
-right. The camera monitor was running on the workstation as a development stopgap, while the production
-radio ran in the closet. Establishing that meant reading running processes, listening sockets and
-mediamtx's own API, because two installations of the same software look identical from the outside.
+Or Starlight Surveillance, my most recent project aimed at helping me rid another subscription by
+moving my camera footage off Google Cloud Storage and onto the hard drive.
 
-If you take one thing from this article before the technical content starts, take that. **The hardest part
-of migrating a home server is often working out what you actually have.**
+There's also the pressure of creating a Linux container for an OpenClaw instance where I can run a
+consort on affordable DeepSeek powered agents; like my colleagues are doing here on the GBTI
+Network. <br><br>Who knows, maybe there will be a new reason to spin up those retired 1060 GPUs soon
+too.
 
-## Why this is not a physical-to-virtual conversion
+If that time comes, I want to be free from Windows running sublinux and just go ahead and move to an
+OS that is designed to manage linux resources.
 
-The obvious reading of "move the machine to Proxmox" is to image the Windows install into a virtual
-machine and carry on. I did not do that.
+So this month I made the call to change my personal identity, format over Windows and install
+ProxMox to be my new home server OS.
 
-Imaging Windows into a VM preserves the exact thing I was trying to escape. WSL2 is itself a virtual
-machine, so running it inside another virtual machine means nested virtualization for no benefit
-whatsoever. And neither workload actually needed Windows. The camera stack is Python and ffmpeg. The radio
-platform is an Electron desktop application wrapped around a Fastify server, and the migration runs only
-the server, headless, which is the reason it fits in a container at all.
+## Proxmox and the ProxMoxBox box
 
-So Windows and WSL both disappear, and the workloads run natively on Linux.
+[Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) is a Debian-based
+virtualization platform that manages both VMs and LXC containers behind one web interface. I am running
+9.2.2, which sits on Debian 13.
+
+The machine is now, unavoidably, the ProxMoxBox box. Say it three times fast. I will wait.
+
+There is a genuine reason to pick Proxmox beyond the feature list, and it is the ecosystem. Home servers
+have a large and active community of people solving the same problems, publishing helper scripts, and
+answering questions from someone running exactly your hardware. That is worth a great deal when something
+does not work at two in the morning.
 
 ## What LXC is, and how it differs from a virtual machine
 
@@ -85,59 +90,6 @@ the radio when both want the CPU at once.
 
 Ceilings rather than reservations is what lets two services share 12 GB without either being starved,
 which is not what "load balancing" describes.
-
-## Proxmox and the ProxMoxBox box
-
-[Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) is a Debian-based
-virtualization platform that manages both VMs and LXC containers behind one web interface. I am running
-9.2.2, which sits on Debian 13.
-
-The machine is now, unavoidably, the ProxMoxBox box. Say it three times fast. I will wait.
-
-There is a genuine reason to pick Proxmox beyond the feature list, and it is the ecosystem. Home servers
-have a large and active community of people solving the same problems, publishing helper scripts, and
-answering questions from someone running exactly your hardware. That is worth a great deal when something
-does not work at two in the morning.
-
-## The hardware shaped every decision
-
-The host is an i7-7700 with 12 GB of RAM on an ASRock H110 Pro BTC+. That is a crypto mining motherboard,
-which is exactly as odd as it sounds and is the reason several things below are the way they are.
-
-Three constraints followed directly from the hardware.
-
-**Wi-Fi cannot carry a bridged container.** An access point drops frames whose source MAC address is not
-the associated station, so a bridged container never receives a LAN address. My containers therefore sit
-behind NAT on their own subnet. I want to be precise about this because it is easy to present as a
-security decision: it is not one. It is a workaround for a wireless limitation.
-
-**12 GB of RAM rules out ZFS**, because the ARC cache would compete with the containers for the memory
-they need. The host uses ext4 with LVM-thin instead.
-
-**Bulk storage over USB under a service that writes continuously** is the weak point of the build, and it
-caused real trouble.
-
-## Two things that went wrong, and what they taught
-
-The machine would not complete POST with the USB disk attached. I chased a kernel USB quirk first, then
-suspected the hub. Both theories were wrong, and the giveaway was that the F11 boot menu would not open
-either. That proves the stall happened before any bootloader ran, which means no kernel parameter could
-ever have fixed it. The actual fix was in firmware: disable Legacy USB Support and enable XHCI Hand-off.
-
-The second lesson arrived by accident, twice, and makes a better argument for journaling filesystems than
-any explanation could. The same drive was pulled while mounted on two separate occasions. Formatted as
-exFAT, it came back dirty, demanded a full repair, and recovered 8.5 GB of orphaned fragments into a
-`FOUND.000` directory, with eight files having earlier failed to copy with silent I/O errors. Reformatted
-as ext4 and abused identically, `e2fsck` replayed the journal and reported zero errors across all five
-passes.
-
-The same drive met the same mistake on two filesystems and came back differently each time, because
-exFAT has no journal.
-
-One honest loose end: that drive is rated for 550 MB/s and delivers about 40. I tested and eliminated the
-filesystem, the hub, the cable and both machines, and I still cannot explain it. It is fast enough for
-streaming, which needs roughly 1 MB/s, and only painful for bulk copies. I would rather say that than
-invent a cause.
 
 ## Reaching it: Tailscale, and what actually provides the security
 
