@@ -99,3 +99,10 @@ grandfathered:
     reason: coupon:CODEABLEYEAR
     until: "2027-08-13T22:56:59.378Z"
     tier: creator
+
+  # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-17). Auto-appended.
+  - github_id: "59509273"       # github.com/sohrab09
+    login: sohrab09
+    reason: coupon:HUDSINVITE
+    until: "2027-08-17T04:12:21.157Z"
+    tier: member
