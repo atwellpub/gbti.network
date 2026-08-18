@@ -162,3 +162,34 @@ test('runProbes: an inactive KV read token fails its live check', async () => {
   const results = await runProbes({ env: { CF_KV_READ_TOKEN: 'tok' }, fetch });
   assert.equal(results.find((x) => x.name.startsWith('CF_KV_READ_TOKEN')).ok, false, 'active status is required, not just HTTP 200');
 });
+
+// The no-expiry alarm has a twin hole one step along, found by asking what ELSE could make it silent.
+// A mustExpire credential reporting an UNPARSEABLE expiry evaluated as HEALTHY: daysUntil returns null so no
+// window can contain it, and expiresAt is truthy so the no-expiry branch stays quiet. A garbage date is
+// indistinguishable from a valid far-future one. Reachable whenever a provider changes its date format, and
+// the probes parse two such formats from two vendors, neither of which is ours to pin.
+test('evaluate: mustExpire + an UNPARSEABLE expiry is flagged, not silently healthy', () => {
+  const now = new Date('2026-08-18T00:00:00Z');
+  for (const bad of ['not-a-date', 'never', 'Expires: -', '???']) {
+    const { problems, healthy } = evaluate([{ name: 'T', ok: true, mustExpire: true, expiresAt: bad }], { now });
+    assert.equal(healthy, false, `${bad} must not read as healthy`);
+    assert.equal(problems[0].kind, 'unreadable-expiry');
+  }
+});
+
+test('evaluate: a PARSEABLE expiry still behaves normally, so the new branch is not swallowing the good case', () => {
+  const now = new Date('2026-08-18T00:00:00Z');
+  // ISO and the looser human form Cloudflare renders in its dashboard both parse.
+  for (const good of ['2027-08-28T00:00:00Z', 'Aug 28, 2027']) {
+    assert.equal(evaluate([{ name: 'T', ok: true, mustExpire: true, expiresAt: good }], { now }).healthy, true, good);
+  }
+  const soon = evaluate([{ name: 'T', ok: true, mustExpire: true, expiresAt: '2026-08-20T00:00:00Z' }], { now });
+  assert.equal(soon.problems[0].kind, 'expiring', 'a near expiry is still the expiring case, not unreadable');
+});
+
+test('evaluate: the unreadable-expiry check is mustExpire-only, so opted-out credentials are unaffected', () => {
+  // Same opt-in discipline as the no-expiry branch: Stripe and the Discord bot legitimately report nothing,
+  // and a check that fired on them would be noise, which is how a guard gets switched off.
+  const now = new Date('2026-08-18T00:00:00Z');
+  assert.equal(evaluate([{ name: 'T', ok: true, expiresAt: 'not-a-date' }], { now }).healthy, true);
+});

@@ -51,6 +51,17 @@ export function evaluate(results, { warnDays = 30, now = new Date() } = {}) {
       continue;
     }
     const d = daysUntil(r.expiresAt, now);
+    // SecurityMaster 2026-08-18: the SAME hole one step along. The branch above catches a mustExpire
+    // credential that reports NO expiry. It does not catch one that reports an UNPARSEABLE expiry, and that
+    // case is worse, because a garbage date is indistinguishable from a valid far-future one: `daysUntil`
+    // returns null, so no window can ever contain it, while `expiresAt` is truthy so the no-expiry alarm
+    // stays quiet too. Measured, not reasoned: `expiresAt: 'not-a-date'` evaluated as HEALTHY before this.
+    // Reachable whenever a provider changes its date format, and the probes read exactly two such formats
+    // from two vendors: a GitHub response HEADER and Cloudflare's `expires_on`. Neither is ours to pin.
+    if (r.mustExpire === true && d === null) {
+      problems.push({ name: r.name, kind: 'unreadable-expiry', message: `${r.name} reports an expiry that cannot be parsed (${JSON.stringify(r.expiresAt)}), so no expiry check can ever fire on it. Treat it as UNEXPIRING until the value is understood: the provider's date format may have changed, and a date nothing can read is the same silence as no date at all.` });
+      continue;
+    }
     if (d !== null && d <= warnDays) {
       problems.push({ name: r.name, kind: d < 0 ? 'expired' : 'expiring', message: d < 0 ? `${r.name} EXPIRED ${-d} day(s) ago (${r.expiresAt}).` : `${r.name} expires in ${d} day(s) (${r.expiresAt}). Renew it before then.` });
     }
