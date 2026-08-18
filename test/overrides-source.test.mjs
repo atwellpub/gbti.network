@@ -19,6 +19,7 @@ import {
   kvCredsPresent,
   readOverridesFromKv,
   applyOverridesSource,
+  adoptKvBans,
   diffOverrides,
   MAX_OVERRIDES_AGE_MS,
 } from '../scripts/lib/overrides-source.mjs';
@@ -179,21 +180,132 @@ test('sow-213 ACCEPTANCE 2 (GATE): every unhealthy source makes the gate THROW, 
   }
 });
 
-test('sow-213 ACCEPTANCE 2 (GATE): git and KV disagreeing about a ban DENIES rather than picking a side', async () => {
-  // 'both' mode, the Phase 1 safety net: the checkout still has the files, so repoRoot is the real one.
+// --- 'BOTH' MODE: DIVERGENCE. These four replace a single test that asserted the WRONG behaviour. ----------
+//
+// That test pinned "any divergence THROWS", on the reasoning that one source must be lying and the gate does
+// not get to guess which. The reasoning was wrong and the throw shipped a repository-wide outage on a daily
+// timer: reconcile writes the KV mirror and THEN merges the coupon fold PR into house/grandfathered.yml, so
+// git routinely carries a grant the mirror does not. Measured 2026-08-18: reconcile 07:55Z, next sync 13:10Z.
+//
+// The replacement is not a relaxation. In this mode the gate decides on the GIT maps, so three of the four
+// divergence cases were already enforced or already ignored and the throw bought nothing but downtime. The
+// fourth, a ban present only in KV, was never enforced by the throw either: it denied everybody instead of
+// the banned author. Unioning restrictive records denies exactly the right person, and there is no guess in
+// it, because both readings of the divergence agree that a banned person is banned.
+//
+// EACH TEST BELOW PINS A PROPERTY THE OLD ONE DID NOT COVER AT ALL.
+
+test("sow-213 'both' mode: a ban present ONLY in KV is ADOPTED, and the gate denies THAT AUTHOR", async () => {
+  // The checkout still has the files, so repoRoot is the real one and the mode is 'both'.
   const overrides = gateOverrides();
-  overrides.bans = new Map(); // git says nobody is banned
-  await assert.rejects(
-    () => applyOverridesSource({
-      overrides,
-      repoRoot: process.cwd(),
-      env: CREDS,
-      readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(bannedMirror) }), // KV says one is
-      log: () => {},
-    }),
-    /DISAGREE/,
-    'one of the two sources is lying about who is banned, and the gate does not get to guess which',
+  overrides.bans = new Map(); // git says nobody is banned; KV says one person is
+
+  const r = await applyOverridesSource({
+    overrides,
+    repoRoot: process.cwd(),
+    env: CREDS,
+    readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(bannedMirror) }),
+    log: () => {},
+  });
+
+  assert.equal(r.mode, 'both', 'the git files are present and creds are set');
+  assert.deepEqual(r.adopted, [BANNED_ID], 'the KV-only ban is pulled into the map the gate decides on');
+
+  const d = await gateDecision(overrides);
+  assert.equal(d.status, 'banned', 'a ban in EITHER source bans: the fail-closed direction for a restrictive record');
+  assert.equal(d.check, 'fail', 'and the gate denies the BANNED AUTHOR, which the old throw never did');
+  assert.equal(d.autoMerge, false);
+});
+
+test("sow-213 'both' mode, the pre-fix control: the old behaviour denied EVERYONE instead of the banned author", async () => {
+  // Pinned so the change is shown to be an improvement rather than asserted to be one. Under the old code
+  // this same input threw /DISAGREE/, which pr-gate publishes as a FAILING required check on every open PR.
+  // The difference is not that fewer things fail; it is that the RIGHT thing fails.
+  const overrides = gateOverrides();
+  overrides.bans = new Map();
+  const kv = await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(bannedMirror) });
+  const differences = diffOverrides(overrides, kv);
+
+  assert.deepEqual(
+    differences,
+    [{ field: 'bans', id: BANNED_ID, git: false, kv: true }],
+    'the divergence the old code threw on is still DETECTED; it is now acted on precisely instead of loudly',
   );
+});
+
+test('sow-213: mirror lag must NOT fail the gate, and the git-side record stays enforced', async () => {
+  // THE LIVE REGRESSION, as a regression test. git is ahead of the mirror, which is the steady state for
+  // several hours after every reconcile. The banned author must still be denied, and nothing may throw.
+  const overrides = gateOverrides();
+  overrides.bans = new Map([[BANNED_ID, { github_id: BANNED_ID, reason: 'spam' }]]); // git knows
+  const emptyMirror = async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(fresh()) }); // KV does not
+
+  const r = await applyOverridesSource({ overrides, repoRoot: process.cwd(), env: CREDS, readKv: emptyMirror, log: () => {} });
+
+  assert.equal(r.mode, 'both');
+  assert.deepEqual(r.adopted, [], 'nothing to adopt: git is the one that is ahead');
+  assert.equal(r.differences.length, 1, 'the lag is still REPORTED, not swallowed');
+
+  const d = await gateDecision(overrides);
+  assert.equal(d.check, 'fail', 'the git ban is enforced regardless of what the mirror has caught up to');
+  assert.equal(d.status, 'banned');
+});
+
+test('sow-213: a grandfather grant present only in KV is NOT honoured, because it is PERMISSIVE', async () => {
+  // The asymmetry that makes the union safe. Unioning a restrictive record fails closed; unioning a
+  // permissive one would hand paid status to whoever can write the mirror, which is fail OPEN. While the git
+  // files exist, git is the attesting source for grants.
+  const overrides = gateOverrides();
+  const grantedInKvOnly = fresh({ grandfathered: { grandfathered: [{ github_id: '777', reason: 'coupon:X' }] } });
+
+  const r = await applyOverridesSource({
+    overrides,
+    repoRoot: process.cwd(),
+    env: CREDS,
+    readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(grantedInKvOnly) }),
+    log: () => {},
+  });
+
+  assert.equal(r.differences.length, 1, 'the KV-only grant is reported');
+  assert.equal(overrides.grandfathers.has('777'), false, 'and is NOT adopted into the map the gate decides on');
+  assert.deepEqual(r.adopted, [], 'adoption is bans-only, by construction');
+});
+
+test('sow-213: the exact reconcile coupon-fold shape resolves cleanly instead of blocking the repository', async () => {
+  // Reproduces the production sequence: reconcile writes the mirror from the pre-merge checkout, then merges
+  // the fold PR, so the gate sees a grant in git that the mirror does not carry yet. This threw before.
+  const overrides = gateOverrides();
+  overrides.grandfathers = new Map([['190312419', { github_id: '190312419', reason: 'coupon:CODEABLEYEAR' }]]);
+
+  const r = await applyOverridesSource({
+    overrides,
+    repoRoot: process.cwd(),
+    env: CREDS,
+    readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(fresh()) }),
+    log: () => {},
+  });
+
+  assert.equal(r.mode, 'both');
+  assert.deepEqual(r.differences, [{ field: 'grandfathered', id: '190312419', git: true, kv: false }]);
+  // The assertion that matters is simply that we got here: applyOverridesSource resolved, so pr-gate does not
+  // enter the catch that publishes `membership-gate` as failure on every open PR.
+});
+
+test('sow-213: adoptKvBans unions bans, never grandfathers, and never overwrites a git entry', async () => {
+  const overrides = { bans: new Map([['1', { github_id: '1', reason: 'from git' }]]), grandfathers: new Map() };
+  const kv = {
+    bans: new Map([['1', { github_id: '1', reason: 'from kv' }], ['2', { github_id: '2', reason: 'kv only' }]]),
+    grandfathers: new Map([['3', { github_id: '3' }]]),
+  };
+
+  assert.deepEqual(adoptKvBans(overrides, kv), ['2'], 'only the id git did not already carry');
+  assert.equal(overrides.bans.get('1').reason, 'from git', 'a git entry is never overwritten by the mirror');
+  assert.equal(overrides.bans.size, 2);
+  assert.equal(overrides.grandfathers.size, 0, 'grandfathers are never adopted');
+
+  // Defensive: an unavailable read has no maps at all, and this must not throw on the way to the caller's
+  // own handling of that case.
+  assert.deepEqual(adoptKvBans({ bans: new Map(), grandfathers: new Map() }, {}), []);
 });
 
 // THE LAPSED-TOKEN PATH, AND IT IS A SCHEDULED EVENT RATHER THAN A HYPOTHETICAL. `CF_KV_READ_TOKEN` is

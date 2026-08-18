@@ -145,16 +145,79 @@ export async function applyOverridesSource({ overrides, repoRoot, env = process.
     return { mode, overrides, generatedAt: kv.generatedAt };
   }
 
-  // Both sources present: require agreement. This is the safety net for Phase 2, and it is why the writer can
-  // be inverted without a flag day. A divergence means one of the two is lying about who is banned, and we do
-  // not get to guess which.
+  // Both sources present. The FIRST version of this branch threw on ANY divergence, on the reasoning that one
+  // of the two sources must be lying and the gate does not get to guess which. That reasoning was wrong, and
+  // it shipped a repository-wide outage on a daily timer. Both halves are worth stating, because the
+  // correction is not "relax the check", it is "the check was measuring the wrong thing".
+  //
+  // WHY IT WAS AN OUTAGE. `scripts/reconcile.mjs` writes the KV mirror (line ~697) and THEN merges the coupon
+  // fold PR into house/grandfathered.yml (line ~752). Its own comment records that the run cannot see its own
+  // merge, so the mirror is written from the pre-merge checkout BY DESIGN. The moment that PR lands, git
+  // carries a grant KV does not, every gate run throws, and `pr-gate.mjs` publishes `membership-gate` as a
+  // FAILING required check for EVERY open PR until the next 6-hourly sync. Measured on 2026-08-18: reconcile
+  // ran 07:55Z, the next sync ran 13:10Z. A five-hour blackout, repeating daily, triggered by a coupon
+  // redemption. The same shape appears in reverse whenever an unban, an ungrandfather or an erase-member
+  // removes an entry from git and the mirror still carries it.
+  //
+  // WHY THE CHECK WAS MEASURING THE WRONG THING. In this mode `overrides` was loaded from GIT and git is what
+  // the gate decides on: the branch below never reassigned the maps. So walk the four divergence cases and
+  // ask what denying the whole repository actually bought:
+  //   ban in git only          -> already enforced, the git map has it. Denying everyone adds NOTHING.
+  //   grandfather in git only  -> already granted from git. Denying everyone adds NOTHING.
+  //   grandfather in KV only   -> NOT granted, the gate reads git. Denying everyone adds NOTHING.
+  //   ban in KV only           -> NOT enforced. This is the only case with any security content at all.
+  // Three of the four were pure self-inflicted downtime. The fourth deserves a better answer than an outage.
+  //
+  // THE BETTER ANSWER, AND THERE IS NO GUESSWORK IN IT. A ban is RESTRICTIVE, so the union is the fail-closed
+  // direction: banned in EITHER source means banned. That answers the original objection rather than dodging
+  // it, because we no longer have to decide which source is stale. Both readings ("git has not caught up" and
+  // "KV has not caught up") agree that the person is banned, so adopting the KV-only ban is correct under
+  // both. It also denies exactly the right person instead of everybody, and it is what makes a Phase 2
+  // KV-native ban actually BITE before Phase 3 removes the files, which the throw never did.
+  //
+  // A GRANDFATHER GRANT IS NOT UNIONED, AND THAT ASYMMETRY IS THE WHOLE POINT. It is PERMISSIVE: honouring a
+  // KV-only grant would hand paid status to anyone able to write that blob, which is fail-OPEN. While git is
+  // present it stays the attesting source for permissive records. Restrictive records union, permissive
+  // records do not. Phase 3 removes the git files and the 'kv' branch above takes over, at which point the
+  // mirror is the only record and its integrity is carried by the credential scoping instead.
   const differences = diffOverrides(overrides, kv);
-  if (differences.length) {
-    const detail = differences.map((d) => `${d.field}:${d.id} (git=${d.git} kv=${d.kv})`).join(', ');
-    throw new Error(`git and KV overrides DISAGREE: ${detail}. Refusing to gate until they match.`);
+  const adopted = adoptKvBans(overrides, kv);
+
+  // Loud, because converting a hard failure into a warning is exactly how a real signal goes unnoticed, and
+  // this SOW's entire thesis is that quiet failures are the defect. These lines are the compensating control.
+  for (const d of differences) {
+    if (d.field === 'bans' && !d.git) {
+      log(`pr-gate: WARNING: ${d.id} is banned in KV but not in git. ADOPTED (a ban in either source bans).`);
+    } else if (d.field === 'bans') {
+      log(`pr-gate: WARNING: ${d.id} is banned in git but not in the KV mirror. The git ban is enforced; the mirror is behind.`);
+    } else {
+      log(`pr-gate: WARNING: grandfather grant for ${d.id} differs (git=${d.git} kv=${d.kv}). Git is authoritative here; a KV-only grant is NOT honoured while the git files exist.`);
+    }
   }
-  log(`pr-gate: overrides source = git, cross-checked against KV (mirror ${kv.generatedAt}), ${overrides.bans.size} ban(s) agree.`);
-  return { mode, overrides, generatedAt: kv.generatedAt };
+  const summary = differences.length
+    ? `${differences.length} divergence(s), ${adopted.length} KV-only ban(s) adopted`
+    : `${overrides.bans.size} ban(s) agree`;
+  log(`pr-gate: overrides source = git, cross-checked against KV (mirror ${kv.generatedAt}), ${summary}.`);
+  return { mode, overrides, generatedAt: kv.generatedAt, differences, adopted };
+}
+
+/**
+ * Union KV-only bans into the map the gate decides on, and report which ids were adopted. MUTATES `overrides`
+ * in place, like the rest of this resolution.
+ *
+ * Bans only. See the asymmetry argument above: restrictive records are safe to union because both readings of
+ * a divergence agree on the restrictive outcome, and permissive records are not, because unioning them would
+ * let whoever can write the mirror grant themselves paid status.
+ */
+export function adoptKvBans(overrides, kv) {
+  const adopted = [];
+  for (const [id, entry] of kv?.bans ?? []) {
+    if (!overrides.bans.has(id)) {
+      overrides.bans.set(id, entry);
+      adopted.push(id);
+    }
+  }
+  return adopted;
 }
 
 /**
