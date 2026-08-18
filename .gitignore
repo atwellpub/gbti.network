@@ -31,9 +31,20 @@ node_modules/
 .snapshots/
 
 # .product/ is a LOCAL working directory per the working agreement, but the brand and Chrome Web
-# Store assets under it are deliberately tracked. Ignore the directory by default so anything else
-# dropped in later does not ship without someone deciding, and un-ignore the two that are meant to
-# be here. Note this does NOT untrack the 88 files already committed; it is preventive only.
+# Store assets under it are deliberately tracked. Ignore the directory by default and un-ignore the
+# two subtrees that are meant to be here.
+#
+# WHAT THIS DOES AND DOES NOT COVER, because the first version of this comment claimed more than the
+# rule delivers. It stops a NEW LOCATION under .product/ from being tracked by default: a stray file
+# at the root, or a new subdirectory, is ignored. It does NOT protect the two un-ignored directories,
+# so anything dropped into brand/ or chrome-extension/ still sweeps in with a bulk add. That is the
+# intended trade, since those are the asset directories and have to stay trackable.
+#
+# It also does NOT untrack the 88 files already committed; a gitignore entry only affects untracked
+# paths, so this is preventive for new paths only.
+#
+# Related gap worth knowing: check-no-secrets.mjs reads a text-extension list, so a credential pasted
+# into an IMAGE anywhere under here passes unexamined.
 .product/*
 !.product/brand/
 !.product/chrome-extension/
