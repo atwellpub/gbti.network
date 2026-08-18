@@ -196,6 +196,48 @@ test('sow-213 ACCEPTANCE 2 (GATE): git and KV disagreeing about a ban DENIES rat
   );
 });
 
+// THE LAPSED-TOKEN PATH, AND IT IS A SCHEDULED EVENT RATHER THAN A HYPOTHETICAL. `CF_KV_READ_TOKEN` is
+// being minted WITH A TTL on purpose (secrets-ops: where scope cannot confine a credential, time must). So
+// "the gate's KV credential stopped working" is not a maybe, it is a dated certainty, and after Phase 3 it
+// lands in the one configuration where getting it wrong readmits every banned author at once.
+//
+// The reassuring half is that the mode is derived from the FILES, not from the credentials: with the git
+// files gone the mode is 'kv' whatever the env says, so absent or expired creds cannot degrade to "no bans".
+// This test pins that, because the alternative reading (no creds, so fall back to git, so an empty ban map)
+// is the exact fail-open this SOW exists to close and it is a plausible thing for a later change to add.
+test('sow-213: AFTER Phase 3, an absent or lapsed KV credential DENIES; it cannot fall back to an empty ban list', async () => {
+  for (const [label, env] of [
+    ['credential never provisioned', {}],
+    ['secret name mistyped, so Actions interpolates empty strings', { CF_ACCOUNT_ID: '', CF_KV_NAMESPACE_ID: '', CF_API_TOKEN: '' }],
+    ['only the token missing (a lapsed TTL looks like this)', { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: '' }],
+  ]) {
+    await assert.rejects(
+      () => applyOverridesSource({ overrides: gateOverrides(), repoRoot: rootWithoutOverrideFiles(), env, log: () => {} }),
+      /overrides unavailable from KV/,
+      `${label}: must DENY once the git files are gone`,
+    );
+  }
+});
+
+// The counterpart, and the reason the SAME missing credential is acceptable TODAY. Before Phase 3 the git
+// files are present and authoritative, so no creds means mode 'git' and the gate behaves exactly as it always
+// has. That is a FAIL-QUIET, which is normally the defect this repo hunts, and it is acceptable here for one
+// narrow reason: in Phase 1 the KV read is a CROSS-CHECK, not the decision. Git still decides.
+//
+// IT STOPS BEING ACCEPTABLE THE MOMENT PHASE 2 INVERTS THE WRITER, and nothing has to be remembered for that
+// to hold: removing the files is what flips the mode. The test above is the proof that the flip happens.
+test('sow-213: BEFORE Phase 3, the same absent credential is a quiet no-op, because git is still authoritative', async () => {
+  const overrides = gateOverrides();
+  const { mode } = await applyOverridesSource({
+    overrides,
+    repoRoot: process.cwd(), // the house files are still here
+    env: {},
+    readKv: async () => { throw new Error('must not be called'); },
+    log: () => {},
+  });
+  assert.equal(mode, 'git', 'no creds + files present = current behaviour, unchanged and silent');
+});
+
 // The 'git' mode is the pre-provisioning world and must stay EXACTLY as it was: no KV read at all, overrides
 // untouched. Asserted because a change here would be a silent behaviour change on the live gate.
 test('sow-213 (GATE): in git mode the KV read is never called and the overrides are untouched', async () => {
