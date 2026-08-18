@@ -51,13 +51,25 @@ export function evaluate(results, { warnDays = 30, now = new Date() } = {}) {
       continue;
     }
     const d = daysUntil(r.expiresAt, now);
-    // SecurityMaster 2026-08-18: the SAME hole one step along. The branch above catches a mustExpire
-    // credential that reports NO expiry. It does not catch one that reports an UNPARSEABLE expiry, and that
-    // case is worse, because a garbage date is indistinguishable from a valid far-future one: `daysUntil`
-    // returns null, so no window can ever contain it, while `expiresAt` is truthy so the no-expiry alarm
-    // stays quiet too. Measured, not reasoned: `expiresAt: 'not-a-date'` evaluated as HEALTHY before this.
-    // Reachable whenever a provider changes its date format, and the probes read exactly two such formats
-    // from two vendors: a GitHub response HEADER and Cloudflare's `expires_on`. Neither is ours to pin.
+    // SecurityMaster 2026-08-18. WHY THIS IS NOT DEFENSIVE CODING: these expiry values are parsed out of TWO
+    // DATE FORMATS FROM TWO VENDORS, a GitHub response HEADER (`github-authentication-token-expiration`) and
+    // Cloudflare's `expires_on`. Neither is ours to pin, so this is a live dependency on somebody else's
+    // release notes. The day either changes shape, the value stops parsing here.
+    //
+    // AND IT LANDS ON GH_BOT_TOKEN FIRST. That token carries contents + pull-requests + statuses write on the
+    // content repo and is what MERGES member PRs, so the highest-blast-radius credential held is the one most
+    // exposed to this, and it is the credential `mustExpire` was written for in the first place. Anyone
+    // tidying this away as an edge case should weigh that before deleting it.
+    //
+    // THE MECHANISM: the branch above catches a mustExpire credential reporting NO expiry. It did not catch
+    // one reporting an UNPARSEABLE expiry, which is worse, because a garbage date is indistinguishable from a
+    // valid far-future one. `daysUntil` returns null so no window can ever contain it, while `expiresAt` stays
+    // truthy so the no-expiry alarm stays quiet too. Measured, not reasoned: `expiresAt: 'not-a-date'`
+    // evaluated as HEALTHY before this branch existed.
+    //
+    // The general lesson, which cost three guards to surface: when you build an alarm, enumerate every way it
+    // can stay SILENT, not only the one you built it for. Testing that an alarm fires on its intended
+    // condition confirms the path you already had in mind.
     if (r.mustExpire === true && d === null) {
       problems.push({ name: r.name, kind: 'unreadable-expiry', message: `${r.name} reports an expiry that cannot be parsed (${JSON.stringify(r.expiresAt)}), so no expiry check can ever fire on it. Treat it as UNEXPIRING until the value is understood: the provider's date format may have changed, and a date nothing can read is the same silence as no date at all.` });
       continue;
