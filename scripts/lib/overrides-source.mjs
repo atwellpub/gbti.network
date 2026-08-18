@@ -79,12 +79,28 @@ export async function readOverridesFromKv({ env = process.env, fetchImpl = globa
   if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) {
     return { available: false, reason: `mirror is stale or misdated (age ${Number.isFinite(ageMs) ? Math.round(ageMs / 3600000) + 'h' : 'unknown'})` };
   }
+  // sow-213 FIX: the mirror's `bans` / `grandfathered` fields are the PARSED YAML FILE OBJECTS
+  // ({ bans: [...] }), NOT bare arrays. `bansFromParsed` takes that object directly, which is exactly what the
+  // Worker does (`bansFromParsed(mirror.bans)`).
+  //
+  // The first version of this function wrapped them a SECOND time, which would have thrown on the first real
+  // blob and taken the gate down the moment CF credentials were added. It shipped because ITS OWN TESTS BUILT
+  // THE FIXTURE FROM THE SAME WRONG ASSUMPTION AS THE CODE, so the two agreed and the agreement proved
+  // nothing. That is the failure class this repo keeps meeting: evidence that does not bear on the claim.
+  //
+  // The shape guard is copied from the Worker (membership-content.mjs `isSection`) for the same reason the 48h
+  // bound is: the gate and the Worker disagreeing about who is banned is its own bug class. A BARE ARRAY here
+  // is precisely what the broken version produced, and it must read as UNAVAILABLE (deny), never as "no bans".
+  const isSection = (x) => x != null && typeof x === 'object' && !Array.isArray(x);
+  if (!isSection(raw.bans) || !isSection(raw.grandfathered)) {
+    return { available: false, reason: 'mirror sections are malformed (bans/grandfathered must be objects)' };
+  }
   return {
     available: true,
     generatedAt,
     raw,
-    bans: bansFromParsed({ bans: raw.bans ?? [] }),
-    grandfathers: grandfathersFromParsed({ grandfathered: raw.grandfathered ?? [] }),
+    bans: bansFromParsed(raw.bans),
+    grandfathers: grandfathersFromParsed(raw.grandfathered),
   };
 }
 

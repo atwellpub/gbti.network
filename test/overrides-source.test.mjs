@@ -25,7 +25,12 @@ import { bansFromParsed, grandfathersFromParsed } from '../membership/overrides-
 
 const CREDS = { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
 const NOW = new Date('2026-08-16T12:00:00Z');
-const fresh = (over = {}) => ({ generatedAt: '2026-08-16T06:00:00Z', roles: {}, bans: [], grandfathered: [], ...over });
+// The mirror's sections are the PARSED YAML FILE OBJECTS ({ bans: [...] }), NOT bare arrays: the Worker
+// passes each straight to bansFromParsed and rejects a non-object (membership-content.mjs isSection).
+// THESE FIXTURES USED BARE ARRAYS AND THAT IS WHY THE ORIGINAL DOUBLE-WRAP BUG SHIPPED: the fixture was
+// built from the same wrong assumption as the code, so the two agreed and the agreement proved nothing.
+// Built from the real blob shape now, taken from the Worker rather than from memory.
+const fresh = (over = {}) => ({ generatedAt: '2026-08-16T06:00:00Z', roles: {}, bans: { bans: [] }, grandfathered: { grandfathered: [] }, ...over });
 const okFetch = (body) => async () => ({ ok: true, status: 200, json: async () => body });
 
 // --- ACCEPTANCE 1: a ban that exists ONLY in KV must be honoured. -------------------------------------------
@@ -34,7 +39,7 @@ test('sow-213 ACCEPTANCE 1: a ban present only in KV is loaded and would deny th
   const kv = await readOverridesFromKv({
     env: CREDS,
     now: NOW,
-    fetchImpl: okFetch(fresh({ bans: [{ github_id: '424242', reason: 'spam' }] })),
+    fetchImpl: okFetch(fresh({ bans: { bans: [{ github_id: '424242', reason: 'spam' }] } })),
   });
   assert.equal(kv.available, true);
   assert.equal(kv.bans.has('424242'), true, 'the KV-only ban is visible to the gate');
@@ -53,7 +58,12 @@ test('sow-213 ACCEPTANCE 2: every unhealthy source is UNAVAILABLE, never an empt
     ['fetch throws', { env: CREDS, fetchImpl: async () => { throw new Error('network down'); } }],
     ['not an object', { env: CREDS, fetchImpl: okFetch('a string') }],
     ['null body', { env: CREDS, fetchImpl: okFetch(null) }],
-    ['no generatedAt', { env: CREDS, fetchImpl: okFetch({ bans: [], grandfathered: [] }) }],
+    ['no generatedAt', { env: CREDS, fetchImpl: okFetch({ bans: { bans: [] }, grandfathered: { grandfathered: [] } }) }],
+    // The shape guard. A BARE ARRAY section is exactly what the original double-wrap bug produced, and a
+    // malformed section must read as UNAVAILABLE (deny), never fall through to an empty ban list.
+    ['bans is a bare array', { env: CREDS, fetchImpl: okFetch(fresh({ bans: [] })) }],
+    ['grandfathered is a bare array', { env: CREDS, fetchImpl: okFetch(fresh({ grandfathered: [] })) }],
+    ['a section is missing entirely', { env: CREDS, fetchImpl: okFetch({ generatedAt: '2026-08-16T06:00:00Z', grandfathered: { grandfathered: [] } }) }],
     ['unparseable date', { env: CREDS, fetchImpl: okFetch(fresh({ generatedAt: 'not-a-date' })) }],
     ['stale beyond 48h', { env: CREDS, fetchImpl: okFetch(fresh({ generatedAt: '2026-08-01T00:00:00Z' })) }],
     ['dated in the future', { env: CREDS, fetchImpl: okFetch(fresh({ generatedAt: '2027-01-01T00:00:00Z' })) }],

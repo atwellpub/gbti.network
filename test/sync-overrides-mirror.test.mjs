@@ -22,11 +22,17 @@ test('dry-run reports the blob it would write and touches nothing', async () => 
 });
 
 test('with CF credentials it PUTs the mirror to the KV REST API', async () => {
-  let captured;
-  const fetchImpl = async (url, opts) => { captured = { url, opts }; return { ok: true, status: 200 }; };
+  // sow-213 Phase 2: the writer READS the current blob before writing, so KV-native bans are not erased.
+  // The fake models that read (404 = the legitimate first write); the PUT assertions are unchanged.
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    return opts.method === 'PUT' ? { ok: true, status: 200 } : { ok: false, status: 404 };
+  };
   const env = { CF_ACCOUNT_ID: 'acc', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
   const r = await syncOverridesMirror({ root: ROOT, env, now: NOW, fetchImpl });
   assert.equal(r.written, true);
+  const captured = calls.find((c) => c.opts.method === 'PUT');
   assert.match(captured.url, /accounts\/acc\/storage\/kv\/namespaces\/ns\/values\/overrides%3Amirror$/);
   assert.equal(captured.opts.method, 'PUT');
   assert.equal(captured.opts.headers.Authorization, 'Bearer tok');
