@@ -23,10 +23,15 @@ test('buildMailSend stamps a pending record and defaults availableAt to enqueued
   assert.equal(later.availableAt, 5000);
 });
 
-test('buildMailSend + sendKey reject missing identifiers', () => {
+test('buildMailSend + sendKey reject missing identifiers (issueId + recipientHash); customerId is OPTIONAL', () => {
   assert.throws(() => buildMailSend({ recipientHash: 'h', customerId: 'c' }), MailQueueError);
   assert.throws(() => buildMailSend({ issueId: 'i', customerId: 'c' }), MailQueueError);
-  assert.throws(() => buildMailSend({ issueId: 'i', recipientHash: 'h' }), MailQueueError);
+  // customerId is OPTIONAL (store decision 2026-08-17: self-managed KV, not Stripe). An anonymous subscriber
+  // has no Stripe Customer; the drain resolves its address from the mail:subscriber:<recipientHash> record.
+  const anon = buildMailSend({ issueId: 'i', recipientHash: 'h' }, { now: at(3) });
+  assert.equal(anon.customerId, null);
+  assert.equal(anon.recipientHash, 'h');
+  assert.equal(normalizeMailSend(anon).customerId, null); // a customerId-less record survives normalize
   assert.throws(() => sendKey('', 'h'), MailQueueError);
   assert.throws(() => sendKey('i', '  '), MailQueueError);
   assert.equal(sendKey('2026-08-18', 'abc'), 'mail:send:2026-08-18:abc');
@@ -50,8 +55,9 @@ test('LEAK GUARD: a send record carries an HMAC + customerId but provably no raw
 
 test('normalizeMailSend coerces a stored value and drops an unusable one', () => {
   assert.equal(normalizeMailSend(null), null);
-  assert.equal(normalizeMailSend({ issueId: 'i', recipientHash: 'h' }), null); // no customerId
-  assert.equal(normalizeMailSend({ recipientHash: 'h', customerId: 'c' }), null); // no issueId
+  assert.equal(normalizeMailSend({ recipientHash: 'h', customerId: 'c' }), null); // no issueId (required)
+  assert.equal(normalizeMailSend({ issueId: 'i', customerId: 'c' }), null); // no recipientHash (required)
+  assert.equal(normalizeMailSend({ issueId: 'i', recipientHash: 'h' }).customerId, null); // customerId OPTIONAL
   const n = normalizeMailSend({ issueId: 'i', recipientHash: 'h', customerId: 'c', status: 'weird', enqueuedAt: '5', availableAt: '65', attempts: '2' });
   assert.equal(n.status, 'pending'); // bad status -> pending
   assert.equal(n.enqueuedAt, 5);

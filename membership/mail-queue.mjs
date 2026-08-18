@@ -57,8 +57,10 @@ export function buildMailSend(input = {}, { now = Date.now, availableAt = null }
   if (!issueId) throw new MailQueueError('issueId is required');
   const recipientHash = trimOrNull(input.recipientHash);
   if (!recipientHash) throw new MailQueueError('recipientHash is required');
+  // customerId is OPTIONAL (store decision 2026-08-17: self-managed KV, not Stripe). An ANONYMOUS subscriber
+  // has no Stripe Customer; the drain resolves its address from the mail:subscriber:<recipientHash> record. A
+  // caller MAY denormalize a member's customerId here to save a lookup, but it is never required.
   const customerId = trimOrNull(input.customerId);
-  if (!customerId) throw new MailQueueError('customerId is required');
 
   const enqueuedAt = Number(now());
   const avail = num(availableAt);
@@ -82,8 +84,8 @@ export function normalizeMailSend(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const issueId = trimOrNull(raw.issueId);
   const recipientHash = trimOrNull(raw.recipientHash);
-  const customerId = trimOrNull(raw.customerId);
-  if (!issueId || !recipientHash || !customerId) return null;
+  const customerId = trimOrNull(raw.customerId); // optional (see buildMailSend)
+  if (!issueId || !recipientHash) return null;
   const status = MAIL_STATUS.has(raw.status) ? raw.status : 'pending';
   const enqueuedAt = num(raw.enqueuedAt) ?? 0;
   return {
