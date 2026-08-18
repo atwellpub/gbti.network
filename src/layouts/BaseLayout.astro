@@ -32,7 +32,7 @@ interface Props {
 }
 
 const {
-  title = 'The GBTI Network',
+  title = SITE_NAME,
   description = 'A creator network: plugins, prompts, and people building the open internet together.',
   ogImage,
   ogType = 'website',
@@ -44,7 +44,7 @@ const siteName = SITE_NAME;
 const fullTitle = title === siteName ? title : `${title} | ${siteName}`;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 // Every page gets an OG image so a shared link never previews blank. A page-specific image (a post cover, a
-// product banner) wins and renders as a large card; otherwise the branded 1200x630 "The GBTI Network" card is
+// product banner) wins and renders as a large card; otherwise the branded 1200x630 GBTI Network card is
 // the default, so the homepage + any page without its own image previews as a proper large card.
 const DEFAULT_OG_IMAGE = '/og-image.png';
 const ogImageUrl = new URL(ogImage || DEFAULT_OG_IMAGE, Astro.site).href;
