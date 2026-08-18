@@ -18,9 +18,12 @@ import {
   resolveOverridesMode,
   kvCredsPresent,
   readOverridesFromKv,
+  applyOverridesSource,
   diffOverrides,
   MAX_OVERRIDES_AGE_MS,
 } from '../scripts/lib/overrides-source.mjs';
+import { evaluatePR } from '../scripts/pr-gate.mjs';
+import { buildPriceTierMap } from '../membership/tiers.mjs';
 import { bansFromParsed, grandfathersFromParsed } from '../membership/overrides-core.mjs';
 
 const CREDS = { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
@@ -45,6 +48,79 @@ test('sow-213 ACCEPTANCE 1: a ban present only in KV is loaded and would deny th
   assert.equal(kv.bans.has('424242'), true, 'the KV-only ban is visible to the gate');
   // And it is the SAME shape effectiveStatus already consumes, so no call site has to change.
   assert.deepEqual([...kv.bans.keys()], [...bansFromParsed({ bans: [{ github_id: '424242' }] }).keys()]);
+});
+
+// ACCEPTANCE 1, AS THE SOW ACTUALLY STATES IT: not "the ban map is populated" but "THE GATE DENIES".
+//
+// The test above proves `readOverridesFromKv` returns a populated map, and its own name says the author
+// "would deny". WOULD is a proxy, and a proxy is the failure class this SOW keeps meeting. Between that map
+// and a denial sit three things it never touches: the mode deriving to 'kv' from the ABSENCE of the git
+// files, the assignment of the KV maps onto the overrides object, and effectiveStatus ranking the ban above
+// Stripe. These two tests drive all of them and assert the gate's own decision.
+//
+// THE FIXTURE IS BUILT SO THE BAN IS THE ONLY VARIABLE. The author is an active paid CREATOR publishing to
+// their own folder, which is the one combination that fully passes and auto-merges. The first attempt gave
+// them no tier, and the "control" then failed for a sow-185 tier reason instead of the ban, which would have
+// been a red proving nothing: exactly the trap these tests exist to close.
+const BANNED_ID = '424242';
+const BANNED_LOGIN = 'banneduser';
+const CREATOR_PRICE = 'price_creator';
+const bannedMirror = fresh({ bans: { bans: [{ github_id: BANNED_ID, reason: 'spam', at: '2026-08-01T00:00:00Z' }] } });
+const PRICE_TIER_MAP = buildPriceTierMap({ legacyCreatorPriceId: CREATOR_PRICE });
+const paidCreatorStripe = {
+  async findCustomerByGithubId() {
+    return { subscriptions: { data: [{ status: 'active', items: { data: [{ price: { id: CREATOR_PRICE } }] } }] } };
+  },
+};
+const gateOverrides = () => ({
+  roles: new Map(),
+  bans: new Map(),
+  grandfathers: new Map(),
+  membersIndex: new Map([[BANNED_ID, BANNED_LOGIN]]),
+});
+const ownFolderPost = [`members/${BANNED_LOGIN}/posts/hello/index.md`];
+const gateDecision = (overrides) =>
+  evaluatePR({ author: BANNED_ID, paths: ownFolderPost, overrides, stripe: paidCreatorStripe, now: NOW, priceTierMap: PRICE_TIER_MAP });
+
+/** A repo root with NO house/ override files: the post-migration world Phase 3 creates. */
+function rootWithoutOverrideFiles() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sow213-gate-'));
+  fs.mkdirSync(path.join(dir, 'house'), { recursive: true });
+  return dir;
+}
+
+test('sow-213 ACCEPTANCE 1 (GATE): a ban that exists ONLY in KV makes the gate DENY a paid creator', async () => {
+  const overrides = gateOverrides();
+
+  const { mode } = await applyOverridesSource({
+    overrides,
+    repoRoot: rootWithoutOverrideFiles(),
+    env: CREDS,
+    readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(bannedMirror) }),
+    log: () => {},
+  });
+
+  // Asserted rather than assumed: if this ever resolved to 'both' or 'git' the rest of the test would be
+  // checking a different world than the one Phase 3 creates.
+  assert.equal(mode, 'kv', 'with the git files absent the gate must be in KV-only mode, with no fallback');
+
+  const d = await gateDecision(overrides);
+  assert.equal(d.status, 'banned', 'the KV-only ban must outrank the active Stripe subscription');
+  assert.equal(d.check, 'fail', 'THE ACCEPTANCE CRITERION: the gate DENIES, it does not merely notice');
+  assert.equal(d.label, 'banned', 'and it denies BECAUSE of the ban, not for some unrelated reason');
+  assert.equal(d.autoMerge, false);
+});
+
+// THE PRE-CHANGE CONTROL, so acceptance 1 is shown to FAIL without the KV read rather than merely to pass
+// with it. This is the old gate exactly: overrides come from the git checkout, the KV read never happens, and
+// once the files are gone `readYaml` returns {} so the bans map is EMPTY. An empty bans map is
+// indistinguishable from "nobody is banned", which is the entire defect class this SOW exists to close.
+test('sow-213 ACCEPTANCE 1 (GATE), pre-change control: with no KV read the banned author is ADMITTED and AUTO-MERGED', async () => {
+  const d = await gateDecision(gateOverrides()); // empty bans: what loadOverrides yields once the file is gone
+
+  assert.notEqual(d.status, 'banned', 'the pre-change gate cannot see a KV-only ban');
+  assert.equal(d.check, 'pass', 'THE FAIL-OPEN: a banned author passes the gate');
+  assert.equal(d.autoMerge, true, 'and their PR auto-merges. This is what acceptance 1 exists to stop.');
 });
 
 // --- ACCEPTANCE 2: an unreadable, stale, or malformed source must DENY. -------------------------------------
@@ -74,6 +150,67 @@ test('sow-213 ACCEPTANCE 2: every unhealthy source is UNAVAILABLE, never an empt
     assert.ok(r.reason, `${label} must say why`);
     assert.equal(r.bans, undefined, `${label} must not hand back a ban map at all`);
   }
+});
+
+// ACCEPTANCE 2 AT THE GATE. The test above proves the READ reports unavailable. It does not prove the GATE
+// refuses, and the gap is not theoretical: a mutation that turns the gate's `throw` into an early return
+// leaves every module-level test above passing, green, while a banned author sails through. Found by mutating
+// the code rather than by reading it, which is the only way this kind of hole shows itself.
+//
+// A THROW HERE IS A DENY. `pr-gate.mjs` wraps this call in the try whose catch publishes `membership-gate` as
+// `failure`, so the PR cannot merge. That is why every unhealthy path throws instead of returning a flag: a
+// returned flag is something a caller can forget to check, and forgetting would fail OPEN.
+test('sow-213 ACCEPTANCE 2 (GATE): every unhealthy source makes the gate THROW, which is how it denies', async () => {
+  const unhealthy = [
+    ['unreachable', { available: false, reason: 'KV read threw (network down)' }],
+    ['HTTP error', { available: false, reason: 'KV read failed (500)' }],
+    ['stale', { available: false, reason: 'mirror is stale or misdated (age 400h)' }],
+    ['malformed', { available: false, reason: 'mirror sections are malformed (bans/grandfathered must be objects)' }],
+  ];
+  for (const [label, kvResult] of unhealthy) {
+    // Both post-migration modes must deny: 'kv' (the files are gone) and 'both' (the Phase 1 cross-check).
+    for (const repoRoot of [rootWithoutOverrideFiles(), process.cwd()]) {
+      await assert.rejects(
+        () => applyOverridesSource({ overrides: gateOverrides(), repoRoot, env: CREDS, readKv: async () => kvResult, log: () => {} }),
+        /overrides unavailable from KV/,
+        `${label} must DENY, not fall through to an empty ban list`,
+      );
+    }
+  }
+});
+
+test('sow-213 ACCEPTANCE 2 (GATE): git and KV disagreeing about a ban DENIES rather than picking a side', async () => {
+  // 'both' mode, the Phase 1 safety net: the checkout still has the files, so repoRoot is the real one.
+  const overrides = gateOverrides();
+  overrides.bans = new Map(); // git says nobody is banned
+  await assert.rejects(
+    () => applyOverridesSource({
+      overrides,
+      repoRoot: process.cwd(),
+      env: CREDS,
+      readKv: async () => await readOverridesFromKv({ env: CREDS, now: NOW, fetchImpl: okFetch(bannedMirror) }), // KV says one is
+      log: () => {},
+    }),
+    /DISAGREE/,
+    'one of the two sources is lying about who is banned, and the gate does not get to guess which',
+  );
+});
+
+// The 'git' mode is the pre-provisioning world and must stay EXACTLY as it was: no KV read at all, overrides
+// untouched. Asserted because a change here would be a silent behaviour change on the live gate.
+test('sow-213 (GATE): in git mode the KV read is never called and the overrides are untouched', async () => {
+  const overrides = gateOverrides();
+  let called = 0;
+  const { mode } = await applyOverridesSource({
+    overrides,
+    repoRoot: process.cwd(), // the files are present
+    env: {}, // no creds
+    readKv: async () => { called += 1; return { available: true, bans: new Map([['1', {}]]), grandfathers: new Map() }; },
+    log: () => {},
+  });
+  assert.equal(mode, 'git');
+  assert.equal(called, 0, 'git mode must not reach the network at all');
+  assert.equal(overrides.bans.size, 0, 'and must not have been overwritten');
 });
 
 test('sow-213: the 48h boundary matches the WORKER exactly (inclusive), deliberately', async () => {

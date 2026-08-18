@@ -27,13 +27,7 @@ import fs from 'node:fs';
 import { deriveMembership } from '../membership/derive-status.mjs';
 import { loadOverrides, roleOf, effectiveStatus } from '../membership/overrides.mjs';
 // sow-213: the overrides source resolver + the fail-closed KV read (bans/grandfathered leaving the public repo).
-import {
-  overrideFilesPresent,
-  resolveOverridesMode,
-  kvCredsPresent,
-  readOverridesFromKv,
-  diffOverrides,
-} from './lib/overrides-source.mjs';
+import { applyOverridesSource } from './lib/overrides-source.mjs';
 import { ownedFolderFor, decide, contributionTarget } from '../membership/classify-pr.mjs';
 import { parseHostedRef, parseAdminHostedRef } from '../membership/hosted-author.mjs'; // SOW-156 hosted content + sow-161 hosted-admin canonical-head identity
 import { buildEnvPriceTierMap, resolveEffectiveTier } from '../membership/tier-gate.mjs'; // sow-185: price -> tier + override-aware tier
@@ -239,34 +233,10 @@ async function main() {
     // Every failure here THROWS, and the catch below publishes `membership-gate` as `failure`, so the PR
     // cannot merge. That is deliberate: an unreadable ban list must DENY, never "skip the ban check". An
     // empty bans map is indistinguishable from "nobody is banned", which is the whole defect class.
-    const overridesMode = resolveOverridesMode({
-      gitPresent: overrideFilesPresent(repoRoot),
-      credsPresent: kvCredsPresent(process.env),
-    });
-    if (overridesMode === 'git') {
-      // Pre-provisioning: the files are still in git and there are no KV creds. Current behaviour, unchanged.
-      console.log('pr-gate: overrides source = git (KV credentials not set; nothing has moved yet).');
-    } else {
-      const kv = await readOverridesFromKv({ env: process.env });
-      if (!kv.available) {
-        throw new Error(`overrides unavailable from KV (${kv.reason}); refusing to gate on an unknown ban list [mode=${overridesMode}]`);
-      }
-      if (overridesMode === 'kv') {
-        overrides.bans = kv.bans;
-        overrides.grandfathers = kv.grandfathers;
-        console.log(`pr-gate: overrides source = KV (mirror ${kv.generatedAt}); the git files are gone, as intended.`);
-      } else {
-        // Both sources present: require agreement. This is the safety net for Phase 2, and it is why the
-        // writer can be inverted without a flag day. A divergence means one of the two is lying about who is
-        // banned, and we do not get to guess which.
-        const differences = diffOverrides(overrides, kv);
-        if (differences.length) {
-          const detail = differences.map((d) => `${d.field}:${d.id} (git=${d.git} kv=${d.kv})`).join(', ');
-          throw new Error(`git and KV overrides DISAGREE: ${detail}. Refusing to gate until they match.`);
-        }
-        console.log(`pr-gate: overrides source = git, cross-checked against KV (mirror ${kv.generatedAt}), ${overrides.bans.size} ban(s) agree.`);
-      }
-    }
+    // The whole resolution lives in applyOverridesSource so the SOW's acceptance criteria can be tested
+    // against the function the gate actually runs, rather than against the KV read alone.
+    await applyOverridesSource({ overrides, repoRoot, env: process.env });
+
     // sow-185: the price-id -> tier map from the provisioned env (STRIPE_PRICE_MEMBER/CREATOR_* + legacy
     // STRIPE_PRICE_ID), passed by pr-membership-gate.yml.
     //

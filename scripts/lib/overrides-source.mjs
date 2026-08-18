@@ -105,6 +105,59 @@ export async function readOverridesFromKv({ env = process.env, fetchImpl = globa
 }
 
 /**
+ * Resolve the gate's ACTUAL override maps: derive the mode, read KV when the mode calls for it, and hand back
+ * the overrides object the gate will decide on. Throws on every unhealthy path, and `pr-gate.mjs` reports a
+ * thrown error as a FAILING `membership-gate` status, so a throw here is a DENY.
+ *
+ * EXTRACTED SO THE ACCEPTANCE CRITERIA CAN BE TESTED AS STATED. The SOW's criterion is "a banned author is
+ * DENIED BY THE GATE when the ban exists only in KV". While this logic sat inline in `run()` the only thing a
+ * test could reach was `readOverridesFromKv`, so the test asserted that a ban map came back populated and its
+ * name said the author "WOULD deny". That is a proxy: it proves the module, not the gate, and it steps over
+ * the mode derivation and the assignment that sit between them. Same failure class as the double-wrap bug
+ * above, one level up. With this exported, the test drives mode -> read -> assignment -> evaluatePR and
+ * asserts the decision itself.
+ *
+ * `readKv` and `log` are injected for that test; production passes neither.
+ *
+ * MUTATES `overrides` in place (as the inline version did) and also returns it, so the caller reads either way.
+ */
+export async function applyOverridesSource({ overrides, repoRoot, env = process.env, readKv = readOverridesFromKv, log = console.log }) {
+  const mode = resolveOverridesMode({
+    gitPresent: overrideFilesPresent(repoRoot),
+    credsPresent: kvCredsPresent(env),
+  });
+
+  if (mode === 'git') {
+    // Pre-provisioning: the files are still in git and there are no KV creds. Current behaviour, unchanged.
+    log('pr-gate: overrides source = git (KV credentials not set; nothing has moved yet).');
+    return { mode, overrides };
+  }
+
+  const kv = await readKv({ env });
+  if (!kv.available) {
+    throw new Error(`overrides unavailable from KV (${kv.reason}); refusing to gate on an unknown ban list [mode=${mode}]`);
+  }
+
+  if (mode === 'kv') {
+    overrides.bans = kv.bans;
+    overrides.grandfathers = kv.grandfathers;
+    log(`pr-gate: overrides source = KV (mirror ${kv.generatedAt}); the git files are gone, as intended.`);
+    return { mode, overrides, generatedAt: kv.generatedAt };
+  }
+
+  // Both sources present: require agreement. This is the safety net for Phase 2, and it is why the writer can
+  // be inverted without a flag day. A divergence means one of the two is lying about who is banned, and we do
+  // not get to guess which.
+  const differences = diffOverrides(overrides, kv);
+  if (differences.length) {
+    const detail = differences.map((d) => `${d.field}:${d.id} (git=${d.git} kv=${d.kv})`).join(', ');
+    throw new Error(`git and KV overrides DISAGREE: ${detail}. Refusing to gate until they match.`);
+  }
+  log(`pr-gate: overrides source = git, cross-checked against KV (mirror ${kv.generatedAt}), ${overrides.bans.size} ban(s) agree.`);
+  return { mode, overrides, generatedAt: kv.generatedAt };
+}
+
+/**
  * Compare the git-loaded Maps against the KV-loaded Maps. PURE. Returns the list of disagreeing github_ids,
  * empty when they agree. Membership only, deliberately: a differing NOTE or reason is not a gating fact, and
  * failing the gate on prose churn would train people to ignore it.
