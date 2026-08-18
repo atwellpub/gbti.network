@@ -19410,8 +19410,14 @@ async function planMemberFiles({ built, body, encrypt }) {
   let publicPart = "";
   let memberPart = null;
   if (vis === "members") {
-    memberPart = String(body ?? "").trim();
-    if (!memberPart) return null;
+    const split = splitMemberMarkdown(body);
+    if (split.memberPart) {
+      publicPart = split.publicPart;
+      memberPart = split.memberPart;
+    } else {
+      memberPart = String(body ?? "").replace(MEMBER_MARKER, "").trim();
+      if (!memberPart) return null;
+    }
   } else {
     const split = splitMemberMarkdown(body);
     if (split.memberPart == null) return null;

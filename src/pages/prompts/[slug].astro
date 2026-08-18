@@ -103,6 +103,10 @@ const editHref = editPath ? `/workbench/#tab=prompt&edit=${encodeURIComponent(ed
               <figcaption>Example result{d.targets?.length ? ` · ${d.targets[0]}` : ''}</figcaption>
             </figure>
           )}
+          {/* sow-016: a Mode B stub MAY carry a public teaser (the body before the members-only marker). It
+              renders here as ordinary prose, ABOVE the prompt block, because .prompt-block forces monospace on
+              its children — right for a prompt, wrong for the paragraphs explaining it. */}
+          {isStub(prompt) && rawBody && <div class="prompt-teaser"><Prose><Content /></Prose></div>}
           <div class="prompt-block" data-mode="visual">
             <div class="prompt-block-bar">
               <span class="prompt-block-label"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><use href="#ico-terminal"/></svg>Prompt</span>
@@ -236,6 +240,9 @@ const editHref = editPath ? `/workbench/#tab=prompt&edit=${encodeURIComponent(ed
        copyable artifact, not blog prose. The Copy button lives in the bar, so it never overlaps the image. */
     /* The prompt well sits lighter than the tinted page band (so it reads as a distinct surface) but not as
        light as the white header/sidebar cards: --paper-2 is the off-white intermediate. */
+    /* sow-016 Mode B: the public teaser above a locked prompt block. Ordinary prose, deliberately NOT inside
+       .prompt-block, whose children are forced to monospace. */
+    .prompt-teaser { margin: 0 0 26px; }
     .prompt-block { border: 1.5px solid var(--line-2); border-radius: var(--r-lg); overflow: hidden; background: var(--paper-2); }
     .prompt-block-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 12px 9px 16px; background: var(--paper); border-bottom: 1.5px solid var(--line); }
     .prompt-block-label { display: inline-flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-soft); }

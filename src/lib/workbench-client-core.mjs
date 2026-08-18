@@ -112,8 +112,16 @@ export async function planMemberFiles({ built, body, encrypt }) {
   let publicPart = '';
   let memberPart = null;
   if (vis === 'members') {
-    memberPart = String(body ?? '').trim(); // whole item: the entire body is gated
-    if (!memberPart) return null;
+    // Mirrors client/src/operations.mjs planMemberFiles: a members item MAY carry a public teaser before the
+    // marker, so a Mode B stub can say what it is. No marker means the whole body is gated, as before.
+    const split = splitMemberMarkdown(body);
+    if (split.memberPart) {
+      publicPart = split.publicPart;
+      memberPart = split.memberPart;
+    } else {
+      memberPart = String(body ?? '').replace(MEMBER_MARKER, '').trim(); // whole item: the entire body is gated
+      if (!memberPart) return null;
+    }
   } else {
     const split = splitMemberMarkdown(body);
     if (split.memberPart == null) return null; // plain public content: no encryption

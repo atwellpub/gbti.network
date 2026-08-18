@@ -10,6 +10,21 @@ const fakeEncrypt = async (plaintext, assetId) => ({ v: 1, kid: '1', iv: 'IV', a
 // A fake decrypt that inverts fakeEncrypt (extracts the plaintext from the ct wrapper), for the round-trip test.
 const fakeDecryptCt = (ct) => String(ct).replace(/^CT\(/, '').replace(/\)$/, '');
 
+// The website WorkBench duplicates client/src/operations.mjs planMemberFiles, so the teaser rule has to hold in
+// BOTH or publishing the same item from the website silently wipes the public part the extension kept.
+test('planMemberFiles: a MEMBERS item with a marker keeps the teaser public and encrypts only the tail', async () => {
+  const body = 'Public teaser TEASER_W.\n\n<!-- members-only -->\n\nGATED_PAYLOAD_W';
+  const built = buildContentFile({ type: 'prompt', username: 'gwen', input: { slug: 'mode-b-teaser', title: 'T', shortDescription: 'x', visibility: 'members', publicStub: true, status: 'published' }, body });
+  const plan = await planMemberFiles({ built, body, encrypt: fakeEncrypt });
+  assert.equal(plan.files.length, 2);
+  const md = plan.files.find((f) => f.path.endsWith('.md'));
+  const enc = plan.files.find((f) => f.path.endsWith('.enc'));
+  assert.match(md.content, /TEASER_W/, 'the public teaser must survive into the committed .md');
+  assert.doesNotMatch(md.content, /GATED_PAYLOAD_W/, 'the gated payload must NOT be in the committed .md');
+  assert.doesNotMatch(md.content, /<!-- members-only -->/, 'the marker itself must never reach the committed .md');
+  assert.match(enc.content, /CT\(GATED_PAYLOAD_W\)/);
+});
+
 test('planMemberFiles: a members comment encrypts to a .enc + a stub .md carrying the pointer', async () => {
   const id = commentId('2026-01-02T03:04:05Z', 'abc123');
   const built = buildCommentFile({ username: 'gwen', input: { id, targetType: 'post', targetSlug: 'hello', createdAt: '2026-01-02T03:04:05Z', status: 'published', visibility: 'members' }, body: 'a members-only reply' });

@@ -9,7 +9,7 @@
 import { buildContentFile, flipContentStatus, buildShareFile, shareId as makeShareId, buildCommentFile, commentId as makeCommentId, serializeContentFile, parseContentFile, contentPath, ContentValidationError, byCommentOldest, NETWORK_CONTENT_OWNER } from './content-ops.mjs';
 import { publishContent, publishFiles, commitToBranchOnFork, branchName } from './publish.mjs';
 import { canPublish, canStageDrafts, isBlockedFromPublishing, canSeeNews, canFollow, canSave, canBrowse, canSeeShares, fetchStripeStatus } from './membership.mjs';
-import { splitMemberMarkdown, encAssetFor, encryptViaWorker, decryptViaWorker, MemberContentLockedError } from './member-content.mjs';
+import { splitMemberMarkdown, encAssetFor, encryptViaWorker, decryptViaWorker, MemberContentLockedError, MEMBER_MARKER } from './member-content.mjs';
 import {
   getActivity as workerGetActivity, setFavorite as workerSetFavorite, createCollection as workerCreateCollection,
   renameCollection as workerRenameCollection, deleteCollection as workerDeleteCollection,
@@ -801,8 +801,21 @@ export async function planMemberFiles({ built, body, encrypt }) {
   let publicPart = '';
   let memberPart = null;
   if (vis === 'members') {
-    memberPart = String(body ?? '').trim(); // whole-item: the ENTIRE body is gated (Mode A or B)
-    if (!memberPart) return null; // a members item with an empty body: nothing to encrypt (plain publish)
+    // A members item MAY carry a public teaser: everything before the marker stays in index.md and only the
+    // tail is encrypted, so a Mode B stub can say what it is instead of showing a bare title. Without a marker
+    // this is unchanged from before — the ENTIRE body is gated (Mode A, or a Mode B stub with no teaser).
+    // Back-compatible by measurement: no shipped members item contains the marker, and validate-content
+    // rejects a committed body that does, so no existing item can change shape here.
+    const split = splitMemberMarkdown(body);
+    if (split.memberPart) {
+      publicPart = split.publicPart; // the teaser: stays in index.md, public
+      memberPart = split.memberPart; // the tail: encrypted to the .enc
+    } else {
+      // No marker, or a marker with an empty tail: the ENTIRE body is gated, exactly as before. Strip any
+      // marker so the literal `<!-- members-only -->` never reaches index.md (validate-content rejects it).
+      memberPart = String(body ?? '').replace(MEMBER_MARKER, '').trim();
+      if (!memberPart) return null; // a members item with an empty body: nothing to encrypt (plain publish)
+    }
   } else {
     const split = splitMemberMarkdown(body);
     if (split.memberPart == null) return null; // plain public content (no marker): no encryption

@@ -12,6 +12,20 @@ import { GbtiElement, define } from '../base.mjs';
 // more / Show less toggle, so a member can scan the note without scrolling past the whole block.
 const CLIP_LINES = 8;
 
+/**
+ * Decide how one decrypted code block is presented, given its line count. Pure so it can be pinned in node;
+ * the DOM wiring around it needs a browser and is verified there.
+ *
+ * EVERY block gets a Copy button, not only the clipped ones. sow-016 gating moved a prompt's payload behind
+ * the wall, and the page's own Copy button is suppressed on a stub, so without this a paying member could
+ * read the file they joined for and had no way to take it.
+ */
+export function codeBlockPlan(lineCount) {
+  const lines = Number.isFinite(lineCount) ? lineCount : 0;
+  const clip = lines > CLIP_LINES + 1;
+  return { clip, copy: true, moreLabel: clip ? `Show more (${lines} lines)` : null, lessLabel: clip ? 'Show less' : null };
+}
+
 const PROSE = `
   .state, .locked { color: var(--muted); font-size: 14px; padding: 10px 0; }
   .locked a { color: var(--accent); font-weight: 600; }
@@ -30,8 +44,9 @@ const PROSE = `
     content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3.2em;
     background: linear-gradient(to bottom, transparent, var(--panel)); pointer-events: none; border-radius: 0 0 8px 8px;
   }
+  .codeclip-controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .codeclip-toggle {
-    display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 4px 11px;
+    display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px;
     font: inherit; font-size: 13px; font-weight: 600; line-height: 1.2;
     background: transparent; color: var(--accent); border: 1px solid var(--line, rgba(127,127,127,.32));
     border-radius: 6px; cursor: pointer;
@@ -61,33 +76,58 @@ class GbtiLockedContent extends GbtiElement {
       html = '';
     }
     this.set(this.css(PROSE) + `<div class="unlocked">${html}</div>`);
-    this.clipLongCode();
+    this.decorateCode();
     this.emit('gbti-unlocked', { encPath });
   }
 
-  /** Clip any long <pre> in the rendered body to CLIP_LINES with a Show more / Show less toggle. */
-  clipLongCode() {
+  /** Give every decrypted <pre> a Copy button, and clip the long ones behind a Show more / Show less toggle. */
+  decorateCode() {
     const doc = this.root?.ownerDocument || (typeof document !== 'undefined' ? document : null);
     if (!doc) return;
     for (const pre of this.$$('.unlocked pre')) {
       const lines = (pre.textContent || '').replace(/\n$/, '').split('\n').length;
-      if (lines <= CLIP_LINES + 1) continue; // short enough: leave it inline
+      const plan = codeBlockPlan(lines);
+
       const clip = doc.createElement('div');
-      clip.className = 'codeclip collapsed';
+      clip.className = plan.clip ? 'codeclip collapsed' : 'codeclip';
       const inner = doc.createElement('div');
       inner.className = 'codeclip-inner';
       pre.replaceWith(clip);
       inner.appendChild(pre);
       clip.appendChild(inner);
+
+      const controls = doc.createElement('div');
+      controls.className = 'codeclip-controls';
+      clip.appendChild(controls);
+
+      // Copy first: on a gated prompt this IS the payload, and the page's own Copy button is suppressed
+      // for a stub, so this button is the only way a member takes away what they joined for.
+      const copy = doc.createElement('button');
+      copy.type = 'button';
+      copy.className = 'codeclip-toggle';
+      copy.textContent = 'Copy';
+      copy.addEventListener('click', async () => {
+        const text = (pre.textContent || '').replace(/\n$/, '');
+        try {
+          await navigator.clipboard.writeText(text);
+          copy.textContent = 'Copied';
+          setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+        } catch {
+          copy.textContent = 'Copy failed'; // clipboard denied: say so rather than looking like it worked
+        }
+      });
+      controls.appendChild(copy);
+
+      if (!plan.clip) continue;
       const btn = doc.createElement('button');
       btn.type = 'button';
       btn.className = 'codeclip-toggle';
-      btn.textContent = `Show more (${lines} lines)`;
+      btn.textContent = plan.moreLabel;
       btn.addEventListener('click', () => {
         const collapsed = clip.classList.toggle('collapsed');
-        btn.textContent = collapsed ? `Show more (${lines} lines)` : 'Show less';
+        btn.textContent = collapsed ? plan.moreLabel : plan.lessLabel;
       });
-      clip.appendChild(btn);
+      controls.appendChild(btn);
     }
   }
 }

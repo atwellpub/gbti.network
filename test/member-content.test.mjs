@@ -77,6 +77,35 @@ test('planMemberFiles: a public post with a members-only SECTION keeps the tease
   assert.match(idx.content, /encryptedBody:/);
 });
 
+// A Mode B stub used to be all-or-nothing: `visibility: members` gated the ENTIRE body, so the public page
+// could show a title and a one-line description and nothing else. A members item may now carry a teaser
+// before the marker, which is what lets a walled prompt say what it is and what you would do with it.
+test('planMemberFiles: a MEMBERS item with a marker keeps the teaser public and encrypts only the tail', async () => {
+  const body = `Public teaser TEASER_B.\n\n## Install\n1. Do the thing\n\n${MEMBER_MARKER}\n\n## The skill file\nGATED_PAYLOAD_B`;
+  const built = buildContentFile({ type: 'prompt', username: 'alice', input: { title: 'T', slug: 'mode-b-teaser', shortDescription: 'x', status: 'published', visibility: 'members', publicStub: true, publishedAt: '2026-06-07' }, body });
+  const plan = await planMemberFiles({ built, body, encrypt: fakeEncrypt });
+  assert.equal(plan.files.length, 2, 'a teaser + an encrypted tail is still two files');
+  const idx = plan.files.find((f) => f.path.endsWith('index.md'));
+  const enc = plan.files.find((f) => f.path.endsWith('.enc'));
+  assert.ok(idx && enc, 'both the index.md and the .enc must be planned');
+  assert.match(idx.content, /TEASER_B/, 'the public teaser must survive into index.md');
+  assert.match(idx.content, /## Install/, 'everything before the marker is public');
+  assert.doesNotMatch(idx.content, /GATED_PAYLOAD_B/, 'the gated payload must NOT be in index.md');
+  assert.doesNotMatch(idx.content, /<!-- members-only -->/, 'the marker itself must never reach index.md');
+  assert.match(idx.content, /encryptedBody: members\/alice\/_enc\/prompt-mode-b-teaser-body\.enc/);
+  assert.equal(enc.content, JSON.stringify(await fakeEncrypt('## The skill file\nGATED_PAYLOAD_B', 'prompt:mode-b-teaser:body')));
+});
+
+test('planMemberFiles: a MEMBERS item whose marker has an EMPTY tail gates the whole body and strips the marker', async () => {
+  const body = `WOULD_BE_TEASER\n\n${MEMBER_MARKER}\n   `;
+  const built = buildContentFile({ type: 'prompt', username: 'alice', input: { title: 'T', slug: 'empty-gate', shortDescription: 'x', status: 'published', visibility: 'members', publicStub: true, publishedAt: '2026-06-07' }, body });
+  const plan = await planMemberFiles({ built, body, encrypt: fakeEncrypt });
+  const idx = plan.files.find((f) => f.path.endsWith('index.md'));
+  assert.equal(plan.files.length, 2, 'the body is gated wholesale rather than published behind an empty lock');
+  assert.doesNotMatch(idx.content, /WOULD_BE_TEASER/, 'a lock that decrypts to nothing must not expose the body instead');
+  assert.doesNotMatch(idx.content, /<!-- members-only -->/, 'the marker must be stripped');
+});
+
 test('planMemberFiles: plain public content returns null (normal single-file publish)', async () => {
   const built = buildContentFile({ type: 'post', username: 'alice', input: { title: 'T', slug: 'plain', status: 'published', visibility: 'public', publishedAt: '2026-06-07' }, body: 'just public, no marker' });
   assert.equal(await planMemberFiles({ built, body: 'just public, no marker', encrypt: fakeEncrypt }), null);

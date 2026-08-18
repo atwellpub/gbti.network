@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { createHttpClient } from '../client-ui/src/client.mjs';
 import { coerceValue, gatherInput } from '../client-ui/src/form.mjs';
 import { readHooks, canEditInPlace, toPublishPayload } from '../client-ui/src/inline.mjs';
+import { codeBlockPlan } from '../client-ui/src/elements/gbti-locked-content.mjs';
 
 // ---- GbtiClient http adapter ----
 
@@ -114,4 +115,30 @@ test('toPublishPayload: merges edits into the FULL frontmatter (other metadata p
   assert.equal(out2.body, 'just body');
 
   assert.throws(() => toPublishPayload(null, {}), /no item/);
+});
+
+// ---- <gbti-locked-content> code-block presentation (sow-016 + the walled-prompt copy gap) ----
+// The DOM wiring needs a browser and is verified there; this pins the DECISION, and specifically that a
+// Copy button is offered on EVERY decrypted block. Without it a member who paid for a gated prompt could
+// read the file and had no way to take it, because the page's own Copy button is suppressed on a stub.
+
+test('codeBlockPlan: every decrypted code block offers Copy, short ones included', () => {
+  assert.equal(codeBlockPlan(1).copy, true);
+  assert.equal(codeBlockPlan(8).copy, true);
+  assert.equal(codeBlockPlan(400).copy, true);
+});
+
+test('codeBlockPlan: only a block longer than the clip threshold is clipped, and it names its line count', () => {
+  assert.equal(codeBlockPlan(9).clip, false, 'exactly threshold+1 stays inline');
+  assert.equal(codeBlockPlan(9).moreLabel, null);
+  assert.equal(codeBlockPlan(10).clip, true, 'threshold+2 clips');
+  assert.equal(codeBlockPlan(10).moreLabel, 'Show more (10 lines)');
+  assert.equal(codeBlockPlan(10).lessLabel, 'Show less');
+});
+
+test('codeBlockPlan: a missing or junk line count degrades to an unclipped, still-copyable block', () => {
+  for (const bad of [undefined, null, NaN, 'lots']) {
+    assert.equal(codeBlockPlan(bad).clip, false, `${String(bad)} must not clip`);
+    assert.equal(codeBlockPlan(bad).copy, true, `${String(bad)} must still be copyable`);
+  }
 });
