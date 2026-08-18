@@ -94,9 +94,13 @@ jobs:
           # THIS TOKEN IS READ-ONLY AND IS NOT CF_API_TOKEN. CF_API_TOKEN is Workers KV Storage:EDIT and
           # non-expiring; it must never be used here. This job runs on pull_request_target, so a KV-WRITE
           # credential in it would trade away the property that makes holding secrets here acceptable at all.
-          # CF_KV_READ_TOKEN expires 2027-08-28 by design: Cloudflare's KV permission is account-level with no
-          # per-namespace selector, so where scope cannot confine a credential, time does. See
-          # .data/ops/secrets-ops/README.md.
+          # CF_KV_READ_TOKEN is REQUIRED to carry an expiry, by design: Cloudflare's KV permission is
+          # account-level with no per-namespace selector, so where scope cannot confine a credential, time
+          # does. The date itself is deliberately NOT repeated here. It lives in one place,
+          # .data/ops/secrets-ops/README.md, and is checked on every run by the mustExpire probe in
+          # scripts/check-credentials.mjs, which reports a token carrying NO expiry as a problem rather than
+          # as healthy. An earlier version of this comment stated a specific date as established fact while it
+          # was still unconfirmed; a date copied into a second file is a claim that drifts from its source.
           #
           # The account and namespace ids are non-secret identifiers (acting on them requires the token), so
           # they are inlined exactly as in sync-overrides-mirror.yml and reconcile.yml.

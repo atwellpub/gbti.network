@@ -109,6 +109,31 @@ export async function runProbes({ env = process.env, fetch = globalThis.fetch } 
     });
     return { ok: res.ok, status: res.status, detail: res.ok ? null : 'token expired/revoked? LinkedIn tokens last ~60 days; re-run the OAuth flow (secrets-ops)' };
   }));
+  // sow-213: the PR gate's KV read credential. `mustExpire` is the whole point of it. Cloudflare's Workers KV
+  // Storage permission is ACCOUNT-LEVEL with no per-namespace selector, so this token cannot be confined by
+  // scope, and the compensating control agreed with the owner is that it must be confined by TIME instead.
+  // That makes "does it actually carry an expiry" a security property rather than bookkeeping, and it is
+  // exactly the thing nobody re-checks after the day it was minted.
+  //
+  // It is here because the answer was in doubt on day one: the owner reported setting a TTL at mint, and the
+  // Cloudflare token list displayed `Expires: -` immediately afterwards, which is how a NO-EXPIRY token
+  // renders. Rather than resolve that by asking again, this probe asks the authority (Cloudflare) on every
+  // run, and keeps asking. A control whose existence depends on someone remembering to look is not a control.
+  //
+  // IF THIS FIRES WHILE THE OWNER HAS CONFIRMED A TTL, suspect the probe before the token: `/user/tokens/verify`
+  // is documented to return `expires_on` only when one is set, and if it turns out not to return it at all
+  // then read the expiry from the token DETAIL endpoint instead. Do not silence this by dropping mustExpire.
+  if (env.CF_KV_READ_TOKEN) out.push(await probe('CF_KV_READ_TOKEN (Cloudflare, KV read for the PR gate)', async () => {
+    const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { Authorization: `Bearer ${env.CF_KV_READ_TOKEN}` } });
+    let body = null; try { body = await res.json(); } catch { /* */ }
+    return {
+      ok: res.ok && body?.result?.status === 'active',
+      status: res.status,
+      detail: body?.result?.status,
+      expiresAt: body?.result?.expires_on || null,
+      mustExpire: true,
+    };
+  }));
   if (env.CF_API_TOKEN) out.push(await probe('CF_API_TOKEN (Cloudflare)', async () => {
     const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } });
     let body = null; try { body = await res.json(); } catch { /* */ }

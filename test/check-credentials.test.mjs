@@ -129,3 +129,36 @@ test('runProbes: the GitHub token probe declares mustExpire', async () => {
   // And end to end: that probe result, with no expiry header, must produce a problem.
   assert.equal(evaluate(results).healthy, false);
 });
+
+// sow-213: the gate's KV read token. Its expiry is not bookkeeping, it is the compensating control, because
+// Cloudflare's KV permission is account-level and the token cannot be confined by scope. So "did the TTL
+// actually save" has to be answered by a machine on every run rather than by someone remembering to look:
+// on day one the owner reported setting one and the Cloudflare token list showed `Expires: -`, which is how
+// a no-expiry token renders. These tests pin both readings.
+test('runProbes: the KV read token probe declares mustExpire and reports the expiry Cloudflare returns', async () => {
+  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active', expires_on: '2027-08-28T00:00:00Z' } }) });
+  const results = await runProbes({ env: { CF_KV_READ_TOKEN: 'tok' }, fetch });
+  const r = results.find((x) => x.name.startsWith('CF_KV_READ_TOKEN'));
+  assert.ok(r, 'the probe runs when the secret is present');
+  assert.equal(r.ok, true);
+  assert.equal(r.mustExpire, true, 'without this the no-expiry case can never be flagged');
+  assert.equal(r.expiresAt, '2027-08-28T00:00:00Z');
+  assert.equal(evaluate(results, { now: new Date('2026-08-18T00:00:00Z') }).healthy, true);
+});
+
+test('runProbes: a KV read token with NO expiry is reported as a PROBLEM, not as healthy', async () => {
+  // The exact doubt this probe exists to settle: live and valid, but carrying no TTL, so the control that
+  // justified accepting an account-wide token does not exist. Liveness alone would call this green.
+  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active' } }) });
+  const results = await runProbes({ env: { CF_KV_READ_TOKEN: 'tok' }, fetch });
+  const { problems, healthy } = evaluate(results, { now: new Date('2026-08-18T00:00:00Z') });
+  assert.equal(healthy, false, 'a live-but-unexpiring token must not read as healthy');
+  assert.equal(problems[0].kind, 'no-expiry');
+  assert.match(problems[0].name, /^CF_KV_READ_TOKEN/);
+});
+
+test('runProbes: an inactive KV read token fails its live check', async () => {
+  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'disabled' } }) });
+  const results = await runProbes({ env: { CF_KV_READ_TOKEN: 'tok' }, fetch });
+  assert.equal(results.find((x) => x.name.startsWith('CF_KV_READ_TOKEN')).ok, false, 'active status is required, not just HTTP 200');
+});
