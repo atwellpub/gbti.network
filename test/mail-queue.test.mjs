@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMailSend, normalizeMailSend, sendKey, isDue, planDrain, canRetry, markClaimed, releaseClaim,
-  markSent, markFailed, withinBudget, budgetRemaining, budgetDayKey, budgetMonthKey, hashString,
+  markSent, markFailed, markSuppressed, withinBudget, budgetRemaining, budgetDayKey, budgetMonthKey, hashString,
   rotateOrder, backlogCount, oldestPendingAgeMs, MailQueueError, DEFAULT_MAX_ATTEMPTS,
 } from '../membership/mail-queue.mjs';
 
@@ -105,6 +105,21 @@ test('markSent is the per-recipient sent marker: a sent record is never due or d
   assert.equal(isDue(sent, 1000), false);
   assert.deepEqual(planDrain([sent], 1000).due, []);
   assert.equal(canRetry(sent), false);
+});
+
+test('markSuppressed terminalizes WITHOUT sending: never due, never retried, not a sent marker', () => {
+  const r = buildMailSend({ issueId: 'i', recipientHash: 'h' }, { now: at(0) });
+  const supp = markSuppressed(r, { now: at(9) });
+  assert.equal(supp.status, 'suppressed');
+  assert.equal(supp.suppressedAt, 9);
+  assert.equal(supp.sentAt, null, 'a suppressed record is not a send, so sentAt stays null');
+  assert.equal(isDue(supp, 1000), false); // terminal: never due
+  assert.deepEqual(planDrain([supp], 1000).due, []); // never drained again
+  assert.equal(canRetry(supp), false); // terminal, never retried
+  assert.equal(backlogCount([supp]), 0, 'a suppressed record is not backlog');
+  // survives a normalize round-trip
+  assert.equal(normalizeMailSend(supp).status, 'suppressed');
+  assert.equal(normalizeMailSend(supp).suppressedAt, 9);
 });
 
 test('canRetry respects the attempt budget; markFailed terminalizes', () => {

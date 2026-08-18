@@ -19,7 +19,7 @@
 // The per-recipient-per-issue KEY is itself the idempotency guarantee: one recipient can hold at most one record
 // per issue, so a re-run of the weekly compile finds the record already present and does not enqueue a second.
 
-export const MAIL_STATUS = new Set(['pending', 'claimed', 'sent', 'failed']);
+export const MAIL_STATUS = new Set(['pending', 'claimed', 'sent', 'failed', 'suppressed']);
 export const DEFAULT_MAX_ATTEMPTS = 5;
 
 /** Thrown for caller-input problems; the handler maps it to a 400 (never a 500). */
@@ -76,6 +76,7 @@ export function buildMailSend(input = {}, { now = Date.now, availableAt = null }
     attempts: 0,
     sentAt: null,
     failedAt: null,
+    suppressedAt: null,
   };
 }
 
@@ -100,6 +101,7 @@ export function normalizeMailSend(raw) {
     attempts: num(raw.attempts) ?? 0,
     sentAt: num(raw.sentAt),
     failedAt: num(raw.failedAt),
+    suppressedAt: num(raw.suppressedAt),
   };
 }
 
@@ -152,6 +154,15 @@ export function markSent(item, { now = Date.now } = {}) {
 /** Terminal failure after the attempt budget is spent. */
 export function markFailed(item, { now = Date.now } = {}) {
   return { ...item, status: 'failed', failedAt: Number(now()) };
+}
+
+/** Terminal, and NOT a send: the recipient unsubscribed (a mail:suppress marker appeared) after the issue was
+ *  compiled but before this record drained. Distinct from 'sent' (an email went out) and 'failed' (a send
+ *  error) so the drain's metrics and the rate budget stay honest: a suppressed recipient consumes no send. The
+ *  drain checks the suppression marker on every record before claiming, so an unsubscribe is always honored
+ *  before the next send even mid-window. */
+export function markSuppressed(item, { now = Date.now } = {}) {
+  return { ...item, status: 'suppressed', suppressedAt: Number(now()) };
 }
 
 // ----- Rate budget (a HARD, FAIL-CLOSED ceiling; the drain checks it before every release) -----
