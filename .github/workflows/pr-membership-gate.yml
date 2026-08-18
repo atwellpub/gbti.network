@@ -81,3 +81,25 @@ jobs:
           # isBot admin-floor never triggers for it. Without this, every extension-authored PR (comments + content)
           # is rejected as "not a member" and auto-closed.
           BOT_GITHUB_ID: ${{ vars.BOT_GITHUB_ID }}
+          # sow-213: the gate reads bans and grandfather grants from the KV overrides mirror as well as from
+          # house/*.yml, and requires the two to AGREE. Those records are person-keyed data about real people
+          # and are moving out of this public, forkable, CDN-cached repo into KV; this is the step that teaches
+          # the gate the new source while the git files are still authoritative.
+          #
+          # MODE IS DERIVED FROM REALITY, NOT FROM A FLAG. With the files present and these three set, the mode
+          # is 'both': read both, and a DIVERGENCE, an unreadable mirror or one older than 48h all DENY. Once
+          # Phase 3 removes the files the same code resolves to 'kv' with no fallback, so the act of removing
+          # them is the act that closes the fallback. There is nothing to remember later.
+          #
+          # THIS TOKEN IS READ-ONLY AND IS NOT CF_API_TOKEN. CF_API_TOKEN is Workers KV Storage:EDIT and
+          # non-expiring; it must never be used here. This job runs on pull_request_target, so a KV-WRITE
+          # credential in it would trade away the property that makes holding secrets here acceptable at all.
+          # CF_KV_READ_TOKEN expires 2027-08-28 by design: Cloudflare's KV permission is account-level with no
+          # per-namespace selector, so where scope cannot confine a credential, time does. See
+          # .data/ops/secrets-ops/README.md.
+          #
+          # The account and namespace ids are non-secret identifiers (acting on them requires the token), so
+          # they are inlined exactly as in sync-overrides-mirror.yml and reconcile.yml.
+          CF_ACCOUNT_ID: "d42b12e969229c5187ad0f7289536487"
+          CF_KV_NAMESPACE_ID: "49432379e11844ac81b6fdaf22d3937a"
+          CF_API_TOKEN: ${{ secrets.CF_KV_READ_TOKEN }}
