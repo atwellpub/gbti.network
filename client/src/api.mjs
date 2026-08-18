@@ -58,6 +58,9 @@ import {
   getSocialQueue,
   socialQueueAction,
   getCouponUsageOp,
+  listInvitesOp,
+  createInviteOp,
+  updateInviteOp,
   refreshCouponUntil,
 } from './operations.mjs';
 import { getSettings, updateSettings, getBilling, getReferral } from './settings-ops.mjs';
@@ -214,6 +217,12 @@ export async function handleApi(reqInfo, ctx) {
   if (method === 'POST' && pathname === '/api/admin-ops') return run(() => triggerAdminOp(ctx, body ?? {})); // SOW-038 P3: reconcile/E2E trigger
   if (method === 'GET' && pathname === '/api/coupon-pool') return run(() => getCouponPool(ctx)); // SOW-119: the coupon registry
   if (method === 'GET' && pathname === '/api/coupon-usage') return run(() => getCouponUsageOp(ctx)); // SOW-119: KV usage (Worker-gated)
+  // sow-231 Phase 3: issued invites. One path, three verbs, matching the Worker route it forwards to.
+  if (pathname === '/api/invites') {
+    if (method === 'GET') return run(() => listInvitesOp(ctx));
+    if (method === 'POST') return run(() => createInviteOp(ctx, body ?? {}));
+    if (method === 'PATCH') return run(() => updateInviteOp(ctx, body ?? {}));
+  }
   if (method === 'GET' && pathname === '/api/coupon-refresh') return run(() => refreshCouponUntil(ctx)); // SOW-119 QA: live-oracle recheck before the expiry popup
 
   // Role-gated admin/superadmin actions (the operations enforce the capability; the gate is authoritative).

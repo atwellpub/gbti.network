@@ -70,6 +70,26 @@ export async function getCouponUsage({ token, signupBase, fetch = globalThis.fet
   return { usage: data?.usage ?? {}, configFresh: data?.configFresh ?? false };
 }
 
+/**
+ * sow-231 Phase 3: issued invites, over the bearer token (the extension and npm hosts). The website uses
+ * the cookie session against the same routes; the Worker accepts both (`allowCookie`).
+ *
+ * One function for all three verbs because they share a URL, a gate and an error shape, and splitting them
+ * would mean three copies of the same 6 lines drifting apart.
+ */
+export async function inviteAdminRequest({ token, signupBase, method = 'GET', body = null, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new AdminClientError('not signed in');
+  const res = await fetch(trimBase(signupBase) + '/membership/admin/invites', {
+    method,
+    headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* ignore */ }
+  if (!res.ok) throw new AdminClientError(data?.message || data?.error || `invite request failed (${res.status})`);
+  return data;
+}
+
 /** SOW-058: the superadmin syndication queue (admin-gated read) -> { pending, sent, cancelled, failed }. */
 export async function getSyndicationQueue({ token, signupBase, fetch = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError('not signed in');

@@ -155,6 +155,18 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       body: JSON.stringify(body),
     }));
   }
+  // sow-231 Phase 3: the same cookie-session + CSRF treatment as workerPost, for the invite PATCH route.
+  // Written as its own helper rather than a `method` parameter on workerPost so an existing POST caller
+  // cannot acquire a method by accident.
+  async function workerPatch(path: string, body: unknown) {
+    const csrf = readCsrf();
+    return parseJson(await fetch(base + path, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-GBTI-CSRF': csrf } : {}) },
+      body: JSON.stringify(body),
+    }));
+  }
   // sow-158 News: a status-aware GET for the news read routes. <gbti-news> drives its view from the ERROR CODE
   // (not-authenticated -> sign-in nudge, membership-required -> locked nudge, else the feed), so map the HTTP
   // status to those codes (mirrors operations.mapNewsErr). A signed-in member gets 200 -> the feed renders.
@@ -569,6 +581,13 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     couponUsage() { return workerGet('/membership/admin/coupon-usage'); }, // { ok, usage }
     async addCoupon(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'coupon-add', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
     async updateCoupon(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'coupon-update', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+
+    // sow-231 Phase 3: ISSUED INVITES. Unlike the coupon config above, these are NOT git-native and open no
+    // PR: an invite is per-person state carrying an administration note, so it lives in KV per the storage
+    // boundary. That is why these go straight to the Worker rather than through the author route.
+    inviteList() { return workerGet('/membership/admin/invites'); }, // { ok, invites }
+    inviteCreate(args: any = {}) { return workerPost('/membership/admin/invites', args); }, // { campaign, note?, expiresAt? }
+    inviteUpdate(args: any = {}) { return workerPatch('/membership/admin/invites', args); }, // { code, action: 'revoke'|'note', note? }
 
     // ----- SOW-043/046: interactive News over the cookie session (free-tier perk; authorizeSignedIn) -----
     getNews({ category, since, limit }: any = {}) {

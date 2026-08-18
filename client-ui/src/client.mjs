@@ -148,6 +148,11 @@ export function createHttpClient({ baseUrl = '', token, fetch = globalThis.fetch
     addCoupon: ({ code, freeDays, note, maxRedemptions, expiresAt }) => request('POST', '/api/admin', { action: 'coupon-add', code, freeDays, note, maxRedemptions, expiresAt }), // SOW-119
     updateCoupon: ({ code, patch }) => request('POST', '/api/admin', { action: 'coupon-update', code, patch }), // SOW-119
     couponUsage: () => request('GET', '/api/coupon-usage'), // SOW-119: per-coupon KV usage + invite links
+    // sow-231 Phase 3: issued invites. NOT git-native and no PR: per-person KV state with an admin note,
+    // so it takes effect at once. The host forwards these to /membership/admin/invites.
+    inviteList: () => request('GET', '/api/invites'),
+    inviteCreate: ({ campaign, note, expiresAt }) => request('POST', '/api/invites', { campaign, note, expiresAt }),
+    inviteUpdate: ({ code, action, note }) => request('PATCH', '/api/invites', { code, action, note }),
     quotePool: () => request('GET', '/api/quote-pool'), // SOW-063 P3: the splash quote pool { quotes } for the manager
     contentChannelPool: () => request('GET', '/api/content-channel-pool'), // SOW-087: the category -> Discord-channel map { channels }
     setContentChannel: ({ category, channelId }) => request('POST', '/api/admin', { action: 'content-channel-set', category, channelId }), // SOW-087

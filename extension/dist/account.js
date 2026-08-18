@@ -6698,8 +6698,43 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-quote-manager", GbtiQuoteManager);
 
+  // membership/checkout-prices.mjs
+  var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
+  var PRICE_ENV = Object.freeze({
+    [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
+    [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
+  });
+
+  // membership/tier-gate.mjs
+  var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
+
+  // membership/coupons.mjs
+  function normalizeCouponCode(code) {
+    return String(code ?? "").trim().toUpperCase();
+  }
+
+  // membership/invites.mjs
+  var INVITE_STATE = Object.freeze({
+    issued: "issued",
+    redeemed: "redeemed",
+    revoked: "revoked",
+    expired: "expired",
+    unknown: "unknown"
+    // a malformed or missing record: never redeemable
+  });
+  var LANDER_BY_TIER = Object.freeze({
+    member: "/member-invite/",
+    creator: "/curator-invite/"
+  });
+  var LANDER_BY_CAMPAIGN = Object.freeze({
+    CODEABLEYEAR: "/codeable-invite/"
+  });
+  function landerFor({ code, tier } = {}) {
+    const c = normalizeCouponCode(code);
+    return LANDER_BY_CAMPAIGN[c] || LANDER_BY_TIER[tier] || null;
+  }
+
   // client-ui/src/elements/gbti-coupon-manager.mjs
-  var INVITE_PATH = "/codeable-invite/?coupon=";
   var CSS15 = `
   :host { display:block; }
   .head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin:0 0 12px; }
@@ -6728,6 +6763,23 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .reds { list-style:none; margin:6px 0 0; padding:0; }
   .reds li { font-size:12.5px; color:var(--muted); padding:2px 0; font-family:var(--font-mono, monospace); }
   .muted { color:var(--muted); }
+  .warn { color:var(--amber, #a9781c); }
+  /* sow-231 Phase 3: issued invites. A separate panel because it is a different STORE with different rules:
+     coupons are git-native config edited by PR, invites are per-person KV state that goes live at once. */
+  .inv-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin:26px 0 12px; padding-top:20px; border-top:1px solid var(--line); }
+  .inv-head h3 { margin:0; font-family:var(--font-display, inherit); font-size:17px; }
+  .mint { display:grid; grid-template-columns: .9fr 1.6fr .8fr auto; gap:8px; margin:0 0 14px; }
+  @media (max-width: 760px) { .mint { grid-template-columns: 1fr 1fr; } }
+  .mint select, .mint input { min-width:0; font:inherit; color:var(--fg); background:var(--paper, transparent); border:1px solid var(--line); border-radius:7px; padding:7px 9px; }
+  .i { border-top:1px solid var(--line); padding:11px 2px; }
+  .i:first-child { border-top:0; }
+  .i.spent { opacity:.62; }
+  .st { font-family:var(--font-mono, monospace); font-size:11px; text-transform:uppercase; letter-spacing:.08em; border:1px solid var(--line); border-radius:999px; padding:2px 8px; }
+  .st.issued { color:var(--accent); border-color:var(--accent); }
+  .st.redeemed { color:var(--muted); }
+  .st.revoked, .st.expired, .st.unknown { color:var(--amber, #a9781c); border-color:var(--amber, #a9781c); }
+  .noterow { display:flex; gap:8px; margin-top:7px; }
+  .noterow input { flex:1 1 auto; min-width:0; font:inherit; font-size:12.5px; color:var(--fg); background:var(--paper, transparent); border:1px solid var(--line); border-radius:7px; padding:5px 9px; }
 `;
   var GbtiCouponManager = class extends GbtiElement {
     // SOW-070: static admin.html markup upgrades before setClient; render() retries the load once the client lands.
@@ -6751,6 +6803,11 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       } catch {
         this._usage = {};
       }
+      try {
+        this._invites = (await this.client.inviteList?.())?.invites ?? [];
+      } catch {
+        this._invites = null;
+      }
       this._loading = false;
       this.render();
     }
@@ -6773,7 +6830,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       const rows = this._coupons.map((c) => {
         const code = String(c.code || "").toUpperCase();
         const u = this._usage[code] || { count: 0, redemptions: [] };
-        const link = `${this._siteBase()}${INVITE_PATH}${encodeURIComponent(code)}`;
+        const path = landerFor({ code, tier: c.tier });
+        const link = path ? `${this._siteBase()}${path}?coupon=${encodeURIComponent(code)}` : "";
         const reds = (u.redemptions || []).slice(0, 8).map((r) => `<li>${esc(r.login || r.githubId)} · ${esc(String(r.redeemedAt || "").slice(0, 10))} → ${esc(String(r.until || "").slice(0, 10))}</li>`).join("");
         return `<li class="c${c.active === false ? " off" : ""}" data-code="${esc(code)}">
         <div class="crow">
@@ -6782,7 +6840,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           <span class="sp"></span>
           <button class="lk" data-toggle="${esc(code)}">${c.active === false ? "Activate" : "Deactivate"}</button>
         </div>
-        <div class="linkrow"><input readonly value="${esc(link)}" aria-label="Share URL for ${esc(code)}" /><button class="lk" data-copy="${esc(link)}">Copy</button></div>
+        ${link ? `<div class="linkrow"><input readonly value="${esc(link)}" aria-label="Share URL for ${esc(code)}" /><button class="lk" data-copy="${esc(link)}">Copy</button></div>` : `<div class="use warn">No lander for tier <b>${esc(String(c.tier || "none"))}</b>, so there is no link to share. Give the coupon a known tier, or add the tier to landerFor().</div>`}
         <div class="use">Redemptions: <b>${esc(String(u.count ?? 0))}</b>${u.max != null ? ` of ${esc(String(u.max))}` : ""}</div>
         ${reds ? `<ul class="reds">${reds}</ul>` : ""}
       </li>`;
@@ -6798,6 +6856,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         <button class="btn" data-add>Add coupon</button>
       </div>
       <ul class="list">${rows || '<li class="c muted">No coupons yet.</li>'}</ul>
+      ${this._invitesHtml()}
     `);
       this.$("[data-add]")?.addEventListener("click", () => this._add());
       this.$$("[data-toggle]").forEach((b) => b.addEventListener("click", () => this._toggle(b.dataset.toggle)));
@@ -6811,6 +6870,72 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         } catch {
         }
       }));
+      this.$("[data-mint]")?.addEventListener("click", () => this._mint());
+      this.$$("[data-revoke]").forEach((b) => b.addEventListener("click", () => this._revoke(b.dataset.revoke)));
+      this.$$("[data-savenote]").forEach((b) => b.addEventListener("click", () => this._saveNote(b.dataset.savenote)));
+    }
+    /**
+     * The issued-invites panel. Rendered from inviteSummary records the Worker already resolved, so the
+     * STATE is not re-derived here: one place decides whether an invite is issued, redeemed, revoked or
+     * expired, and it is the same place the redemption path asks.
+     */
+    _invitesHtml() {
+      const mintable = (this._coupons || []).filter((c) => c.active !== false);
+      const opts = mintable.map((c) => `<option value="${esc(String(c.code).toUpperCase())}">${esc(String(c.code).toUpperCase())}</option>`).join("");
+      if (this._invites === null) {
+        return `<div class="inv-head"><h3>Issued invites</h3></div>
+        <p class="use warn">Could not load issued invites. The coupon registry above is unaffected.</p>`;
+      }
+      const items = (this._invites || []).map((v) => {
+        const code = esc(String(v.code || ""));
+        const state = String(v.state || "unknown");
+        const path = landerFor({ code: v.campaign, tier: (this._coupons || []).find((c) => String(c.code).toUpperCase() === String(v.campaign).toUpperCase())?.tier });
+        const link = path ? `${this._siteBase()}${path}?coupon=${encodeURIComponent(String(v.code))}` : "";
+        const who = v.redeemedByLogin || v.redeemedBy;
+        return `<li class="i${state === "issued" ? "" : " spent"}">
+        <div class="crow">
+          <span class="code">${code}</span>
+          <span class="st ${esc(state)}">${esc(state)}</span>
+          <span class="meta">${esc(String(v.campaign || ""))}${v.issuedAt ? ` · issued ${esc(String(v.issuedAt).slice(0, 10))}` : ""}${v.issuedByLogin ? ` by ${esc(v.issuedByLogin)}` : ""}${who ? ` · redeemed by ${esc(String(who))}` : ""}${v.expiresAt ? ` · expires ${esc(String(v.expiresAt).slice(0, 10))}` : ""}</span>
+          <span class="sp"></span>
+          ${state === "issued" ? `<button class="lk" data-revoke="${code}">Revoke</button>` : ""}
+        </div>
+        ${link && state === "issued" ? `<div class="linkrow"><input readonly value="${esc(link)}" aria-label="Invite link for ${code}" /><button class="lk" data-copy="${esc(link)}">Copy</button></div>` : ""}
+        <div class="noterow">
+          <input data-note="${code}" value="${esc(v.note || "")}" placeholder="Administration note (who this went to, and why)" maxlength="280" />
+          <button class="lk" data-savenote="${code}">Save note</button>
+        </div>
+      </li>`;
+      }).join("");
+      return `
+      <div class="inv-head">
+        <h3>Issued invites</h3>
+        <span class="hint">One-time links, each backed by a campaign above. Unlike coupons these are per-person records in KV, not config, so they take effect immediately and open no PR.</span>
+      </div>
+      <div class="mint">
+        <select data-f="campaign" aria-label="Campaign">${opts || '<option value="">No active campaign</option>'}</select>
+        <input data-f="inote" placeholder="Note (who is this for?)" maxlength="280" />
+        <input data-f="iexpires" type="date" aria-label="Expires (optional)" />
+        <button class="btn" data-mint${mintable.length ? "" : " disabled"}>Generate invite</button>
+      </div>
+      <ul class="list">${items || '<li class="i muted">No invites issued yet.</li>'}</ul>`;
+    }
+    async _mint() {
+      const v = (k) => this.$(`[data-f="${k}"]`)?.value?.trim() ?? "";
+      const campaign = v("campaign");
+      if (!campaign) {
+        this._msg = "Pick a campaign to mint against.";
+        this.render();
+        return;
+      }
+      await this._run(() => this.client.inviteCreate({ campaign, note: v("inote"), expiresAt: v("iexpires") || null }), `Invite minted against ${campaign}`);
+    }
+    async _revoke(code) {
+      await this._run(() => this.client.inviteUpdate({ code, action: "revoke" }), `${code} revoked`);
+    }
+    async _saveNote(code) {
+      const note = this.$(`[data-note="${code}"]`)?.value ?? "";
+      await this._run(() => this.client.inviteUpdate({ code, action: "note", note }), `Note saved for ${code}`);
     }
     async _add() {
       const v = (k) => this.$(`[data-f="${k}"]`)?.value?.trim() ?? "";
@@ -17996,6 +18121,11 @@ From the author:
       // SOW-119
       couponUsage: () => request("GET", "/api/coupon-usage"),
       // SOW-119: per-coupon KV usage + invite links
+      // sow-231 Phase 3: issued invites. NOT git-native and no PR: per-person KV state with an admin note,
+      // so it takes effect at once. The host forwards these to /membership/admin/invites.
+      inviteList: () => request("GET", "/api/invites"),
+      inviteCreate: ({ campaign, note, expiresAt }) => request("POST", "/api/invites", { campaign, note, expiresAt }),
+      inviteUpdate: ({ code, action, note }) => request("PATCH", "/api/invites", { code, action, note }),
       quotePool: () => request("GET", "/api/quote-pool"),
       // SOW-063 P3: the splash quote pool { quotes } for the manager
       contentChannelPool: () => request("GET", "/api/content-channel-pool"),

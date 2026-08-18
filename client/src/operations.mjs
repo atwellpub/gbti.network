@@ -39,7 +39,7 @@ import yaml from 'js-yaml';
 import { rolesFromParsed, roleOf, isAdminRole } from '../../membership/overrides-core.mjs';
 import { buildRoster } from '../../membership/superadmin-roster.mjs';
 import { filterActivity } from '../../membership/member-activity.mjs';
-import { getRosterStatuses as workerGetRosterStatuses, getDiscordChannels as workerGetDiscordChannels, triggerAdminOp as workerTriggerAdminOp, getSyndicationQueue as workerGetSyndicationQueue, cancelSyndication as workerCancelSyndication, approveSyndication as workerApproveSyndication, getSyndicateNow as workerGetSyndicateNow, syndicateNow as workerSyndicateNow, getSocialQueue as workerGetSocialQueue, socialQueueAction as workerSocialQueueAction, getCouponUsage as workerGetCouponUsage } from './member-admin-client.mjs';
+import { getRosterStatuses as workerGetRosterStatuses, getDiscordChannels as workerGetDiscordChannels, triggerAdminOp as workerTriggerAdminOp, getSyndicationQueue as workerGetSyndicationQueue, cancelSyndication as workerCancelSyndication, approveSyndication as workerApproveSyndication, getSyndicateNow as workerGetSyndicateNow, syndicateNow as workerSyndicateNow, getSocialQueue as workerGetSocialQueue, socialQueueAction as workerSocialQueueAction, getCouponUsage as workerGetCouponUsage, inviteAdminRequest} from './member-admin-client.mjs';
 
 export const CLIENT_VERSION = '0.1.0';
 
@@ -1871,6 +1871,48 @@ export async function getCouponUsageOp(ctx) {
     return await workerGetCouponUsage({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
   } catch (err) {
     throw new OperationError('admin-op-failed', err?.message || 'could not read coupon usage');
+  }
+}
+
+/**
+ * sow-231 Phase 3: the issued-invite admin ops. All three share one Worker route and one gate, so they
+ * share one client call and differ only by verb and body.
+ *
+ * requireAdmin runs HERE as well as at the Worker on purpose: the local gate gives a useful error to a
+ * non-admin instead of a 403 from a network call, and the Worker remains the real boundary.
+ */
+export async function listInvitesOp(ctx) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.('githubToken');
+  if (!token) throw new OperationError('not-authenticated', 'sign in first');
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: 'GET', fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError('admin-op-failed', err?.message || 'could not list invites');
+  }
+}
+
+export async function createInviteOp(ctx, body = {}) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.('githubToken');
+  if (!token) throw new OperationError('not-authenticated', 'sign in first');
+  if (!body?.campaign) throw new OperationError('bad-request', 'a campaign is required');
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: 'POST', body, fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError('admin-op-failed', err?.message || 'could not mint the invite');
+  }
+}
+
+export async function updateInviteOp(ctx, body = {}) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.('githubToken');
+  if (!token) throw new OperationError('not-authenticated', 'sign in first');
+  if (!body?.code) throw new OperationError('bad-request', 'an invite code is required');
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: 'PATCH', body, fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError('admin-op-failed', err?.message || 'could not update the invite');
   }
 }
 

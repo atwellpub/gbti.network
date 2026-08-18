@@ -19294,6 +19294,21 @@ async function getCouponUsage({ token, signupBase, fetch: fetch2 = globalThis.fe
   if (!res.ok) throw new AdminClientError(data?.message || data?.error || `coupon usage request failed (${res.status})`);
   return { usage: data?.usage ?? {}, configFresh: data?.configFresh ?? false };
 }
+async function inviteAdminRequest({ token, signupBase, method = "GET", body = null, fetch: fetch2 = globalThis.fetch }) {
+  if (!token || !signupBase) throw new AdminClientError("not signed in");
+  const res = await fetch2(trimBase11(signupBase) + "/membership/admin/invites", {
+    method,
+    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
+    ...body ? { body: JSON.stringify(body) } : {}
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new AdminClientError(data?.message || data?.error || `invite request failed (${res.status})`);
+  return data;
+}
 async function getSyndicationQueue({ token, signupBase, fetch: fetch2 = globalThis.fetch }) {
   if (!token || !signupBase) throw new AdminClientError("not signed in");
   const res = await fetch2(trimBase11(signupBase) + "/membership/syndication", { method: "GET", headers: { Authorization: "Bearer " + token } });
@@ -20828,6 +20843,38 @@ async function getCouponUsageOp(ctx) {
     return await getCouponUsage({ token, signupBase: SIGNUP_BASE, fetch: ctx.fetch ?? globalThis.fetch });
   } catch (err) {
     throw new OperationError("admin-op-failed", err?.message || "could not read coupon usage");
+  }
+}
+async function listInvitesOp(ctx) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.("githubToken");
+  if (!token) throw new OperationError("not-authenticated", "sign in first");
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: "GET", fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError("admin-op-failed", err?.message || "could not list invites");
+  }
+}
+async function createInviteOp(ctx, body = {}) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.("githubToken");
+  if (!token) throw new OperationError("not-authenticated", "sign in first");
+  if (!body?.campaign) throw new OperationError("bad-request", "a campaign is required");
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: "POST", body, fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError("admin-op-failed", err?.message || "could not mint the invite");
+  }
+}
+async function updateInviteOp(ctx, body = {}) {
+  await requireAdmin(ctx);
+  const token = ctx.store?.get?.("githubToken");
+  if (!token) throw new OperationError("not-authenticated", "sign in first");
+  if (!body?.code) throw new OperationError("bad-request", "an invite code is required");
+  try {
+    return await inviteAdminRequest({ token, signupBase: SIGNUP_BASE, method: "PATCH", body, fetch: ctx.fetch ?? globalThis.fetch });
+  } catch (err) {
+    throw new OperationError("admin-op-failed", err?.message || "could not update the invite");
   }
 }
 async function refreshCouponUntil(ctx) {
@@ -23226,6 +23273,14 @@ async function dispatch(ctx, { method = "GET", pathname, query = {}, body } = {}
         return ok(await triggerAdminOp2(ctx, body ?? {}));
       case "/api/coupon-usage":
         return ok(await getCouponUsageOp(ctx));
+      // sow-231 Phase 3: issued invites. The dispatch switch has no method dimension, so the verb is read
+      // from the request rather than encoded in three separate paths, keeping this one route in step with
+      // the npm host and the Worker.
+      case "/api/invites": {
+        if (method === "POST") return ok(await createInviteOp(ctx, body ?? {}));
+        if (method === "PATCH") return ok(await updateInviteOp(ctx, body ?? {}));
+        return ok(await listInvitesOp(ctx));
+      }
       case "/api/coupon-refresh":
         return ok(await refreshCouponUntil(ctx));
       case "/api/pr-status": {

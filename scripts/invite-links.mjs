@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { couponsFromParsed } from '../membership/coupons.mjs';
+import { landerFor, LANDER_BY_TIER, LANDER_BY_CAMPAIGN } from '../membership/invites.mjs'; // sow-231 P3: ONE mapping
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SITE = process.env.SITE_BASE_URL || 'https://gbti.network';
@@ -32,21 +33,10 @@ const useLocal = args.has('--local');
 const showAll = args.has('--all');
 const asJson = args.has('--json');
 
-// THE LANDER FOR A TIER. Every paid tier needs an entry: a coupon whose tier is not here has no page that
-// describes what it grants, which is a real gap rather than a formatting problem, so it is reported loudly
-// instead of falling back to a generic page that would describe the wrong thing.
-export const LANDER_BY_TIER = {
-  member: '/member-invite/',
-  creator: '/curator-invite/',
-};
-
-// PER-CODE OVERRIDES, for campaigns that have their own audience-specific page. CODEABLEYEAR is creator
-// tier, so the tier map would send it to /curator-invite/, but it has a dedicated Codeable lander whose copy
-// addresses that audience directly. The override is by CODE rather than by tier because that is what it is:
-// a property of the campaign, not of the tier.
-export const LANDER_BY_CODE = {
-  CODEABLEYEAR: '/codeable-invite/',
-};
+// The tier -> lander mapping now lives in membership/invites.mjs (`landerFor`), shared with the browser
+// coupon manager. It was duplicated here first; that duplication is removed rather than kept in sync,
+// because a second copy of this particular mapping drifts silently and the symptom is somebody being sent
+// a page describing a tier they were not given.
 
 function readRegistry() {
   const rel = 'house/coupons.yml';
@@ -62,7 +52,7 @@ function readRegistry() {
 /** The lander that describes what `coupon` grants, or null when nothing does. Pure. */
 export function resolveLander(coupon) {
   if (!coupon || !coupon.code) return null;
-  return LANDER_BY_CODE[coupon.code] || LANDER_BY_TIER[coupon.tier] || null;
+  return landerFor({ code: coupon.code, tier: coupon.tier });
 }
 
 /** Why a coupon is not sendable right now, or null when it is. Mirrors couponIsRedeemable plus the cap. */
@@ -85,7 +75,7 @@ export function inviteRow(c, now = new Date()) {
   // already rejects that for an ACTIVE coupon, so reaching it here means an inactive one or a registry
   // edited around the validator.
   if (!c.tier) warnings.push('no tier: cannot resolve a lander, and an active coupon naming no tier is rejected by validateCoupons');
-  else if (!lander) warnings.push(`tier "${c.tier}" has no lander in LANDER_BY_TIER: nothing describes what this grants`);
+  else if (!lander) warnings.push(`tier "${c.tier}" has no lander in membership/invites.mjs LANDER_BY_TIER: nothing describes what this grants`);
   return {
     code: c.code,
     tier: c.tier ?? null,

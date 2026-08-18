@@ -7,7 +7,7 @@
 // over the injected ctx, so it is unit-tested in node with a fake ctx.
 
 import { OperationError, listContent, listMembersOnly, getContentItem, validateContent, publish, saveDraft, listDrafts, readDraft, discardDraft, publishDraft, publishShare, listShares, listShareComments, readContent, publishComment, editComment, getComment, decryptMemberAsset, getMemberActivity, getMemberEarnings, mutateMemberActivity, getFollows, setFollow, upvoteContent, ogPreview, getDiscordInvite, getDiscordLinkUrl, getDiscordLinkStatus,
-  discordUnlink, getNews, getNewsSources, getPrefs, setPrefs, publishNews, reflectNewsDiscussion, recordNewsOpen, recordContentOpen, setOwnContentStatus, renameContent, deleteComment, stageImage, listDiscordChannels, getOnboardingStatus, listIncomingContributions, getContributionReview, reviewContribution, getOverridesRoster, getOpenPulls, triggerAdminOp, getSyndicationQueue, cancelSyndication, approveSyndication, getSyndicateNowInfo, syndicateNow, getSocialQueue, socialQueueAction, listComments, getCouponUsageOp, refreshCouponUntil } from '../../client/src/operations.mjs';
+  discordUnlink, getNews, getNewsSources, getPrefs, setPrefs, publishNews, reflectNewsDiscussion, recordNewsOpen, recordContentOpen, setOwnContentStatus, renameContent, deleteComment, stageImage, listDiscordChannels, getOnboardingStatus, listIncomingContributions, getContributionReview, reviewContribution, getOverridesRoster, getOpenPulls, triggerAdminOp, getSyndicationQueue, cancelSyndication, approveSyndication, getSyndicateNowInfo, syndicateNow, getSocialQueue, socialQueueAction, listComments, getCouponUsageOp, refreshCouponUntil, listInvitesOp, createInviteOp, updateInviteOp } from '../../client/src/operations.mjs';
 import { getBilling, getReferral } from '../../client/src/account-ops.mjs'; // SOW-040: account surface (Stripe portal + referral link); node-free so the MV3 bundle stays autostart-free
 import { fieldsFor } from '../../client/src/form-fields.mjs';
 import { renderMarkdown } from '../../client/src/markdown.mjs';
@@ -227,6 +227,14 @@ export async function dispatch(ctx, { method = 'GET', pathname, query = {}, body
         return ok(await triggerAdminOp(ctx, body ?? {}));
       case '/api/coupon-usage': // SOW-119 QA: per-coupon redemption counts (admin-gated by the op + the Worker)
         return ok(await getCouponUsageOp(ctx));
+      // sow-231 Phase 3: issued invites. The dispatch switch has no method dimension, so the verb is read
+      // from the request rather than encoded in three separate paths, keeping this one route in step with
+      // the npm host and the Worker.
+      case '/api/invites': {
+        if (method === 'POST') return ok(await createInviteOp(ctx, body ?? {}));
+        if (method === 'PATCH') return ok(await updateInviteOp(ctx, body ?? {}));
+        return ok(await listInvitesOp(ctx));
+      }
       case '/api/coupon-refresh': // SOW-119 QA: live-oracle recheck before the expiry popup nags (clears a stale grant date)
         return ok(await refreshCouponUntil(ctx));
       case '/api/pr-status': {

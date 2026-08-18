@@ -219,6 +219,43 @@ export function setInviteNote(rec, note) {
  * is that the code in the link is unique per invite rather than shared. The sow-119 `?t=<token>` resolver
  * stays retired.
  */
+/**
+ * sow-231 Phase 3: WHICH LANDER a coupon's link should point at.
+ *
+ * There are now three tier-scoped invite landers, and sending a code to the wrong one advertises benefits
+ * the recipient will not receive. That is not hypothetical: a member-tier coupon went live pointed at the
+ * Creator lander on 2026-08-15 and the owner caught it. `house/membership-tiers.yml` calls benefit copy a
+ * legal line, so the pairing is a correctness question rather than a routing convenience.
+ *
+ * Node-free and pure so the browser manager, the CLI and any future surface resolve it identically. It is
+ * the ONLY place the mapping lives; a second copy would drift and the drift would be invisible until
+ * somebody read a lander they were sent.
+ */
+export const LANDER_BY_TIER = Object.freeze({
+  member: '/member-invite/',
+  creator: '/curator-invite/',
+});
+
+// Per-CAMPAIGN overrides, for a campaign with its own audience-specific page. CODEABLEYEAR is creator tier,
+// so the tier map alone would send it to the generic curator lander; it has a Codeable page whose copy
+// addresses that audience directly. Keyed by campaign because that is what it is: a property of the
+// campaign, not of the tier.
+export const LANDER_BY_CAMPAIGN = Object.freeze({
+  CODEABLEYEAR: '/codeable-invite/',
+});
+
+/**
+ * The lander for a coupon/campaign, or NULL when nothing describes what it grants.
+ *
+ * Null rather than a fallback ON PURPOSE. Falling back to any page would describe a tier the coupon does
+ * not confer, which is the exact defect this exists to prevent, so a caller must handle "no lander" rather
+ * than be handed a plausible wrong one.
+ */
+export function landerFor({ code, tier } = {}) {
+  const c = normalizeCouponCode(code);
+  return LANDER_BY_CAMPAIGN[c] || LANDER_BY_TIER[tier] || null;
+}
+
 export function inviteLink(siteBase, code, path = '/codeable-invite/') {
   const base = String(siteBase || '').replace(/\/+$/, '');
   return `${base}${path}?coupon=${encodeURIComponent(normalizeCouponCode(code))}`;

@@ -7,7 +7,10 @@
 // two other guards in this repo untrustworthy this week.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveLander, blockedReason, inviteRow, LANDER_BY_TIER, LANDER_BY_CODE } from '../scripts/invite-links.mjs';
+import { resolveLander, blockedReason, inviteRow } from '../scripts/invite-links.mjs';
+// sow-231 Phase 3: the mapping moved into membership/invites.mjs so the browser coupon manager and this CLI
+// resolve a lander identically. Importing it from its real home rather than re-exporting keeps one source.
+import { LANDER_BY_TIER, LANDER_BY_CAMPAIGN } from '../membership/invites.mjs';
 
 const NOW = new Date('2026-08-15T12:00:00.000Z');
 const coupon = (over = {}) => ({ code: 'TESTCODE', tier: 'member', freeDays: 365, active: true, maxRedemptions: null, expiresAt: null, note: '', ...over });
@@ -21,7 +24,7 @@ test('a per-code lander beats the tier map, because the page belongs to the camp
   // CODEABLEYEAR is creator tier, so the tier map alone would send it to the generic curator lander. It has
   // its own page addressing that audience, and which page a campaign uses is a property of the campaign.
   assert.equal(resolveLander(coupon({ code: 'CODEABLEYEAR', tier: 'creator' })), '/codeable-invite/');
-  assert.equal(LANDER_BY_CODE.CODEABLEYEAR, '/codeable-invite/');
+  assert.equal(LANDER_BY_CAMPAIGN.CODEABLEYEAR, '/codeable-invite/');
 });
 
 test('an unknown tier resolves to NO lander rather than to a plausible one', () => {
