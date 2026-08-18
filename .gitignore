@@ -30,6 +30,14 @@ node_modules/
 .data/
 .snapshots/
 
+# .product/ is a LOCAL working directory per the working agreement, but the brand and Chrome Web
+# Store assets under it are deliberately tracked. Ignore the directory by default so anything else
+# dropped in later does not ship without someone deciding, and un-ignore the two that are meant to
+# be here. Note this does NOT untrack the 88 files already committed; it is preventive only.
+.product/*
+!.product/brand/
+!.product/chrome-extension/
+
 # Local Claude Code agent config (permissions, settings). Stays local, never in the repo.
 .claude/
 
