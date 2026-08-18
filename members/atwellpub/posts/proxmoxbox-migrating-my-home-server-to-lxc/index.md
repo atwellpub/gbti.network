@@ -40,7 +40,7 @@ If that time comes, I want to be free from Windows running sublinux and just go 
 OS that is designed to manage linux resources.
 
 So this month I made the call to change my personal identity, format over Windows and install
-ProxMox to be my new home server OS.
+Proxmox to be my new home server OS.
 
 ## Proxmox and the ProxMoxBox box
 
@@ -57,7 +57,8 @@ does not work at two in the morning.
 
 ## What LXC is, and how it differs from a virtual machine
 
-The difference decides how many services fit on one box.
+A container and a virtual machine cost the machine very different amounts, and that decides how many
+services fit on one box.
 
 A virtual machine emulates a computer. It boots its own kernel, runs its own device drivers through
 QEMU, and holds its own memory. When you give a VM 4 GB, that 4 GB is allocated to it and the host cannot
@@ -82,8 +83,8 @@ schedule, which replaces the previous arrangement of remembering to export the w
 usually not doing it.
 
 Here is the part I originally described, incorrectly, as load balancing. Proxmox does not balance load
-between containers. What actually happens is subtler and more useful: **the `cores` setting is a ceiling,
-not a reservation.** I have allocated 10 cores across 8 threads, deliberately overlapping, because each
+between containers. What actually happens is subtler and more useful: the `cores` setting is a ceiling,
+not a reservation. I have allocated 10 cores across 8 threads, deliberately overlapping, because each
 service can burst up to its ceiling whenever the other is idle. Container memory is elastic in the same
 way, where VM memory is not without ballooning. On top of that, `cpuunits` gives the cameras priority over
 the radio when both want the CPU at once.
@@ -103,8 +104,8 @@ IP address that changes. Because every connection is initiated outbound from the
 perfectly well from behind the NAT described earlier. NAT traversal is a convenience here, not a defence.
 
 I want to be careful about that last point, because it is the sort of thing that gets stated loosely and
-then repeated. **Not exposing a port is real and worthwhile, but obscurity is not the security boundary
-here. The tailnet access control list is.** Only devices I have added to my network can reach these
+then repeated. Not exposing a port is real and worthwhile, but obscurity is not the security boundary
+here. The tailnet access control list is. Only devices I have added to my network can reach these
 services at all, and the ACL decides which of those devices may reach which service. That is a policy I
 control and can audit, rather than a hope that nobody scans my address.
 
@@ -112,8 +113,8 @@ On cost: as of the pricing change in April 2026, Tailscale's free Personal plan 
 unlimited devices, which is comfortably more than a household needs. Check the current terms before you
 rely on that, since it changed once already this year.
 
-There is one container-specific trap worth recording. **Tailscale in an unprivileged LXC container needs
-`/dev/net/tun` passed through explicitly.** Containers do not get it by default, and without it the daemon
+There is one container-specific trap worth recording. Tailscale in an unprivileged LXC container needs
+`/dev/net/tun` passed through explicitly. Containers do not get it by default, and without it the daemon
 simply cannot build a tunnel. Separately, Debian ships `tailscaled` with `Restart=on-failure`. It exited
 cleanly once with status 0, systemd counted that as success, and remote access stayed down for three
 minutes. That is now `Restart=always`.
@@ -128,8 +129,8 @@ with Wi-Fi associating on its own, storage mounting, both containers auto-starti
 answering. What remains is data. The media library is copying to the newly reformatted volume, after which
 the media paths get repointed, both containers restart, and the radio gets a fresh deploy.
 
-The concrete result, though, is already visible. **Both containers running put the host at 2.0 GB used
-with 9.4 GB available.** The same two workloads as virtual machines would have consumed roughly 6 GB
+The concrete result, though, is already visible. Both containers running put the host at 2.0 GB used
+with 9.4 GB available. The same two workloads as virtual machines would have consumed roughly 6 GB
 before executing a single line of application code. On a 12 GB machine, that difference is the entire
 reason this approach works.
 
@@ -149,7 +150,7 @@ Management API. A bridge process holds and extends the Nest sessions against a q
 hour per camera, which is the sort of constraint that shapes an entire design once you hit it. Support for
 Ring cameras is planned but not built.
 
-**That project is not open source yet.** I intend to publish it this year, and I will update this article
+That project is not open source yet. I intend to publish it this year, and I will update this article
 with a link when it is available.
 
 ## What migration is actually good for
@@ -160,13 +161,13 @@ dial an RTSP port that nothing was listening on, systemd units bound to a servic
 and no longer existed, a restart-limit directive sitting in the wrong section where systemd ignores it
 entirely, and a hardened unit with no write access to the directory it records footage into.
 
-None of those were caused by the move. All of them were waiting.
+All four were waiting to be found. None was caused by the move.
 
 ---
 
-If you self-host anything, the question worth asking is not whether your services are running. It is
-whether they will come back on their own after the next power cut. Mine did not, and that is what started
-this.
+If you self-host anything, the question worth asking is whether your services come back on their own
+after the next power cut, not whether they are running today. Mine did not come back, and that is what
+started this.
 
 For more tutorials, AI skills and member-built products, have a look around
 [GBTI Network](https://gbti.network/). We are a developer co-op, and this is the sort of thing we spend
