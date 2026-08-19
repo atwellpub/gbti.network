@@ -153,7 +153,7 @@ Eventually, the switch will happen and the plan is to have a dedicated team of d
   
 You can always reach me through [getgoon.pro](http://getgoon.pro), even if you just want to share some awesome results that Goon has helped you achieve.  
   
-You can also reach me at my usual “workplace” for this or any other project: [https://www.codeable.io/developers/andrija-naglic/](https://www.codeable.io/developers/andrija-naglic/?ref=99TG1)“_
+You can also reach me at my usual “workplace” for this or any other project: [https://www.codeable.io/developers/andrija-naglic/](https://www.codeable.io/developers/andrija-naglic/?ref=MzT91)“_
 
 ### Finally, what’s next for Goon?
 
