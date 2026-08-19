@@ -34,6 +34,8 @@ export interface ShareLinks {
   x: string; // X intent href (hashtags carried in the intent's hashtags param)
   linkedin: string; // LinkedIn share-offsite href (url only; LinkedIn scrapes the page's own OG tags)
   reddit: string; // reddit submit href (url + title, no hashtags; Reddit has no hashtag concept)
+  whatsapp: string; // wa.me intent href (one combined "lead title url" string, no hashtags; works on web and mobile)
+  sms: string; // sms: URI (the same combined string in ?&body=, no hashtags; opens the native messaging app on a device)
 }
 
 /**
@@ -42,6 +44,7 @@ export interface ShareLinks {
  *  - X: text = "lead title", url + hashtags ride their own intent params (hashtags help discovery).
  *  - LinkedIn: url only, its share-offsite endpoint pulls title/description from the page's OG tags.
  *  - Reddit: url + title as separate params, its submit page has no hashtag concept.
+ *  - WhatsApp / SMS: one combined "lead title url" string, hashtags dropped as noise in a direct message.
  */
 export function buildShare({ type, title, url, categories }: ShareInput): ShareLinks {
   const schema = SHARE_SCHEMA[type];
@@ -58,6 +61,9 @@ export function buildShare({ type, title, url, categories }: ShareInput): ShareL
 
   const lead = schema.lead;
   const headline = `${lead} ${title}`.trim(); // the human sentence, no url, no tags
+  // Messaging targets carry one combined string with no hashtags. Encode the whole "lead title url" together
+  // so the spaces survive (see .data/ops/share-ops/README.md).
+  const msg = enc(`${headline} ${url}`);
 
   return {
     lead,
@@ -67,5 +73,7 @@ export function buildShare({ type, title, url, categories }: ShareInput): ShareL
     }`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}`,
     reddit: `https://www.reddit.com/submit?url=${enc(url)}&title=${enc(title)}`,
+    whatsapp: `https://wa.me/?text=${msg}`,
+    sms: `sms:?&body=${msg}`,
   };
 }
