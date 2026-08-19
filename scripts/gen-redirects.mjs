@@ -110,12 +110,11 @@ const EXTRA = [
   // earning nothing. `check-redirects` never caught it because a path that exists in no config has no
   // destination to fail on.
   //
-  // Each path is restored to the destination its own legacy rule carried, recovered from
-  // .data/legacy/db (wp_redirection_items). Deliberately NOT consolidated onto one referral code: the
-  // dump has TWO enabled Codeable codes, 99TG1 on the older rules (ids 2, 11, 13) and MzT91 on the newer
-  // ones (ids 34, 44, 54). Picking one would be a guess about which account is still live, and a wrong
-  // guess sends real clicks to the wrong place. Restoring each path as it was is faithful and loses
-  // nothing; consolidating is the owner's call.
+  // Each path was first restored to the destination its own legacy rule carried, recovered from
+  // .data/legacy/db (wp_redirection_items). The dump had two enabled Codeable codes, so the paths were
+  // restored on the codes they each carried rather than guessed onto one account (sow-119). The owner has
+  // since consolidated: every Codeable path below now points at the single live code, MzT91, and the other
+  // legacy code is retired (sow-257, owner decision 2026-08-18).
   ['/outbound/codeable', 'https://codeable.io/?ref=MzT91'],
   ['/outbound/codeable/wordpress-services', 'https://app.codeable.io/tasks/new?ref=MzT91'],
   ['/codeable/naresh-devineni', 'https://www.codeable.io/developers/naresh-devineni/?ref=MzT91'],
@@ -126,14 +125,14 @@ const EXTRA = [
   // referral credit is not lost by this, because a dead destination was already earning nothing. Replacing
   // this with a current partner link needs the owner's BugHerd account and is raised with them.
   ['/outbound/bugherd', 'https://bugherd.com/'],
-  ['/codeable', 'https://codeable.io/?ref=99TG1'],
-  ['/outsourcing/codeable', 'https://codeable.io/?ref=99TG1'],
-  ['/outsource/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=99TG1'],
+  ['/codeable', 'https://codeable.io/?ref=MzT91'],
+  ['/outsourcing/codeable', 'https://codeable.io/?ref=MzT91'],
+  ['/outsource/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=MzT91'],
   // Linked live from members/atwellpub/posts/how-to-use-wp-cli-staging-to-import-a-remote-database. It
   // matches no legacy rule exactly: the dump has /outsourcing/codeable and /outsource/codeable/wp-cli,
   // and this link is a hybrid of the two, so it was probably broken on WordPress as well. Pointed at the
-  // WP-CLI developers page its sibling rule used, keeping that family's code.
-  ['/outsourcing/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=99TG1'],
+  // WP-CLI developers page its sibling rule used, on the consolidated MzT91 code like the rest.
+  ['/outsourcing/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=MzT91'],
 ];
 for (const [oldPath, newPath] of EXTRA) { lines.push(`${oldPath} ${newPath} 301`); n++; }
 
