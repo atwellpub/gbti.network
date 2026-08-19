@@ -135,7 +135,7 @@ test('sow-229: buildRoster resolves tier per source (staff creator, grandfather 
     roles: { superadmins: [{ github_id: '1', login: 'sa' }], admins: [{ github_id: '2', login: 'ad' }], moderators: [] },
     bans: { bans: [{ github_id: '9', login: 'baddie' }] },
     grandfathered: { grandfathered: [
-      { github_id: '3', login: 'founder', until: null },              // default grant -> creator
+      { github_id: '3', login: 'founder', until: null },              // default grant -> member (owner Q15)
       { github_id: '7', login: 'memb', until: null, tier: 'member' }, // explicit member grant
     ] },
     membersIndex: { members: { 1: 'sa', 2: 'ad', 3: 'founder', 7: 'memb', 9: 'baddie' } },
@@ -143,7 +143,7 @@ test('sow-229: buildRoster resolves tier per source (staff creator, grandfather 
   const by = Object.fromEntries(roster.map((r) => [r.githubId, r]));
   assert.equal(by['1'].tier, 'creator'); // superadmin (staff)
   assert.equal(by['2'].tier, 'creator'); // admin (staff)
-  assert.equal(by['3'].tier, 'creator'); // grandfather, default tier
+  assert.equal(by['3'].tier, 'member'); // grandfather, default tier (owner Q15 flip: tierless -> member)
   assert.equal(by['7'].tier, 'member');  // grandfather, explicit tier survives
   assert.equal(by['9'].tier, 'none');    // banned -> none
 });

@@ -45,11 +45,11 @@ test('buildEnvPriceTierMap: empty env -> empty map -> tierForPrice FAILS CLOSED 
   assert.equal(tierForPrice('anything', map), TIER.none);
 });
 
-test('grantTier: no tier field -> creator (legacy flat grant default)', () => {
-  assert.equal(grantTier({ github_id: '1' }), TIER.creator);
-  assert.equal(grantTier({}), TIER.creator);
-  assert.equal(grantTier(null), TIER.creator);
-  assert.equal(grantTier(undefined), TIER.creator);
+test('grantTier: no tier field -> member (owner Q15 flip 2026-08-18, was creator)', () => {
+  assert.equal(grantTier({ github_id: '1' }), TIER.member);
+  assert.equal(grantTier({}), TIER.member);
+  assert.equal(grantTier(null), TIER.member);
+  assert.equal(grantTier(undefined), TIER.member);
 });
 
 test('grantTier: an explicit member / creator tier is honored', () => {
@@ -57,22 +57,22 @@ test('grantTier: an explicit member / creator tier is honored', () => {
   assert.equal(grantTier({ tier: 'creator' }), TIER.creator);
 });
 
-test('grantTier: an invalid or none tier falls back to creator (validate-content rejects it at PR time)', () => {
-  assert.equal(grantTier({ tier: 'none' }), TIER.creator);
-  assert.equal(grantTier({ tier: 'bogus' }), TIER.creator);
-  assert.equal(grantTier({ tier: 5 }), TIER.creator);
+test('grantTier: an invalid or none tier falls back to member (validate-content rejects it at PR time)', () => {
+  assert.equal(grantTier({ tier: 'none' }), TIER.member);
+  assert.equal(grantTier({ tier: 'bogus' }), TIER.member);
+  assert.equal(grantTier({ tier: 5 }), TIER.member);
 });
 
 test('resolveEffectiveTier: ban -> none (denied by status: banned anyway)', () => {
   assert.equal(resolveEffectiveTier({ source: 'ban', status: 'banned' }), TIER.none);
 });
 
-test('resolveEffectiveTier: staff -> creator', () => {
+test('resolveEffectiveTier: staff -> creator (superadmins do NOT ride the tierless flip down; staff bypasses grantTier)', () => {
   assert.equal(resolveEffectiveTier({ source: 'staff', status: 'paid' }), TIER.creator);
 });
 
-test('resolveEffectiveTier: grandfather -> the grant tier, default creator', () => {
-  assert.equal(resolveEffectiveTier({ source: 'grandfather', status: 'paid', grant: {} }), TIER.creator);
+test('resolveEffectiveTier: grandfather -> the grant tier, default member (owner Q15; the 15 tierless comps drop to member)', () => {
+  assert.equal(resolveEffectiveTier({ source: 'grandfather', status: 'paid', grant: {} }), TIER.member);
   assert.equal(resolveEffectiveTier({ source: 'grandfather', status: 'paid', grant: { tier: 'member' } }), TIER.member);
   assert.equal(resolveEffectiveTier({ source: 'grandfather', status: 'paid', grant: { tier: 'creator' } }), TIER.creator);
 });

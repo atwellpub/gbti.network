@@ -321,11 +321,19 @@ test('authorizeCreator: a Content Creator (creator price) is admitted', async ()
   assert.equal(r.tier, 'creator');
 });
 
-test('authorizeCreator: a grandfathered member (no Stripe sub) resolves to creator and is admitted (override wins)', async () => {
-  const mirror = freshMirror({ grandfathered: { grandfathered: [{ github_id: '3' }] } });
-  const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, mirror), deps('3', () => null));
-  assert.equal(r.ok, true);
-  assert.equal(r.tier, 'creator');
+test('authorizeCreator: a TIERLESS grandfather now resolves to member and is DENIED creator (owner Q15); an explicit tier:creator is admitted', async () => {
+  // owner Q15 2026-08-18: a tierless grandfather grant defaults to member, so the 15 co-op comps lose the
+  // creator-gated write path. authorizeCreator denies them.
+  const tierless = freshMirror({ grandfathered: { grandfathered: [{ github_id: '3' }] } });
+  const denied = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, tierless), deps('3', () => null));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.status, 403);
+  assert.match(denied.body.message, /Content Creator/);
+  // the escape hatch: an explicit tier:creator grandfather still resolves creator and is admitted (override wins)
+  const creator = freshMirror({ grandfathered: { grandfathered: [{ github_id: '3', tier: 'creator' }] } });
+  const ok = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV(PRICE_ENV, creator), deps('3', () => null));
+  assert.equal(ok.ok, true);
+  assert.equal(ok.tier, 'creator');
 });
 
 test('authorizeCreator: a grandfathered member pinned to tier:member is DENIED (settable tier honored)', async () => {

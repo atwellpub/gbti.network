@@ -37,12 +37,16 @@ export function buildEnvPriceTierMap(env = {}) {
 /**
  * The tier a grandfather grant confers. The optional `tier` field lets a superadmin (admin+) set any account to
  * a specific paid tier by editing house/grandfathered.yml (superadmin auto-merged per SOW-108). A grant with no
- * tier (every legacy flat grant) or an unrecognized one defaults to creator, preserving the full complimentary
- * access those grants were issued under.
+ * tier (every legacy flat grant) or an unrecognized one defaults to MEMBER. The owner flipped this default from
+ * creator to member on 2026-08-18 (owner-questions.md Q15), with the consequence stated in the chosen option:
+ * the fifteen tierless co-op comps drop to Network Member. They keep everything already published (only a ban
+ * drafts content), but classify-pr rejects their next content PR as rejected-not-creator and reconcile drops
+ * their Content Creator Discord badge. The escape hatch is an explicit `tier: creator` on any single entry, so
+ * anyone who should keep full access is restored by hand without reversing the default.
  */
 export function grantTier(grant) {
   const t = grant?.tier;
-  return isTier(t) && t !== TIER.none ? t : TIER.creator;
+  return isTier(t) && t !== TIER.none ? t : TIER.member;
 }
 
 /**
@@ -50,7 +54,7 @@ export function grantTier(grant) {
  * grandfather) the grant entry. Never drops an override:
  *   ban         -> none (the account is denied by status: banned anyway)
  *   staff       -> creator (admins / superadmins hold full access; the owner path folds roles into source)
- *   grandfather -> the grant's tier (default creator)
+ *   grandfather -> the grant's tier (default member; owner Q15 2026-08-18)
  *   stripe      -> the Stripe subscription's tier WHEN currently paid, else none
  * Fail closed: an unknown source, or a non-paid stripe status, resolves to none.
  */

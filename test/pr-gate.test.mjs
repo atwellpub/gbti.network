@@ -225,19 +225,21 @@ test('banned author -> failure + banned, overriding paid status', async () => {
   assert.equal(d.label, 'banned');
 });
 
-test('grandfathered author with no Stripe customer -> success + paid', async () => {
+test('grandfathered author (tierless -> member per owner Q15) publishing content -> rejected-not-creator, still effective-paid', async () => {
   const ev = event({ authorId: 100 });
   const d = await evaluatePR({
     author: ev.pull_request.user.id,
     paths: ['members/octocat/profile.md'],
     overrides: overrides({ grandfathers: new Map([['100', { github_id: '100' }]]) }),
     priceTierMap: PRICE_MAP,
-    stripe: fakeStripe({}), // no customer; grandfather makes it paid anyway
+    stripe: fakeStripe({}), // no customer; grandfather still confers effective-paid, but the tier is now member
     now: NOW,
   });
-  assert.equal(d.check, 'pass');
-  assert.equal(d.label, 'paid');
-  assert.equal(d.status, 'paid');
+  // owner Q15 2026-08-18: a tierless grandfather now resolves to member, below the Content Creator floor a
+  // profile (public presence) requires, so the publish gate rejects it. This is the lost-publish consequence.
+  assert.equal(d.check, 'fail');
+  assert.equal(d.label, 'rejected-not-creator');
+  assert.equal(d.status, 'paid'); // the grandfather still confers effective-paid; only the TIER dropped
 });
 
 test('unmapped author (no folder, no customer) -> rejected-not-a-member, never default-open', async () => {

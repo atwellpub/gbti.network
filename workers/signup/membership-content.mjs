@@ -83,8 +83,8 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
   const effective = effectiveStatus(githubId, derived, overrides, now);
   // sow-185: resolve the effective TIER from the SAME { status, source } (overrides preserved) plus the Stripe
   // tier and the grandfather grant. ban -> none, staff -> creator, grandfather -> the grant's tier (default
-  // creator), stripe -> the price's tier when paid. A caller that gates on tier reads this; status-only callers
-  // ignore it. INERT today (legacy price -> creator).
+  // member, owner Q15), stripe -> the price's tier when paid. A caller that gates on tier reads this; status-only
+  // callers ignore it. INERT today (legacy price -> creator).
   const gfGrant = overrides.grandfathers.get(String(githubId));
   const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, stripeTier, grant: gfGrant });
 

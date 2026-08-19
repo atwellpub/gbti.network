@@ -419,7 +419,8 @@ validateOverrideConsistency();
 
 // sow-185: a grandfather grant may carry an optional `tier` naming the membership tier it confers. When
 // present it MUST be one of the paid tiers (member / creator); anything else (a typo, or `none`) is rejected,
-// because a bad value would silently fall back to the creator default in tier-gate.grantTier and over-grant.
+// because a bad value would silently fall back to the default tier in tier-gate.grantTier (member since owner
+// Q15) instead of the tier the editor intended.
 function validateGrandfatherTiers() {
   const rel = 'house/grandfathered.yml';
   if (!has(path.join(ROOT, rel))) return; // optional file
@@ -429,7 +430,7 @@ function validateGrandfatherTiers() {
   // Guard the shape: a `grandfathered:` mapping (missing the list dashes) parses to a non-array, which `?? []`
   // does not catch, so iterating it would throw an uncaught TypeError and crash the validator. Coerce cleanly.
   for (const e of Array.isArray(parsed?.grandfathered) ? parsed.grandfathered : []) {
-    if (e?.tier === undefined || e?.tier === null) continue; // no tier -> defaults to creator, allowed
+    if (e?.tier === undefined || e?.tier === null) continue; // no tier -> defaults to member (owner Q15), allowed
     if (!PAID_GRANT_TIERS.includes(e.tier)) {
       errors.push(`${rel}: grant for github_id ${e.github_id ?? '(unknown)'} has tier "${e.tier}"; allowed: ${PAID_GRANT_TIERS.join(', ')}`);
     }

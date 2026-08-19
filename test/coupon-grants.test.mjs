@@ -58,7 +58,8 @@ test('planCouponGrants: the four-way policy (add / replace permanent comp / skip
 });
 
 // sow-185: converting a permanent comp changes the time BOUND only; a hand-set tier is orthogonal and must
-// survive the conversion, else the standard fold machinery would silently revert it to the creator default.
+// survive the conversion, else the standard fold machinery would silently revert it to the member default
+// (grantTier's tierless default, flipped from creator to member by the owner, Q15 2026-08-18).
 test('planCouponGrants + appendGrantEntries carry a hand-set tier through a permanent-comp conversion', () => {
   const file = FILE + `  - github_id: "888"   # github.com/tieredcomp\n    login: tieredcomp\n    reason: complimentary access (member level)\n    until: null\n    tier: member\n`;
   const { grants } = planCouponGrants({
@@ -77,7 +78,7 @@ test('planCouponGrants + appendGrantEntries carry a hand-set tier through a perm
   assert.equal(map.get('888').tier, 'member'); // renderGrantBlock emitted the tier line, so it survives the fold
 });
 
-test('planCouponGrants invents no tier when nothing names one (fold defaults to creator downstream)', () => {
+test('planCouponGrants invents no tier when nothing names one (fold defaults to member downstream, owner Q15)', () => {
   // github_id 111 in FILE is a permanent comp with NO tier, the redemption carries none, and NO coupon
   // registry is supplied -> the converted grant carries no tier field, exactly as it folded pre-sow-185.
   const { grants } = planCouponGrants({
@@ -86,7 +87,7 @@ test('planCouponGrants invents no tier when nothing names one (fold defaults to 
     now: NOW,
   });
   assert.equal(grants.length, 1);
-  assert.equal('tier' in grants[0], false); // no tier -> tier-gate.grantTier applies the creator default
+  assert.equal('tier' in grants[0], false); // no tier -> tier-gate.grantTier applies the member default (owner Q15)
 });
 
 // sow-185, the owner's "TIER IS EXPLICIT, NOT INHERITED" ruling. The fold NAMES the tier instead of leaving

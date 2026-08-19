@@ -476,7 +476,7 @@ export async function gatherOverrideOnlyMembers(overrides, now, { seen = new Set
     const effective = effectiveStatus(githubId, 'none', overrides, now);
     // sow-185: resolve the tier for the Content-Creator Discord badge. These override-only members have NO
     // Stripe subscription, so the tier comes entirely from the override (grandfather -> the grant's tier,
-    // default creator; staff -> creator; ban -> none). Mirrors memberEntryFor so the Stripe-customer path and
+    // default member (owner Q15); staff -> creator; ban -> none). Mirrors memberEntryFor so the Stripe-customer path and
     // this override-only path agree, and so a grandfathered creator is not stripped of @Creator every run.
     const tier = resolveEffectiveTier({ source: effective.source, status: effective.status, grant: overrides.grandfathers.get(githubId) });
     const username = resolveUsername(githubId, login, overrides, repoIndex);

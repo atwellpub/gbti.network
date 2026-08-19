@@ -7,7 +7,8 @@
 # sow-185: an optional `tier:` field sets the membership TIER a grant confers, so a superadmin (admin+) can
 # comp any account at a specific level by editing this file (superadmin edits auto-merge per SOW-108). Allowed
 # values: `member` (Network Member) or `creator` (Content Creator). A grant with NO `tier` defaults to
-# `creator`, which preserves the full complimentary access every existing grant below was issued under. Free
+# `member` (owner decision Q15, 2026-08-18, flipped from creator): a tierless comp reads as Network Member, so
+# an entry that should keep Content Creator access MUST carry an explicit `tier: creator`. Free
 # access is the absence of a grant; deplatforming is a ban (house/bans.yml), never a tier here.
 grandfathered:
   - github_id: "132623795"   # github.com/Aliayashi517

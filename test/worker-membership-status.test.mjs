@@ -144,8 +144,9 @@ test('paidTier: a member-priced Stripe subscription resolves to member (the $5 a
 test('paidTier: a non-paid member (fresh mirror, no sub) resolves to none', async () => {
   assert.equal(await tierOf({ customer: null }), 'none');
 });
-test('paidTier: a grandfather grant confers creator by default; an explicit tier:member confers member', async () => {
-  assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1' }] }) }), 'creator');
+test('paidTier: a grandfather grant confers member by default (owner Q15 flip); an explicit tier is honored', async () => {
+  assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1' }] }) }), 'member'); // tierless -> member (the flip; the 15 co-op comps)
+  assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1', tier: 'creator' }] }) }), 'creator'); // the escape hatch: an explicit creator keeps full access
   assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1', tier: 'member' }] }) }), 'member');
 });
 test('paidTier: a fresh TIERLESS coupon grant (legacy) falls back to creator', async () => {

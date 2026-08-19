@@ -79,8 +79,8 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
  *   1. the existing entry's hand-set tier  (an owner decision outranks a campaign default; SOW-142)
  *   2. the redemption record's stamped tier (what the coupon promised when it was actually redeemed)
  *   3. the coupon registry's declared tier (house/coupons.yml, for records predating the stamp)
- *   4. nothing                             (no tier is written; grantTier's creator default applies, the
- *                                           exact pre-sow-185 behaviour, so this can only ADD explicitness)
+ *   4. nothing                             (no tier is written here; grantTier's default applies downstream,
+ *                                           now `member` per owner Q15, so this step only ever ADDS explicitness)
  */
 export function planCouponGrants({ redemptions = [], grandfatheredParsed = null, couponsParsed = null, now = new Date() } = {}) {
   const existing = grandfathersFromParsed(grandfatheredParsed);
@@ -109,7 +109,7 @@ export function planCouponGrants({ redemptions = [], grandfatheredParsed = null,
     // sow-185: the four-step precedence documented above. A hand-set tier on the existing entry wins because
     // converting a permanent comp changes only the time BOUND (permanent -> free year); the owner's tier
     // choice is orthogonal and must survive the conversion, else renderGrantBlock would drop it and
-    // grantTier would silently revert the grant to the creator default. Only ever a real paid tier.
+    // grantTier would silently revert the grant to the default tier (member since owner Q15). Only ever a real paid tier.
     // sow-231 Phase 2 adds the FOURTH step, and it exists because of a gap the first three do not cover for
     // an invite. A per-invite code (CODEABLE-7F3Q) is not in the registry, so `couponTier(registry, r.code)`
     // MISSES for it, leaving an invite grant with only the redemption record's own stamp between it and no

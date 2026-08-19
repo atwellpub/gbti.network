@@ -467,9 +467,10 @@ test('sow-185: memberEntryFor resolves the effective TIER override-aware (Stripe
   // with the map: a member-priced sub -> member, a creator-priced sub -> creator
   assert.equal(memberEntryFor(paidCustomer('price_m'), ov(), NOW, { priceTierMap: priceMap }).tier, 'member');
   assert.equal(memberEntryFor(paidCustomer('price_c'), ov(), NOW, { priceTierMap: priceMap }).tier, 'creator');
-  // a grandfathered member (no sub) -> creator by default; a tier:member grant -> member (the override wins)
+  // a grandfathered member (no sub) -> member by default (owner Q15 flip); an explicit tier grant wins
   const noSub = { id: 'c', metadata: { github_id: '720' } };
-  assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'creator');
+  assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'member');
+  assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720', tier: 'creator' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'creator'); // the escape hatch keeps a comp at creator
   assert.equal(memberEntryFor(noSub, ov({ grandfathers: new Map([['720', { github_id: '720', tier: 'member' }]]) }), NOW, { priceTierMap: priceMap }).tier, 'member');
   // a non-paid (expired) account -> tier none
   assert.equal(memberEntryFor(noSub, ov(), NOW, { priceTierMap: priceMap }).tier, 'none');
@@ -686,7 +687,7 @@ test('gatherOverrideOnlyMembers: a grandfathered member with no Stripe customer 
   assert.equal(members[0].discordUserId, '629903610582663183'); // resolved from the override map
   assert.equal(members[0].effective.status, 'paid'); // grandfather -> paid
   assert.equal(members[0].effective.source, 'grandfather');
-  assert.equal(members[0].tier, 'creator'); // sow-185: a default grandfather grant resolves to creator (was undefined pre-fix)
+  assert.equal(members[0].tier, 'member'); // owner Q15: a tierless grandfather now resolves to member (rfilipo is one of the 15 comps)
 
   const actions = planReconcile({ members, repoIndex: {}, now: NOW });
   const discordActions = ofKind(actions, 'discord');
@@ -695,10 +696,10 @@ test('gatherOverrideOnlyMembers: a grandfathered member with no Stripe customer 
   assert.equal(discordActions[0].role, 'member'); // grandfathered co-op member -> the full Member role
   assert.equal(discordActions[0].discordUserId, '629903610582663183');
 
-  // sow-185 (review fix): once the Creator role is provisioned, this override-only grandfathered creator ALSO
-  // gets @Creator on top of @Member (before the fix m.tier was undefined, so @Creator was wrongly withheld).
+  // owner Q15: this tierless co-op comp is now MEMBER tier, so even once the Creator role is provisioned it
+  // gets @Member ONLY, never @Creator. This is the Content Creator badge drop the owner accepted for the 15.
   const withCreator = ofKind(planReconcile({ members, repoIndex: {}, now: NOW, creatorRoleEnabled: true }), 'discord');
-  assert.deepEqual(withCreator.filter((a) => a.type === 'add-role').map((a) => a.role).sort(), ['creator', 'member']);
+  assert.deepEqual(withCreator.filter((a) => a.type === 'add-role').map((a) => a.role).sort(), ['member']);
 });
 
 test('gatherOverrideOnlyMembers: skips ids already gathered from Stripe and yields no Discord action without an id', async () => {

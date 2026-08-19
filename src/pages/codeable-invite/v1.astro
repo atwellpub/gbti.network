@@ -41,8 +41,9 @@ import {
 } from '../../lib/membership';
 import { tierDisplay } from '../../lib/tiers';
 
-// sow-185: name the tier this invite confers. A fresh CODEABLEYEAR redemption folds into a tierless grandfather
-// grant, and a tierless grant resolves to the Content Creator tier (grantTier default), so the invite is a full
+// sow-185: name the tier this invite confers. A fresh CODEABLEYEAR redemption carries the coupon's explicit
+// `tier: creator` (house/coupons.yml), so it folds into a grandfather grant stamped Content Creator (NOT via
+// grantTier's tierless default, which the owner flipped to member in Q15), and the invite is a full
 // year of Content Creator membership, the network's top tier. Bind the label + the "if you stay" price to the
 // single source of truth (house/membership-tiers.yml via tierDisplay) so this page can never drift from it. This
 // is the TIER_DISPLAY binding src/lib/membership.ts's deprecation note points every new consumer to.
