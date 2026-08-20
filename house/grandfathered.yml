@@ -15,77 +15,62 @@ grandfathered:
     login: aliayashi517
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "3306507"     # github.com/andrija-naglic
     login: andrija-naglic
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "6953730"     # github.com/bomsn (Ali Khallad)
     login: bomsn
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "6268698"     # github.com/daprela (Giulio Daprelà)
     login: daprela
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "4893879"     # github.com/elsonponte (Elson Ponte)
     login: elsonponte
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "89241634"    # github.com/Eyesandnose (Ayodeji Adekore)
     login: eyesandnose
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "90683647"    # github.com/Giles-Beckley
     login: giles-beckley
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "4948323"     # github.com/leogopal (Leo Gopal)
     login: leogopal
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "18620454"    # github.com/MattBissett
     login: mattbissett
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "7998393"     # github.com/nareshdevineni
     login: nareshdevineni
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "1367750"     # github.com/rafael-minuesa (Rafael Minuesa)
     login: rafael-minuesa
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "225425"      # github.com/rfilipo (Ricardo Filipo)
     login: rfilipo
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "8797609"     # github.com/shaneedwardtaylor (Shane Taylor)
     login: shaneedwardtaylor
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "97899242"    # github.com/srikanthkoneru
     login: srikanthkoneru
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
   - github_id: "7199469"     # github.com/Thivieira (Thiago Vieira)
     login: thivieira
     reason: complimentary access (grandfathered co-op member)
     until: null
-    tier: creator
 # - github_id: "..."
 #   login: founder
 #   reason: founding member
@@ -96,7 +81,6 @@ grandfathered:
     login: adbox85
     reason: coupon:CODEABLEYEAR
     until: "2027-07-21T15:20:31.034Z"
-    tier: creator
 
   # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-13). Auto-appended.
   - github_id: "190312419"      # github.com/metacast-entertainment
