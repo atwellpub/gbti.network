@@ -747,6 +747,35 @@ async function handleWebhook(request, env) {
   return json({ ok: true, summary });
 }
 
+/**
+ * UnifiedWorker cron dispatch. `workers/signup/wrangler.toml` must carry these strings EXACTLY, in BOTH
+ * [triggers] and [env.production.triggers] (wrangler does not inherit triggers into a named env).
+ *
+ * A MAP, NOT A TERNARY CHAIN, AND THE REASON IS WORTH KEEPING. This dispatch used to end in a bare else that
+ * ran the syndication drain, so it was never really a three-way choice: it was two recognised crons and a
+ * CATCH-ALL. Any fourth cron string would have silently run drainSyndication instead of its own job.
+ *
+ * The fourth string is not hypothetical. The obvious next one is the SOW-166 weekly digest, and that is the
+ * worst possible case for a catch-all: the digest would appear to do nothing while an unscheduled syndication
+ * drain fired in its place, which reads as "the digest is broken" rather than as a misroute, and sends posts
+ * to live channels at a time nobody is watching for them. An unrecognised schedule now runs NOTHING and says
+ * so loudly, which is the failure a person can actually find.
+ */
+const CRON_JOBS = new Map([
+  ['0 * * * *', { run: ingest, label: 'news ingest' }],                 // fetch sources, dedupe, AI-classify, prune -> NEWS_KV
+  ['30 * * * *', { run: backfillImages, label: 'news image backfill' }], // scrape og:images for stored items lacking one (SOW-050)
+  ['*/5 * * * *', { run: drainSyndication, label: 'syndication drain' }], // post items past the one-hour hold (SOW-058)
+]);
+
+/**
+ * Resolve a cron string to the job it runs. PURE and exported so the routing is testable without invoking the
+ * jobs themselves. An unknown schedule resolves to null. It MUST NOT resolve to a default: a default here is
+ * precisely the catch-all this exists to remove.
+ */
+export function resolveCronJob(cron) {
+  return CRON_JOBS.get(cron) ?? null;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1404,21 +1433,21 @@ export default {
     }
   },
 
-  // UnifiedWorker cron dispatch (this Worker now owns three schedules; wrangler crons must match these strings):
-  //   `0 * * * *`  -> ingest: fetch news sources, parse, dedupe, AI-classify, prune, save to NEWS_KV.
-  //   `30 * * * *` -> backfillImages: scrape og:images for stored items lacking one (SOW-050).
-  //   `*/5 * * * *`-> drainSyndication (SOW-058): post items past the one-hour hold to every ready channel.
-  // Each is fail-closed + best-effort (a failure never breaks the cron) and runs via ctx.waitUntil so the handler
-  // returns immediately. ingest (dedupe by guid) + backfillImages (imgTried flag) are idempotent, so an overlap
-  // with the still-deployed gbti-news worker during cutover is safe.
+  // Each job is fail-closed + best-effort (a failure never breaks the cron) and runs via ctx.waitUntil so the
+  // handler returns immediately. ingest (dedupe by guid) + backfillImages (imgTried flag) are idempotent, so an
+  // overlap with the still-deployed gbti-news worker during cutover is safe. Routing lives in CRON_JOBS above.
   async scheduled(controller, env, ctx) {
     const cron = controller?.cron;
-    const [job, label] = cron === '0 * * * *' ? [ingest(env), 'news ingest']
-      : cron === '30 * * * *' ? [backfillImages(env), 'news image backfill']
-        : [drainSyndication(env), 'syndication drain'];
-    ctx.waitUntil(job.then(
-      (r) => console.log(label, JSON.stringify(r)),
-      (e) => console.error(`${label} failed`, e?.message ?? e),
+    const entry = resolveCronJob(cron);
+    if (!entry) {
+      // Loud and specific, because the whole point is that this stops being invisible. Nothing is run: a
+      // schedule we do not recognise is a configuration error, and guessing at it is what caused the problem.
+      console.error('cron dispatch: UNRECOGNISED schedule, no job run', JSON.stringify({ cron: cron ?? null }));
+      return;
+    }
+    ctx.waitUntil(entry.run(env).then(
+      (r) => console.log(entry.label, JSON.stringify(r)),
+      (e) => console.error(`${entry.label} failed`, e?.message ?? e),
     ));
   },
 };
