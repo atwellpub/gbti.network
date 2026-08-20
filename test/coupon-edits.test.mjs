@@ -13,7 +13,7 @@ test('addCouponEdit adds a normalized coupon and rejects dups + junk', () => {
   const r = addCouponEdit(POOL, { code: ' summer25 ', freeDays: 90, note: 'Summer promo' }, CTX);
   assert.equal(r.changed, true);
   assert.equal(r.next.coupons.length, 2);
-  assert.deepEqual(r.next.coupons[1], { code: 'SUMMER25', freeDays: 90, active: true, tier: 'creator', note: 'Summer promo', maxRedemptions: null, expiresAt: null });
+  assert.deepEqual(r.next.coupons[1], { code: 'SUMMER25', freeDays: 90, active: true, tier: 'member', note: 'Summer promo', maxRedemptions: null, expiresAt: null });
   assert.equal(r.audit.action, 'coupon-add');
   assert.throws(() => addCouponEdit(POOL, { code: 'codeableyear', freeDays: 30 }, CTX), CouponEditError);
   assert.throws(() => addCouponEdit(POOL, { code: 'bad code', freeDays: 30 }, CTX), CouponEditError);
@@ -24,12 +24,14 @@ test('addCouponEdit adds a normalized coupon and rejects dups + junk', () => {
 // sow-185: an added coupon is `active: true`, and validateCoupons rejects an active coupon naming no tier,
 // so the admin path must WRITE one or it would hand the admin a PR that fails CI.
 test('addCouponEdit always writes a tier: the default is recorded as a value, not left to grantTier', () => {
-  const explicit = addCouponEdit(POOL, { code: 'MEMBERONLY', freeDays: 30, tier: 'member' }, CTX);
-  assert.equal(explicit.next.coupons[1].tier, 'member', 'an explicit tier is honored');
-  assert.equal(explicit.audit.detail.tier, 'member', 'and recorded in the audit');
+  // `creator` on purpose: it must DIFFER from DEFAULT_COUPON_TIER, or this passes whether the explicit
+  // value is honored or silently ignored in favour of the default.
+  const explicit = addCouponEdit(POOL, { code: 'CREATORONLY', freeDays: 30, tier: 'creator' }, CTX);
+  assert.equal(explicit.next.coupons[1].tier, 'creator', 'an explicit tier is honored');
+  assert.equal(explicit.audit.detail.tier, 'creator', 'and recorded in the audit');
 
   const defaulted = addCouponEdit(POOL, { code: 'NOTIERGIVEN', freeDays: 30 }, CTX);
-  assert.equal(defaulted.next.coupons[1].tier, 'creator', 'the default is WRITTEN INTO THE FILE');
+  assert.equal(defaulted.next.coupons[1].tier, 'member', 'the default is WRITTEN INTO THE FILE');
 
   assert.throws(() => addCouponEdit(POOL, { code: 'JUNKTIER', freeDays: 30, tier: 'creater' }, CTX), CouponEditError);
   assert.throws(() => addCouponEdit(POOL, { code: 'NONETIER', freeDays: 30, tier: 'none' }, CTX), CouponEditError);
@@ -57,7 +59,7 @@ test('updateCouponEdit patches the tier and heals a legacy active coupon that na
   const legacy = { coupons: [{ code: 'LEGACY', freeDays: 30, active: true }] };
   const healed = updateCouponEdit(legacy, { code: 'LEGACY', patch: { note: 'touched' } }, CTX);
   assert.equal(healed.changed, true);
-  assert.equal(healed.next.coupons[0].tier, 'creator');
+  assert.equal(healed.next.coupons[0].tier, 'member');
   assert.equal(healed.audit.detail.tierDefaulted, true, 'the heal is visible in the audit, not silent');
 
   // But an EMPTY patch still throws rather than becoming a silent tier write: the heal runs after the guard.

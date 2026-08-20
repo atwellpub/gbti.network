@@ -21,10 +21,12 @@ const MAX_NOTE = 160;
  * read, forever, so changing it would move every grant that ever leaned on it. A written value cannot be
  * retroactively re-decided.
  *
- * Creator because every campaign to date confers full complimentary access; an admin naming `member`
- * explicitly overrides it.
+ * Member (owner decision, 2026-08-19, flipped from creator). Past campaigns all conferred full
+ * complimentary access, and the three CODEABLEYEAR grants carry `tier: creator` as written values, so
+ * they are unaffected. The default now names the LOWER tier so a coupon added without the field grants
+ * the smaller thing: an admin who means Content Creator says so, rather than an omission deciding it.
  */
-export const DEFAULT_COUPON_TIER = 'creator';
+export const DEFAULT_COUPON_TIER = 'member';
 
 function checkTier(tier) {
   if (tier === undefined || tier === null || tier === '') return DEFAULT_COUPON_TIER;
