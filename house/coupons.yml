@@ -58,7 +58,7 @@ coupons:
   - code: CODEABLEYEAR
     freeDays: 365
     active: true
-    tier: creator
+    tier: member
     note: Codeable experts, first year free (SOW-119)
     maxRedemptions: null
     expiresAt: null
