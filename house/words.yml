@@ -1,0 +1,128 @@
+# sow-259: the word-of-the-day pool (git-native, portable). This file IS the curation: a fork that clones this
+# repo carries its words, and its build publishes its own /words.json. Admin-CODEOWNED (house/**), editable from
+# the admin word manager (which opens an auto-merged PR). The Astro build emits src/pages/words.json.ts from this;
+# the homepage rail card renders the build-time pick and then re-picks client side on a deterministic 24-hour
+# rotation (the same word for every reader in a given UTC day). Each entry: { word, partOfSpeech, definition,
+# enabled }. Disable a word with enabled: false (kept for history) instead of deleting it. The site also ships a
+# bundled copy of this seed set as a fail-soft fallback (client-ui/src/word-of-the-day.mjs).
+words:
+  - word: ephemeral
+    partOfSpeech: adjective
+    definition: Lasting for a very short time.
+    enabled: true
+  - word: laconic
+    partOfSpeech: adjective
+    definition: Using very few words.
+    enabled: true
+  - word: quotidian
+    partOfSpeech: adjective
+    definition: Ordinary, or occurring every day.
+    enabled: true
+  - word: sanguine
+    partOfSpeech: adjective
+    definition: Cheerfully optimistic, especially in a difficult situation.
+    enabled: true
+  - word: obdurate
+    partOfSpeech: adjective
+    definition: Stubbornly refusing to change an opinion or a course of action.
+    enabled: true
+  - word: perfunctory
+    partOfSpeech: adjective
+    definition: Done without real care or interest, merely as a duty.
+    enabled: true
+  - word: salient
+    partOfSpeech: adjective
+    definition: Most noticeable or important.
+    enabled: true
+  - word: tacit
+    partOfSpeech: adjective
+    definition: Understood or implied without being stated.
+    enabled: true
+  - word: verisimilitude
+    partOfSpeech: noun
+    definition: The appearance of being true or real.
+    enabled: true
+  - word: alacrity
+    partOfSpeech: noun
+    definition: Brisk and cheerful readiness.
+    enabled: true
+  - word: equanimity
+    partOfSpeech: noun
+    definition: Calmness and composure under strain.
+    enabled: true
+  - word: lacuna
+    partOfSpeech: noun
+    definition: A gap where something is missing.
+    enabled: true
+  - word: penumbra
+    partOfSpeech: noun
+    definition: The partly shaded outer edge of a shadow.
+    enabled: true
+  - word: sinecure
+    partOfSpeech: noun
+    definition: A position that requires little work but still carries income or prestige.
+    enabled: true
+  - word: bellwether
+    partOfSpeech: noun
+    definition: Something that leads the way, or that indicates a coming trend.
+    enabled: true
+  - word: cadence
+    partOfSpeech: noun
+    definition: The rhythm of a sequence of sounds or words.
+    enabled: true
+  - word: denouement
+    partOfSpeech: noun
+    definition: The final part of a story, where the strands are drawn together and resolved.
+    enabled: true
+  - word: ersatz
+    partOfSpeech: adjective
+    definition: Serving as a poor substitute for the real thing.
+    enabled: true
+  - word: fulsome
+    partOfSpeech: adjective
+    definition: Praising so excessively that it reads as insincere.
+    enabled: true
+  - word: gainsay
+    partOfSpeech: verb
+    definition: To deny or contradict.
+    enabled: true
+  - word: inure
+    partOfSpeech: verb
+    definition: To accustom someone to something unpleasant, so that they stop minding it.
+    enabled: true
+  - word: limn
+    partOfSpeech: verb
+    definition: To depict or describe, in paint or in words.
+    enabled: true
+  - word: obviate
+    partOfSpeech: verb
+    definition: To remove a need or a difficulty before it arises.
+    enabled: true
+  - word: propitiate
+    partOfSpeech: verb
+    definition: To win the favour of someone by doing something that pleases them.
+    enabled: true
+  - word: adumbrate
+    partOfSpeech: verb
+    definition: To outline faintly, or to foreshadow.
+    enabled: true
+  - word: recondite
+    partOfSpeech: adjective
+    definition: Little known, or dealing with an obscure subject.
+    enabled: true
+  - word: apocryphal
+    partOfSpeech: adjective
+    definition: Widely circulated and repeated, but probably not true.
+    enabled: true
+  - word: desultory
+    partOfSpeech: adjective
+    definition: Moving from one thing to another without a plan or a purpose.
+    enabled: true
+  - word: halcyon
+    partOfSpeech: adjective
+    definition: Calm and peaceful, or idyllically happy in memory.
+    enabled: true
+  - word: inchoate
+    partOfSpeech: adjective
+    definition: Just begun, and not yet fully formed.
+    enabled: true

@@ -1,0 +1,64 @@
+---
+// sow-259: the homepage rail's word-of-the-day card. One more `div.card.side-card` in the existing rail shape
+// (the V3 .card/.side-card/.side-h classes are global in src/styles/gbti-v3.css, so a child component gets them).
+//
+// WHY THERE IS A CLIENT SCRIPT AT ALL. The homepage is prerendered and CDN-cached, so a build-time-only pick would
+// freeze the word until the next deploy and go stale across a quiet weekend. So the build renders today's pick as
+// the initial content (a reader with no JavaScript still sees a real word), and the script re-picks from
+// /words.json against the current 24-hour bucket. This is the same shape the Shop Talk card already uses for its
+// date chip in src/pages/index.astro. Both sides call the SAME pickWord, so they cannot disagree about the rule.
+//
+// The card is deliberately INERT: no link. Measured at build time (2026-08-19): 38 distinct tags across 90 content
+// items with only 7 used more than once, and no site search route, so a destination would land most readers on an
+// empty feed. Owner decision, revisit when the corpus supports it.
+import { loadWords } from '../../lib/words';
+import { pickWord } from '../../../client-ui/src/word-of-the-day.mjs';
+
+const initial = pickWord(loadWords());
+---
+{initial && (
+  <div class="card side-card wotd" data-wotd>
+    <div class="side-h">Word of the day</div>
+    <div class="wotd-term" data-wotd-word>{initial.word}</div>
+    <div class="wotd-pos" data-wotd-pos hidden={!initial.partOfSpeech}>{initial.partOfSpeech}</div>
+    <p class="wotd-def" data-wotd-def>{initial.definition}</p>
+  </div>
+)}
+
+<style>
+  .wotd-term { font-family: var(--f-display); font-weight: 800; font-size: 24px; color: var(--fg); margin-top: 10px; line-height: 1.2; overflow-wrap: anywhere; }
+  .wotd-pos { font-family: var(--f-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--green-700); margin-top: 6px; }
+  /* Tailwind preflight sets [hidden]{display:none !important}, but state this anyway: an explicit display on the
+     element would otherwise beat the UA rule and a blank part-of-speech row would take up space. */
+  .wotd-pos[hidden] { display: none !important; }
+  .wotd-def { color: var(--fg-soft); font-size: 14.5px; line-height: 1.55; margin-top: 10px; }
+</style>
+
+<script>
+  import { pickWord } from '../../../client-ui/src/word-of-the-day.mjs';
+
+  (async () => {
+    const card = document.querySelector('[data-wotd]');
+    if (!card) return;
+    // Fail soft in every branch: on a fetch error, a bad payload, or an empty pool the card KEEPS whatever the
+    // build rendered. It never blanks itself and never shows an error, because a broken rail card is worse than a
+    // word that is a deploy behind.
+    let words;
+    try {
+      const res = await fetch('/words.json', { cache: 'no-cache' });
+      if (!res.ok) return;
+      words = (await res.json())?.words;
+    } catch { return; }
+    const next = pickWord(words);
+    if (!next) return;
+    const term = card.querySelector('[data-wotd-word]');
+    const pos = card.querySelector('[data-wotd-pos]');
+    const def = card.querySelector('[data-wotd-def]');
+    if (term) term.textContent = next.word;
+    if (def) def.textContent = next.definition;
+    if (pos) {
+      pos.textContent = next.partOfSpeech || '';
+      pos.hidden = !next.partOfSpeech;
+    }
+  })();
+</script>
