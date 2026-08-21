@@ -28,6 +28,54 @@ import { normalizeNewsOpens, distinctOpenerCount } from '../../membership/news-o
 import { NEWS_OPENS_KEY } from './membership-news-opened.mjs';
 
 const SITE_URL_DEFAULT = 'https://gbti.network';
+const MAIL_ISSUE_PREFIX = 'mail:issue:';
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * Resolve the content-window lower bound (`since`) for a NEW issue: the generatedAt of the most recent PRIOR
+ * frozen issue, so "since the last issue" is literally true and a skipped or delayed week WIDENS the window
+ * rather than dropping the intervening content on the floor (composeIssue drops member items with date < since,
+ * inclusive boundary). Taking the GREATEST prior issueId (not last-week's computed id) is what makes a MISSED
+ * week correct: computing `weekly-<today-7d>` and reading it would miss and fall back to bootstrap in exactly
+ * the outage case the anchor exists for.
+ *
+ * For the very FIRST issue (no prior) it falls back to nowMs - bootstrapMs (default 7 days): a bounded, honest
+ * launch window (news-led, and the member sections show their empty-section notes for a quiet first week)
+ * rather than dumping the newest-N-ever back catalog. ALWAYS returns a finite number given a finite nowMs (the
+ * forgotten-param trap), and the value is echoed on the frozen issue as window.since so a missing window is
+ * visible in the artifact, not silent.
+ *
+ * Enumerates the mail:issue: prefix (one key per week, so a decade of issues fits inside a single KV list
+ * page). Considers ONLY ids of the canonical `weekly-YYYY-MM-DD` shape, which sort lexicographically =
+ * chronologically, so a hand-seeded or backfilled issue with a foreign id shape can never be mistaken for the
+ * prior issue.
+ */
+export async function resolveSince(kv, { nowMs, currentIssueId, bootstrapMs = WEEK_MS, pageBudget = 50 } = {}) {
+  const bootstrap = Number(nowMs) - bootstrapMs;
+  if (!kv?.list) return bootstrap;
+  let bestId = null;
+  let cursor;
+  for (let page = 0; page < pageBudget; page++) {
+    let res;
+    try { res = await kv.list({ prefix: MAIL_ISSUE_PREFIX, cursor }); } catch { break; }
+    for (const k of res?.keys ?? []) {
+      const id = k.name.slice(MAIL_ISSUE_PREFIX.length);
+      if (!id.startsWith('weekly-')) continue;              // only canonical ids sort chronologically
+      if (currentIssueId && id >= currentIssueId) continue; // strictly before self; ignores self + any future
+      if (bestId == null || id > bestId) bestId = id;
+    }
+    if (res?.list_complete || !res?.cursor) break;
+    cursor = res.cursor;
+  }
+  if (bestId == null) return bootstrap; // first issue ever
+  const prev = await getIssue(kv, bestId);
+  const gen = Number(prev?.generatedAt);
+  if (Number.isFinite(gen)) return gen;
+  // Defensive: a prior issue somehow missing generatedAt. Parse its date (midnight UTC) so a delayed week still
+  // widens from the right week boundary rather than collapsing to bootstrap.
+  const parsed = Date.parse(`${bestId.slice('weekly-'.length)}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed : bootstrap;
+}
 
 /**
  * Gather the member content entries from the public build artifacts over HTTP. Fail-SOFT per artifact: a failed
@@ -131,19 +179,28 @@ export async function compileWeeklyIssue(env, {
   maxNews,
 } = {}) {
   if (!kv) return { ok: false, reason: 'no kv' };
-  const issueId = weeklyIssueId(Number(now()));
+  const nowMs = Number(now());
+  const issueId = weeklyIssueId(nowMs);
 
   // Freeze once: if the issue already exists, reuse it (do NOT recompose); otherwise gather + compose + persist.
   let issue = await getIssue(kv, issueId);
   let composed = false;
   if (!issue) {
-    const [contentEntries, newsEntries] = await Promise.all([
+    const [contentEntries, newsEntries, since] = await Promise.all([
       gatherContentEntries(env, { fetchImpl, siteUrl }),
       gatherNewsEntries(env, { kv, queryItems }),
+      resolveSince(kv, { nowMs, currentIssueId: issueId }),
     ]);
     const items = normalizeContent(contentEntries, { displayName });
     const news = normalizeNews(newsEntries);
-    issue = composeIssue({ issueId, items, news, now }, { perSection, maxNews });
+    // The content window (composeIssue `since`, PublicationMaster PR 320) is PART OF THE SECTION CONTRACT, not
+    // an optimization: without it every issue re-sends the newest-N-ever best-of and the empty-section notes
+    // become unreachable code. KNOWN, ACCEPTED limitation (SOW-166): `since` windows on publishedAt, which the
+    // client stamps at PR-open time (operations.mjs), NOT at merge/deploy. So a held-for-review or backdated
+    // item that first enters the build artifact AFTER the prior compile is dropped by the window and never
+    // mailed. The exact fix ("not previously mailed" via an already-mailed `exclude` set) is a fast-follow
+    // GATED BEFORE unrestricted send; the tiny allowlist test launch is unaffected. See the SOW-166 note.
+    issue = composeIssue({ issueId, items, news, now }, { perSection, maxNews, since });
     // ALWAYS-SEND: shouldSend is unconditionally true, but gate on it honestly so a future skip is one edit.
     if (!shouldSend(issue)) return { ok: true, issueId, composed: false, skipped: true, reason: 'nothing to send' };
     await putIssue(kv, issue);
@@ -162,5 +219,6 @@ export async function compileWeeklyIssue(env, {
     pending: enq?.pending ?? 0,
     recipientsTruncated: truncated, // the caller MUST surface this: a truncated base under-sends silently otherwise
     counts: issue?.counts ?? null,
+    since: issue?.window?.since ?? null, // the resolved window, surfaced for the cron log; null here is a caller bug
   };
 }
