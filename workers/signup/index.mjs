@@ -90,6 +90,7 @@ import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tie
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
+import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf, requireOrigin } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF (+ Origin-only for form-POST routes)
 
@@ -1423,6 +1424,15 @@ export default {
           const r = await handleTouch(request, env);
           return json(r.body, r.status, { ...MEMBER_CONTENT_CORS, 'Cache-Control': 'no-store' });
         }
+      }
+
+      // SOW-166: the weekly-digest ONE-CLICK unsubscribe (RFC 8058). GET renders a confirmation page that POSTs
+      // (a mail-client prefetch must never opt anyone out); POST performs suppress-then-erase against the
+      // capability token in the URL. The handler owns method dispatch, fail-closed verification and the
+      // no-referrer/no-store page headers, so the route just delegates. NOT gated behind a flag: auto-enrolment
+      // was granted on the rider that the opt-out always works.
+      if (pathname === '/mail/unsubscribe') {
+        return await handleUnsubscribe(request, env);
       }
 
       return json({ error: 'not_found' }, 404);
