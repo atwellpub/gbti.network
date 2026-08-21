@@ -9,10 +9,15 @@
 // drain injects it as `renderIssue(issue, ctx)` and returns { subject, html, text }.
 //
 // WHAT THIS RENDERER DOES NOT DO, on purpose:
-//   - It mints NO unsubscribe token. The token is a keyed HMAC and this module has no secret; the drain mints
-//     it per recipient at send time and passes the finished `unsubscribeUrl` in ctx. A missing url renders a
-//     managed-subscription fallback line, but the DRAIN is what refuses to send when it cannot build one (an
-//     email with no working opt-out is the one thing auto-enrolment was conditioned against).
+//   - It mints NO unsubscribe token. The token is a keyed HMAC and this module has no secret; the drain is to
+//     mint it per recipient at send time and pass the finished `unsubscribeUrl` in ctx. A missing url renders a
+//     managed-subscription fallback line here, but that fallback is NOT the control and this comment must not
+//     read as though the case is handled: an email with no working opt-out (or no postal address) must NEVER be
+//     sent, and enforcing that is OWED to the drain's send-capability commit, which must REFUSE such a recipient
+//     (leave the record pending, burn no attempt), the same shape as its unreadable-suppression defer. As of
+//     this commit the drain passes only { recipientHash, subscriber, from } and does NOT yet build
+//     unsubscribeUrl or postalAddress; wiring that ctx AND the refusal is a hard prerequisite of enabling any
+//     send. Until then the send gate (fail-closed) is the compensating control keeping this latent.
 //   - It carries NO member body or ciphertext. The layout items are already the public-safe projection
 //     (kind/title/url/author/date only), so there is no field here that could leak gated content.
 //   - It sets NO email headers. List-Unsubscribe / List-Unsubscribe-Post and the multipart assembly are the
@@ -102,7 +107,9 @@ export function renderIssue(issue, ctx = {}) {
   const sectionsText = layout.map(sectionText).join('\n\n');
 
   // The footer's unsubscribe line. A real url renders a one-click link; without one we fall back to a managed
-  // line rather than a broken link (the drain refuses to send in that case, so this fallback is belt-and-braces).
+  // line rather than a broken link. This fallback keeps a MISUSE from crashing; it is NOT permission to send
+  // without a working opt-out. The drain must refuse that send (see the header note), so in production this
+  // branch is unreachable, not a supported degraded mode.
   const unsubHtml = unsubscribeUrl
     ? `<a href="${escapeHtml(unsubscribeUrl)}" style="color:#6c6976">Unsubscribe</a> from the weekly digest.`
     : 'You can manage your subscription from the GBTI Network site.';

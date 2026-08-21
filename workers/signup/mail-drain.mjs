@@ -202,8 +202,18 @@ export async function drainMailIssue(env, {
       continue;
     }
 
-    // Render from the FROZEN issue (same content for everyone; the renderer may personalize the unsubscribe
-    // link off the recipientHash). A render throw is treated as retryable rather than dropping the recipient.
+    // Render from the FROZEN issue (same content for everyone; the renderer personalizes the unsubscribe link
+    // off the per-recipient url). A render throw is treated as retryable rather than dropping the recipient.
+    //
+    // SEND-CAPABILITY PREREQUISITE (SecurityMaster, 2026-08-21): before ANY cron wires a real send, this ctx
+    // MUST carry the fields renderIssue actually reads, and a recipient for whom they cannot be built MUST be
+    // refused here (leave pending, burn no attempt, count it), the same shape as the suppression defer above:
+    //   - unsubscribeUrl: mint makeUnsubToken(env.MAIL_UNSUB_KEY, hash) and build the /mail/unsubscribe URL;
+    //     a null token (no key) => refuse (an email with no working opt-out must never be sent).
+    //   - postalAddress: env.MAIL_POSTAL_ADDRESS, a USPS PO box / CMRA, city+state only, NEVER the LLC's
+    //     registered home address; unset => refuse (CAN-SPAM 7704(a)(5)).
+    // renderIssue DEFAULTS both, so a mismatch fails SILENT into a CAN-SPAM violation, not a crash: the guard
+    // has to be explicit, and the send gate is the only thing keeping this latent until then.
     let message;
     try {
       message = renderIssue(issue, { recipientHash: hash, subscriber, from });
