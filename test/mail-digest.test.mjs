@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   composeIssue, hasContent, issueKey, isPublicItem, SECTION_KINDS, DigestError,
-  SECTION_ORDER, SECTION_LABELS, EMPTY_SECTION_NOTES,
+  SECTION_ORDER, SECTION_LABELS, EMPTY_SECTION_NOTES, shouldSend,
 } from '../membership/mail-digest.mjs';
 
 const at = (t) => () => t;
@@ -211,15 +211,33 @@ test('a thin member week can lift the news cap, but only when asked, and never p
     composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 5, maxNewsThin: 2 }).topNews.length, 5);
 });
 
-test('the all-empty week is still the one skip: hasContent is the floor the cron reads', () => {
+test('shouldSend is the gate and it is unconditional (owner ruling 2026-08-21)', () => {
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  const thin = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1) });
+  const full = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1) });
+  for (const issue of [dead, thin, full]) assert.equal(shouldSend(issue), true);
+  // and it does not depend on being handed a well-formed issue at all
+  assert.equal(shouldSend(undefined), true);
+});
+
+test('hasContent stays HONEST, so it can still tell an empty issue from a full one', () => {
+  // It is no longer the gate, but the subject line and the logs read it, and a predicate that answered
+  // "yes" for an empty issue would mislead them.
   const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
   assert.equal(dead.isEmpty, true);
-  assert.equal(hasContent(dead), false, 'a week with nothing public must not be mailed as a page of notes');
-  // even so, the sections are all present, so a renderer never has to special-case the shape
-  assert.equal(dead.layout.length, SECTION_ORDER.length);
-  assert.ok(dead.layout.every((s) => s.empty && s.note));
-
-  // one news item is enough to clear the floor
+  assert.equal(hasContent(dead), false);
   const alive = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1) });
   assert.equal(hasContent(alive), true);
+});
+
+test('a fully empty issue is still SHAPED, so always-send never renders a special case', () => {
+  // The owner's ground for always-send is that news ingests daily, so this state should not occur. That is a
+  // fact about the ingest running, not a property of the composer, so the shape is pinned here: if the news
+  // worker is ever down for a week the renderer still gets five labelled sections with notes, not a hole.
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  assert.equal(dead.layout.length, SECTION_ORDER.length);
+  assert.deepEqual(dead.layout.map((s) => s.key), SECTION_ORDER, 'canonical order when nothing is filled');
+  assert.ok(dead.layout.every((s) => s.empty && s.note && s.label));
+  assert.deepEqual(dead.topNews, []);
+  for (const k of SECTION_KINDS) assert.deepEqual(dead.sections[k], []);
 });

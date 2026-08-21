@@ -126,9 +126,9 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * Empty-week policy (owner ruling 2026-08-21): the issue ALWAYS carries every section, and an empty one
  * gets its note instead of being dropped. `layout` is the render-ready ordering, filled sections first.
  *
- * `isEmpty` still means "nothing public at all, member or news", and `hasContent` still reads it, so the
- * compile cron keeps one floor: a week with genuinely nothing is skipped rather than mailed as a page of
- * notes. A thin member week is never silence; a dead week is not a mail nobody can act on.
+ * `isEmpty` still means "nothing public at all, member or news", and `hasContent` still reports it, but it
+ * is no longer a send gate: the owner ruled literal always-send on 2026-08-21 and `shouldSend` is the gate.
+ * The flag stays because the template and the logs still want to know.
  *
  * `maxNewsThin` OPTIONALLY lifts the news cap on a week with NO member content, so a news-led issue is a
  * real issue rather than a stub. It applies only when every member section is empty, it can only raise the
@@ -218,7 +218,31 @@ function buildLayout(sections, topNews) {
   return [...all.filter((s) => !s.empty), ...all.filter((s) => s.empty)];
 }
 
-/** Does this issue have anything worth sending? The compile cron skips only a fully-empty issue. */
+/**
+ * Does this issue actually have anything in it? PURELY FACTUAL, and deliberately NOT the send gate: see
+ * shouldSend below. Kept honest because a subject line, a log line and a quiet-week template variant all
+ * want to know the difference, and a predicate that answers "yes" for an empty issue would mislead every
+ * one of them.
+ */
 export function hasContent(issue) {
   return Boolean(issue) && !issue.isEmpty;
+}
+
+/**
+ * THE SEND GATE. Always true.
+ *
+ * Owner ruling, sow-166, 2026-08-21: literal always-send. The digest goes out on its Tuesday cadence
+ * regardless of what a given week produced, and a thin week shows the sections with their notes rather than
+ * being skipped. Both @SowMaster and I recommended keeping a floor that skipped a fully-empty issue, and the
+ * owner overruled it on the ground that it is not a reachable state: the news worker ingests daily, so every
+ * issue carries news by construction. Recorded because the reasoning is what makes the "always" safe, and if
+ * news ingest ever stops being daily this decision is worth revisiting rather than inheriting.
+ *
+ * It takes the issue it ignores on purpose. The gate is a policy decision that currently has one answer, and
+ * a caller reading `shouldSend(issue)` can see where the policy lives; a bare `true` at the call site could
+ * not be found again.
+ */
+// eslint-disable-next-line no-unused-vars
+export function shouldSend(issue) {
+  return true;
 }
