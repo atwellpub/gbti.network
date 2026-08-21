@@ -20,6 +20,44 @@
 
 export const SECTION_KINDS = ['article', 'product', 'prompt', 'share'];
 
+// THE SECTION CONTRACT (owner ruling, sow-166, 2026-08-21). An issue ALWAYS carries every section. A
+// section with nothing in it is not dropped: it is rendered with a note saying no new member items were
+// published in that category, because a visible gap is an invitation to fill it and a missing section is
+// not. The owner chose this over skipping silently, which was the other recommendation on the table.
+//
+// ORDER is "the types that have content first, news especially". SECTION_ORDER is the canonical priority,
+// and `layout` splits on it: filled sections in that order, then empty sections in that SAME order. So the
+// relative order never changes week to week (a reader learns where Prompts sits), and the only thing that
+// moves is the line between what was published and what was not.
+export const SECTION_ORDER = ['news', 'article', 'product', 'prompt', 'share'];
+
+export const SECTION_LABELS = {
+  news: 'News',
+  article: 'Articles',
+  product: 'Products',
+  prompt: 'Prompts',
+  share: 'Shares',
+};
+
+// The empty-section notes. This copy is member-facing and it lives HERE rather than in the template,
+// because the template is design-gated (it swaps in behind the injected renderIssue seam) and the words a
+// member reads should not move when the visual design does.
+//
+// Each note is worded differently on purpose. On a genuinely thin week a reader sees four of these at once,
+// and four sentences built to the same pattern read as generated filler, which is the opposite of an
+// invitation.
+export const EMPTY_SECTION_NOTES = {
+  news: 'No news items were curated this week.',
+  article:
+    'No new articles were published this week. The blog runs on what members write, so a draft you have been sitting on would land well here.',
+  product:
+    'No new products this week. If you have shipped something recently, adding it to the directory takes a few minutes.',
+  prompt:
+    'No new prompts this week. If you have one you reach for often, it will probably work for somebody else too.',
+  share:
+    'No shares this week. A share is the cheapest thing to post here: a link and a sentence about why it is worth reading.',
+};
+
 /** Thrown for caller-input problems; the handler maps it to a 400 (never a 500). */
 export class DigestError extends Error {}
 
@@ -76,17 +114,34 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * items into the four sections (each newest-first, capped at `perSection`), and ranks the news by
  * distinct-opener count (`opens`, then newest) capped at `maxNews`.
  *
- * Empty-week policy (Q10): if there is NO public member content AND NO news, the issue is marked empty so the
- * compile cron can SKIP it. If member content is empty but news is present, a TOP-NEWS-ONLY issue is still
- * composed and sent (an empty week never means silence unless there is truly nothing public to say).
+ * Empty-week policy (owner ruling 2026-08-21): the issue ALWAYS carries every section, and an empty one
+ * gets its note instead of being dropped. `layout` is the render-ready ordering, filled sections first.
  *
- * @returns { issueId, generatedAt, sections: {article,product,prompt,share}, topNews, counts, isEmpty }
+ * `isEmpty` still means "nothing public at all, member or news", and `hasContent` still reads it, so the
+ * compile cron keeps one floor: a week with genuinely nothing is skipped rather than mailed as a page of
+ * notes. A thin member week is never silence; a dead week is not a mail nobody can act on.
+ *
+ * `maxNewsThin` OPTIONALLY lifts the news cap on a week with NO member content, so a news-led issue is a
+ * real issue rather than a stub. It applies only when every member section is empty, it can only raise the
+ * cap and never lower it, and it defaults to no lift, so an explicit maxNews is always a real ceiling. The
+ * compile cron is where to set it; 8 is the suggested value.
+ *
+ * @returns { issueId, generatedAt, sections, topNews, layout, counts, isEmpty }
  */
-export function composeIssue({ issueId, items = [], news = [], now = Date.now } = {}, { perSection = 5, maxNews = 5 } = {}) {
+export function composeIssue(
+  { issueId, items = [], news = [], now = Date.now } = {},
+  { perSection = 5, maxNews = 5, maxNewsThin } = {},
+) {
   const id = trimOrNull(issueId);
   if (!id) throw new DigestError('issueId is required');
   const cap = Math.max(0, Math.floor(Number(perSection)) || 0);
   const newsCap = Math.max(0, Math.floor(Number(maxNews)) || 0);
+  // The thin-week news cap is OPT IN and defaults to no lift at all. An earlier draft defaulted it to 8 and
+  // a caller passing maxNews: 3 got 4 items back: a parameter named "max" that a default can exceed is a
+  // trap, and the existing cap test caught it. Unset means maxNews, so nothing ever overrides an explicit
+  // ceiling; set it and it can only ever raise, never lower.
+  const thinCap =
+    maxNewsThin == null ? newsCap : Math.max(newsCap, Math.max(0, Math.floor(Number(maxNewsThin)) || 0));
 
   // Layer 1: drop every non-public item. Layer 2: project each survivor to public-safe fields only.
   const publicItems = (Array.isArray(items) ? items : [])
@@ -102,11 +157,15 @@ export function composeIssue({ issueId, items = [], news = [], now = Date.now } 
     sections[k] = sections[k].sort(byDateDesc).slice(0, cap);
   }
 
-  const topNews = (Array.isArray(news) ? news : [])
+  // The member total decides the news cap, so rank first and slice after (slicing to the small cap and then
+  // trying to widen it would have already thrown away the extra items).
+  const rankedNews = (Array.isArray(news) ? news : [])
     .map(newsItem)
     .filter((it) => it.title && it.url)
-    .sort((a, b) => (b.opens - a.opens) || (b.date - a.date))
-    .slice(0, newsCap);
+    .sort((a, b) => (b.opens - a.opens) || (b.date - a.date));
+
+  const memberItemCount = SECTION_KINDS.reduce((n, k) => n + sections[k].length, 0);
+  const topNews = rankedNews.slice(0, memberItemCount === 0 ? thinCap : newsCap);
 
   const counts = {
     article: sections.article.length,
@@ -115,17 +174,39 @@ export function composeIssue({ issueId, items = [], news = [], now = Date.now } 
     share: sections.share.length,
     news: topNews.length,
   };
-  const memberTotal = counts.article + counts.product + counts.prompt + counts.share;
-  const isEmpty = memberTotal === 0 && counts.news === 0;
+  const isEmpty = memberItemCount === 0 && counts.news === 0;
 
   return {
     issueId: id,
     generatedAt: Number(now()),
     sections,
     topNews,
+    layout: buildLayout(sections, topNews),
     counts,
     isEmpty,
   };
+}
+
+/**
+ * The render-ready section ordering. Every section in SECTION_ORDER appears exactly once: the ones with
+ * items first (in canonical order), then the empty ones (in that same canonical order) carrying their note.
+ * PURE, and it reads only the already-projected public-safe items, so it cannot widen the leak guard.
+ */
+function buildLayout(sections, topNews) {
+  const itemsFor = (key) => (key === 'news' ? topNews : sections[key] ?? []);
+  const entry = (key) => {
+    const items = itemsFor(key);
+    const empty = items.length === 0;
+    return {
+      key,
+      label: SECTION_LABELS[key] ?? key,
+      items,
+      empty,
+      note: empty ? EMPTY_SECTION_NOTES[key] ?? null : null,
+    };
+  };
+  const all = SECTION_ORDER.map(entry);
+  return [...all.filter((s) => !s.empty), ...all.filter((s) => s.empty)];
 }
 
 /** Does this issue have anything worth sending? The compile cron skips only a fully-empty issue. */

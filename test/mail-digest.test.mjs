@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   composeIssue, hasContent, issueKey, isPublicItem, SECTION_KINDS, DigestError,
+  SECTION_ORDER, SECTION_LABELS, EMPTY_SECTION_NOTES,
 } from '../membership/mail-digest.mjs';
 
 const at = (t) => () => t;
@@ -97,4 +98,108 @@ test('an unknown kind does not crash and does not land in a section', () => {
   const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
   assert.equal(issue.counts.article, 1);
   assert.equal(issue.counts.product + issue.counts.prompt + issue.counts.share, 0);
+});
+
+// ---- sow-166 content contract (owner ruling 2026-08-21): always send, every section present, note the gaps.
+
+test('layout carries EVERY section every week, filled ones first, in canonical order', () => {
+  const items = [pub('prompt', 'p1', 300), pub('share', 's1', 200)];
+  const news = [{ title: 'n', url: 'https://n/1', opens: 5, date: 100 }];
+  const issue = composeIssue({ issueId: 'i', items, news, now: at(1) });
+
+  // nothing is ever dropped: all five, exactly once each
+  assert.deepEqual(issue.layout.map((s) => s.key).sort(), [...SECTION_ORDER].sort());
+  assert.equal(issue.layout.length, SECTION_ORDER.length);
+
+  // filled first (news leads the filled group), then the empty ones
+  assert.deepEqual(issue.layout.map((s) => s.key), ['news', 'prompt', 'share', 'article', 'product']);
+  assert.deepEqual(issue.layout.filter((s) => !s.empty).map((s) => s.key), ['news', 'prompt', 'share']);
+});
+
+test('the relative order inside each group is stable, so a section does not move week to week', () => {
+  const rank = (key) => SECTION_ORDER.indexOf(key);
+  for (const items of [[], [pub('article', 'a', 1)], [pub('share', 's', 1), pub('product', 'p', 2)]]) {
+    const layout = composeIssue({ issueId: 'i', items, news: [], now: at(1) }).layout;
+    const filled = layout.filter((s) => !s.empty).map((s) => rank(s.key));
+    const empty = layout.filter((s) => s.empty).map((s) => rank(s.key));
+    assert.deepEqual(filled, [...filled].sort((a, b) => a - b), 'filled group out of canonical order');
+    assert.deepEqual(empty, [...empty].sort((a, b) => a - b), 'empty group out of canonical order');
+  }
+});
+
+test('an empty section carries its note and a filled one carries none', () => {
+  const issue = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1) });
+  const bySection = Object.fromEntries(issue.layout.map((s) => [s.key, s]));
+
+  assert.equal(bySection.article.empty, false);
+  assert.equal(bySection.article.note, null, 'a section with items must not carry an empty note');
+
+  for (const key of ['news', 'product', 'prompt', 'share']) {
+    assert.equal(bySection[key].empty, true);
+    assert.equal(bySection[key].note, EMPTY_SECTION_NOTES[key]);
+    assert.ok(bySection[key].note.length > 0, `${key} note is blank`);
+  }
+});
+
+test('every section in the order has a label and a note defined, so none can render nameless', () => {
+  for (const key of SECTION_ORDER) {
+    assert.ok(SECTION_LABELS[key], `no label for ${key}`);
+    assert.ok(EMPTY_SECTION_NOTES[key], `no empty note for ${key}`);
+  }
+  // the notes are member-facing copy: the house style bans em and en dashes in anything a reader sees
+  for (const [key, note] of Object.entries(EMPTY_SECTION_NOTES)) {
+    assert.ok(!/[\u2013\u2014]/.test(note), `${key} note contains an em or en dash`);
+  }
+  // four of these can appear together on a thin week; identical phrasing reads as filler
+  const memberNotes = ['article', 'product', 'prompt', 'share'].map((k) => EMPTY_SECTION_NOTES[k]);
+  assert.equal(new Set(memberNotes).size, memberNotes.length, 'empty-section notes must not repeat');
+});
+
+test('LEAK GUARD holds through layout: a members item reaches no section and no body field appears', () => {
+  const items = [
+    pub('article', 'public-one', 200),
+    { kind: 'article', title: 'secret', url: 'https://x/s', author: 'bob', date: 300, visibility: 'members', body: 'SECRET BODY' },
+  ];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const serialized = JSON.stringify(issue);
+  assert.ok(!serialized.includes('SECRET BODY'), 'a member body reached the compiled issue');
+  assert.ok(!serialized.includes('secret'), 'a member item title reached the compiled issue');
+  for (const section of issue.layout) {
+    for (const it of section.items) {
+      assert.deepEqual(Object.keys(it).sort(), ['author', 'authorName', 'date', 'kind', 'title', 'url']);
+    }
+  }
+});
+
+test('a thin member week can lift the news cap, but only when asked, and never past an explicit max', () => {
+  const news = Array.from({ length: 10 }, (_, i) => ({ title: `n${i}`, url: `https://n/${i}`, opens: 10 - i, date: i }));
+
+  // unset: no lift, so maxNews stays a real ceiling (this is the trap the cap test caught)
+  assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 3 }).topNews.length, 3);
+
+  // opted in, and the member week is empty: the lift applies
+  assert.equal(
+    composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 3, maxNewsThin: 8 }).topNews.length, 8);
+
+  // opted in, but a member item exists: normal cap, because the lift is for thin weeks only
+  assert.equal(
+    composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news, now: at(1) }, { maxNews: 3, maxNewsThin: 8 })
+      .topNews.length, 3);
+
+  // a thin cap BELOW the normal one can only ever raise, never shorten a news-led issue
+  assert.equal(
+    composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 5, maxNewsThin: 2 }).topNews.length, 5);
+});
+
+test('the all-empty week is still the one skip: hasContent is the floor the cron reads', () => {
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  assert.equal(dead.isEmpty, true);
+  assert.equal(hasContent(dead), false, 'a week with nothing public must not be mailed as a page of notes');
+  // even so, the sections are all present, so a renderer never has to special-case the shape
+  assert.equal(dead.layout.length, SECTION_ORDER.length);
+  assert.ok(dead.layout.every((s) => s.empty && s.note));
+
+  // one news item is enough to clear the floor
+  const alive = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1) });
+  assert.equal(hasContent(alive), true);
 });
