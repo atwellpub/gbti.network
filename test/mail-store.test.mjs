@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getIssue, putIssue, getSend, putSend, readPendingIndex, removeFromPending,
-  enqueueIssue, activeIssueIds, getSubscriber, putSubscriber, eraseSubscriber, readBudget, bumpBudget, MAIL_PENDING_KEY,
+  enqueueIssue, activeIssueIds, getSubscriber, putSubscriber, eraseSubscriber, eraseSubscriberMail, readBudget, bumpBudget, MAIL_PENDING_KEY,
 } from '../workers/signup/mail-store.mjs';
 import { sendKey, markSent, budgetDayKey, budgetMonthKey } from '../membership/mail-queue.mjs';
 import { subscriberKey, suppressKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
@@ -128,6 +128,28 @@ test('eraseSubscriber deletes the record but LEAVES the suppression marker (eras
   assert.ok(kv.m.get(suppressKey('h1')), 'the suppression marker OUTLIVES the record, so a re-add cannot un-suppress');
   assert.equal(await eraseSubscriber(kv, 'h1'), true, 'erasing an absent record is idempotently a success');
   assert.equal(await eraseSubscriber(kv, ''), false, 'a blank hash is refused, never handed to a key builder');
+});
+
+test('eraseSubscriberMail wipes the record + all send state across EVERY issue, keeps suppression, spares others', async () => {
+  const kv = makeKV();
+  const h = 'herase';
+  await putSubscriber(kv, buildSubscriber({ hash: h, source: 'anon', emailEnc: 'ENC' }, { now: at(0) }));
+  await kv.put(suppressKey(h), SUPPRESS_VALUE);
+  await enqueueIssue(kv, issueOf('i1'), [h, 'other'], { now: at(0) });
+  await enqueueIssue(kv, issueOf('i2'), [h], { now: at(0) });
+  assert.ok(await getSend(kv, 'i1', h));
+  assert.ok(await getSend(kv, 'i2', h));
+
+  const res = await eraseSubscriberMail(kv, h);
+  assert.equal(res.subscriber, 1);
+  assert.equal(res.sends, 2, 'both per-issue send records deleted');
+  assert.equal(await getSubscriber(kv, h), null, 'subscriber record erased');
+  assert.equal(await getSend(kv, 'i1', h), null, 'send record in i1 erased');
+  assert.equal(await getSend(kv, 'i2', h), null, 'send record in i2 erased');
+  assert.deepEqual(await readPendingIndex(kv, 'i1'), ['other'], 'hash removed from i1 pending; the other recipient stays');
+  assert.deepEqual(await readPendingIndex(kv, 'i2'), [], 'hash removed from i2 pending');
+  assert.ok(kv.m.get(suppressKey(h)), 'the suppression marker survives erasure (cannot un-suppress)');
+  assert.ok(await getSend(kv, 'i1', 'other'), 'a different subscriber in the same issue is untouched');
 });
 
 test('readBudget treats an ABSENT counter as 0, an ERROR as null (fail-closed), a corrupt value as null', async () => {

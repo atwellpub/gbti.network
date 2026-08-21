@@ -169,6 +169,51 @@ export async function eraseSubscriber(kv, hash) {
   try { await kv.delete(key); return true; } catch { return false; }
 }
 
+/**
+ * The COMPLETE mail-side erasure for one subscriber hash: the counterpart to eraseSubscriber that also removes the
+ * per-recipient SEND state. Deletes mail:subscriber:<hash>, deletes mail:send:<issueId>:<hash> across EVERY issue
+ * (enumerated from mail:issue:, so a terminal send record in an already-drained issue is gone now rather than in up
+ * to 30 days on its TTL), and removes the hash from each issue's pending index. Deliberately LEAVES the suppression
+ * marker mail:suppress:<hash>: a bare hash with no address that must outlive erasure so a later re-add cannot
+ * silently re-contact someone who opted out (the same minimized keyed-hash survival coupon-lock.mjs carries).
+ *
+ * Takes a HASH, not a github_id, and the ordering is load-bearing for the SCRIPT-SIDE member erasure. The mail
+ * keyspace is derived from the EMAIL via mailHash, and a github_id cannot reach it. The erase-member script must
+ * compute the hash from the Stripe customer's address and call this BEFORE it deletes the Stripe customer; run
+ * afterward, the address (the only input that derives this key) is gone and the record is unreachable by any run.
+ * Both callers share it: the erase-member script (a member) and the one-click unsubscribe route (an anon). Best
+ * effort + idempotent; returns { subscriber, sends, issues } counts.
+ */
+export async function eraseSubscriberMail(kv, hash) {
+  const h = String(hash ?? '').trim();
+  const subKey = subscriberKey(h);
+  if (!kv || !subKey) return { subscriber: 0, sends: 0, issues: 0 };
+  let subscriber = 0;
+  try { if (await kv.get(subKey)) subscriber = 1; } catch { /* count is best-effort */ }
+  await eraseSubscriber(kv, h); // deletes the record; leaves the suppression marker
+
+  let sends = 0;
+  let issues = 0;
+  if (kv.list) {
+    let cursor;
+    for (let page = 0; page < 100; page++) {
+      let res;
+      try { res = await kv.list({ prefix: 'mail:issue:', cursor }); } catch { break; }
+      for (const k of res?.keys ?? []) {
+        const issueId = k.name.slice('mail:issue:'.length);
+        if (!issueId) continue;
+        issues++;
+        const sk = sendKey(issueId, h);
+        try { if (await kv.get(sk)) { await kv.delete(sk); sends++; } } catch { /* best effort */ }
+        await removeFromPending(kv, issueId, h);
+      }
+      if (res?.list_complete || !res?.cursor) break;
+      cursor = res.cursor;
+    }
+  }
+  return { subscriber, sends, issues };
+}
+
 // ---------- the rate budget (fail-closed) ----------
 
 /** Read one counter. Distinguishes ABSENT (a legitimate zero, e.g. the first send of the day) from an ERROR or
