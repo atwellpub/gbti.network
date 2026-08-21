@@ -57,27 +57,33 @@ async function listPriorIssueIds(kv, { currentIssueId, pageBudget = 50 } = {}) {
 }
 
 /**
- * Resolve the composeIssue window REGIME for a NEW issue. `since` and `exclude` are TWO REGIMES, not stacked
- * filters (SowMaster ruling, 2026-08-21; composeIssue PR 321):
+ * Resolve the composeIssue window for a NEW issue. `since` and `exclude` are a FILTER and a FLOOR applied
+ * TOGETHER, not alternatives (SowMaster ruling + PublicationMaster correction, 2026-08-21; composeIssue chains
+ * both filters):
  *   - FIRST issue (no prior frozen issue): { firstIssue: true, since: nowMs - bootstrapMs, exclude: null }.
  *     A bounded, launch-worded issue rather than the newest-N-ever back catalogue.
- *   - THEREAFTER (a prior exists): { firstIssue: false, since: null, exclude: <urls already mailed> }.
- *     "everything not yet mailed", so there is no publishedAt loss window: a held-for-review contribution or a
- *     backdated item that first entered the artifact AFTER an earlier compile stays eligible until it has
- *     actually appeared in an issue. This CLOSES the Trap Two loss at compile time.
+ *   - THEREAFTER (a prior exists): { firstIssue: false, since: the newsletter EPOCH, exclude: <mailed urls> }.
+ *     The epoch (a floor months in the past) drops everything published BEFORE the newsletter existed; exclude
+ *     drops what has already been mailed. Together: mail everything published since the newsletter began that
+ *     has not been mailed yet, exactly once however late it arrives. This CLOSES Trap Two (a held or backdated
+ *     item published DURING the newsletter's life stays eligible until mailed) WITHOUT re-opening the
+ *     back-catalogue drain: `since = null` would make the pool the whole 40-per-type artifact, so issue two
+ *     would mail the pre-newsletter archive and walk backwards in time, and the empty-section notes would be
+ *     unreachable until it drained. A floor cannot cut off a contribution held for days; only a tight per-issue
+ *     window could, and this is not one.
  *
- * The mailed set is the union of member-section item urls across the last `historyDepth` prior issues (derived
- * from the frozen issues themselves, so there is no separate accumulator to drift). That depth is this layer's
- * bound and is safe: the source artifact (activity-index) only carries the newest 40 per type, so a url old
- * enough to fall outside the history is old enough to be gone from the candidate set anyway. `since` and
- * `exclude` are NEVER both non-null, so the two regimes never stack (stacking re-opens the loss exclude closes).
+ * The epoch is the FIRST issue's own launch floor, recorded as its `window.since`, so there is no new constant
+ * and nothing to tune. The mailed set is the union of member-section item urls across the last `historyDepth`
+ * prior issues, derived from the frozen issues themselves so there is no separate accumulator to drift; the
+ * bound is safe because the artifact caps at 40 per type, so a url aged out of it can never reappear.
  */
 export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = WEEK_MS, historyDepth = 26, pageBudget = 50 } = {}) {
   const priorIds = await listPriorIssueIds(kv, { currentIssueId, pageBudget });
   if (priorIds.length === 0) {
     return { firstIssue: true, since: Number(nowMs) - bootstrapMs, exclude: null };
   }
-  const recent = priorIds.sort().reverse().slice(0, Math.max(1, historyDepth)); // newest-first, bounded
+  const sorted = priorIds.slice().sort();                       // chronological ascending (weekly- sorts as dates)
+  const recent = sorted.slice(-Math.max(1, historyDepth)).reverse(); // the newest `historyDepth`, newest-first
   const exclude = new Set();
   for (const id of recent) {
     // eslint-disable-next-line no-await-in-loop -- bounded by historyDepth, and this is the weekly compile, not a tick
@@ -91,7 +97,23 @@ export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = W
       }
     }
   }
-  return { firstIssue: false, since: null, exclude };
+  const since = await resolveEpoch(kv, sorted[0], { nowMs, bootstrapMs });
+  return { firstIssue: false, since, exclude };
+}
+
+/**
+ * The newsletter EPOCH: the first issue's launch floor. It is that issue's recorded `window.since` (the oldest
+ * frozen issue is always a first issue, composed with firstIssue:true, so it always carries a finite one, even
+ * across a transition where later issues were composed with a null since). Defensive fallback for a legacy or
+ * hand-seeded first issue with no recorded floor: its own date at midnight UTC, so a pre-newsletter item is
+ * still floored; last-ditch a week-ago floor if even the id will not parse.
+ */
+async function resolveEpoch(kv, oldestId, { nowMs, bootstrapMs }) {
+  const first = await getIssue(kv, oldestId);
+  const recorded = Number(first?.window?.since);
+  if (Number.isFinite(recorded)) return recorded;
+  const parsed = Date.parse(`${String(oldestId).slice('weekly-'.length)}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed : Number(nowMs) - bootstrapMs;
 }
 
 /**
@@ -237,8 +259,9 @@ export async function compileWeeklyIssue(env, {
     pending: enq?.pending ?? 0,
     recipientsTruncated: truncated, // the caller MUST surface this: a truncated base under-sends silently otherwise
     counts: issue?.counts ?? null,
-    // The resolved regime, surfaced for the cron log. firstIssue: since set + no exclude. Thereafter: exclude a
-    // count + since null. `since` AND `excluded` both null on a composed issue would be the forgotten-window bug.
+    // The resolved window, surfaced for the cron log. firstIssue: since = launch floor, excluded null. Thereafter:
+    // since = the newsletter epoch, excluded a count. `since` null on a composed issue would be the forgotten-floor
+    // bug (the whole-artifact back-catalogue drain); the frozen issue's window records both so it is never silent.
     firstIssue: Boolean(issue?.launchNote),
     since: issue?.window?.since ?? null,
     excluded: issue?.window?.excluded ?? null,

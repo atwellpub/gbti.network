@@ -180,14 +180,16 @@ test('resolveWindow (FIRST issue): no prior -> since = now - 7d, exclude null, f
   );
 });
 
-test('resolveWindow (THEREAFTER): a prior exists -> since null, exclude = the prior member urls, firstIssue false', async () => {
+const EPOCH = Date.UTC(2026, 6, 28); // a newsletter that launched ~2026-07-28, recorded as issue one's window.since
+
+test('resolveWindow (THEREAFTER): a prior exists -> since = the newsletter EPOCH (a floor), exclude = the mailed member urls', async () => {
   const kv = makeKV();
-  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: {
+  await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), window: { since: EPOCH, excluded: null, appliesTo: 'members' }, sections: {
     article: [{ url: '/articles/a1/' }], product: [{ url: '/products/p1/' }], prompt: [], share: [{ url: '/shares/ann/s1/' }],
   }, topNews: [{ url: 'https://n/news-should-not-be-excluded' }] });
   const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
   assert.equal(w.firstIssue, false);
-  assert.equal(w.since, null, 'the exclude regime carries no since (stacking them re-opens the loss)');
+  assert.equal(w.since, EPOCH, 'the floor is the newsletter epoch, not null; null would drain the pre-newsletter back catalogue');
   assert.deepEqual([...w.exclude].sort(), ['/articles/a1/', '/products/p1/', '/shares/ann/s1/'], 'all member sections, unioned');
   assert.ok(!w.exclude.has('https://n/news-should-not-be-excluded'), 'news is NOT excluded (it re-ranks by opens)');
 });
@@ -200,14 +202,22 @@ test('resolveWindow: a foreign (non weekly-) issue id is not counted as a prior,
   assert.equal(w.exclude, null);
 });
 
-test('resolveWindow: the exclude set is bounded to the last historyDepth issues', async () => {
+test('resolveWindow: exclude is bounded to the last historyDepth issues; the epoch is still read from the oldest', async () => {
   const kv = makeKV();
-  await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), sections: { article: [{ url: '/articles/old/' }] } });
+  await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), window: { since: EPOCH }, sections: { article: [{ url: '/articles/old/' }] } });
   await putIssue(kv, { issueId: 'weekly-2026-08-11', generatedAt: gen(7, 11), sections: { article: [{ url: '/articles/mid/' }] } });
   await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: { article: [{ url: '/articles/recent/' }] } });
   const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25', historyDepth: 2 });
   assert.deepEqual([...w.exclude].sort(), ['/articles/mid/', '/articles/recent/'], 'the two newest priors only');
-  assert.ok(!w.exclude.has('/articles/old/'), 'the issue beyond the history depth is not read, so its url is not excluded');
+  assert.ok(!w.exclude.has('/articles/old/'), 'the issue beyond the history depth is not read for exclusion');
+  assert.equal(w.since, EPOCH, 'but the epoch IS read from the oldest issue, even though it is beyond historyDepth');
+});
+
+test('resolveWindow: a first issue with no recorded window.since falls back to its own date as the epoch', async () => {
+  const kv = makeKV();
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: { article: [{ url: '/a/' }] } }); // legacy: no window
+  const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
+  assert.equal(w.since, Date.UTC(2026, 7, 18, 0, 0, 0), 'parsed from the oldest issue id at midnight UTC, still a real floor');
 });
 
 test('compileWeeklyIssue FIRST issue: launch window drops an out-of-window item, keeps an in-window one', async () => {
@@ -227,28 +237,31 @@ test('compileWeeklyIssue FIRST issue: launch window drops an out-of-window item,
   assert.ok(issue.launchNote, 'a first issue carries the launch note');
 });
 
-test('compileWeeklyIssue THEREAFTER: excludes already-mailed, KEEPS a never-mailed old-dated held item (Trap Two closed)', async () => {
+test('compileWeeklyIssue THEREAFTER: epoch floor + exclude keeps a held item, drops the pre-newsletter back catalogue, excludes already-mailed', async () => {
   const kv = makeKV();
   seedSubscribers(kv, ['r1']);
-  // A prior issue mailed one article. The current artifact carries: that same already-mailed item; a fresh one;
-  // and a HELD contribution whose publishedAt (08-10) PREDATES the prior compile but which was never mailed.
-  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: {
+  // Issue one (the oldest prior) records the newsletter epoch as its window.since and already mailed one article.
+  await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), window: { since: EPOCH, excluded: null, appliesTo: 'members' }, sections: {
     article: [{ url: '/articles/mailed/', title: 'Already mailed' }], product: [], prompt: [], share: [],
   } });
   const activity = { entries: [
-    { type: 'post', slug: 'mailed', title: 'Already mailed', url: '/articles/mailed/', author: 'ann', publishedAt: Date.UTC(2026, 7, 17), visibility: 'public' },
-    { type: 'post', slug: 'fresh', title: 'Fresh this week', url: '/articles/fresh/', author: 'ann', publishedAt: Date.UTC(2026, 7, 24), visibility: 'public' },
-    { type: 'post', slug: 'held', title: 'Held contribution', url: '/articles/held/', author: 'bob', publishedAt: Date.UTC(2026, 7, 10), visibility: 'public' },
+    { type: 'post', slug: 'mailed',  title: 'Already mailed',      url: '/articles/mailed/',  author: 'ann', publishedAt: Date.UTC(2026, 6, 30), visibility: 'public' }, // after epoch, already mailed
+    { type: 'post', slug: 'fresh',   title: 'Fresh this week',     url: '/articles/fresh/',   author: 'ann', publishedAt: Date.UTC(2026, 7, 24), visibility: 'public' }, // new, not mailed
+    { type: 'post', slug: 'held',    title: 'Held contribution',   url: '/articles/held/',    author: 'bob', publishedAt: Date.UTC(2026, 7, 1),  visibility: 'public' }, // after epoch, never mailed (held for review)
+    { type: 'post', slug: 'prenews', title: 'Predates newsletter', url: '/articles/prenews/', author: 'ann', publishedAt: Date.UTC(2026, 3, 1),  visibility: 'public' }, // BEFORE epoch: floored, never the back catalogue
   ] };
   const d = { ...deps(kv), fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }), queryItems: async () => ({ items: [] }) };
   const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
   assert.equal(r.firstIssue, false);
-  assert.equal(r.since, null, 'the exclude regime carries no since');
-  assert.equal(r.excluded, 1, 'exactly the one already-mailed url is in the exclude set');
+  assert.equal(r.since, EPOCH, 'the floor is the newsletter epoch, not null');
+  assert.equal(r.excluded, 1, 'exactly the one already-mailed url is excluded');
   const issue = await getIssue(kv, 'weekly-2026-08-25');
-  // byDateDesc: fresh (08-24) then held (08-10). The already-mailed one is gone; the OLD-dated never-mailed held
-  // item is KEPT. Under the retired since-regime the held item would have been dropped (date < prior compile).
-  assert.deepEqual(issue.sections.article.map((a) => a.title), ['Fresh this week', 'Held contribution'], 'already-mailed excluded, held item kept');
-  assert.equal(issue.window.since, null);
+  // Four cases in ONE compile, so no single mutant passes: fresh KEPT, held (after epoch, never mailed) KEPT,
+  // already-mailed EXCLUDED, pre-newsletter (before epoch) FLOORED. byDateDesc: fresh (08-24) then held (08-01).
+  // since=null would surface 'Predates newsletter'; a removed exclude would surface 'Already mailed'; a tight
+  // per-issue window would drop 'Held contribution'.
+  assert.deepEqual(issue.sections.article.map((a) => a.title), ['Fresh this week', 'Held contribution'],
+    'held item kept (Trap Two), already-mailed excluded, pre-newsletter floored out');
+  assert.equal(issue.window.since, EPOCH);
   assert.equal(issue.window.excluded, 1);
 });
