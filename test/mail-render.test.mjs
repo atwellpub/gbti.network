@@ -254,6 +254,101 @@ test('a member item derives its author avatar from the github login; a news item
   assert.doesNotMatch(html, /github\.com\/Src\.png/, 'the news source is not treated as an avatar login');
 });
 
+// ---- CAN-SPAM PRIMARY-PURPOSE GUARDS ----
+// The digest is operated as an editorial publication (see .data/ops/mail-ops/can-spam-primary-purpose-position.md).
+// The FTC's mixed-message factors are placement, proportion and emphasis, all PROPERTIES OF THE RENDERED OUTPUT,
+// so a prose position becomes a control here. A membership CTA is ANY membership solicitation; the renderer emits
+// exactly one, marked with an inert sentinel. Each CTA guard FIRST asserts the CTA EXISTS, because an assertion
+// about a CTA that is not there passes vacuously and measures nothing (and its mutation passes too).
+const CTA_OPEN = '<!--membership-cta-->';
+const CTA_CLOSE = '<!--/membership-cta-->';
+const ED = '<!--editorial:';
+const ctaCount = (h) => (h.match(/<!--membership-cta-->/g) || []).length;
+const ctaBlock = (h) => h.slice(h.indexOf(CTA_OPEN), h.indexOf(CTA_CLOSE));
+const vistext = (h) => h.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+
+test('CAN-SPAM 1: editorial content precedes the membership solicitation', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.equal(ctaCount(html), 1, 'a CTA must exist for this guard to mean anything');
+  const firstEditorial = html.indexOf(ED);
+  assert.ok(firstEditorial >= 0, 'the issue carries editorial content');
+  assert.ok(firstEditorial < html.indexOf(CTA_OPEN), 'the first editorial section precedes the CTA');
+});
+
+test('CAN-SPAM 2: exactly one CTA, it is the only membership link, and nothing editorial follows it', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.equal(ctaCount(html), 1, 'exactly one membership CTA');
+  assert.ok(html.lastIndexOf(ED) < html.indexOf(CTA_OPEN), 'no editorial section appears after the CTA');
+  assert.equal((html.match(/\/membership\//g) || []).length, 1, 'exactly one membership link in the whole message');
+  const m = html.indexOf('/membership/');
+  assert.ok(m > html.indexOf(CTA_OPEN) && m < html.indexOf(CTA_CLOSE), 'the sole membership link lives inside the CTA');
+});
+
+test('CAN-SPAM 3: the CTA is a small, bounded fraction of the message', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.equal(ctaCount(html), 1);
+  const ctaVis = vistext(ctaBlock(html)).length;
+  const allVis = vistext(html).length;
+  // Absolute cap: catches a CTA growing into a pitch regardless of issue size.
+  assert.ok(ctaVis <= 220, `CTA visible text ${ctaVis} exceeds the 220-char cap`);
+  // Ratio: catches the thin-week proportion regression (worst case is a near-empty issue).
+  assert.ok(ctaVis / allVis < 0.35, `CTA proportion ${(ctaVis / allVis).toFixed(3)} is too high`);
+});
+
+test('CAN-SPAM 4: the subject describes editorial content and matches no promotional pattern', () => {
+  const counts = renderIssue({ generatedAt: Date.UTC(2026, 7, 21), counts: { article: 2, product: 0, prompt: 0, share: 1, news: 3 }, layout: [] }, {}).subject;
+  assert.match(counts, /GBTI Digest/, 'the counts subject carries the issue descriptor');
+  for (const s of [counts, renderIssue(issueFixture(), {}).subject]) {
+    assert.match(s, /GBTI/);
+    assert.doesNotMatch(s, /\b(join|subscribe|upgrade|save|sale|discount|free trial)\b/i, `promotional subject: ${s}`);
+    assert.doesNotMatch(s, /%\s*off|percent off/i);
+  }
+});
+
+test('CAN-SPAM 5: no third-party sponsor block renders (permanent under the position)', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.doesNotMatch(html, /sponsor/i);
+});
+
+test('CAN-SPAM 6: the CTA carries no disproportionate emphasis (no large type, no fill)', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.equal(ctaCount(html), 1);
+  const block = ctaBlock(html);
+  // Not the largest type: editorial titles are 14px and the header is 18px; the CTA must stay below 13px.
+  assert.deepEqual(block.match(/font-size:(1[3-9]|[2-9]\d)(\.\d+)?px/g) || [], [], 'the CTA uses no large type');
+  // No filled background of any kind (accent fill or a full-width button bar).
+  assert.doesNotMatch(block, /background-color/i, 'the CTA has no filled background');
+});
+
+test('CAN-SPAM 7: however many sections are empty, they collapse to exactly one block (the load-bearing property)', () => {
+  const manyEmpty = { layout: [
+    { key: 'news', label: 'News', empty: false, items: [{ title: 'N', url: 'https://n/x', source: 'S', date: 1 }] },
+    { key: 'article', label: 'Articles', empty: true, note: 'No new articles have been published since the last issue.', items: [] },
+    { key: 'product', label: 'Products', empty: true, note: 'No new products since the last issue.', items: [] },
+    { key: 'prompt', label: 'Prompts', empty: true, note: 'No new prompts since the last issue.', items: [] },
+    { key: 'share', label: 'Shares', empty: true, note: 'No shares since the last issue.', items: [] },
+  ] };
+  const { html } = renderIssue(manyEmpty, {});
+  assert.equal((html.match(/Nothing new in/g) || []).length, 1, 'four empty sections collapse to ONE line, not a box each');
+  // and the per-section notes are NOT restored as interspersed boxes (the exact regression the position forbids)
+  assert.doesNotMatch(html, /No new articles have been published|No new products since|No new prompts since|No shares since/);
+});
+
+test('CAN-SPAM 8: no CTA renders on an all-editorial-empty issue (a solicitation without editorial reads as promotional)', () => {
+  const allEmpty = { layout: [
+    { key: 'product', label: 'Products', empty: true, items: [] },
+    { key: 'prompt', label: 'Prompts', empty: true, items: [] },
+  ] };
+  const { html, text } = renderIssue(allEmpty, {});
+  assert.equal(ctaCount(html), 0);
+  assert.doesNotMatch(text, /See membership|\/membership\//);
+});
+
+test('CAN-SPAM 9: a caller can suppress the CTA for a given issue via ctx.membershipCta', () => {
+  assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 1);
+  assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: false }).html), 0);
+});
+
 test('empty sections collapse to a single line naming them all; the first issue swaps the cadence clause and shows its launch note', () => {
   const base = [
     { key: 'news', label: 'News', empty: false, items: [{ title: 'N', url: 'https://n/x', source: 'Src', date: 1 }] },

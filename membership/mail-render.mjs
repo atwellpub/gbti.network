@@ -239,7 +239,10 @@ function sectionHtml(section, p, siteUrl) {
     + `<tr><td width="536" style="width:536px;padding:14px 28px 0">`
     + `<a href="${escapeHtml(feed)}" style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};text-decoration:underline">See all in the ${name} feed</a>`
     + `</td></tr></table>`;
-  return `<div>${head}${items}${seeAll}</div>`;
+  // An invisible sentinel marking an editorial section start. The CAN-SPAM primary-purpose guards read it to
+  // assert editorial content precedes the membership CTA and nothing editorial follows the CTA. Comments are
+  // inert in every mail client; this is a test locator, not visible copy.
+  return `<div><!--editorial:${escapeHtml(section.key)}-->${head}${items}${seeAll}</div>`;
 }
 
 function emptyLineHtml(empties, p, firstIssue, siteUrl) {
@@ -250,6 +253,29 @@ function emptyLineHtml(empties, p, firstIssue, siteUrl) {
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px">`
     + `${phrase} <a href="${escapeHtml(absUrl('/feeds/', siteUrl))}" style="color:${p.footerLink};text-decoration:underline">Browse the archive</a></div>`
     + `</td></tr></table>`;
+}
+
+// THE MEMBERSHIP CTA, and the CAN-SPAM primary-purpose position makes its SHAPE a compliance constraint, not a
+// design choice (see .data/ops/mail-ops/can-spam-primary-purpose-position.md). It is deliberately ONE modest
+// block, placed AFTER all editorial content and before the footer, and it renders only for an issue that has at
+// least one editorial section (an all-empty issue carrying a solicitation would read as primarily promotional).
+// Modest by construction: body-size type, no filled button, no accent background, one text link, no price (the
+// membership page carries the current price). It reuses the perks language the footer already shipped rather
+// than introducing new promotional copy. The sentinels are inert test locators for the placement/proportion/
+// emphasis guards. The same block renders for every recipient of the issue (compile-once, Q12): harmless to a
+// paid member, and per-recipient targeting would break the single frozen issue. Suppress a given issue's CTA
+// with ctx.membershipCta === false.
+function membershipCtaHtml(p, siteUrl) {
+  const href = escapeHtml(absUrl('/membership/', siteUrl));
+  return `<!--membership-cta-->`
+    + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
+    + `<tr><td width="536" style="width:536px;padding:30px 28px 0">`
+    + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:${p.inkSoft};mso-line-height-rule:exactly;line-height:18px">`
+    + `Reading the digest is free. Membership adds commenting, collections, member Shares and the Discord community. `
+    + `<a href="${href}" style="color:${p.footerLink};text-decoration:underline">See membership</a>`
+    + `</div>`
+    + `</td></tr></table>`
+    + `<!--/membership-cta-->`;
 }
 
 function headerHtml(p, ctx, range, launchNote) {
@@ -292,7 +318,7 @@ function footerHtml(p, ctx, siteUrl) {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:28px 28px 24px">`
     + `<div style="height:1px;background-color:${p.hairline};font-size:0;line-height:0">&nbsp;</div>`
-    + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:14px">You get this digest every week because you are on the GBTI Network list. Reading is free; membership adds comments, collections and Discord.</div>`
+    + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:14px">You get this digest every week because you are on the GBTI Network list.</div>`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:9px">${links}</div>`
     + postalLine
     + `</td></tr></table>`;
@@ -333,7 +359,12 @@ export function renderIssue(issue, ctx = {}) {
   const preheaderText = escapeHtml(counts ? countsSummary(counts) : 'Your weekly roundup from the GBTI Network.');
   const preheader = `<span style="display:none;font-size:1px;color:${p.pageBg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${preheaderText}</span>`;
 
-  const body = filled.map((s) => sectionHtml(s, p, siteUrl)).join('') + emptyLineHtml(empties, p, firstIssue, siteUrl);
+  // The membership CTA renders only when the issue has editorial content AND the caller did not suppress it. An
+  // all-editorial-empty issue carrying a solicitation would read as primarily promotional (see the CTA note).
+  const showCta = filled.length > 0 && ctx.membershipCta !== false;
+  const body = filled.map((s) => sectionHtml(s, p, siteUrl)).join('')
+    + emptyLineHtml(empties, p, firstIssue, siteUrl)
+    + (showCta ? membershipCtaHtml(p, siteUrl) : '');
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
@@ -362,10 +393,14 @@ export function renderIssue(issue, ctx = {}) {
   const launchText = issue?.launchNote ? `${str(issue.launchNote)}\n` : '';
   const filledText = filled.map((s) => sectionText(s, siteUrl)).join('\n\n');
   const emptyText = empties.length ? `\n\n${emptyPhrase(empties, firstIssue)}` : '';
+  // The text-side CTA mirrors the html: one modest line, after all editorial, only when the html renders it.
+  const ctaText = showCta
+    ? `\n\nReading the digest is free. Membership adds commenting, collections, member Shares and the Discord community: ${siteUrl}/membership/`
+    : '';
 
   const text = `GBTI DIGEST${range ? ` (${range.short})` : ''}\n`
     + `${greetingText}\n${headerLineText}\n${launchText}\n`
-    + `${filledText}${emptyText}\n\n`
+    + `${filledText}${emptyText}${ctaText}\n\n`
     + `----\n${siteUrl}\n${unsubText}${postalText}\n`;
 
   return { subject, html, text };
