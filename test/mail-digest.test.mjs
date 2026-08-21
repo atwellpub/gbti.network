@@ -253,7 +253,9 @@ test('WINDOW: `since` keeps what is new and drops what is old, both proven in on
     pub('product', 'old-product', 400),
     pub('share', 'brand-new-share', 3_000),
   ];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(9) }, { since: 1_000 });
+  // `now` sits AFTER every fixture date on purpose: an item reaches the artifact only once it is published, so
+  // a compile that predates its own items is a world that cannot occur, and the future-date clamp says so.
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(9_000) }, { since: 1_000 });
 
   assert.deepEqual(issue.sections.article.map((x) => x.title), ['published-after-the-last-issue'], 'the new one survives');
   assert.deepEqual(issue.sections.share.map((x) => x.title), ['brand-new-share']);
@@ -266,12 +268,12 @@ test('WINDOW: the boundary is inclusive, so an item never falls between two issu
   // An item published at the exact instant of the previous compile has to land in exactly one issue. If the
   // boundary excluded it, next week's window starts later still and the item is lost for good.
   const onTheBoundary = composeIssue(
-    { issueId: 'i', items: [pub('article', 'exactly-at-the-cutoff', 1_000)], news: [], now: at(1) },
+    { issueId: 'i', items: [pub('article', 'exactly-at-the-cutoff', 1_000)], news: [], now: at(9_000) },
     { since: 1_000 },
   );
   assert.equal(onTheBoundary.counts.article, 1);
   const justUnder = composeIssue(
-    { issueId: 'i', items: [pub('article', 'one-tick-earlier', 999)], news: [], now: at(1) },
+    { issueId: 'i', items: [pub('article', 'one-tick-earlier', 999)], news: [], now: at(9_000) },
     { since: 1_000 },
   );
   assert.equal(justUnder.counts.article, 0);
@@ -477,4 +479,28 @@ test('REGIMES: the floor plus the sent set is the only combination that gets all
     titles({ since: EPOCH, exclude: new Set([`https://gbti.network/article/new-this-week`]) }),
     ['held-for-review'],
   );
+});
+
+test('FUTURE DATES: an item dated ahead of the compile is clamped, so it cannot outrun an advancing floor', () => {
+  // Reachable, not hypothetical: isListed is a visibility check with no date test and validate-content has no
+  // future-date guard, so a scheduled post or a mistyped year reaches the artifact dated ahead of now.
+  const NOW = 1_000_000;
+  const items = [pub('article', 'postdated', NOW + 100_000), pub('article', 'normal', NOW - 100_000)];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(NOW) });
+
+  const postdated = issue.sections.article.find((x) => x.title === 'postdated');
+  assert.equal(postdated.date, NOW, 'clamped to the compile time, not carried forward');
+  // The compile floor coupling rests on this: everything an issue mails is at or below its own compile time,
+  // so a floor that advances to a past compile time can never leave a previously mailed item above it.
+  for (const it of issue.sections.article) assert.ok(it.date <= issue.generatedAt, `${it.title} is not in the future`);
+
+  // A normal item is untouched, so the clamp only ever reaches the anomalous case.
+  assert.equal(issue.sections.article.find((x) => x.title === 'normal').date, NOW - 100_000);
+});
+
+test('FUTURE DATES: the clamp does not quietly break ordering for everything else', () => {
+  const NOW = 1_000_000;
+  const items = [pub('article', 'older', 10), pub('article', 'newer', 20), pub('article', 'newest', 30)];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(NOW) });
+  assert.deepEqual(issue.sections.article.map((x) => x.title), ['newest', 'newer', 'older']);
 });

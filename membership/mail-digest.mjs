@@ -158,14 +158,25 @@ export function isPublicItem(it) {
 
 /** The public-safe projection of a member item. Copies ONLY public metadata; there is no field that could
  *  carry a body or ciphertext, so this is structurally incapable of leaking member content. */
-function publicItem(it) {
+function publicItem(it, nowMs) {
   return {
     kind: str(it.kind),
     title: trimOrNull(it.title),
     url: trimOrNull(it.url),
     author: trimOrNull(it.author),
     authorName: trimOrNull(it.authorName),
-    date: numOr0(it.date),
+    // CLAMPED AT THE COMPILE TIME. A publishedAt in the FUTURE is reachable: `isListed` is a visibility check
+    // with no date test, and validate-content has no future-date guard, so a scheduled post or a mistyped year
+    // reaches the artifact dated ahead of now. Unclamped it breaks the compile's floor coupling, which rests on
+    // "an item mailed by an issue was published no later than that issue's compile": a future-dated item is
+    // above every floor that advances behind it, so it leaves the mailed set and is mailed AGAIN, once per
+    // historyDepth, until the floor finally passes its date. Simulated: with historyDepth 3 it re-mailed at
+    // issues 1, 5 and 9 while a normal item beside it mailed exactly once.
+    //
+    // Clamping also fixes the ordering: a mistyped year would otherwise pin an item to the top of its section
+    // for a year. For every item NOT dated in the future this is exactly `date`, so the blast radius is the
+    // anomalous case and nothing else.
+    date: Math.min(numOr0(it.date), nowMs),
   };
 }
 
@@ -232,6 +243,9 @@ export function composeIssue(
   // (date >= since) so an item published at the exact instant of the previous compile lands in exactly one
   // issue: this one. Excluding it would drop it forever, since next week's window starts later still.
   const sinceMs = Number.isFinite(Number(since)) && since != null ? Number(since) : null;
+  // Resolved ONCE, up front, because the projection clamps item dates against it and the returned issue reports
+  // it. Reading the injected clock twice could hand the two different values.
+  const generatedAt = Number(now());
   // The already-mailed set. Accepts a Set or any iterable of urls; anything else (including a bare object, a
   // string, or nothing) means NO exclusion. `null` is kept distinct from an EMPTY set on purpose: an empty set
   // is a real answer on the first issue, and a caller that forgot to pass one is not, so the two must not look
@@ -249,7 +263,7 @@ export function composeIssue(
   // Layer 1: drop every non-public item. Layer 2: project each survivor to public-safe fields only.
   const publicItems = (Array.isArray(items) ? items : [])
     .filter(isPublicItem)
-    .map(publicItem)
+    .map((it) => publicItem(it, generatedAt))
     .filter((it) => it.title && it.url) // an item with no title or link is not renderable
     // Windowed AFTER the projection, so it reads the already-normalized numeric `date` rather than whatever
     // shape the caller passed. An undated item has date 0 and therefore never survives a window, which is the
@@ -290,7 +304,7 @@ export function composeIssue(
 
   return {
     issueId: id,
-    generatedAt: Number(now()),
+    generatedAt,
     sections,
     topNews,
     layout: buildLayout(sections, topNews, Boolean(firstIssue)),
