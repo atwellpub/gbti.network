@@ -131,6 +131,34 @@ test('SOW-018: a normal activity-index (no share) and no /shares/ passes the tri
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// SOW-166: the digest's public-shares artifact (/shares-index.json) now feeds an EMAIL that reaches lapsed
+// accounts, so it must sit INSIDE the standing dist leak scan, not beside it. This proves coverage: the scan
+// walks every non-binary dist file, so a NON-public share's title leaking into shares-index.json is caught,
+// while a PUBLIC share's title appearing there is allowed (that is the artifact's whole purpose).
+test('SOW-166: a NON-public share leaking into dist/shares-index.json is caught; a public share is allowed', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'members/alice/shares'), { recursive: true });
+  // a public share (allowed in the artifact) and a members-only share (must never reach it)
+  fs.writeFileSync(path.join(root, 'members/alice/shares/pub-9.md'), '---\nstatus: published\nvisibility: public\nid: pub-9\nauthor: alice\ntitle: Public share heading text here\n---\n');
+  fs.writeFileSync(path.join(root, 'members/alice/shares/priv-9.md'), '---\nstatus: published\nvisibility: members\nid: priv-9\nauthor: alice\ntitle: Confidential members only share heading\n---\n');
+
+  // an honest artifact: only the public share's title. This must PASS (the public title is allowed to appear).
+  fs.writeFileSync(path.join(root, 'dist/shares-index.json'), JSON.stringify({ entries: [
+    { type: 'share', slug: 'alice/pub-9', title: 'Public share heading text here', url: '/shares/alice/pub-9/', visibility: 'public' },
+  ] }));
+  assert.deepEqual(checkBuildSecrets({ root, env: {} }).errors, [], 'a public share title in the artifact is allowed');
+
+  // now the members-only share's title leaks into the same artifact. The whole-tree scan must catch it.
+  fs.writeFileSync(path.join(root, 'dist/shares-index.json'), JSON.stringify({ entries: [
+    { type: 'share', slug: 'alice/pub-9', title: 'Public share heading text here', url: '/shares/alice/pub-9/', visibility: 'public' },
+    { type: 'share', slug: 'alice/priv-9', title: 'Confidential members only share heading', url: '/shares/alice/priv-9/', visibility: 'members' },
+  ] }));
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => /NON-public Share leaked into build output/.test(e) && /shares-index\.json/.test(e)),
+    'the members-share title in shares-index.json is caught by the standing dist scan: ' + errors.join('; '));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('SOW-016: a Mode B item authored `publicStub: True` (capital) is NOT misclassified as Mode A', () => {
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, 'house/posts/stub'), { recursive: true });
