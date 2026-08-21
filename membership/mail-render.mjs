@@ -28,11 +28,13 @@
 //   - postal address: rendered ONLY from ctx.postalAddress, and ONLY when the drain supplies it (the CAN-SPAM
 //     7704(a)(5) footer slot). There is no default and nothing hardcoded: absent ctx renders no address at all,
 //     which is the permanent contract that keeps the value off the default render path. OWNER 2026-08-21: the
-//     address is provided and used, but it is per-recipient CONFIG, not source. The value lives in the
-//     MAIL_POSTAL_ADDRESS Worker secret, the drain reads it and passes it in ctx, and it must NEVER reach a
-//     committed file: the content repo is public, so a street address in git history is a permanent, forkable,
-//     crawlable exposure that an email to a subscriber is not. For that reason the test fixture is an obviously
-//     fake address, and the real value appears in no comment, doc, or commit message.
+//     digest ships with NO postal address for now (the primary-purpose position, .data/ops/mail-ops/), and a
+//     PO Box is a LATER intent. So this inert ctx.postalAddress slot is now LOAD-BEARING, not defensive: when
+//     the PO Box exists it becomes a MAIL_POSTAL_ADDRESS Worker secret the drain reads and passes in ctx, a
+//     config change, NOT a code change here. It must NEVER reach a committed file: the content repo is public,
+//     so a street address in git history is a permanent, forkable, crawlable exposure that an email to a
+//     subscriber is not. For that reason the test fixture is an obviously fake address, and the real value
+//     appears in no comment, doc, or commit message.
 //
 // UNSUBSCRIBE. `ctx.unsubscribeUrl` is per-recipient and arrives from the drain at send time; the renderer mints
 // no token. With a real url the footer carries a one-click Unsubscribe link. WITHOUT one it renders a
@@ -364,11 +366,12 @@ export function renderIssue(issue, ctx = {}) {
   const preheaderText = escapeHtml(counts ? countsSummary(counts) : 'Your weekly roundup from the GBTI Network.');
   const preheader = `<span style="display:none;font-size:1px;color:${p.pageBg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${preheaderText}</span>`;
 
-  // The membership CTA is OPT-IN and renders only when the caller sets ctx.membershipCta === true AND the issue
-  // has editorial content. Opt-in is fail-safe: omitting the flag renders no solicitation, so wiring the send
-  // without an explicit decision cannot ship one. An all-editorial-empty issue never carries it either (a
-  // solicitation with no editorial reads as primarily promotional). See the CTA note.
-  const showCta = filled.length > 0 && ctx.membershipCta === true;
+  // The membership CTA renders BY DEFAULT and is SUPPRESSIBLE per issue: it shows when the issue has editorial
+  // content AND the caller has not set ctx.membershipCta === false. OWNER 2026-08-21: the fact of the CTA and
+  // its end placement are approved and it is on by default; a caller passes membershipCta:false to suppress a
+  // given issue. An all-editorial-empty issue never carries it either (a solicitation with no editorial reads
+  // as primarily promotional). See the CTA note.
+  const showCta = filled.length > 0 && ctx.membershipCta !== false;
   const body = filled.map((s) => sectionHtml(s, p, siteUrl)).join('')
     + emptyLineHtml(empties, p, firstIssue, siteUrl)
     + (showCta ? membershipCtaHtml(p, siteUrl) : '');

@@ -346,12 +346,16 @@ test('CAN-SPAM 8: no CTA on an all-editorial-empty issue even when opted in (a s
   assert.doesNotMatch(text, /About membership|\/membership\//);
 });
 
-test('CAN-SPAM 9: the CTA is OPT-IN and fail-safe: omitted or false renders none, only true renders one', () => {
-  assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 0, 'omitting the flag renders NO solicitation (fail-safe default)');
-  assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: false }).html), 0);
+test('CAN-SPAM 9: the CTA is ON by default and suppressible per issue: omitted or true renders one, false suppresses it', () => {
+  // OWNER 2026-08-21: the CTA is approved, end-placed and DEFAULT ON; a caller passes membershipCta:false to
+  // suppress a given issue. The property under test is unchanged (the default is a deliberate choice pinned by
+  // a test); the choice reversed. Reverting the code to `=== true` reds the omit case; ignoring the flag
+  // (`filled.length > 0`) reds the false case, so the guard bites in both directions.
+  assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 1, 'omitting the flag renders the CTA (default on)');
   assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: true }).html), 1);
+  assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: false }).html), 0, 'membershipCta:false suppresses it for this issue');
   // the accuracy fix: the CTA does not claim collections (a free-tier perk under SOW-077)
-  assert.doesNotMatch(renderIssue(issueFixture(), { membershipCta: true }).html, /collections/i);
+  assert.doesNotMatch(renderIssue(issueFixture(), {}).html, /collections/i);
 });
 
 test('empty sections collapse to a single line naming them all; the first issue swaps the cadence clause and shows its launch note', () => {
