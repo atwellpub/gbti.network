@@ -12,6 +12,15 @@
 //      authorName/date only). There is deliberately no body/encryptedBody field, so a caller that wrongly
 //      passes a member body cannot leak it into a compiled issue (the leak-guard test asserts this).
 //
+// THE WINDOW IS PART OF THE SECTION CONTRACT, not an optimization. `since` drops member items older than the
+// previous issue, and WITHOUT it the whole contract is silently hollow: the input artifacts are the site's
+// entire published history (activity-index.json filters on isListed only and caps at 40 PER TYPE;
+// shares-index filters on isPublicShare only), so an unwindowed compile emits the newest 5 of each type ever
+// published, and emits the SAME 5 again next week. Every empty-section note below then becomes unreachable
+// code, because a section on a site with five published articles is never empty again, and `maxNewsThin`
+// dies with it (it triggers on memberItemCount === 0). The owner's empty-section ruling presupposes a window:
+// a note renders "because a visible gap is an invitation to fill it", and there is no gap without a window.
+//
 // Item shape IN (the Worker normalizes activity-index entries + public shares to this):
 //   { kind: 'article'|'product'|'prompt'|'share', title, url, author, authorName?, date: number,
 //     visibility: 'public'|'members', ... (any extra fields are dropped by the projection) }
@@ -130,16 +139,20 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * is no longer a send gate: the owner ruled literal always-send on 2026-08-21 and `shouldSend` is the gate.
  * The flag stays because the template and the logs still want to know.
  *
+ * `since` is the member-content window: items older than it are dropped before grouping (see the header note,
+ * where the reason it is load-bearing lives). Absent means no window, which is what every caller written before
+ * this option got, and it is never the right thing for the weekly compile.
+ *
  * `maxNewsThin` OPTIONALLY lifts the news cap on a week with NO member content, so a news-led issue is a
  * real issue rather than a stub. It applies only when every member section is empty, it can only raise the
  * cap and never lower it, and it defaults to no lift, so an explicit maxNews is always a real ceiling. The
  * compile cron is where to set it; 8 is the suggested value.
  *
- * @returns { issueId, generatedAt, sections, topNews, layout, counts, isEmpty }
+ * @returns { issueId, generatedAt, sections, topNews, layout, counts, isEmpty, window }
  */
 export function composeIssue(
   { issueId, items = [], news = [], now = Date.now } = {},
-  { perSection = 5, maxNews = 5, maxNewsThin } = {},
+  { perSection = 5, maxNews = 5, maxNewsThin, since } = {},
 ) {
   const id = trimOrNull(issueId);
   if (!id) throw new DigestError('issueId is required');
@@ -151,12 +164,21 @@ export function composeIssue(
   // ceiling; set it and it can only ever raise, never lower.
   const thinCap =
     maxNewsThin == null ? newsCap : Math.max(newsCap, Math.max(0, Math.floor(Number(maxNewsThin)) || 0));
+  // The member-content window. Only a finite number applies; absent, null or unparseable means NO window, which
+  // preserves the behaviour of every caller written before this option existed. The boundary is INCLUSIVE
+  // (date >= since) so an item published at the exact instant of the previous compile lands in exactly one
+  // issue: this one. Excluding it would drop it forever, since next week's window starts later still.
+  const sinceMs = Number.isFinite(Number(since)) && since != null ? Number(since) : null;
 
   // Layer 1: drop every non-public item. Layer 2: project each survivor to public-safe fields only.
   const publicItems = (Array.isArray(items) ? items : [])
     .filter(isPublicItem)
     .map(publicItem)
-    .filter((it) => it.title && it.url); // an item with no title or link is not renderable
+    .filter((it) => it.title && it.url) // an item with no title or link is not renderable
+    // Windowed AFTER the projection, so it reads the already-normalized numeric `date` rather than whatever
+    // shape the caller passed. An undated item has date 0 and therefore never survives a window, which is the
+    // right way round: an item with no publication date cannot be shown to be new.
+    .filter((it) => sinceMs === null || it.date >= sinceMs);
 
   const sections = { article: [], product: [], prompt: [], share: [] };
   for (const it of publicItems) {
@@ -193,6 +215,12 @@ export function composeIssue(
     layout: buildLayout(sections, topNews),
     counts,
     isEmpty,
+    // The frozen issue records its OWN window, so a compile that forgot to pass one is visible in the stored
+    // artifact instead of invisible. `null` here means the issue is a best-of rather than a what-is-new, and
+    // that is a bug in the caller every time. News is deliberately not windowed: it is ranked by distinct
+    // openers rather than recency, and the gather already returns a bounded recent set, so a story that
+    // ingested nine days ago and was opened all week is exactly what belongs at the top.
+    window: { since: sinceMs, appliesTo: 'members' },
   };
 }
 

@@ -241,3 +241,84 @@ test('a fully empty issue is still SHAPED, so always-send never renders a specia
   assert.deepEqual(dead.topNews, []);
   for (const k of SECTION_KINDS) assert.deepEqual(dead.sections[k], []);
 });
+
+test('WINDOW: `since` keeps what is new and drops what is old, both proven in one call', () => {
+  // Positive AND negative control together on purpose. A window test that only asserts the old item is gone
+  // passes just as well against a function that drops EVERYTHING, which is the same guards-passing-on-zero
+  // shape that made an earlier verification of the shares artifact vacuous.
+  const items = [
+    pub('article', 'published-after-the-last-issue', 2_000),
+    pub('article', 'published-before-the-last-issue', 500),
+    pub('product', 'old-product', 400),
+    pub('share', 'brand-new-share', 3_000),
+  ];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(9) }, { since: 1_000 });
+
+  assert.deepEqual(issue.sections.article.map((x) => x.title), ['published-after-the-last-issue'], 'the new one survives');
+  assert.deepEqual(issue.sections.share.map((x) => x.title), ['brand-new-share']);
+  assert.deepEqual(issue.sections.product, [], 'the old one is dropped');
+  assert.equal(issue.counts.article, 1);
+  assert.equal(issue.counts.product, 0);
+});
+
+test('WINDOW: the boundary is inclusive, so an item never falls between two issues', () => {
+  // An item published at the exact instant of the previous compile has to land in exactly one issue. If the
+  // boundary excluded it, next week's window starts later still and the item is lost for good.
+  const onTheBoundary = composeIssue(
+    { issueId: 'i', items: [pub('article', 'exactly-at-the-cutoff', 1_000)], news: [], now: at(1) },
+    { since: 1_000 },
+  );
+  assert.equal(onTheBoundary.counts.article, 1);
+  const justUnder = composeIssue(
+    { issueId: 'i', items: [pub('article', 'one-tick-earlier', 999)], news: [], now: at(1) },
+    { since: 1_000 },
+  );
+  assert.equal(justUnder.counts.article, 0);
+});
+
+test('WINDOW: this is what makes an empty-section note reachable at all', () => {
+  // The point of the whole option. The same site, the same artifact, one quiet week: unwindowed it re-sends
+  // last week's article as if it were new and the note never renders; windowed the section is empty and the
+  // invitation appears. If this ever fails, the section contract is decorative.
+  const backCatalogue = [pub('article', 'written-months-ago', 100), pub('prompt', 'also-old', 90)];
+
+  const unwindowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1) });
+  const staleArticles = unwindowed.layout.find((s) => s.key === 'article');
+  assert.equal(staleArticles.empty, false, 'without a window the back catalogue fills the section');
+  assert.equal(staleArticles.note, null, 'so the invitation never renders');
+
+  const windowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1) }, { since: 1_000 });
+  const freshArticles = windowed.layout.find((s) => s.key === 'article');
+  assert.equal(freshArticles.empty, true);
+  assert.equal(freshArticles.note, EMPTY_SECTION_NOTES.article);
+  assert.equal(windowed.isEmpty, true, 'nothing new and no news is a genuinely empty week');
+});
+
+test('WINDOW: an undated item is never new', () => {
+  // date 0 is what the normalizer emits for a missing publishedAt. Treating "no date" as "brand new" would put
+  // every dateless entry into every issue forever.
+  const issue = composeIssue(
+    { issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1) },
+    { since: 1_000 },
+  );
+  assert.equal(issue.counts.article, 0);
+  // ...but with no window it still renders, because that is the pre-window behaviour and it is unchanged.
+  const unwindowed = composeIssue({ issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1) });
+  assert.equal(unwindowed.counts.article, 1);
+});
+
+test('WINDOW: news is deliberately NOT windowed, and the issue records the window it used', () => {
+  const news = [{ title: 'opened-all-week', url: 'https://n/1', opens: 40, date: 10 }];
+  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: 5_000 });
+  assert.equal(issue.counts.news, 1, 'ranked by openers, not recency, so an older story still leads');
+  assert.deepEqual(issue.window, { since: 5_000, appliesTo: 'members' });
+
+  // A compile that forgot the window says so in the stored artifact rather than looking identical to one
+  // that meant it. `since: null` in KV is the tell.
+  const forgot = composeIssue({ issueId: 'i', items: [], news, now: at(1) });
+  assert.equal(forgot.window.since, null);
+  // Garbage is treated as no window rather than as 0, which would silently window nothing while looking set.
+  for (const bad of ['soon', NaN, Infinity, undefined, null, {}]) {
+    assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: bad }).window.since, null, `since: ${String(bad)}`);
+  }
+});
