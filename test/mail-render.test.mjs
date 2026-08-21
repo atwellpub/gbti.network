@@ -1,6 +1,6 @@
 // SOW-166: renderIssue v2, the send-ready 600px table template. Pure; plain objects, no IO. These tests split
 // into CONTRACT (behaviour the send path depends on: fail-closed urls, escaping, layout-order consumption, the
-// leak guard, the unsubscribe link/fallback, the always-absent postal address) and DESIGN v2 (the table
+// leak guard, the unsubscribe link/fallback, the postal address that renders only from ctx) and DESIGN v2 (the table
 // skeleton, palette token layer, counts subject and preheader, the filled-before-empty collapse, and the
 // optional blurb/thumb/derived-avatar item fields). Reconciled to the owner's 2026-08-21 rulings.
 import { test } from 'node:test';
@@ -111,13 +111,17 @@ test('an unsafe unsubscribe url is dropped to the fallback (fail closed), never 
   assert.match(html, /manage your subscription/i);
 });
 
-test('NO postal address is ever rendered, even if a caller passes one (owner ruling: none in any template)', () => {
-  // The default has no address.
-  assert.doesNotMatch(renderIssue(issueFixture(), {}).html, /Dothan|Gethsemane|Delaware|PO Box/i);
-  // And there is no code path that emits one: passing the removed parameter is inert.
-  const { html, text } = renderIssue(issueFixture(), { postalAddress: 'Gethsemane LLC, Dothan, Alabama, USA' });
-  assert.doesNotMatch(html, /Dothan|Gethsemane|Alabama/i);
-  assert.doesNotMatch(text, /Dothan|Gethsemane|Alabama/i);
+test('postal address renders ONLY when the drain supplies ctx.postalAddress; there is no default (never hardcoded)', () => {
+  // Permanent contract: no address on the default render path. This is what keeps the real value, which lives
+  // only in the MAIL_POSTAL_ADDRESS worker secret, off any output the drain did not explicitly ask for.
+  const bare = renderIssue(issueFixture(), {});
+  assert.doesNotMatch(bare.html, /PO Box|Suite|Ste\.|\bLLC\b/i, 'no address text on the default path');
+  // A supplied address renders in the html footer and the text alternative. The fixture is an OBVIOUSLY FAKE
+  // address on purpose: the real value must never appear in a committed file, a comment, or a commit message.
+  const fake = 'Example Org, PO Box 00000, Testville, ZZ 00000, USA';
+  const { html, text } = renderIssue(issueFixture(), { postalAddress: fake });
+  assert.match(html, /Example Org, PO Box 00000, Testville, ZZ 00000, USA/);
+  assert.match(text, /Example Org, PO Box 00000, Testville, ZZ 00000, USA/);
 });
 
 test('an empty or missing layout renders a valid shell rather than crashing', () => {

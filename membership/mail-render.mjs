@@ -25,10 +25,14 @@
 //     broken label.
 //   - NO Sponsored card and NO standalone Plans card (owner ruling: dropped from this template).
 //   - NO greeting personalisation beyond the design's `simple` default (a first name is stored nowhere).
-//   - NO postal address, anywhere, ever. OWNER RULING 2026-08-21: no postal address in any email or template in
-//     this initiative. The renderer has no parameter and no code path that emits one. CAN-SPAM compliance for a
-//     real send is resolved OUTSIDE this template (the drain must refuse a recipient it cannot lawfully mail);
-//     an unlawful send is prevented by refusing to send, not by printing an address here.
+//   - postal address: rendered ONLY from ctx.postalAddress, and ONLY when the drain supplies it (the CAN-SPAM
+//     7704(a)(5) footer slot). There is no default and nothing hardcoded: absent ctx renders no address at all,
+//     which is the permanent contract that keeps the value off the default render path. OWNER 2026-08-21: the
+//     address is provided and used, but it is per-recipient CONFIG, not source. The value lives in the
+//     MAIL_POSTAL_ADDRESS Worker secret, the drain reads it and passes it in ctx, and it must NEVER reach a
+//     committed file: the content repo is public, so a street address in git history is a permanent, forkable,
+//     crawlable exposure that an email to a subscriber is not. For that reason the test fixture is an obviously
+//     fake address, and the real value appears in no comment, doc, or commit message.
 //
 // UNSUBSCRIBE. `ctx.unsubscribeUrl` is per-recipient and arrives from the drain at send time; the renderer mints
 // no token. With a real url the footer carries a one-click Unsubscribe link. WITHOUT one it renders a
@@ -92,12 +96,12 @@ const PALETTES = {
   light: {
     pageBg: '#efece7', cardBg: '#ffffff', cardBorder: '#e0dbd3', hairline: '#eae6df',
     ink: '#232029', inkSoft: '#4a4653', meta: '#7c7784', accent: '#187a4b', rule: '#187a4b',
-    footerLink: '#4a4653',
+    footerLink: '#4a4653', postalMeta: '#9b96a1',
   },
   dark: {
     pageBg: '#1b1922', cardBg: '#232029', cardBorder: '#35313d', hairline: '#302c37',
     ink: '#f3f2f0', inkSoft: '#bdbac4', meta: '#847f8d', accent: '#5fd49a', rule: '#1f9e5f',
-    footerLink: '#bdbac4',
+    footerLink: '#bdbac4', postalMeta: '#847f8d',
   },
 };
 
@@ -279,11 +283,18 @@ function footerHtml(p, ctx, siteUrl) {
     ? `<a href="${escapeHtml(unsub)}" style="color:${p.footerLink};text-decoration:underline">Unsubscribe</a>`
     : `manage your subscription from <a href="${escapeHtml(siteUrl)}" style="color:${p.footerLink};text-decoration:underline">gbti.network</a>`;
   const links = `<a href="${escapeHtml(feedAbs)}" style="color:${p.footerLink};text-decoration:underline">Open the feed</a> &middot; ${unsubLink}`;
+  // The CAN-SPAM postal slot. Rendered ONLY when the drain supplies ctx.postalAddress (from the MAIL_POSTAL_ADDRESS
+  // secret); absent means no address line. The value is never defaulted or hardcoded here (see the header note).
+  const postal = str(ctx.postalAddress).trim();
+  const postalLine = postal
+    ? `<div style="font-family:'Courier New',monospace;font-size:10px;color:${p.postalMeta};mso-line-height-rule:exactly;line-height:16px;padding-top:12px">${escapeHtml(postal)}</div>`
+    : '';
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:28px 28px 24px">`
     + `<div style="height:1px;background-color:${p.hairline};font-size:0;line-height:0">&nbsp;</div>`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:14px">You get this digest every week because you are on the GBTI Network list. Reading is free; membership adds comments, collections and Discord.</div>`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:9px">${links}</div>`
+    + postalLine
     + `</td></tr></table>`;
 }
 
@@ -306,7 +317,7 @@ function itemText(sectionKey, it, siteUrl) {
  * preheader, `launchNote` for the first-issue clause, and ctx.
  *
  * @param issue  the frozen composeIssue output ({ issueId, layout, counts, generatedAt, launchNote, ... })
- * @param ctx    { theme?, unsubscribeUrl?, siteUrl?, subject?, greeting?, headerLine? }, per recipient
+ * @param ctx    { theme?, unsubscribeUrl?, siteUrl?, subject?, greeting?, headerLine?, postalAddress? }, per recipient
  */
 export function renderIssue(issue, ctx = {}) {
   const p = PALETTES[ctx.theme === 'dark' ? 'dark' : 'light'];
@@ -344,6 +355,8 @@ export function renderIssue(issue, ctx = {}) {
   const unsubText = unsub
     ? `Unsubscribe from the weekly digest: ${unsub}`
     : 'Manage your subscription from the GBTI Network site.';
+  const postal = str(ctx.postalAddress).trim();
+  const postalText = postal ? `\n${postal}` : '';
   const greetingText = str(ctx.greeting).trim() || 'This week on the network';
   const headerLineText = str(ctx.headerLine).trim() || 'Everything new across the network since the last issue.';
   const launchText = issue?.launchNote ? `${str(issue.launchNote)}\n` : '';
@@ -353,7 +366,7 @@ export function renderIssue(issue, ctx = {}) {
   const text = `GBTI DIGEST${range ? ` (${range.short})` : ''}\n`
     + `${greetingText}\n${headerLineText}\n${launchText}\n`
     + `${filledText}${emptyText}\n\n`
-    + `----\n${siteUrl}\n${unsubText}\n`;
+    + `----\n${siteUrl}\n${unsubText}${postalText}\n`;
 
   return { subject, html, text };
 }
