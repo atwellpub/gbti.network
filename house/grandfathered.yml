@@ -10,67 +10,87 @@
 # `member` (owner decision Q15, 2026-08-18, flipped from creator): a tierless comp reads as Network Member, so
 # an entry that should keep Content Creator access MUST carry an explicit `tier: creator`. Free
 # access is the absence of a grant; deplatforming is a ban (house/bans.yml), never a tier here.
+#
+# EVERY entry carries an EXPLICIT tier (owner decision, 2026-08-21). Do not add a bare entry and rely on the
+# default. The point is not behaviour, which is identical either way, it is that a future change to
+# grantTier's default then produces a visible diff per person instead of silently moving everyone on one
+# line. That silent movement happened on 2026-08-18 and ran for two days before anyone noticed.
 grandfathered:
   - github_id: "132623795"   # github.com/Aliayashi517
     login: aliayashi517
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "3306507"     # github.com/andrija-naglic
     login: andrija-naglic
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "6953730"     # github.com/bomsn (Ali Khallad)
     login: bomsn
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "6268698"     # github.com/daprela (Giulio Daprelà)
     login: daprela
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "4893879"     # github.com/elsonponte (Elson Ponte)
     login: elsonponte
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "89241634"    # github.com/Eyesandnose (Ayodeji Adekore)
     login: eyesandnose
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "90683647"    # github.com/Giles-Beckley
     login: giles-beckley
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "4948323"     # github.com/leogopal (Leo Gopal)
     login: leogopal
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "18620454"    # github.com/MattBissett
     login: mattbissett
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "7998393"     # github.com/nareshdevineni
     login: nareshdevineni
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "1367750"     # github.com/rafael-minuesa (Rafael Minuesa)
     login: rafael-minuesa
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "225425"      # github.com/rfilipo (Ricardo Filipo)
     login: rfilipo
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "8797609"     # github.com/shaneedwardtaylor (Shane Taylor)
     login: shaneedwardtaylor
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "97899242"    # github.com/srikanthkoneru
     login: srikanthkoneru
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
   - github_id: "7199469"     # github.com/Thivieira (Thiago Vieira)
     login: thivieira
     reason: complimentary access (grandfathered co-op member)
     until: null
+    tier: member
 # - github_id: "..."
 #   login: founder
 #   reason: founding member
@@ -81,25 +101,26 @@ grandfathered:
     login: adbox85
     reason: coupon:CODEABLEYEAR
     until: "2027-07-21T15:20:31.034Z"
+    tier: member
 
   # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-13). Auto-appended.
   - github_id: "190312419"      # github.com/metacast-entertainment
     login: metacast-entertainment
     reason: coupon:CODEABLEYEAR
     until: "2027-08-12T12:56:20.498Z"
-    tier: creator
+    tier: member
 
   # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-14). Auto-appended.
   - github_id: "10647"          # github.com/pcfreak30
     login: pcfreak30
     reason: coupon:CODEABLEYEAR
     until: "2027-08-13T22:21:57.611Z"
-    tier: creator
+    tier: member
   - github_id: "316750045"      # github.com/hatest1011
     login: hatest1011
     reason: coupon:CODEABLEYEAR
     until: "2027-08-13T22:56:59.378Z"
-    tier: creator
+    tier: member
 
   # SOW-119: coupon grants folded in from KV redemptions by reconcile (2026-08-17). Auto-appended.
   - github_id: "59509273"       # github.com/sohrab09
