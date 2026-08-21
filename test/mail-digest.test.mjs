@@ -440,6 +440,42 @@ test('LAUNCH ISSUE: the derived notes cannot drift from the ones they are derive
   }
 });
 
+test('the empty-section notes carry an INVITATION, which is the whole reason they exist', () => {
+  // The same tautological gap as the launch line, found by the same audit. Every other assertion about these
+  // notes either restates the constant or checks the cadence clause, so deleting all four invitation halves
+  // left the suite fully green. The owner's ruling was that an empty section renders a note "because a visible
+  // gap is an invitation to fill it": a note that states the absence and stops is the version they rejected.
+  //
+  // Pinned by SUBSTANCE (a second sentence beyond the bare statement) rather than by exact wording, so the
+  // copy can be rewritten freely and only fails by losing the invitation itself.
+  const sentences = (note) => note.split(/(?<=\.)\s+/).filter(Boolean);
+  for (const kind of SECTION_KINDS) {
+    assert.ok(
+      sentences(EMPTY_SECTION_NOTES[kind]).length >= 2,
+      `${kind} note states the absence and then invites; it currently only states it`,
+    );
+  }
+  // NEWS is deliberately the exception and asserting that keeps the rule honest: nothing a member does
+  // produces a news item, so an invitation there would be asking for something nobody can supply. Without
+  // this half, the test above could be satisfied by padding every note including one that must not be padded.
+  assert.equal(sentences(EMPTY_SECTION_NOTES.news).length, 1, 'news states a fact and invites nothing');
+});
+
+test('LAUNCH ISSUE: the launch line still says the two things it exists to say', () => {
+  // Found by auditing this file for TAUTOLOGICAL assertions, the mechanism SowMaster named after the PR 324
+  // failure: an assertion that restates a post-condition of the code under test has no discriminating power
+  // at all. `assert.equal(issue.launchNote, FIRST_ISSUE_NOTE)` is exactly that shape. It restates the
+  // constant's definition and passes against ANY value of it, so replacing the reviewed sentence with
+  // "First issue." left all 36 tests green, including the plain-sentence one, which that string also passes.
+  //
+  // The line exists to do two things: retire "the last issue" by saying this is the first, and name the span
+  // it covers so a reader does not wonder where last month's article went. Both are pinned here by SUBSTANCE
+  // rather than by exact string, so the owner or SowMaster can reword it freely and only lose the test by
+  // dropping one of the facts.
+  assert.match(FIRST_ISSUE_NOTE, /first issue/i, 'must say it is the first issue');
+  assert.match(FIRST_ISSUE_NOTE, /past week/i, 'must name the span it covers');
+});
+
 test('LAUNCH ISSUE: the copy is plain sentences, the same rule the standing notes are held to', () => {
   // The renderer is a table-based HTML email, so a stray asterisk or bracket reaches the reader as one.
   for (const note of [FIRST_ISSUE_NOTE, ...Object.values(FIRST_ISSUE_SECTION_NOTES)]) {
