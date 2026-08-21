@@ -25,6 +25,8 @@ import { couponGrantKey } from '../../workers/signup/coupons.mjs'; // SOW-119 / 
 import { redemptionKey, redemptionCountKey } from '../../membership/coupons.mjs'; // SOW-119 key builders
 import { removeGrantEntryIfPresent, listCouponRedemptions, GRANDFATHERED_PATH } from './coupon-grants.mjs';
 import { couponLockKey, COUPON_LOCK_VALUE } from '../../membership/coupon-lock.mjs'; // sow-212: the minimized lock
+import { mailHash } from '../../membership/mail-suppress.mjs'; // SOW-166: the keyed identity behind every mail key
+import { eraseSubscriberMail } from '../../workers/signup/mail-store.mjs'; // SOW-166: the one shared mail eraser
 
 export const ACTIVITY_KEY = (githubId) => `activity:${githubId}`;
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`; // SOW-023 subscription graph
@@ -357,6 +359,96 @@ export async function scrubConversionSnapshots({ githubId, env = process.env, fe
  * rest are the operator checklist (composed from reconcile + the SOW-016 rotation), printed so nothing is
  * silently skipped. Pure (returns data), so it is unit-tested.
  */
+/**
+ * A Workers-KV-shaped facade over the REST helpers above, so the SCRIPT side and the WORKER side run the SAME
+ * erasure logic (`eraseSubscriberMail`) instead of two implementations that can drift. An erasure path is the
+ * worst possible place for two implementations, because the failure mode is silent: records that were never
+ * deleted look exactly like records that were.
+ *
+ * `get` honours the TYPE ARGUMENT because mail-store.mjs uses both forms (`kv.get(k, 'json')` at the issue,
+ * send, pending and subscriber reads, plain `kv.get(k)` at the existence checks). A shim that ignored it would
+ * hand back a raw string where an object was expected, every parse would yield null, and the erasure would
+ * report success having deleted nothing.
+ *
+ * `list` is keys-only ON PURPOSE and does not reuse listKvByPrefix, which fetches every value and then DROPS
+ * any entry whose value is not a JSON object. That filter is harmless where it is used; here it would silently
+ * skip an issue whose body failed to parse, and with it that issue's send record for this person. Enumerating
+ * keys without reading values is both cheaper and the only version that cannot lose a key.
+ */
+export function kvRestShim({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const accountId = env.CF_ACCOUNT_ID;
+  const namespaceId = env.CF_KV_NAMESPACE_ID;
+  const apiToken = env.CF_API_TOKEN;
+  if (!accountId || !namespaceId || !apiToken) return null;
+  const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`;
+  const headers = { Authorization: `Bearer ${apiToken}` };
+  return {
+    async get(key, type) {
+      const text = await readKvValue({ key, env, fetchImpl });
+      if (text == null) return null;
+      if (type !== 'json') return text;
+      try { return JSON.parse(text); } catch { return null; }
+    },
+    async put(key, value) {
+      return putKvValue({ key, value, env, fetchImpl });
+    },
+    async delete(key) {
+      return deleteKvKey({ key, env, fetchImpl });
+    },
+    async list({ prefix, cursor } = {}) {
+      const url = `${base}/keys?prefix=${encodeURIComponent(prefix ?? '')}&limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const res = await fetchImpl(url, { headers });
+      if (!res || !res.ok) throw new Error(`KV key list failed: ${res ? res.status : 'no response'}`);
+      const json = await res.json();
+      const next = json?.result_info?.cursor || '';
+      return {
+        keys: (json?.result ?? []).filter((k) => k?.name).map((k) => ({ name: k.name })),
+        list_complete: !next,
+        cursor: next || undefined,
+      };
+    },
+  };
+}
+
+/**
+ * SOW-166 right-to-erasure: delete the member's weekly-digest records.
+ *
+ * THIS STEP MUST RUN BEFORE THE STRIPE CUSTOMER DELETE, and that is a correctness constraint rather than a
+ * preference. Every mail key is derived from the ADDRESS via mailHash, while erasure is driven by github_id,
+ * so nothing in the mail keyspace can be located from a github_id alone. The address lives in exactly one
+ * place we can still read: the Stripe customer. Once step `stripe` deletes it, the hash can never be computed
+ * again and the subscriber record is unreachable BY ANY FUTURE RUN, permanently. Each step looks correct on
+ * its own, which is precisely why the ordering is written down here and asserted by a test rather than left to
+ * whoever next edits runErasure.
+ *
+ * The suppression marker `mail:suppress:<hash>` deliberately SURVIVES (eraseSubscriberMail keeps it). Deleting
+ * it would silently re-contact someone who asked not to be contacted, and it holds a bare keyed hash with no
+ * address in it. Same shape the owner already ruled on for the coupon lock on 2026-08-11: the record that
+ * prevents a future harm outlives erasure in a form that can answer "has this opted out" but never "who".
+ *
+ * Fails SOFT and says why. Every skip reason is reported rather than swallowed, because "no mail records were
+ * deleted" and "we could not tell whether there were any" must never look the same in the audit record.
+ */
+export async function eraseMailRecords({ githubId, stripe = null, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const secret = env.MAIL_SUPPRESS_KEY;
+  if (!secret) return { skipped: true, reason: 'MAIL_SUPPRESS_KEY not set locally; the mail hash cannot be computed (see secrets-ops)' };
+  if (!stripe) return { skipped: true, reason: 'no Stripe client (set STRIPE_SECRET_KEY); the address is the only input to the hash' };
+
+  let customer = null;
+  try { customer = await stripe.findCustomerByGithubId(String(githubId)); } catch (e) { return { error: e?.message || 'Stripe lookup failed' }; }
+  if (!customer?.id) return { skipped: true, reason: 'no Stripe customer found (already deleted? this step must run BEFORE the stripe step)' };
+  if (!customer?.email) return { skipped: true, reason: 'Stripe customer has no email; nothing to derive the mail hash from' };
+
+  const hash = await mailHash(secret, customer.email);
+  if (!hash) return { skipped: true, reason: 'mailHash returned null (blank secret or address)' };
+
+  const kv = kvRestShim({ env, fetchImpl });
+  if (!kv) return { skipped: true, reason: 'CF_ACCOUNT_ID / CF_KV_NAMESPACE_ID / CF_API_TOKEN not set' };
+
+  const counts = await eraseSubscriberMail(kv, hash);
+  return { ...counts, suppressionMarkerKept: true };
+}
+
 export function planErasure({ githubId, username } = {}) {
   const who = username ? `members/${username}/` : "the member's";
   return [
@@ -369,6 +461,7 @@ export function planErasure({ githubId, username } = {}) {
     { step: 'news-opens', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every per-item news detail-open set (news-opens:*, SOW-111).` },
     { step: 'conv-snapshot', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the member's frozen conversion snapshot ${CONV_SNAPSHOT_KEY(githubId)} (SOW-059).` },
     { step: 'conv-counterpart', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every OTHER member's frozen snapshot (conv:*) where they are a first/last-touch owner, inviter, or collaborator.` },
+    { step: 'mail', auto: true, tool: 'erase-member.mjs --apply', action: `SOW-166: resolve the address from Stripe, compute the mail hash, then delete mail:subscriber:<hash> and every mail:send:<issue>:<hash>. The unsubscribe marker mail:suppress:<hash> SURVIVES (deleting it would silently re-contact someone who opted out). MUST run before the stripe step: after it, the address is gone and the hash can never be computed again.` },
     { step: 'discord', auto: true, tool: 'erase-member.mjs --apply', action: 'Remove the member\'s managed Discord roles (Member/Trial/Locked).' },
     { step: 'members-index', auto: true, tool: 'erase-member.mjs --apply', action: 'Remove the members-index.yml entry (bundled into the content erasure PR).' },
     { step: 'crypto-shred', auto: false, tool: 'scripts/rotate-member-key.mjs', action: 'Rotate the SOW-016 member-content key (global) so the public-history ciphertext becomes keyless.' },
@@ -600,6 +693,10 @@ export async function runErasure({
   await runStep('redeemed-invites', () => minimizeRedeemedInvites({ githubId, env, fetchImpl })); // sow-231: person-keyed by redeemedBy, so it needs a sweep
   await runStep('conv-snapshot', () => eraseConversionSnapshot({ githubId, env, fetchImpl })); // SOW-059: own frozen snapshot
   await runStep('conv-counterpart', () => scrubConversionSnapshots({ githubId, env, fetchImpl })); // SOW-059: scrub as counterpart
+  // SOW-166. ORDER IS LOAD-BEARING: this reads the address off the Stripe customer to derive the mail hash, so
+  // it must precede the `stripe` step below, which deletes that customer. Afterwards the key is underivable
+  // and the records are stranded forever. Pinned by a test in test/erase-member-mail.test.mjs.
+  await runStep('mail', () => eraseMailRecords({ githubId, stripe, env, fetchImpl }));
   await runStep('discord', () => eraseDiscordRoles({ githubId, stripe, discord, env }));
   await runStep('content', () => eraseContent({ github, githubId, username, files, now }));
   if (deleteStripe) await runStep('stripe', () => eraseStripeCustomer({ githubId, stripe }));

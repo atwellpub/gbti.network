@@ -43,6 +43,15 @@ const REGISTRY = [
   { name: 'STRIPE_WEBHOOK_SECRET', targets: ['worker'], optional: true, note: 'Only if the optional Stripe webhook is enabled.' },
   { name: 'SESSION_SECRET', targets: ['worker'], note: 'Signed session/state cookie.' },
   { name: 'MEMBER_CONTENT_KEY', targets: ['worker'], note: 'AES key for member-only content (never leaves the Worker).' },
+  // sow-212. NOT tracked here until 2026-08-21, which is its own small lesson: the registry README documents
+  // this as a three-location secret and calls the erasure copy "the one that matters", while the tool that
+  // reports what is missing had never heard of it. A secret absent from here is invisible to the status table.
+  { name: 'COUPON_LOCK_KEY', targets: ['worker', 'actions'], note: 'HMAC that keeps the one-coupon-per-member lock working after erasure without storing a github_id. NEVER ROTATE (rotation fails open and silently). The LOCAL .env copy is the one erasure needs.' },
+  // SOW-166: the weekly digest. All three are UNSET, and mailHash fails closed without the first, so the
+  // digest cannot enrol anybody today. Generate each in a password manager and paste; see secrets-ops.
+  { name: 'MAIL_SUPPRESS_KEY', targets: ['worker'], note: 'Keys mailHash, the one-way identity behind every digest key (subscriber, send-state, unsubscribe marker). NEVER ROTATE: rotation orphans every suppression marker and silently re-contacts people who opted out. ALSO needed in the local .env, because erase-member computes the hash to delete a member mail records.' },
+  { name: 'MAIL_UNSUB_KEY', targets: ['worker'], note: 'Keys the one-click unsubscribe capability token. Deliberately separate from MAIL_SUPPRESS_KEY: opposite rotation stories, and sharing one welds them so neither can move. Rotatable additively via MAIL_UNSUB_KEYS.' },
+  { name: 'MAIL_ADDRESS_KEY', targets: ['worker'], note: 'Standing AES-256-GCM key for emailEnc, an ANONYMOUS subscriber stored address (member rows store none). Base64 of exactly 32 bytes. NOT MEMBER_CONTENT_KEY, whose rotation is key-destroying and would destroy the addresses.' },
   { name: 'TURNSTILE_SECRET_KEY', targets: ['worker'], note: 'Signup bot check.' },
   { name: 'DISCORD_BOT_TOKEN', targets: ['worker', 'actions'], caution: 'human-todo flags resetting this before launch (session-exposed).' },
   { name: 'GH_BOT_TOKEN', targets: ['actions'], localName: 'GITHUB_BOT_TOKEN', note: 'gbtilabs PAT for Actions (gate/reconcile/award).' },
