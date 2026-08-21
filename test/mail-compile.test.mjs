@@ -3,7 +3,7 @@
 // weekly issue id, and ALWAYS-SEND (a fully-empty week still composes and enqueues). No network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileWeeklyIssue, gatherContentEntries, gatherNewsEntries, listRecipientHashes, resolveSince } from '../workers/signup/mail-compile.mjs';
+import { compileWeeklyIssue, gatherContentEntries, gatherNewsEntries, listRecipientHashes, resolveWindow } from '../workers/signup/mail-compile.mjs';
 import { getIssue, putIssue, readPendingIndex, getSend } from '../workers/signup/mail-store.mjs';
 import { subscriberKey, MAIL_SUBSCRIBER_PREFIX } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
@@ -122,7 +122,10 @@ test('compileWeeklyIssue: composes ONCE, excludes the members item, ranks news b
 
   const issue = await getIssue(kv, 'weekly-2026-08-25');
   assert.ok(issue, 'the issue is frozen in KV');
+  // No prior issue seeded -> the FIRST-issue regime: a bootstrap window, no exclude set, launch wording.
   assert.equal(issue.window.since, Date.UTC(2026, 7, 25, 13, 0, 0) - 7 * 24 * 3600 * 1000, 'first issue bootstraps the window to now - 7 days (never null)');
+  assert.equal(issue.window.excluded, null, 'first issue carries no exclude set');
+  assert.equal(r.firstIssue, true, 'the compile surfaces the launch regime');
   assert.deepEqual(issue.sections.article.map((a) => a.title), ['Public post'], 'the members stub was excluded by composeIssue');
   assert.deepEqual(issue.sections.share.map((s) => s.title), ['A public share']);
   assert.equal(issue.topNews[0].title, 'Hot news', 'news ranked by opens (5 > 2)');
@@ -163,72 +166,89 @@ test('compileWeeklyIssue with no kv is a safe no-op', async () => {
   assert.deepEqual(await compileWeeklyIssue({}, { kv: null }), { ok: false, reason: 'no kv' });
 });
 
-// ---------- resolveSince: the content-window lower bound ----------
+// ---------- resolveWindow: the two composeIssue regimes (SowMaster ruling; `since` OR `exclude`, never both) ----------
 
 const WEEK = 7 * 24 * 3600 * 1000;
 const gen = (mo, day) => Date.UTC(2026, mo, day, 13, 0, 0);
 
-test('resolveSince: no prior issue bootstraps to now - 7 days (never null)', async () => {
+test('resolveWindow (FIRST issue): no prior -> since = now - 7d, exclude null, firstIssue true', async () => {
   const kv = makeKV();
   const nowMs = gen(7, 25);
-  assert.equal(await resolveSince(kv, { nowMs, currentIssueId: 'weekly-2026-08-25' }), nowMs - WEEK);
+  assert.deepEqual(
+    await resolveWindow(kv, { nowMs, currentIssueId: 'weekly-2026-08-25' }),
+    { firstIssue: true, since: nowMs - WEEK, exclude: null },
+  );
 });
 
-test('resolveSince: returns the most recent PRIOR issue generatedAt, ignoring self and any future issue', async () => {
+test('resolveWindow (THEREAFTER): a prior exists -> since null, exclude = the prior member urls, firstIssue false', async () => {
   const kv = makeKV();
-  await putIssue(kv, { issueId: 'weekly-2026-08-11', generatedAt: gen(7, 11) });
-  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18) });
-  await putIssue(kv, { issueId: 'weekly-2026-08-25', generatedAt: gen(7, 25) }); // self
-  await putIssue(kv, { issueId: 'weekly-2026-09-01', generatedAt: gen(8, 1) });  // future
-  const since = await resolveSince(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
-  assert.equal(since, gen(7, 18), 'greatest id strictly before current: not self, not future, not the older 08-11');
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: {
+    article: [{ url: '/articles/a1/' }], product: [{ url: '/products/p1/' }], prompt: [], share: [{ url: '/shares/ann/s1/' }],
+  }, topNews: [{ url: 'https://n/news-should-not-be-excluded' }] });
+  const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
+  assert.equal(w.firstIssue, false);
+  assert.equal(w.since, null, 'the exclude regime carries no since (stacking them re-opens the loss)');
+  assert.deepEqual([...w.exclude].sort(), ['/articles/a1/', '/products/p1/', '/shares/ann/s1/'], 'all member sections, unioned');
+  assert.ok(!w.exclude.has('https://n/news-should-not-be-excluded'), 'news is NOT excluded (it re-ranks by opens)');
 });
 
-test('resolveSince: a MISSED week widens the window to the last ACTUAL issue, not to bootstrap', async () => {
+test('resolveWindow: a foreign (non weekly-) issue id is not counted as a prior, so we stay in the first-issue regime', async () => {
   const kv = makeKV();
-  await putIssue(kv, { issueId: 'weekly-2026-08-11', generatedAt: gen(7, 11) });
-  // The 08-18 compile never ran (an outage). Computing last-week's id (weekly-2026-08-18) and reading it would
-  // miss and drop to bootstrap; taking the greatest PRIOR id widens correctly to 08-11.
-  const since = await resolveSince(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
-  assert.equal(since, gen(7, 11), 'widen from the real prior issue rather than collapsing to a 7-day fallback');
+  await putIssue(kv, { issueId: 'manual-backfill', generatedAt: gen(7, 20), sections: { article: [{ url: '/x/' }] } });
+  const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
+  assert.equal(w.firstIssue, true, 'the foreign id does not flip us into the exclude regime');
+  assert.equal(w.exclude, null);
 });
 
-test('resolveSince: a foreign (non weekly-) issue id is filtered, never mistaken for the prior', async () => {
+test('resolveWindow: the exclude set is bounded to the last historyDepth issues', async () => {
   const kv = makeKV();
-  // Sorts BELOW every weekly- id and is the only prior record. Without the `weekly-` shape filter, resolveSince
-  // would pick it and window from its generatedAt; with the filter there is no valid prior, so we bootstrap.
-  await putIssue(kv, { issueId: 'manual-backfill', generatedAt: gen(7, 20) });
-  const nowMs = gen(7, 25);
-  const since = await resolveSince(kv, { nowMs, currentIssueId: 'weekly-2026-08-25' });
-  assert.equal(since, nowMs - WEEK, 'the foreign id is ignored; with no real weekly prior we bootstrap');
+  await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), sections: { article: [{ url: '/articles/old/' }] } });
+  await putIssue(kv, { issueId: 'weekly-2026-08-11', generatedAt: gen(7, 11), sections: { article: [{ url: '/articles/mid/' }] } });
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: { article: [{ url: '/articles/recent/' }] } });
+  const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25', historyDepth: 2 });
+  assert.deepEqual([...w.exclude].sort(), ['/articles/mid/', '/articles/recent/'], 'the two newest priors only');
+  assert.ok(!w.exclude.has('/articles/old/'), 'the issue beyond the history depth is not read, so its url is not excluded');
 });
 
-test('resolveSince: a prior issue missing generatedAt falls back to that issue`s date, not bootstrap', async () => {
-  const kv = makeKV();
-  await putIssue(kv, { issueId: 'weekly-2026-08-18' }); // no generatedAt (defensive path)
-  const since = await resolveSince(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25' });
-  assert.equal(since, Date.UTC(2026, 7, 18, 0, 0, 0), 'parsed from the prior issue id at midnight UTC');
-});
-
-test('compileWeeklyIssue WINDOWS content: in-window KEPT and out-of-window DROPPED in one compile; since = prior compile time', async () => {
+test('compileWeeklyIssue FIRST issue: launch window drops an out-of-window item, keeps an in-window one', async () => {
   const kv = makeKV();
   seedSubscribers(kv, ['r1']);
-  const priorGen = gen(7, 18); // last Tuesday 13:00 UTC
-  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: priorGen });
   const activity = { entries: [
-    { type: 'post', slug: 'in', title: 'In window', url: '/articles/in/', author: 'ann', publishedAt: Date.UTC(2026, 7, 20), visibility: 'public' }, // after prior compile
-    { type: 'post', slug: 'out', title: 'Out of window', url: '/articles/out/', author: 'ann', publishedAt: Date.UTC(2026, 7, 15), visibility: 'public' }, // before prior compile
+    { type: 'post', slug: 'in', title: 'In launch window', url: '/articles/in/', author: 'ann', publishedAt: Date.UTC(2026, 7, 22), visibility: 'public' },
+    { type: 'post', slug: 'out', title: 'Before launch window', url: '/articles/out/', author: 'ann', publishedAt: Date.UTC(2026, 7, 10), visibility: 'public' },
   ] };
-  const d = {
-    ...deps(kv),
-    fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }),
-    queryItems: async () => ({ items: [] }),
-  };
+  const d = { ...deps(kv), fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }), queryItems: async () => ({ items: [] }) };
   const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
-  assert.equal(r.issueId, 'weekly-2026-08-25');
-  assert.equal(r.since, priorGen, 'the compile surfaces the resolved window for the cron log');
+  assert.equal(r.firstIssue, true);
   const issue = await getIssue(kv, 'weekly-2026-08-25');
-  // The discriminating pair: a drop-everything or a no-window mutant fails one half of THIS one assertion.
-  assert.deepEqual(issue.sections.article.map((a) => a.title), ['In window'], 'older article dropped by the window, newer one kept');
-  assert.equal(issue.window.since, priorGen, 'since is the prior compile time: not null (a resolveSince returning null would look like a working compile forever) and not bootstrap');
+  assert.deepEqual(issue.sections.article.map((a) => a.title), ['In launch window'], 'the pre-window item is dropped by the launch bound');
+  assert.equal(issue.window.since, gen(7, 25) - WEEK);
+  assert.equal(issue.window.excluded, null);
+  assert.ok(issue.launchNote, 'a first issue carries the launch note');
+});
+
+test('compileWeeklyIssue THEREAFTER: excludes already-mailed, KEEPS a never-mailed old-dated held item (Trap Two closed)', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  // A prior issue mailed one article. The current artifact carries: that same already-mailed item; a fresh one;
+  // and a HELD contribution whose publishedAt (08-10) PREDATES the prior compile but which was never mailed.
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: gen(7, 18), sections: {
+    article: [{ url: '/articles/mailed/', title: 'Already mailed' }], product: [], prompt: [], share: [],
+  } });
+  const activity = { entries: [
+    { type: 'post', slug: 'mailed', title: 'Already mailed', url: '/articles/mailed/', author: 'ann', publishedAt: Date.UTC(2026, 7, 17), visibility: 'public' },
+    { type: 'post', slug: 'fresh', title: 'Fresh this week', url: '/articles/fresh/', author: 'ann', publishedAt: Date.UTC(2026, 7, 24), visibility: 'public' },
+    { type: 'post', slug: 'held', title: 'Held contribution', url: '/articles/held/', author: 'bob', publishedAt: Date.UTC(2026, 7, 10), visibility: 'public' },
+  ] };
+  const d = { ...deps(kv), fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }), queryItems: async () => ({ items: [] }) };
+  const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
+  assert.equal(r.firstIssue, false);
+  assert.equal(r.since, null, 'the exclude regime carries no since');
+  assert.equal(r.excluded, 1, 'exactly the one already-mailed url is in the exclude set');
+  const issue = await getIssue(kv, 'weekly-2026-08-25');
+  // byDateDesc: fresh (08-24) then held (08-10). The already-mailed one is gone; the OLD-dated never-mailed held
+  // item is KEPT. Under the retired since-regime the held item would have been dropped (date < prior compile).
+  assert.deepEqual(issue.sections.article.map((a) => a.title), ['Fresh this week', 'Held contribution'], 'already-mailed excluded, held item kept');
+  assert.equal(issue.window.since, null);
+  assert.equal(issue.window.excluded, 1);
 });

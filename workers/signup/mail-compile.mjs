@@ -30,30 +30,16 @@ import { NEWS_OPENS_KEY } from './membership-news-opened.mjs';
 const SITE_URL_DEFAULT = 'https://gbti.network';
 const MAIL_ISSUE_PREFIX = 'mail:issue:';
 const WEEK_MS = 7 * 24 * 3600 * 1000;
+const MEMBER_SECTION_KEYS = ['article', 'product', 'prompt', 'share'];
 
 /**
- * Resolve the content-window lower bound (`since`) for a NEW issue: the generatedAt of the most recent PRIOR
- * frozen issue, so "since the last issue" is literally true and a skipped or delayed week WIDENS the window
- * rather than dropping the intervening content on the floor (composeIssue drops member items with date < since,
- * inclusive boundary). Taking the GREATEST prior issueId (not last-week's computed id) is what makes a MISSED
- * week correct: computing `weekly-<today-7d>` and reading it would miss and fall back to bootstrap in exactly
- * the outage case the anchor exists for.
- *
- * For the very FIRST issue (no prior) it falls back to nowMs - bootstrapMs (default 7 days): a bounded, honest
- * launch window (news-led, and the member sections show their empty-section notes for a quiet first week)
- * rather than dumping the newest-N-ever back catalog. ALWAYS returns a finite number given a finite nowMs (the
- * forgotten-param trap), and the value is echoed on the frozen issue as window.since so a missing window is
- * visible in the artifact, not silent.
- *
- * Enumerates the mail:issue: prefix (one key per week, so a decade of issues fits inside a single KV list
- * page). Considers ONLY ids of the canonical `weekly-YYYY-MM-DD` shape, which sort lexicographically =
- * chronologically, so a hand-seeded or backfilled issue with a foreign id shape can never be mistaken for the
- * prior issue.
+ * The prior frozen issue ids, canonical `weekly-YYYY-MM-DD` shape only, strictly before currentIssueId. Enumerates
+ * the mail:issue: prefix (one key per week, so a decade of issues fits inside a single KV list page). The shape
+ * filter means a hand-seeded or backfilled issue with a foreign id can never be counted as a prior issue.
  */
-export async function resolveSince(kv, { nowMs, currentIssueId, bootstrapMs = WEEK_MS, pageBudget = 50 } = {}) {
-  const bootstrap = Number(nowMs) - bootstrapMs;
-  if (!kv?.list) return bootstrap;
-  let bestId = null;
+async function listPriorIssueIds(kv, { currentIssueId, pageBudget = 50 } = {}) {
+  if (!kv?.list) return [];
+  const ids = [];
   let cursor;
   for (let page = 0; page < pageBudget; page++) {
     let res;
@@ -62,19 +48,50 @@ export async function resolveSince(kv, { nowMs, currentIssueId, bootstrapMs = WE
       const id = k.name.slice(MAIL_ISSUE_PREFIX.length);
       if (!id.startsWith('weekly-')) continue;              // only canonical ids sort chronologically
       if (currentIssueId && id >= currentIssueId) continue; // strictly before self; ignores self + any future
-      if (bestId == null || id > bestId) bestId = id;
+      ids.push(id);
     }
     if (res?.list_complete || !res?.cursor) break;
     cursor = res.cursor;
   }
-  if (bestId == null) return bootstrap; // first issue ever
-  const prev = await getIssue(kv, bestId);
-  const gen = Number(prev?.generatedAt);
-  if (Number.isFinite(gen)) return gen;
-  // Defensive: a prior issue somehow missing generatedAt. Parse its date (midnight UTC) so a delayed week still
-  // widens from the right week boundary rather than collapsing to bootstrap.
-  const parsed = Date.parse(`${bestId.slice('weekly-'.length)}T00:00:00Z`);
-  return Number.isFinite(parsed) ? parsed : bootstrap;
+  return ids;
+}
+
+/**
+ * Resolve the composeIssue window REGIME for a NEW issue. `since` and `exclude` are TWO REGIMES, not stacked
+ * filters (SowMaster ruling, 2026-08-21; composeIssue PR 321):
+ *   - FIRST issue (no prior frozen issue): { firstIssue: true, since: nowMs - bootstrapMs, exclude: null }.
+ *     A bounded, launch-worded issue rather than the newest-N-ever back catalogue.
+ *   - THEREAFTER (a prior exists): { firstIssue: false, since: null, exclude: <urls already mailed> }.
+ *     "everything not yet mailed", so there is no publishedAt loss window: a held-for-review contribution or a
+ *     backdated item that first entered the artifact AFTER an earlier compile stays eligible until it has
+ *     actually appeared in an issue. This CLOSES the Trap Two loss at compile time.
+ *
+ * The mailed set is the union of member-section item urls across the last `historyDepth` prior issues (derived
+ * from the frozen issues themselves, so there is no separate accumulator to drift). That depth is this layer's
+ * bound and is safe: the source artifact (activity-index) only carries the newest 40 per type, so a url old
+ * enough to fall outside the history is old enough to be gone from the candidate set anyway. `since` and
+ * `exclude` are NEVER both non-null, so the two regimes never stack (stacking re-opens the loss exclude closes).
+ */
+export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = WEEK_MS, historyDepth = 26, pageBudget = 50 } = {}) {
+  const priorIds = await listPriorIssueIds(kv, { currentIssueId, pageBudget });
+  if (priorIds.length === 0) {
+    return { firstIssue: true, since: Number(nowMs) - bootstrapMs, exclude: null };
+  }
+  const recent = priorIds.sort().reverse().slice(0, Math.max(1, historyDepth)); // newest-first, bounded
+  const exclude = new Set();
+  for (const id of recent) {
+    // eslint-disable-next-line no-await-in-loop -- bounded by historyDepth, and this is the weekly compile, not a tick
+    const issue = await getIssue(kv, id);
+    const sections = issue?.sections;
+    if (!sections) continue;
+    for (const key of MEMBER_SECTION_KEYS) {
+      for (const item of sections[key] ?? []) {
+        const url = typeof item?.url === 'string' ? item.url.trim() : '';
+        if (url) exclude.add(url); // news is deliberately NOT excluded (ranked by opens, may re-surface)
+      }
+    }
+  }
+  return { firstIssue: false, since: null, exclude };
 }
 
 /**
@@ -186,21 +203,22 @@ export async function compileWeeklyIssue(env, {
   let issue = await getIssue(kv, issueId);
   let composed = false;
   if (!issue) {
-    const [contentEntries, newsEntries, since] = await Promise.all([
+    const [contentEntries, newsEntries, regime] = await Promise.all([
       gatherContentEntries(env, { fetchImpl, siteUrl }),
       gatherNewsEntries(env, { kv, queryItems }),
-      resolveSince(kv, { nowMs, currentIssueId: issueId }),
+      resolveWindow(kv, { nowMs, currentIssueId: issueId }),
     ]);
     const items = normalizeContent(contentEntries, { displayName });
     const news = normalizeNews(newsEntries);
-    // The content window (composeIssue `since`, PublicationMaster PR 320) is PART OF THE SECTION CONTRACT, not
-    // an optimization: without it every issue re-sends the newest-N-ever best-of and the empty-section notes
-    // become unreachable code. KNOWN, ACCEPTED limitation (SOW-166): `since` windows on publishedAt, which the
-    // client stamps at PR-open time (operations.mjs), NOT at merge/deploy. So a held-for-review or backdated
-    // item that first enters the build artifact AFTER the prior compile is dropped by the window and never
-    // mailed. The exact fix ("not previously mailed" via an already-mailed `exclude` set) is a fast-follow
-    // GATED BEFORE unrestricted send; the tiny allowlist test launch is unaffected. See the SOW-166 note.
-    issue = composeIssue({ issueId, items, news, now }, { perSection, maxNews, since });
+    // The window is PART OF THE SECTION CONTRACT (composeIssue, PR 320/321), not an optimization: without it
+    // every issue re-sends the newest-N-ever best-of and the empty-section notes become unreachable. `since`
+    // and `exclude` are TWO REGIMES (SowMaster ruling): the FIRST issue bounds by a launch window (since), and
+    // every issue after excludes the already-mailed urls (exclude). The exclude regime CLOSES the Trap Two
+    // loss: a held-for-review contribution or a backdated item stays eligible until it has actually been mailed,
+    // instead of being dropped by a publishedAt window it predates. resolveWindow returns exactly one regime.
+    issue = composeIssue({ issueId, items, news, now }, {
+      perSection, maxNews, since: regime.since, exclude: regime.exclude, firstIssue: regime.firstIssue,
+    });
     // ALWAYS-SEND: shouldSend is unconditionally true, but gate on it honestly so a future skip is one edit.
     if (!shouldSend(issue)) return { ok: true, issueId, composed: false, skipped: true, reason: 'nothing to send' };
     await putIssue(kv, issue);
@@ -219,6 +237,10 @@ export async function compileWeeklyIssue(env, {
     pending: enq?.pending ?? 0,
     recipientsTruncated: truncated, // the caller MUST surface this: a truncated base under-sends silently otherwise
     counts: issue?.counts ?? null,
-    since: issue?.window?.since ?? null, // the resolved window, surfaced for the cron log; null here is a caller bug
+    // The resolved regime, surfaced for the cron log. firstIssue: since set + no exclude. Thereafter: exclude a
+    // count + since null. `since` AND `excluded` both null on a composed issue would be the forgotten-window bug.
+    firstIssue: Boolean(issue?.launchNote),
+    since: issue?.window?.since ?? null,
+    excluded: issue?.window?.excluded ?? null,
   };
 }
