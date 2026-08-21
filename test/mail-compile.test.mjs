@@ -202,7 +202,7 @@ test('resolveWindow: a foreign (non weekly-) issue id is not counted as a prior,
   assert.equal(w.exclude, null);
 });
 
-test('resolveWindow: exclude is bounded to the last historyDepth issues; the epoch is still read from the oldest', async () => {
+test('resolveWindow: once an issue ages OUT of the depth window, exclude is bounded AND the floor advances to the oldest in-window compile time', async () => {
   const kv = makeKV();
   await putIssue(kv, { issueId: 'weekly-2026-08-04', generatedAt: gen(7, 4), window: { since: EPOCH }, sections: { article: [{ url: '/articles/old/' }] } });
   await putIssue(kv, { issueId: 'weekly-2026-08-11', generatedAt: gen(7, 11), sections: { article: [{ url: '/articles/mid/' }] } });
@@ -210,7 +210,11 @@ test('resolveWindow: exclude is bounded to the last historyDepth issues; the epo
   const w = await resolveWindow(kv, { nowMs: gen(7, 25), currentIssueId: 'weekly-2026-08-25', historyDepth: 2 });
   assert.deepEqual([...w.exclude].sort(), ['/articles/mid/', '/articles/recent/'], 'the two newest priors only');
   assert.ok(!w.exclude.has('/articles/old/'), 'the issue beyond the history depth is not read for exclusion');
-  assert.equal(w.since, EPOCH, 'but the epoch IS read from the oldest issue, even though it is beyond historyDepth');
+  // 08-04 has aged OUT of the depth-2 window, so an epoch floor would leave anything it mailed above the floor yet
+  // no longer excluded: an uncoupled re-mail. The floor advances to 08-11 (the OLDEST issue still IN the window),
+  // so anything an aged-out issue mailed (published no later than 08-04, strictly before 08-11) is floored. Floor
+  // and exclude now cover the same span, which is the coupling.
+  assert.equal(w.since, gen(7, 11), 'the floor is the oldest in-window compile time, not the (now unsafe) fixed epoch');
 });
 
 test('resolveWindow: a first issue with no recorded window.since falls back to its own date as the epoch', async () => {
@@ -264,4 +268,47 @@ test('compileWeeklyIssue THEREAFTER: epoch floor + exclude keeps a held item, dr
     'held item kept (Trap Two), already-mailed excluded, pre-newsletter floored out');
   assert.equal(issue.window.since, EPOCH);
   assert.equal(issue.window.excluded, 1);
+});
+
+// The SEAM the two prior defects lived in: the time floor and the issue-count exclude window are TWO bounds, and
+// the unit tests above each exercise ONE compile. This one runs the composer forward over many issues, which is
+// the only object that can catch an item slipping BETWEEN the bounds. Without the coupling, a below-cap artifact
+// (products never turn over) escapes the exclude window at historyDepth and, still above a FIXED epoch floor, gets
+// re-mailed on a historyDepth cycle. historyDepth is small (3) so the escape point (issue 5) is reached fast.
+test('SEAM (multi-issue): a below-cap item is mailed exactly once, never re-mailed after it ages out of the exclude window', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const TUE = (wk) => Date.UTC(2026, 0, 6 + 7 * wk, 13, 0, 0); // successive weekly compiles (distinct weekly- ids)
+  // Six products, all published INSIDE the first issue's launch window (so all are eligible from issue one) and all
+  // below the 40-per-type artifact cap, so they are present in EVERY week's artifact and never turn over. That makes
+  // the exclude set the ONLY thing that can stop a re-mail, which is exactly the condition the coupling must survive.
+  const products = [1, 2, 3, 4, 5, 6].map((n) => ({
+    type: 'product', slug: `p${n}`, title: `Product ${n}`, url: `/products/p${n}/`, author: 'ann',
+    publishedAt: TUE(0) - (7 - n) * 24 * 3600 * 1000, // week0 -6d (p1, oldest) .. -1d (p6, newest), all in the launch window
+    visibility: 'public',
+  }));
+  const activity = { entries: products };
+  const mailedIn = new Map(); // product url -> [issueIds it appeared in]
+  for (let wk = 0; wk < 8; wk++) {
+    const d = {
+      kv, now: at(TUE(wk)), siteUrl: 'https://x', historyDepth: 3,
+      fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }),
+      queryItems: async () => ({ items: [] }),
+    };
+    // eslint-disable-next-line no-await-in-loop -- sequential issues, each reading the frozen prior ones
+    const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
+    // eslint-disable-next-line no-await-in-loop
+    const issue = await getIssue(kv, r.issueId);
+    for (const p of issue.sections.product ?? []) {
+      if (!mailedIn.has(p.url)) mailedIn.set(p.url, []);
+      mailedIn.get(p.url).push(r.issueId);
+    }
+  }
+  // Every product mailed EXACTLY once across the whole run. Under a fixed epoch floor, products 2-6 (mailed in issue
+  // one, then aged out of the depth-3 exclude window by issue five) are above the epoch and no longer excluded, so
+  // they re-mail: length 2, and this assertion reds. That is the mutant this test exists to catch.
+  for (const [url, issues] of mailedIn) {
+    assert.equal(issues.length, 1, `${url} was mailed ${issues.length} times (${issues.join(', ')}); expected exactly once`);
+  }
+  assert.equal(mailedIn.size, 6, 'and all six below-cap products were actually mailed (not vacuously passing by mailing nothing)');
 });
