@@ -66,3 +66,44 @@ export async function decryptEmail({ key, hash, envelope }) {
     return null;
   }
 }
+
+/**
+ * Resolve a subscriber record to a raw email for sending. BI-MODAL by design (mail-subscriber.mjs): an ANON
+ * subscriber carries the address as an emailEnc envelope on its OWN record (decrypt it here, under the record's
+ * hash); a MEMBER subscriber carries only githubId/customerId and NEVER stores the address, which lives on
+ * their Stripe Customer (data-protection.md:49), so the member branch defers to the INJECTED `fetchMemberEmail`.
+ * The drain injects both, so this stays pure and unit-tested, and the drain does at most one member lookup per
+ * member-recipient (bounded by the per-tick send cap, well inside the Worker subrequest ceiling).
+ *
+ * Fail-closed to null on anything unusable: an unknown source, an anon record without emailEnc, a member record
+ * without an id, an absent key (anon) or absent fetcher (member), a decrypt failure, or a fetcher that throws or
+ * returns nothing. The drain treats null as "no usable address" and never sends to an empty or wrong one.
+ */
+export async function resolveSubscriberEmail(subscriber, { key, fetchMemberEmail } = {}) {
+  const sub = subscriber && typeof subscriber === 'object' ? subscriber : null;
+  if (!sub) return null;
+  const hash = normalizeHash(sub.hash);
+  if (!hash) return null;
+  if (sub.source === 'anon') {
+    // The record stores emailEnc as an OPAQUE string (buildSubscriber/KV JSON), so parse it here; accept a
+    // pre-parsed object too. An unparseable envelope is null, never a send.
+    let envelope = sub.emailEnc;
+    if (typeof envelope === 'string') {
+      try { envelope = JSON.parse(envelope); } catch { return null; }
+    }
+    return decryptEmail({ key, hash, envelope });
+  }
+  if (sub.source === 'member') {
+    if (typeof fetchMemberEmail !== 'function') return null;
+    const idRef = { githubId: sub.githubId ?? null, customerId: sub.customerId ?? null };
+    if (!idRef.githubId && !idRef.customerId) return null;
+    try {
+      const email = await fetchMemberEmail(idRef);
+      const addr = typeof email === 'string' ? email.trim() : '';
+      return addr || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}

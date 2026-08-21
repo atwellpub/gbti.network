@@ -4,7 +4,8 @@
 // control on the SAME envelope so the null cannot come from a broken decrypt.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encryptEmail, decryptEmail } from '../membership/mail-address.mjs';
+import { encryptEmail, decryptEmail, resolveSubscriberEmail } from '../membership/mail-address.mjs';
+import { buildSubscriber } from '../membership/mail-subscriber.mjs';
 
 const KEY = new Uint8Array(32).fill(7);       // deterministic 32-byte AES-256 key
 const OTHER_KEY = new Uint8Array(32).fill(9); // a different valid key
@@ -69,4 +70,46 @@ test('fail-closed: a tampered ciphertext returns null (GCM auth failure is swall
 test('fail-closed: a non-object envelope returns null', async () => {
   assert.equal(await decryptEmail({ key: KEY, hash: HASH_A, envelope: null }), null);
   assert.equal(await decryptEmail({ key: KEY, hash: HASH_A, envelope: 'nope' }), null);
+});
+
+// ---------- resolveSubscriberEmail: the drain's bi-modal address resolver ----------
+
+const at0 = { now: () => 0 };
+
+test('resolveSubscriberEmail (anon): decrypts the record`s own emailEnc string under its hash', async () => {
+  const env = await encryptEmail({ key: KEY, hash: HASH_A, email: EMAIL });
+  // The real record shape: buildSubscriber stores emailEnc as an opaque JSON string; the resolver parses it.
+  const sub = buildSubscriber({ hash: HASH_A, source: 'anon', emailEnc: JSON.stringify(env) }, at0);
+  assert.equal(typeof sub.emailEnc, 'string', 'stored as an opaque string, as the subscribe route writes it');
+  assert.equal(await resolveSubscriberEmail(sub, { key: KEY }), EMAIL);
+});
+
+test('resolveSubscriberEmail (anon): a wrong key, or an unparseable envelope, resolves to null (no throw)', async () => {
+  const env = await encryptEmail({ key: KEY, hash: HASH_A, email: EMAIL });
+  const sub = buildSubscriber({ hash: HASH_A, source: 'anon', emailEnc: JSON.stringify(env) }, at0);
+  assert.equal(await resolveSubscriberEmail(sub, { key: OTHER_KEY }), null);
+  assert.equal(await resolveSubscriberEmail({ hash: HASH_A, source: 'anon', emailEnc: 'not json' }, { key: KEY }), null);
+});
+
+test('resolveSubscriberEmail (member): defers to the injected fetcher with the record`s ids, no key needed', async () => {
+  const sub = buildSubscriber({ hash: HASH_B, source: 'member', githubId: '12345', customerId: 'cus_9' }, at0);
+  let sawArgs = null;
+  const fetchMemberEmail = async (idRef) => { sawArgs = idRef; return '  member@example.com  '; };
+  assert.equal(await resolveSubscriberEmail(sub, { fetchMemberEmail }), 'member@example.com');
+  assert.deepEqual(sawArgs, { githubId: '12345', customerId: 'cus_9' }, 'the fetcher is handed both ids to resolve on');
+});
+
+test('resolveSubscriberEmail (member): no fetcher, or a fetcher that throws or returns nothing, is null', async () => {
+  const sub = { hash: HASH_B, source: 'member', githubId: '12345', customerId: null };
+  assert.equal(await resolveSubscriberEmail(sub, {}), null, 'no fetcher -> null');
+  assert.equal(await resolveSubscriberEmail(sub, { fetchMemberEmail: async () => { throw new Error('stripe down'); } }), null);
+  assert.equal(await resolveSubscriberEmail(sub, { fetchMemberEmail: async () => '' }), null, 'empty address -> null');
+  assert.equal(await resolveSubscriberEmail(sub, { fetchMemberEmail: async () => null }), null);
+});
+
+test('resolveSubscriberEmail: fail-closed on a malformed or sourceless record', async () => {
+  assert.equal(await resolveSubscriberEmail(null, { key: KEY }), null);
+  assert.equal(await resolveSubscriberEmail({ source: 'anon', emailEnc: {} }, { key: KEY }), null, 'no hash -> null');
+  assert.equal(await resolveSubscriberEmail({ hash: HASH_A, source: 'unknown' }, { key: KEY }), null, 'unknown source -> null');
+  assert.equal(await resolveSubscriberEmail({ hash: HASH_B, source: 'member' }, { fetchMemberEmail: async () => 'x@y.z' }), null, 'member with no id -> null');
 });
