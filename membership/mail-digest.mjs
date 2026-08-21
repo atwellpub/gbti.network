@@ -158,27 +158,17 @@ export function isPublicItem(it) {
 
 /** The public-safe projection of a member item. Copies ONLY public metadata; there is no field that could
  *  carry a body or ciphertext, so this is structurally incapable of leaking member content. */
-function publicItem(it, nowMs) {
+function publicItem(it) {
   return {
     kind: str(it.kind),
     title: trimOrNull(it.title),
     url: trimOrNull(it.url),
     author: trimOrNull(it.author),
     authorName: trimOrNull(it.authorName),
-    // CLAMPED AT THE COMPILE TIME. A publishedAt in the FUTURE is reachable: `isListed` is a visibility check
-    // with no date test, and validate-content has no future-date guard, so a scheduled post or a mistyped year
-    // reaches the artifact dated ahead of now. Unclamped it breaks the compile's floor coupling, which rests on
-    // "an item mailed by an issue was published no later than that issue's compile": a future-dated item is
-    // above every floor that advances behind it, so it leaves the mailed set and is mailed AGAIN, once per
-    // historyDepth, until the floor finally passes its date. Simulated: with historyDepth 3 it re-mailed at
-    // issues 1, 5 and 9 while a normal item beside it mailed exactly once.
-    //
-    // Clamping also fixes the ordering: a mistyped year would otherwise pin an item to the top of its section
-    // for a year. For every item NOT dated in the future this is exactly `date`, so the blast radius is the
-    // anomalous case and nothing else.
-    date: Math.min(numOr0(it.date), nowMs),
+    date: numOr0(it.date),
   };
 }
+
 
 /** The public-safe projection of a news item (top-performing by distinct-opener count). */
 function newsItem(it) {
@@ -263,8 +253,26 @@ export function composeIssue(
   // Layer 1: drop every non-public item. Layer 2: project each survivor to public-safe fields only.
   const publicItems = (Array.isArray(items) ? items : [])
     .filter(isPublicItem)
-    .map((it) => publicItem(it, generatedAt))
+    .map(publicItem)
     .filter((it) => it.title && it.url) // an item with no title or link is not renderable
+    // NOT YET DUE. A publishedAt in the FUTURE is reachable (`isListed` is a visibility check with no date
+    // test; validate-content has no date logic at all), and an item dated ahead of the compile must not be
+    // mailed at all, which is both the right product answer and what the compile's floor coupling requires.
+    //
+    // AN EARLIER VERSION OF THIS CLAMPED THE DATE TO THE COMPILE TIME INSTEAD, AND THAT DID NOT WORK. Clamping
+    // re-projects the item to `now` on EVERY weekly compile, so its effective date is perpetually the newest
+    // and perpetually above a floor that lags by historyDepth: it ages out of the mailed set and is mailed
+    // again, on exactly the cycle the clamp was supposed to close. UnifiedWorker caught it by simulating the
+    // merged code forward, which is the only thing that can see it: "published no later than THIS compile" is
+    // trivially true after a clamp, while the floor proof needs "no later than the compile that FIRST mailed
+    // it". A perpetually-now item is structurally incompatible with a lagging floor.
+    //
+    // Dropping it until due satisfies both. It is withheld each week, then enters at its REAL date once that
+    // date passes, mails once, and is then below every later floor. The failure direction is right too: a
+    // mistyped year withholds an item until the typo is fixed, and the corrected date is in the past so it
+    // mails normally. The clamp's failure direction was subscribers receiving it four times, which no later
+    // fix can take back.
+    .filter((it) => it.date <= generatedAt)
     // Windowed AFTER the projection, so it reads the already-normalized numeric `date` rather than whatever
     // shape the caller passed. An undated item has date 0 and therefore never survives a window, which is the
     // right way round: an item with no publication date cannot be shown to be new.

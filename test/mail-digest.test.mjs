@@ -7,6 +7,10 @@ import {
   FIRST_ISSUE_NOTE, FIRST_ISSUE_SECTION_NOTES,
 } from '../membership/mail-digest.mjs';
 
+// The injected clock. It must sit AFTER every fixture date in a test: an item reaches the artifact only once
+// it is published, so a compile that predates its own items cannot occur, and composeIssue now enforces that
+// by withholding anything not yet due. Fixtures written before that used at(1) freely; they were modelling an
+// impossible world and passing for the wrong reason.
 const at = (t) => () => t;
 const pub = (kind, title, date, extra = {}) => ({ kind, title, url: `https://gbti.network/${kind}/${title}`, author: 'alice', date, visibility: 'public', ...extra });
 
@@ -35,7 +39,7 @@ test('LEAK GUARD: a members item is excluded and no body/ciphertext can appear i
     { kind: 'article', title: 'MEMBER ONLY', url: 'https://gbti.network/secret', author: 'bob', date: 200, visibility: 'members', body: 'SECRET MEMBER BODY', encryptedBody: 'members/bob/_enc/s.enc' },
     { kind: 'share', title: 'no-visibility', url: 'https://x', author: 'c', date: 50 }, // missing visibility -> excluded
   ];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) });
   // only the public article survives
   assert.equal(issue.sections.article.length, 1);
   assert.equal(issue.sections.article[0].title, 'public-one');
@@ -63,7 +67,7 @@ test('news is ranked by distinct-opener count, then newest, and capped', () => {
     { title: 'mid-a', url: 'https://n/ma', opens: 10, date: 100 },
     { title: 'mid-b', url: 'https://n/mb', opens: 10, date: 500 }, // same opens, newer -> ahead of mid-a
   ];
-  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 3 });
+  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { maxNews: 3 });
   assert.deepEqual(issue.topNews.map((n) => n.title), ['high', 'mid-b', 'mid-a']); // opens desc, date breaks ties
   assert.equal(issue.topNews.length, 3); // capped
   assert.deepEqual(Object.keys(issue.topNews[0]).sort(), ['date', 'opens', 'source', 'title', 'url']);
@@ -71,11 +75,11 @@ test('news is ranked by distinct-opener count, then newest, and capped', () => {
 
 test('empty-week policy: skip only when member AND news are both empty; else top-news-only still sends', () => {
   // both empty -> isEmpty, the compile cron skips
-  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) });
   assert.equal(dead.isEmpty, true);
   assert.equal(hasContent(dead), false);
   // no member content but news present -> a top-news-only issue that still sends
-  const newsOnly = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n', opens: 1 }], now: at(1) });
+  const newsOnly = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n', opens: 1 }], now: at(1_000_000) });
   assert.equal(newsOnly.isEmpty, false);
   assert.equal(newsOnly.counts.news, 1);
   assert.equal(hasContent(newsOnly), true);
@@ -90,13 +94,13 @@ test('items with no title or url are dropped as unrenderable', () => {
     { kind: 'article', title: 'ok', url: '', author: 'a', date: 1, visibility: 'public' },
     pub('article', 'good', 1),
   ];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) });
   assert.deepEqual(issue.sections.article.map((x) => x.title), ['good']);
 });
 
 test('an unknown kind does not crash and does not land in a section', () => {
   const items = [{ kind: 'video', title: 'v', url: 'https://v', author: 'a', date: 1, visibility: 'public' }, pub('article', 'a', 2)];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) });
   assert.equal(issue.counts.article, 1);
   assert.equal(issue.counts.product + issue.counts.prompt + issue.counts.share, 0);
 });
@@ -106,7 +110,7 @@ test('an unknown kind does not crash and does not land in a section', () => {
 test('layout carries EVERY section every week, filled ones first, in canonical order', () => {
   const items = [pub('prompt', 'p1', 300), pub('share', 's1', 200)];
   const news = [{ title: 'n', url: 'https://n/1', opens: 5, date: 100 }];
-  const issue = composeIssue({ issueId: 'i', items, news, now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items, news, now: at(1_000_000) });
 
   // nothing is ever dropped: all five, exactly once each
   assert.deepEqual(issue.layout.map((s) => s.key).sort(), [...SECTION_ORDER].sort());
@@ -120,7 +124,7 @@ test('layout carries EVERY section every week, filled ones first, in canonical o
 test('the relative order inside each group is stable, so a section does not move week to week', () => {
   const rank = (key) => SECTION_ORDER.indexOf(key);
   for (const items of [[], [pub('article', 'a', 1)], [pub('share', 's', 1), pub('product', 'p', 2)]]) {
-    const layout = composeIssue({ issueId: 'i', items, news: [], now: at(1) }).layout;
+    const layout = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) }).layout;
     const filled = layout.filter((s) => !s.empty).map((s) => rank(s.key));
     const empty = layout.filter((s) => s.empty).map((s) => rank(s.key));
     assert.deepEqual(filled, [...filled].sort((a, b) => a - b), 'filled group out of canonical order');
@@ -129,7 +133,7 @@ test('the relative order inside each group is stable, so a section does not move
 });
 
 test('an empty section carries its note and a filled one carries none', () => {
-  const issue = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1_000_000) });
   const bySection = Object.fromEntries(issue.layout.map((s) => [s.key, s]));
 
   assert.equal(bySection.article.empty, false);
@@ -181,7 +185,7 @@ test('LEAK GUARD holds through layout: a members item reaches no section and no 
     pub('article', 'public-one', 200),
     { kind: 'article', title: 'secret', url: 'https://x/s', author: 'bob', date: 300, visibility: 'members', body: 'SECRET BODY' },
   ];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) });
   const serialized = JSON.stringify(issue);
   assert.ok(!serialized.includes('SECRET BODY'), 'a member body reached the compiled issue');
   assert.ok(!serialized.includes('secret'), 'a member item title reached the compiled issue');
@@ -196,26 +200,26 @@ test('a thin member week can lift the news cap, but only when asked, and never p
   const news = Array.from({ length: 10 }, (_, i) => ({ title: `n${i}`, url: `https://n/${i}`, opens: 10 - i, date: i }));
 
   // unset: no lift, so maxNews stays a real ceiling (this is the trap the cap test caught)
-  assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 3 }).topNews.length, 3);
+  assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { maxNews: 3 }).topNews.length, 3);
 
   // opted in, and the member week is empty: the lift applies
   assert.equal(
-    composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 3, maxNewsThin: 8 }).topNews.length, 8);
+    composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { maxNews: 3, maxNewsThin: 8 }).topNews.length, 8);
 
   // opted in, but a member item exists: normal cap, because the lift is for thin weeks only
   assert.equal(
-    composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news, now: at(1) }, { maxNews: 3, maxNewsThin: 8 })
+    composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news, now: at(1_000_000) }, { maxNews: 3, maxNewsThin: 8 })
       .topNews.length, 3);
 
   // a thin cap BELOW the normal one can only ever raise, never shorten a news-led issue
   assert.equal(
-    composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { maxNews: 5, maxNewsThin: 2 }).topNews.length, 5);
+    composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { maxNews: 5, maxNewsThin: 2 }).topNews.length, 5);
 });
 
 test('shouldSend is the gate and it is unconditional (owner ruling 2026-08-21)', () => {
-  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
-  const thin = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1) });
-  const full = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1) });
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) });
+  const thin = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1_000_000) });
+  const full = composeIssue({ issueId: 'i', items: [pub('article', 'a', 1)], news: [], now: at(1_000_000) });
   for (const issue of [dead, thin, full]) assert.equal(shouldSend(issue), true);
   // and it does not depend on being handed a well-formed issue at all
   assert.equal(shouldSend(undefined), true);
@@ -224,10 +228,10 @@ test('shouldSend is the gate and it is unconditional (owner ruling 2026-08-21)',
 test('hasContent stays HONEST, so it can still tell an empty issue from a full one', () => {
   // It is no longer the gate, but the subject line and the logs read it, and a predicate that answered
   // "yes" for an empty issue would mislead them.
-  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) });
   assert.equal(dead.isEmpty, true);
   assert.equal(hasContent(dead), false);
-  const alive = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1) });
+  const alive = composeIssue({ issueId: 'i', items: [], news: [{ title: 'n', url: 'https://n/1', opens: 1, date: 1 }], now: at(1_000_000) });
   assert.equal(hasContent(alive), true);
 });
 
@@ -235,7 +239,7 @@ test('a fully empty issue is still SHAPED, so always-send never renders a specia
   // The owner's ground for always-send is that news ingests daily, so this state should not occur. That is a
   // fact about the ingest running, not a property of the composer, so the shape is pinned here: if the news
   // worker is ever down for a week the renderer still gets five labelled sections with notes, not a hole.
-  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  const dead = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) });
   assert.equal(dead.layout.length, SECTION_ORDER.length);
   assert.deepEqual(dead.layout.map((s) => s.key), SECTION_ORDER, 'canonical order when nothing is filled');
   assert.ok(dead.layout.every((s) => s.empty && s.note && s.label));
@@ -285,12 +289,12 @@ test('WINDOW: this is what makes an empty-section note reachable at all', () => 
   // invitation appears. If this ever fails, the section contract is decorative.
   const backCatalogue = [pub('article', 'written-months-ago', 100), pub('prompt', 'also-old', 90)];
 
-  const unwindowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1) });
+  const unwindowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1_000_000) });
   const staleArticles = unwindowed.layout.find((s) => s.key === 'article');
   assert.equal(staleArticles.empty, false, 'without a window the back catalogue fills the section');
   assert.equal(staleArticles.note, null, 'so the invitation never renders');
 
-  const windowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1) }, { since: 1_000 });
+  const windowed = composeIssue({ issueId: 'i', items: backCatalogue, news: [], now: at(1_000_000) }, { since: 1_000 });
   const freshArticles = windowed.layout.find((s) => s.key === 'article');
   assert.equal(freshArticles.empty, true);
   assert.equal(freshArticles.note, EMPTY_SECTION_NOTES.article);
@@ -301,28 +305,28 @@ test('WINDOW: an undated item is never new', () => {
   // date 0 is what the normalizer emits for a missing publishedAt. Treating "no date" as "brand new" would put
   // every dateless entry into every issue forever.
   const issue = composeIssue(
-    { issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1) },
+    { issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1_000_000) },
     { since: 1_000 },
   );
   assert.equal(issue.counts.article, 0);
   // ...but with no window it still renders, because that is the pre-window behaviour and it is unchanged.
-  const unwindowed = composeIssue({ issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1) });
+  const unwindowed = composeIssue({ issueId: 'i', items: [pub('article', 'no-date', 0)], news: [], now: at(1_000_000) });
   assert.equal(unwindowed.counts.article, 1);
 });
 
 test('WINDOW: news is deliberately NOT windowed, and the issue records the window it used', () => {
   const news = [{ title: 'opened-all-week', url: 'https://n/1', opens: 40, date: 10 }];
-  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: 5_000 });
+  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { since: 5_000 });
   assert.equal(issue.counts.news, 1, 'ranked by openers, not recency, so an older story still leads');
   assert.deepEqual(issue.window, { since: 5_000, excluded: null, appliesTo: 'members' });
 
   // A compile that forgot the window says so in the stored artifact rather than looking identical to one
   // that meant it. `since: null` in KV is the tell.
-  const forgot = composeIssue({ issueId: 'i', items: [], news, now: at(1) });
+  const forgot = composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) });
   assert.equal(forgot.window.since, null);
   // Garbage is treated as no window rather than as 0, which would silently window nothing while looking set.
   for (const bad of ['soon', NaN, Infinity, undefined, null, {}]) {
-    assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: bad }).window.since, null, `since: ${String(bad)}`);
+    assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { since: bad }).window.since, null, `since: ${String(bad)}`);
   }
 });
 
@@ -335,7 +339,7 @@ test('EXCLUDE: an already-mailed item is dropped and an unmailed one is kept, bo
     pub('share', 'also-never-mailed', 3_000),
   ];
   const exclude = new Set([`https://gbti.network/article/mailed-last-week`]);
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude });
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) }, { exclude });
 
   assert.deepEqual(issue.sections.article.map((x) => x.title), ['never-mailed']);
   assert.deepEqual(issue.sections.share.map((x) => x.title), ['also-never-mailed']);
@@ -350,13 +354,13 @@ test('EXCLUDE: it rescues the item `since` loses, which is the entire reason it 
   const lastCompile = 1_000;
 
   const windowed = composeIssue(
-    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1_000_000) },
     { since: lastCompile },
   );
   assert.equal(windowed.counts.article, 0, 'the window loses it');
 
   const bySentSet = composeIssue(
-    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1_000_000) },
     { exclude: new Set(['https://gbti.network/article/something-else']) },
   );
   assert.equal(bySentSet.counts.article, 1, 'the already-mailed set does not');
@@ -364,7 +368,7 @@ test('EXCLUDE: it rescues the item `since` loses, which is the entire reason it 
 
   // And stacking them re-opens the loss, which is why the regimes are documented as either/or.
   const stacked = composeIssue(
-    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1_000_000) },
     { since: lastCompile, exclude: new Set() },
   );
   assert.equal(stacked.counts.article, 0, 'both filters apply independently');
@@ -372,18 +376,18 @@ test('EXCLUDE: it rescues the item `since` loses, which is the entire reason it 
 
 test('EXCLUDE: an empty set is a real answer and a missing one is not, so they must not look alike', () => {
   const items = [pub('article', 'a', 10)];
-  const firstIssue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude: new Set() });
+  const firstIssue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) }, { exclude: new Set() });
   assert.equal(firstIssue.counts.article, 1);
   assert.equal(firstIssue.window.excluded, 0, 'an empty set records 0');
 
-  const forgot = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  const forgot = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) });
   assert.equal(forgot.window.excluded, null, 'a forgotten set records null, so KV shows which happened');
 });
 
 test('EXCLUDE: takes an array as readily as a Set, and ignores what is not a url collection', () => {
   const items = [pub('article', 'kept', 10), pub('article', 'dropped', 20)];
   const viaArray = composeIssue(
-    { issueId: 'i', items, news: [], now: at(1) },
+    { issueId: 'i', items, news: [], now: at(1_000_000) },
     { exclude: ['https://gbti.network/article/dropped'] },
   );
   assert.deepEqual(viaArray.sections.article.map((x) => x.title), ['kept']);
@@ -391,7 +395,7 @@ test('EXCLUDE: takes an array as readily as a Set, and ignores what is not a url
   // A string is iterable and would otherwise become a set of single characters, excluding nothing while
   // looking set. Anything that is not a url collection means no exclusion, never a partial one.
   for (const bad of ['https://gbti.network/article/dropped', 42, {}, true]) {
-    const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude: bad });
+    const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1_000_000) }, { exclude: bad });
     assert.equal(issue.counts.article, 2, `exclude: ${String(bad)} must not filter`);
     assert.equal(issue.window.excluded, null);
   }
@@ -400,7 +404,7 @@ test('EXCLUDE: takes an array as readily as a Set, and ignores what is not a url
 test('EXCLUDE: news is untouched by it, the same as the window', () => {
   const news = [{ title: 'still-the-top-story', url: 'https://n/1', opens: 40, date: 10 }];
   const issue = composeIssue(
-    { issueId: 'i', items: [], news, now: at(1) },
+    { issueId: 'i', items: [], news, now: at(1_000_000) },
     { exclude: new Set(['https://n/1']) },
   );
   assert.equal(issue.counts.news, 1, 'news ranks by openers and is bounded by its gather, not by this');
@@ -408,7 +412,7 @@ test('EXCLUDE: news is untouched by it, the same as the window', () => {
 });
 
 test('LAUNCH ISSUE: nothing below the line says "since the last issue" to somebody reading their first', () => {
-  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) }, { firstIssue: true });
+  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) }, { firstIssue: true });
   assert.equal(issue.launchNote, FIRST_ISSUE_NOTE);
   for (const section of issue.layout) {
     assert.ok(section.note, `${section.key} still carries a note`);
@@ -418,7 +422,7 @@ test('LAUNCH ISSUE: nothing below the line says "since the last issue" to somebo
 });
 
 test('LAUNCH ISSUE: every issue after it is untouched, which is the half that runs 51 weeks a year', () => {
-  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1_000_000) });
   assert.equal(issue.launchNote, null, 'the template renders the line by its presence, so absence must be null');
   for (const section of issue.layout) assert.match(section.note, /since the last issue/i);
 });
@@ -481,26 +485,64 @@ test('REGIMES: the floor plus the sent set is the only combination that gets all
   );
 });
 
-test('FUTURE DATES: an item dated ahead of the compile is clamped, so it cannot outrun an advancing floor', () => {
-  // Reachable, not hypothetical: isListed is a visibility check with no date test and validate-content has no
-  // future-date guard, so a scheduled post or a mistyped year reaches the artifact dated ahead of now.
-  const NOW = 1_000_000;
-  const items = [pub('article', 'postdated', NOW + 100_000), pub('article', 'normal', NOW - 100_000)];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(NOW) });
+// A weekly compile driven exactly the way workers/signup/mail-compile.mjs drives it: the floor is the compile
+// time of the oldest issue still inside `historyDepth`, and the mailed set is the union of that window's item
+// urls. Returned as a per-title tally, because the property under test is "how many times was this mailed",
+// which no single compile can answer.
+function runWeeklyCompiles(items, { weeks, historyDepth, t0, perSection = 5 }) {
+  const WEEK = 7 * 86_400_000;
+  const issues = [];
+  const tally = {};
+  for (let n = 0; n < weeks; n += 1) {
+    const now = t0 + n * WEEK;
+    const inWindow = issues.slice(-historyDepth);
+    const exclude = new Set(inWindow.flatMap((i) => i.urls));
+    // The floor holds at the epoch until an issue actually AGES OUT, then advances to the compile time of the
+    // oldest issue still inside the window. Advancing it during ramp-up (the first draft of this helper) walls
+    // off the entire back catalogue at the second compile and the test reports a loss that the real compile
+    // does not have. The harness has to model resolveWindow, not something adjacent to it.
+    const since = issues.length > historyDepth ? inWindow[0].generatedAt : t0 - WEEK;
+    const issue = composeIssue({ issueId: `w${n}`, items, news: [], now: at(now) }, { perSection, since, exclude });
+    const mailed = issue.sections.product;
+    for (const it of mailed) tally[it.title] = (tally[it.title] ?? 0) + 1;
+    issues.push({ generatedAt: now, urls: mailed.map((it) => it.url) });
+  }
+  return tally;
+}
 
-  const postdated = issue.sections.article.find((x) => x.title === 'postdated');
-  assert.equal(postdated.date, NOW, 'clamped to the compile time, not carried forward');
-  // The compile floor coupling rests on this: everything an issue mails is at or below its own compile time,
-  // so a floor that advances to a past compile time can never leave a previously mailed item above it.
-  for (const it of issue.sections.article) assert.ok(it.date <= issue.generatedAt, `${it.title} is not in the future`);
+test('FUTURE DATES: a not-yet-due item is withheld, then mailed exactly ONCE when its date arrives', () => {
+  // THIS IS A SEAM TEST AND IT HAS TO BE. The defect it guards is invisible to any single compile: an earlier
+  // fix clamped the date to the compile time, which made every single-compile assertion pass while the item
+  // was re-projected to `now` every week, stayed above a floor lagging by historyDepth, and was mailed FOUR
+  // times over sixteen weeks. UnifiedWorker found that by running the merged code forward. A test that cannot
+  // run forward cannot see it.
+  const DAY = 86_400_000;
+  const T0 = Date.parse('2026-09-01T00:00:00Z');
+  const items = [
+    pub('product', 'normal', T0 - DAY),
+    pub('product', 'due-in-100-days', T0 + 100 * DAY),
+  ];
 
-  // A normal item is untouched, so the clamp only ever reaches the anomalous case.
-  assert.equal(issue.sections.article.find((x) => x.title === 'normal').date, NOW - 100_000);
+  // Stopping BEFORE the due date: withheld entirely, and the ordinary item beside it still mails once, so a
+  // filter that dropped everything could not pass this.
+  const early = runWeeklyCompiles(items, { weeks: 12, historyDepth: 3, t0: T0 });
+  assert.equal(early['due-in-100-days'], undefined, 'not mailed while it is dated in the future');
+  assert.equal(early.normal, 1, 'and the ordinary item is untouched');
+
+  // Running PAST the due date: it arrives at its real date and mails exactly once, never again. Withholding
+  // that turned into silent suppression would pass the assertion above and fail this one.
+  const later = runWeeklyCompiles(items, { weeks: 25, historyDepth: 3, t0: T0 });
+  assert.equal(later['due-in-100-days'], 1, 'mailed once, when due');
+  assert.equal(later.normal, 1);
 });
 
-test('FUTURE DATES: the clamp does not quietly break ordering for everything else', () => {
-  const NOW = 1_000_000;
-  const items = [pub('article', 'older', 10), pub('article', 'newer', 20), pub('article', 'newest', 30)];
-  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(NOW) });
-  assert.deepEqual(issue.sections.article.map((x) => x.title), ['newest', 'newer', 'older']);
+test('FUTURE DATES: an ordinary catalogue still mails each item exactly once across many compiles', () => {
+  // The seam regression for the floor-versus-history coupling, kept here because the due-date filter sits in
+  // the same projection and could re-open it. Six below-cap products, the shape that re-mailed at issue 28.
+  const DAY = 86_400_000;
+  const T0 = Date.parse('2026-09-01T00:00:00Z');
+  const items = Array.from({ length: 6 }, (_, i) => pub('product', `p${i + 1}`, T0 - (i + 1) * DAY));
+  const tally = runWeeklyCompiles(items, { weeks: 20, historyDepth: 3, t0: T0, perSection: 2 });
+  assert.deepEqual(Object.keys(tally).sort(), ['p1', 'p2', 'p3', 'p4', 'p5', 'p6']);
+  for (const [title, n] of Object.entries(tally)) assert.equal(n, 1, `${title} mailed ${n} times, expected once`);
 });
