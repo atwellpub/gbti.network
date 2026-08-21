@@ -266,9 +266,11 @@ const ED = '<!--editorial:';
 const ctaCount = (h) => (h.match(/<!--membership-cta-->/g) || []).length;
 const ctaBlock = (h) => h.slice(h.indexOf(CTA_OPEN), h.indexOf(CTA_CLOSE));
 const vistext = (h) => h.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
+// The CTA is OPT-IN (fail-safe default off), so a guard about the CTA must opt in to have a CTA to guard.
+const CTA_ON = { membershipCta: true };
 
 test('CAN-SPAM 1: editorial content precedes the membership solicitation', () => {
-  const { html } = renderIssue(issueFixture(), {});
+  const { html } = renderIssue(issueFixture(), CTA_ON);
   assert.equal(ctaCount(html), 1, 'a CTA must exist for this guard to mean anything');
   const firstEditorial = html.indexOf(ED);
   assert.ok(firstEditorial >= 0, 'the issue carries editorial content');
@@ -276,7 +278,7 @@ test('CAN-SPAM 1: editorial content precedes the membership solicitation', () =>
 });
 
 test('CAN-SPAM 2: exactly one CTA, it is the only membership link, and nothing editorial follows it', () => {
-  const { html } = renderIssue(issueFixture(), {});
+  const { html } = renderIssue(issueFixture(), CTA_ON);
   assert.equal(ctaCount(html), 1, 'exactly one membership CTA');
   assert.ok(html.lastIndexOf(ED) < html.indexOf(CTA_OPEN), 'no editorial section appears after the CTA');
   assert.equal((html.match(/\/membership\//g) || []).length, 1, 'exactly one membership link in the whole message');
@@ -285,7 +287,7 @@ test('CAN-SPAM 2: exactly one CTA, it is the only membership link, and nothing e
 });
 
 test('CAN-SPAM 3: the CTA is a small, bounded fraction of the message', () => {
-  const { html } = renderIssue(issueFixture(), {});
+  const { html } = renderIssue(issueFixture(), CTA_ON);
   assert.equal(ctaCount(html), 1);
   const ctaVis = vistext(ctaBlock(html)).length;
   const allVis = vistext(html).length;
@@ -311,7 +313,7 @@ test('CAN-SPAM 5: no third-party sponsor block renders (permanent under the posi
 });
 
 test('CAN-SPAM 6: the CTA carries no disproportionate emphasis (no large type, no fill)', () => {
-  const { html } = renderIssue(issueFixture(), {});
+  const { html } = renderIssue(issueFixture(), CTA_ON);
   assert.equal(ctaCount(html), 1);
   const block = ctaBlock(html);
   // Not the largest type: editorial titles are 14px and the header is 18px; the CTA must stay below 13px.
@@ -334,19 +336,22 @@ test('CAN-SPAM 7: however many sections are empty, they collapse to exactly one 
   assert.doesNotMatch(html, /No new articles have been published|No new products since|No new prompts since|No shares since/);
 });
 
-test('CAN-SPAM 8: no CTA renders on an all-editorial-empty issue (a solicitation without editorial reads as promotional)', () => {
+test('CAN-SPAM 8: no CTA on an all-editorial-empty issue even when opted in (a solicitation with no editorial reads as promotional)', () => {
   const allEmpty = { layout: [
     { key: 'product', label: 'Products', empty: true, items: [] },
     { key: 'prompt', label: 'Prompts', empty: true, items: [] },
   ] };
-  const { html, text } = renderIssue(allEmpty, {});
-  assert.equal(ctaCount(html), 0);
-  assert.doesNotMatch(text, /See membership|\/membership\//);
+  const { html, text } = renderIssue(allEmpty, CTA_ON);
+  assert.equal(ctaCount(html), 0, 'opting in does not force a CTA onto an issue with no editorial');
+  assert.doesNotMatch(text, /About membership|\/membership\//);
 });
 
-test('CAN-SPAM 9: a caller can suppress the CTA for a given issue via ctx.membershipCta', () => {
-  assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 1);
+test('CAN-SPAM 9: the CTA is OPT-IN and fail-safe: omitted or false renders none, only true renders one', () => {
+  assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 0, 'omitting the flag renders NO solicitation (fail-safe default)');
   assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: false }).html), 0);
+  assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: true }).html), 1);
+  // the accuracy fix: the CTA does not claim collections (a free-tier perk under SOW-077)
+  assert.doesNotMatch(renderIssue(issueFixture(), { membershipCta: true }).html, /collections/i);
 });
 
 test('empty sections collapse to a single line naming them all; the first issue swaps the cadence clause and shows its launch note', () => {

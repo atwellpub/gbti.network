@@ -263,16 +263,21 @@ function emptyLineHtml(empties, p, firstIssue, siteUrl) {
 // membership page carries the current price). It reuses the perks language the footer already shipped rather
 // than introducing new promotional copy. The sentinels are inert test locators for the placement/proportion/
 // emphasis guards. The same block renders for every recipient of the issue (compile-once, Q12): harmless to a
-// paid member, and per-recipient targeting would break the single frozen issue. Suppress a given issue's CTA
-// with ctx.membershipCta === false.
+// paid member, and per-recipient targeting would break the single frozen issue. The CTA is OPT-IN: it renders
+// only when the compile passes ctx.membershipCta === true (and there is editorial content). Default-off is
+// deliberate and fail-safe, and it is the reason this is code and not a task-queue note: wiring the send without
+// an explicit decision produces an editorial-only email, never an unapproved solicitation, so the owner's
+// approval is the affirmative act that turns the CTA on rather than a suppression someone must remember. The
+// copy is accuracy-checked: it names commenting, member Shares and Discord, which are gated; it does NOT claim
+// collections, which SOW-077 gives a free signed-in member (the route is authorizeMember, not authorizePaid).
 function membershipCtaHtml(p, siteUrl) {
   const href = escapeHtml(absUrl('/membership/', siteUrl));
   return `<!--membership-cta-->`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:30px 28px 0">`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:${p.inkSoft};mso-line-height-rule:exactly;line-height:18px">`
-    + `Reading the digest is free. Membership adds commenting, collections, member Shares and the Discord community. `
-    + `<a href="${href}" style="color:${p.footerLink};text-decoration:underline">See membership</a>`
+    + `Reading the digest is free. Membership adds commenting, member Shares and the Discord community. `
+    + `<a href="${href}" style="color:${p.footerLink};text-decoration:underline">About membership</a>`
     + `</div>`
     + `</td></tr></table>`
     + `<!--/membership-cta-->`;
@@ -359,9 +364,11 @@ export function renderIssue(issue, ctx = {}) {
   const preheaderText = escapeHtml(counts ? countsSummary(counts) : 'Your weekly roundup from the GBTI Network.');
   const preheader = `<span style="display:none;font-size:1px;color:${p.pageBg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${preheaderText}</span>`;
 
-  // The membership CTA renders only when the issue has editorial content AND the caller did not suppress it. An
-  // all-editorial-empty issue carrying a solicitation would read as primarily promotional (see the CTA note).
-  const showCta = filled.length > 0 && ctx.membershipCta !== false;
+  // The membership CTA is OPT-IN and renders only when the caller sets ctx.membershipCta === true AND the issue
+  // has editorial content. Opt-in is fail-safe: omitting the flag renders no solicitation, so wiring the send
+  // without an explicit decision cannot ship one. An all-editorial-empty issue never carries it either (a
+  // solicitation with no editorial reads as primarily promotional). See the CTA note.
+  const showCta = filled.length > 0 && ctx.membershipCta === true;
   const body = filled.map((s) => sectionHtml(s, p, siteUrl)).join('')
     + emptyLineHtml(empties, p, firstIssue, siteUrl)
     + (showCta ? membershipCtaHtml(p, siteUrl) : '');
@@ -395,7 +402,7 @@ export function renderIssue(issue, ctx = {}) {
   const emptyText = empties.length ? `\n\n${emptyPhrase(empties, firstIssue)}` : '';
   // The text-side CTA mirrors the html: one modest line, after all editorial, only when the html renders it.
   const ctaText = showCta
-    ? `\n\nReading the digest is free. Membership adds commenting, collections, member Shares and the Discord community: ${siteUrl}/membership/`
+    ? `\n\nReading the digest is free. Membership adds commenting, member Shares and the Discord community: ${siteUrl}/membership/`
     : '';
 
   const text = `GBTI DIGEST${range ? ` (${range.short})` : ''}\n`
