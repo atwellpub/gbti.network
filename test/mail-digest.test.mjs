@@ -155,6 +155,26 @@ test('every section in the order has a label and a note defined, so none can ren
   assert.equal(new Set(memberNotes).size, memberNotes.length, 'empty-section notes must not repeat');
 });
 
+test('the notes are anchored to the cadence, not to the reading date', () => {
+  // The issue is frozen once and the send smooths across a rate budget, so the last recipient may open it
+  // days after the first. Copy that says "this week" is true on Tuesday and drifts for everyone behind them.
+  for (const [key, note] of Object.entries(EMPTY_SECTION_NOTES)) {
+    assert.ok(!/\bthis week\b/i.test(note), `${key} note is anchored to the reading date ("this week")`);
+    assert.ok(!/\b(today|yesterday|tomorrow|right now)\b/i.test(note), `${key} note uses a reading-date anchor`);
+    assert.match(note, /since the last issue/i, `${key} note should anchor to the issue cadence`);
+  }
+});
+
+test('the notes are plain sentences a table-based HTML email can render', () => {
+  // The renderer is a branded but conservative table email. Markdown would reach the reader literally.
+  for (const [key, note] of Object.entries(EMPTY_SECTION_NOTES)) {
+    assert.ok(!/[*_`~]|\[[^\]]*\]\(/.test(note), `${key} note contains markdown the email would show literally`);
+    assert.ok(!/<[a-z/]/i.test(note), `${key} note contains raw HTML`);
+    assert.equal(note, note.trim(), `${key} note has stray whitespace`);
+    assert.match(note, /\.$/, `${key} note should be a complete sentence`);
+  }
+});
+
 test('LEAK GUARD holds through layout: a members item reaches no section and no body field appears', () => {
   const items = [
     pub('article', 'public-one', 200),
