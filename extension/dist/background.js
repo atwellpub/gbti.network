@@ -19085,7 +19085,7 @@ var PRICE_ENV = Object.freeze({
 var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
 function grantTier(grant) {
   const t = grant?.tier;
-  return isTier(t) && t !== TIER.none ? t : TIER.creator;
+  return isTier(t) && t !== TIER.none ? t : TIER.member;
 }
 function resolveEffectiveTier({ source, status, stripeTier = TIER.none, grant = null } = {}) {
   switch (source) {

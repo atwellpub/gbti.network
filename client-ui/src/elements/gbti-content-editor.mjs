@@ -14,6 +14,7 @@ import './gbti-discussion.mjs'; // SOW-062 P6: the shared discussion thread, emb
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
 import { BANNER_PRESETS } from '../../../src/lib/banner-presets.mjs'; // sow-174: the curated banner-color swatches
 import { detectLinkSource } from '../../../src/lib/product-page.mjs'; // sow-175: wordpress.org/github.com URL detection
+import { publicUrlFor } from '../public-url.mjs'; // SOW-265: the shared live-URL scheme (also used by the My Content table)
 
 // SOW-062 P6: inline icons for the edhead toolbar + section headers (the design's sprite is not in the shadow root).
 const _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
@@ -1174,9 +1175,10 @@ class GbtiContentEditor extends GbtiElement {
   publicUrl() {
     const p = this.preset?.input ?? {};
     const slug = this.presetStr(p.slug) || (this.$('[data-header="slug"]')?.textContent || '').trim();
-    const base = { post: 'articles', product: 'products', prompt: 'prompts' }[this.type];
-    if (!slug || !base) return '';
-    return `https://gbti.network/${base}/${slug}/`;
+    // SOW-265: delegate to the shared scheme so the editor and the My Content table cannot diverge.
+    // Passing itemPath lets the helper recover the slug from a nested item path when frontmatter omits
+    // it, which previously built a broken https://gbti.network/products// URL.
+    return publicUrlFor({ type: this.type, slug, path: this.itemPath });
   }
 
   // SOW-062 Phase 6: the Visual / Markdown doc-view toggle. Visual is the block editor; Markdown is a READ-ONLY

@@ -2304,6 +2304,23 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return null;
   }
 
+  // client-ui/src/public-url.mjs
+  var SITE_ORIGIN = "https://gbti.network";
+  var TYPE_BASE = { post: "articles", product: "products", prompt: "prompts" };
+  function slugFromPath(path) {
+    const parts = String(path || "").split("/").filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last !== "index.md" && last !== "index.mdx") return "";
+    return parts[parts.length - 2] || "";
+  }
+  function publicUrlFor({ type, slug, path } = {}) {
+    const base = TYPE_BASE[type];
+    if (!base) return "";
+    const s = String(slug ?? "").trim() || slugFromPath(path);
+    if (!s) return "";
+    return `${SITE_ORIGIN}/${base}/${encodeURIComponent(s)}/`;
+  }
+
   // client-ui/src/elements/gbti-content-editor.mjs
   var _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
   var DOC = _svg('<path d="M7 3h7l4 4v14H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.2V7.5H18M9 12.5h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
@@ -3410,9 +3427,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     publicUrl() {
       const p = this.preset?.input ?? {};
       const slug = this.presetStr(p.slug) || (this.$('[data-header="slug"]')?.textContent || "").trim();
-      const base = { post: "articles", product: "products", prompt: "prompts" }[this.type];
-      if (!slug || !base) return "";
-      return `https://gbti.network/${base}/${slug}/`;
+      return publicUrlFor({ type: this.type, slug, path: this.itemPath });
     }
     // SOW-062 Phase 6: the Visual / Markdown doc-view toggle. Visual is the block editor; Markdown is a READ-ONLY
     // projection of the whole body as source (the same #body.value the serializer produces), matching the hi-fi
@@ -3717,13 +3732,22 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           }
         })
       );
+      this.$$("button[data-view]").forEach(
+        (b) => b.addEventListener("click", () => {
+          const url = b.dataset.view;
+          if (url) window.open(url, "_blank", "noopener");
+        })
+      );
     }
     rowHtml(it, i) {
       const status2 = it.status ? `<span class="tag ${it.status === "published" ? "ok" : ""}">${esc(it.status)}</span>` : "";
       const vis = it.visibility === "members" ? `<span class="tag">members</span>` : "";
+      const isPub = String(it.status || "").toLowerCase() === "published";
+      const url = isPub ? publicUrlFor({ type: it.type, slug: it.slug, path: it.path }) : "";
+      const view = url ? `<button class="ghost" data-view="${esc(url)}" title="Open the live public page in a new tab">View</button>` : "";
       return `<li class="row" style="justify-content:space-between">
       <span><strong>${esc(it.title)}</strong> <span class="muted">${esc(it.type || "")}</span> ${status2} ${vis}</span>
-      <button class="ghost" data-i="${i}">Edit</button>
+      <span class="rowacts" style="display:inline-flex;gap:6px;flex:none">${view}<button class="ghost" data-i="${i}">Edit</button></span>
     </li>`;
     }
   };
