@@ -37,6 +37,23 @@ test('admin-ops: e2e -> "admin-e2e"', async () => {
   assert.equal(evt, 'admin-e2e');
 });
 
+// sow-213: the mirror refresh is the fast path after a ban. Before this op existed, nothing fired
+// repository_dispatch 'sync-mirror' at all (sync-overrides-mirror.yml accepted the type and a comment claimed the
+// Worker fired it), so a ban reached the edge only on the next 6-hour cron tick. These pin the op AND the gate.
+test('admin-ops: sync-mirror -> repository_dispatch "sync-mirror" (the post-ban fast path)', async () => {
+  let evt = null;
+  const r = await membershipAdminOps(req({ action: 'sync-mirror' }), ENV, { authorize: okAuth, fetch: async (_u, init) => { evt = JSON.parse(init.body).event_type; return { status: 204 }; } });
+  assert.equal(r.status, 200);
+  assert.equal(evt, 'sync-mirror', 'must fire the exact type sync-overrides-mirror.yml listens for');
+});
+
+test('admin-ops: sync-mirror is admin-gated like every other op, and denies BEFORE dispatching', async () => {
+  let called = false;
+  const r = await membershipAdminOps(req({ action: 'sync-mirror' }), ENV, { authorize: denyAuth, fetch: async () => { called = true; return { status: 204 }; } });
+  assert.equal(r.status, 403);
+  assert.equal(called, false, 'a refused caller must not reach the dispatch');
+});
+
 test('admin-ops: an unknown action -> 400 (allow-list), no dispatch', async () => {
   let called = false;
   const r = await membershipAdminOps(req({ action: 'deploy' }), ENV, { authorize: okAuth, fetch: async () => { called = true; return { status: 204 }; } });

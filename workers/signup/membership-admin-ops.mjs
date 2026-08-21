@@ -8,8 +8,24 @@
 import { authorizeAdmin } from './membership-admin.mjs';
 
 // action -> the repository_dispatch event_type the matching workflow listens for. The ONLY operations a caller can
-// trigger; anything else 400s. (reconcile.yml: types [regate, admin-reconcile]; e2e-smoke.yml: types [admin-e2e].)
-const OPS = Object.freeze({ reconcile: 'admin-reconcile', e2e: 'admin-e2e', 'category-migrate': 'category-migrate' }); // SOW-055
+// trigger; anything else 400s. (reconcile.yml: types [regate, admin-reconcile]; e2e-smoke.yml: types [admin-e2e];
+// sync-overrides-mirror.yml: types [sync-mirror].)
+//
+// WHY sync-mirror IS ITS OWN OP AND NOT JUST "RUN RECONCILE" (sow-213, 2026-08-21). The Worker gates effective-paid
+// (ban > staff > grandfather > Stripe) on the KV `overrides:mirror` blob, and the ONLY writers of that blob are two
+// Actions: the daily reconcile and sync-overrides-mirror.yml's 6-hourly cron. Nothing fires the mirror refresh on a
+// WRITE. So a ban committed to house/bans.yml did not reach the edge for up to six hours, during which the banned
+// account kept paid access: member-content decrypt, the publish routes, KV writes. A ban sits at the TOP of the
+// precedence chain precisely because it is the emergency stop, and an emergency stop with a six-hour delay is not
+// one. `reconcile` also rewrites the mirror, but it is a full Stripe sweep that can abort before the mirror write
+// (the exact starvation sync-overrides-mirror.yml exists to prevent), so it is the wrong tool right after a ban.
+// This op is the ~1s Stripe-free refresh: ban, then fire this, and the edge agrees immediately.
+const OPS = Object.freeze({
+  reconcile: 'admin-reconcile',
+  e2e: 'admin-e2e',
+  'category-migrate': 'category-migrate', // SOW-055
+  'sync-mirror': 'sync-mirror',           // sow-213: refresh overrides:mirror NOW, not on the next 6h tick
+});
 const MIGRATE_ACTIONS = new Set(['move', 'rename', 'remove', 'merge']);
 
 /** POST /membership/admin/ops { action } -> fires the mapped repository_dispatch (admin/superadmin only). */
