@@ -312,3 +312,57 @@ test('SEAM (multi-issue): a below-cap item is mailed exactly once, never re-mail
   }
   assert.equal(mailedIn.size, 6, 'and all six below-cap products were actually mailed (not vacuously passing by mailing nothing)');
 });
+
+// The joint SEAM between the advancing floor (resolveWindow, this module's orchestration) and the not-yet-due
+// withholding (composeIssue, PR 325). The floor coupling holds only while no item is dated AFTER the compile that
+// mailed it; nothing upstream enforces that (no future-date guard in isListed or validate-content). A future-dated
+// item (scheduled post, mistyped year) that is treated as mailable NOW sits perpetually above the lagging floor and
+// re-mails once per historyDepth, which PR 324's clamp did NOT fix (it re-projected the item to each new compile,
+// so it stayed above the floor). PR 325 withholds it until due instead. This runs the WHOLE orchestrator forward
+// (resolveWindow + the artifact fetch + composeIssue), a different composition than the composeIssue-level harness.
+//
+// TWO controls, not one (PublicationMaster's caution, learned from a harness bug of theirs). A first-issue control
+// alone is near-useless for a floor: their broken harness advanced the floor during ramp-up, so early items mailed
+// and later ones NEVER did, and a "mails once at issue 0" assertion passes cleanly against that wrong world. The
+// property a floor bug destroys is an item having to WAIT its turn, so the load-bearing control is `wait`, which
+// perSection 1 forces onto issue 1. `immediate` guards the opposite failure (the harness dropping everything).
+test('SEAM (future-dated): a not-yet-due item is withheld then mailed once; a wait-its-turn item still drains', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const DAY = 24 * 3600 * 1000;
+  const TUE = (wk) => Date.UTC(2026, 0, 6 + 7 * wk, 13, 0, 0);
+  // perSection 1 so only the single newest due item mails each issue. `immediate` (newest) mails at issue 0;
+  // `wait` (a day older) cannot mail until issue 1, which is the control that actually exercises the floor. `future`
+  // is 100 days ahead: TUE(15) = +105d is the first compile at or after it (TUE(14) = +98d is still before), so it
+  // is due at issue 15. Run well past 15 so a re-mail (the bug) would show as a second entry.
+  const products = [
+    { type: 'product', slug: 'immediate', title: 'Immediate', url: '/products/immediate/', author: 'ann', publishedAt: TUE(0) - DAY, visibility: 'public' },
+    { type: 'product', slug: 'wait', title: 'Waits its turn', url: '/products/wait/', author: 'ann', publishedAt: TUE(0) - 2 * DAY, visibility: 'public' },
+    { type: 'product', slug: 'future', title: 'Future', url: '/products/future/', author: 'ann', publishedAt: TUE(0) + 100 * DAY, visibility: 'public' },
+  ];
+  const activity = { entries: products };
+  const mailedIn = new Map(); // url -> [week index]
+  for (let wk = 0; wk < 22; wk++) {
+    const d = {
+      kv, now: at(TUE(wk)), siteUrl: 'https://x', historyDepth: 3, perSection: 1,
+      fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }),
+      queryItems: async () => ({ items: [] }),
+    };
+    // eslint-disable-next-line no-await-in-loop
+    const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
+    // eslint-disable-next-line no-await-in-loop
+    const issue = await getIssue(kv, r.issueId);
+    for (const p of issue.sections.product ?? []) {
+      if (!mailedIn.has(p.url)) mailedIn.set(p.url, []);
+      mailedIn.get(p.url).push(wk);
+    }
+  }
+  // The wait-its-turn control is the one that proves the harness models the floor: if the floor were wrongly advanced
+  // (the ramp-up bug), `wait` would be floored out and NEVER mail. It must mail exactly once, at issue 1.
+  assert.deepEqual(mailedIn.get('/products/wait/'), [1], 'the older item waits one issue for its turn, then mails exactly once (not floored out)');
+  assert.deepEqual(mailedIn.get('/products/immediate/'), [0], 'the newest item mails at the first issue (harness is not dropping everything)');
+  // The future item is WITHHELD every issue until it comes due, then mails exactly once. Under PR 324's clamp it
+  // re-mailed at 0, 4, 8, 12 (every historyDepth+1); unbounded, the same. Both fail this, so it is discriminating.
+  assert.deepEqual(mailedIn.get('/products/future/'), [15],
+    'the future-dated item is withheld until due, then mails exactly once, and does NOT re-mail on a historyDepth cycle');
+});
