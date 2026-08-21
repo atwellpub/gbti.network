@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getIssue, putIssue, getSend, putSend, readPendingIndex, removeFromPending,
-  enqueueIssue, activeIssueIds, getSubscriber, readBudget, bumpBudget, MAIL_PENDING_KEY,
+  enqueueIssue, activeIssueIds, getSubscriber, putSubscriber, eraseSubscriber, readBudget, bumpBudget, MAIL_PENDING_KEY,
 } from '../workers/signup/mail-store.mjs';
 import { sendKey, markSent, budgetDayKey, budgetMonthKey } from '../membership/mail-queue.mjs';
-import { subscriberKey } from '../membership/mail-suppress.mjs';
+import { subscriberKey, suppressKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
 
 const at = (t) => () => t;
@@ -106,6 +106,28 @@ test('getSubscriber reads + normalizes a stored subscriber record', async () => 
   assert.equal(got.source, 'anon');
   assert.equal(got.emailEnc, 'ENC');
   assert.equal(await getSubscriber(kv, 'missing'), null);
+});
+
+test('putSubscriber normalizes and round-trips; a record with no address/identity is REFUSED (null, nothing written)', async () => {
+  const kv = makeKV();
+  const stored = await putSubscriber(kv, buildSubscriber({ hash: 'h9', source: 'anon', emailEnc: 'ENC9' }, { now: at(0) }));
+  assert.equal(stored.hash, 'h9');
+  assert.equal((await getSubscriber(kv, 'h9')).emailEnc, 'ENC9');
+  // a malformed record (anon, no emailEnc) does not normalize -> refused, and nothing is persisted
+  assert.equal(await putSubscriber(kv, { hash: 'h10', source: 'anon' }), null);
+  assert.equal(await getSubscriber(kv, 'h10'), null);
+  assert.equal(kv.m.get(subscriberKey('h10')), undefined, 'a refused record leaves no dead row');
+});
+
+test('eraseSubscriber deletes the record but LEAVES the suppression marker (erasure that cannot un-suppress)', async () => {
+  const kv = makeKV();
+  await putSubscriber(kv, buildSubscriber({ hash: 'h1', source: 'anon', emailEnc: 'ENC' }, { now: at(0) }));
+  await kv.put(suppressKey('h1'), SUPPRESS_VALUE); // the one-click opt-out marker
+  assert.equal(await eraseSubscriber(kv, 'h1'), true);
+  assert.equal(await getSubscriber(kv, 'h1'), null, 'the subscriber record is erased');
+  assert.ok(kv.m.get(suppressKey('h1')), 'the suppression marker OUTLIVES the record, so a re-add cannot un-suppress');
+  assert.equal(await eraseSubscriber(kv, 'h1'), true, 'erasing an absent record is idempotently a success');
+  assert.equal(await eraseSubscriber(kv, ''), false, 'a blank hash is refused, never handed to a key builder');
 });
 
 test('readBudget treats an ABSENT counter as 0, an ERROR as null (fail-closed), a corrupt value as null', async () => {

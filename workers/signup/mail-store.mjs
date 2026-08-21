@@ -144,6 +144,31 @@ export async function getSubscriber(kv, hash) {
   return normalizeSubscriber(raw);
 }
 
+/**
+ * Write a subscriber record (built via buildSubscriber / claimForMember). Normalizes FIRST, so a malformed record
+ * never persists and a record with no resolvable address/identity is refused (returns null) rather than stored as a
+ * dead row the drain would later skip. Keyed by the subscriber's own hash. Returns the stored record, or null.
+ */
+export async function putSubscriber(kv, record) {
+  const rec = normalizeSubscriber(record);
+  if (!kv || !rec || !rec.hash) return null;
+  await kv.put(subscriberKey(rec.hash), JSON.stringify(rec));
+  return rec;
+}
+
+/**
+ * Delete a subscriber record by hash. This is the ERASURE channel: an anonymous subscriber who never signed in
+ * cannot authenticate, so the one-click unsubscribe link is their only capability and it must also erase them. It
+ * deliberately does NOT touch the suppression marker (mail:suppress:<hash>): the marker is a bare hash with no
+ * address, and it must OUTLIVE the record so that a later re-add cannot silently un-suppress someone who opted out.
+ * Idempotent: deleting an absent record is a success.
+ */
+export async function eraseSubscriber(kv, hash) {
+  const key = subscriberKey(hash); // null when hash is blank; never hand a bad key to kv.delete
+  if (!kv || !key) return false;
+  try { await kv.delete(key); return true; } catch { return false; }
+}
+
 // ---------- the rate budget (fail-closed) ----------
 
 /** Read one counter. Distinguishes ABSENT (a legitimate zero, e.g. the first send of the day) from an ERROR or
