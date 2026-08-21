@@ -43,8 +43,30 @@ export function budgetDateStrings(ms) {
 const sendSucceeded = (res) => res == null || res.ok !== false;
 
 /**
- * Drain ONE issue for at most `cap` sends this tick, inside the fail-closed rate budget. Returns
- * { issueId, sent, failed, suppressed, dropped, backlog, reason }.
+ * The LAUNCH SEND GATE, fail-closed by default. QAMaster's requirement: with a population-scale backfill sitting
+ * next to a live send path, care is not a control, so the cap lives IN the send path, not in a runbook step.
+ *   - DEFAULT (neither var set) is CLOSED: the drain sends to NOBODY. Forgetting to configure the gate fails safe,
+ *     and a test that does not open it proves that by sending zero.
+ *   - MAIL_SEND_ALLOWLIST: a comma/space-separated list of recipient hashes. ONLY those hashes send; every other
+ *     recipient is REFUSED (left pending, never claimed, so it burns no attempt or budget slot) until the gate
+ *     opens for it. This is the launch/test posture: a real send to a bounded, named set.
+ *   - MAIL_SEND_UNRESTRICTED === 'true': full send. A deliberate, explicit post-launch flip, never a default.
+ * Returns { mode, allows(hash) }.
+ */
+export function resolveSendGate(env = {}) {
+  if (String(env?.MAIL_SEND_UNRESTRICTED ?? '').trim() === 'true') return { mode: 'unrestricted', allows: () => true };
+  const raw = String(env?.MAIL_SEND_ALLOWLIST ?? '').trim();
+  if (raw) {
+    const set = new Set(raw.split(/[\s,]+/).filter(Boolean));
+    return { mode: 'allowlist', size: set.size, allows: (h) => set.has(String(h)) };
+  }
+  return { mode: 'closed', allows: () => false };
+}
+
+/**
+ * Drain ONE issue for at most `cap` sends this tick, inside the fail-closed rate budget and behind the
+ * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, dropped, refused, backlog,
+ * gate, reason }, where `refused` counts recipients the send gate did not permit (left pending, no attempt).
  */
 export async function drainMailIssue(env, {
   kv = env?.SIGNUP_KV,
@@ -61,7 +83,7 @@ export async function drainMailIssue(env, {
   sendEmail,
   from = env?.MAIL_FROM || env?.RESEND_FROM || null,
 } = {}) {
-  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, backlog: 0 };
+  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, refused: 0, backlog: 0 };
   if (!kv) return { ...zero, reason: 'no kv' };
   if (!issueId) return { ...zero, reason: 'no issue id' };
   if (typeof resolveAddress !== 'function' || typeof renderIssue !== 'function' || typeof sendEmail !== 'function') {
@@ -74,6 +96,12 @@ export async function drainMailIssue(env, {
 
   const pending = await readPendingIndex(kv, issueId);
   if (!pending.length) return { ...zero, reason: 'drained', backlog: 0 };
+
+  // LAUNCH SEND GATE (fail-closed), resolved once per issue. A globally-CLOSED gate is the default: it sends
+  // nothing this tick and leaves the entire backlog pending (nothing is claimed, so no attempt is burned). A
+  // launch allowlist restricts sends to named recipient hashes; unrestricted is the deliberate full-send flip.
+  const sendGate = resolveSendGate(env);
+  if (sendGate.mode === 'closed') return { ...zero, reason: 'send gate closed', backlog: pending.length };
 
   // The tick allowance: the tighter of the per-tick cap and the remaining rate budget. FAIL-CLOSED: an
   // unreadable counter makes budgetRemaining 0, so nothing sends this tick.
@@ -94,6 +122,7 @@ export async function drainMailIssue(env, {
   let failed = 0;
   let suppressed = 0;
   let dropped = 0; // a hash in the index whose record is gone: pruned from the index, not a failure
+  let refused = 0; // a hash the launch send gate does not permit yet: left PENDING, no attempt burned
   let budgetLeft = allowance;
   const nowMs = () => Number(now());
 
@@ -128,6 +157,11 @@ export async function drainMailIssue(env, {
       suppressed++;
       continue;
     }
+
+    // LAUNCH SEND GATE, per recipient. A hash the gate does not permit this phase is REFUSED: left PENDING,
+    // NOT claimed, so it burns no attempt and consumes no budget slot, and it waits for the gate to open for it.
+    // Placed AFTER the suppression gate so an unsubscribe is still honored for a not-yet-permitted recipient.
+    if (!sendGate.allows(hash)) { refused++; continue; }
 
     // Claim (burns one attempt) and persist BEFORE any external work, so a cron overlap cannot double-send.
     const claimed = markClaimed(rec, { now });
@@ -189,7 +223,7 @@ export async function drainMailIssue(env, {
   if (sent > 0) await bumpBudget(kv, day, month, sent);
 
   const backlog = (await readPendingIndex(kv, issueId)).length;
-  return { issueId, sent, failed, suppressed, dropped, backlog, allowance };
+  return { issueId, sent, failed, suppressed, dropped, refused, backlog, allowance, gate: sendGate.mode };
 }
 
 /** A retryable failure: leave the record pending for the next tick if it still has attempts, else terminalize it
@@ -232,6 +266,7 @@ export async function drainMail(env, {
   let sent = 0;
   let failed = 0;
   let suppressed = 0;
+  let refused = 0;
   const issues = [];
   for (const id of ids) {
     if (tickCapLeft <= 0) break;
@@ -243,9 +278,10 @@ export async function drainMail(env, {
     sent += r.sent;
     failed += r.failed;
     suppressed += r.suppressed;
+    refused += r.refused || 0;
     issues.push(r);
   }
-  return { drained: sent, failed, suppressed, issues };
+  return { drained: sent, failed, suppressed, refused, issues };
 }
 
 function numOrNull(v) {
