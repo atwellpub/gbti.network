@@ -1,6 +1,8 @@
-// SOW-166: renderIssue v1, the plain semantic digest template. Pure; plain objects, no IO. Proves it renders
-// from the frozen layout (order + empty-section notes owned by the composition core), fails closed on unsafe
-// urls, escapes public content, and carries the unsubscribe link the drain hands it.
+// SOW-166: renderIssue v2, the send-ready 600px table template. Pure; plain objects, no IO. These tests split
+// into CONTRACT (behaviour the send path depends on: fail-closed urls, escaping, layout-order consumption, the
+// leak guard, the unsubscribe link/fallback, the always-absent postal address) and DESIGN v2 (the table
+// skeleton, palette token layer, counts subject and preheader, the filled-before-empty collapse, and the
+// optional blurb/thumb/derived-avatar item fields). Reconciled to the owner's 2026-08-21 rulings.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderIssue, escapeHtml, safeUrl } from '../membership/mail-render.mjs';
@@ -8,7 +10,9 @@ import { composeIssue } from '../membership/mail-digest.mjs';
 
 const at = (t) => () => t;
 
-// A hand-built frozen issue: news filled (2), article empty (note), so order + both branches are exercised.
+// A hand-built frozen issue: news filled (2), article filled (1), product EMPTY (so the collapse branch and the
+// filled-before-empty order are both exercised). No counts/generatedAt, so the subject falls back to the plain
+// default (a bare fixture must not trip the counts-subject path).
 function issueFixture() {
   return {
     issueId: '2026-08-25',
@@ -33,6 +37,8 @@ function issueFixture() {
   };
 }
 
+// ---- CONTRACT ----
+
 test('safeUrl: http(s) and site-relative pass; javascript:, data:, and junk fail closed', () => {
   assert.equal(safeUrl('https://x.com/a'), 'https://x.com/a');
   assert.equal(safeUrl('http://x.com'), 'http://x.com');
@@ -47,22 +53,27 @@ test('escapeHtml neutralizes markup characters', () => {
   assert.equal(escapeHtml('<script>&"\''), '&lt;script&gt;&amp;&quot;&#39;');
 });
 
-test('renders every layout section IN ORDER; filled sections list items, empty sections show the note', () => {
+test('renders filled sections IN ORDER with links; empty sections collapse to one line at the end', () => {
   const { html } = renderIssue(issueFixture(), {});
-  // order: News, then Articles, then the empty Products note
+  // order: News, then Articles, then the collapsed empty line naming Products
   const iNews = html.indexOf('News');
   const iArticles = html.indexOf('Articles');
   const iProducts = html.indexOf('Products');
-  assert.ok(iNews >= 0 && iArticles > iNews && iProducts > iArticles, 'sections render in layout order');
-  // filled: both news titles are links; the article title is a link
+  assert.ok(iNews >= 0 && iArticles > iNews && iProducts > iArticles, 'filled sections in order, empties after');
+  // filled: titles are links
   assert.match(html, /<a href="https:\/\/news\.example\/edge"[^>]*>Edge AI roundup<\/a>/);
   assert.match(html, /<a href="https:\/\/news\.example\/kv"[^>]*>KV at scale<\/a>/);
-  assert.match(html, /<a href="\/blog\/worker-cron\/"[^>]*>Shipping a Worker cron<\/a>/);
+  assert.match(html, /<a href="https:\/\/gbti\.network\/blog\/worker-cron\/"[^>]*>Shipping a Worker cron<\/a>/, 'site-relative item links are absolutized for email');
   // news shows source, member item shows byline
   assert.match(html, /The Register/);
   assert.match(html, /by Dika Fei/);
-  // empty section: the note, no list
-  assert.match(html, /No new products since the last issue\./);
+  // filled sections carry a count label
+  assert.match(html, /2 NEW/);
+  assert.match(html, /1 NEW/);
+  // the empty Products section collapses to one compact line, NOT the per-section note or a section box
+  assert.match(html, /Nothing new in Products since the last issue\./);
+  assert.doesNotMatch(html, /No new products since the last issue\./, 'the per-section note is not rendered');
+  assert.doesNotMatch(html, /NONE THIS WEEK/, 'an empty section gets no count label');
 });
 
 test('an item with an UNSAFE url renders its title as TEXT, never a live link', () => {
@@ -100,21 +111,13 @@ test('an unsafe unsubscribe url is dropped to the fallback (fail closed), never 
   assert.match(html, /manage your subscription/i);
 });
 
-test('subject defaults, and ctx.subject overrides; text alternative carries the sections', () => {
-  assert.equal(renderIssue(issueFixture(), {}).subject, 'The GBTI Network weekly digest');
-  assert.equal(renderIssue(issueFixture(), { subject: 'Custom line' }).subject, 'Custom line');
-  const { text } = renderIssue(issueFixture(), {});
-  assert.match(text, /NEWS/);
-  assert.match(text, /Edge AI roundup/);
-  assert.match(text, /ARTICLES/);
-  assert.match(text, /No new products since the last issue\./);
-});
-
-test('postal address renders only when provided (CAN-SPAM footer slot, supplied by the drain, never fabricated)', () => {
-  assert.doesNotMatch(renderIssue(issueFixture(), {}).html, /Dothan/);
+test('NO postal address is ever rendered, even if a caller passes one (owner ruling: none in any template)', () => {
+  // The default has no address.
+  assert.doesNotMatch(renderIssue(issueFixture(), {}).html, /Dothan|Gethsemane|Delaware|PO Box/i);
+  // And there is no code path that emits one: passing the removed parameter is inert.
   const { html, text } = renderIssue(issueFixture(), { postalAddress: 'Gethsemane LLC, Dothan, Alabama, USA' });
-  assert.match(html, /Gethsemane LLC, Dothan, Alabama, USA/);
-  assert.match(text, /Gethsemane LLC, Dothan, Alabama, USA/);
+  assert.doesNotMatch(html, /Dothan|Gethsemane|Alabama/i);
+  assert.doesNotMatch(text, /Dothan|Gethsemane|Alabama/i);
 });
 
 test('an empty or missing layout renders a valid shell rather than crashing', () => {
@@ -128,7 +131,7 @@ test('an empty or missing layout renders a valid shell rather than crashing', ()
   }
 });
 
-test('INTEGRATION: composeIssue output feeds renderIssue directly (the two shapes fit)', () => {
+test('INTEGRATION: composeIssue output feeds renderIssue directly (the two shapes fit; leak guard holds)', () => {
   const issue = composeIssue({
     issueId: 'i-int',
     items: [
@@ -143,4 +146,121 @@ test('INTEGRATION: composeIssue output feeds renderIssue directly (the two shape
   assert.doesNotMatch(html, /Secret post/, 'the members-only item was excluded by the composition leak guard');
   assert.match(html, /Hot item/);
   assert.match(html, />Unsubscribe</);
+});
+
+// ---- DESIGN v2 ----
+
+test('the shell is a 600px table wrapping a 536px card with a 480px content column', () => {
+  const { html } = renderIssue(issueFixture(), {});
+  assert.match(html, /<table[^>]*width="600"/);
+  assert.match(html, /width="536"/);
+  assert.match(html, /width="480"/);
+  assert.match(html, /role="presentation"/);
+});
+
+test('the palette is light by default and swaps to dark on ctx.theme', () => {
+  const light = renderIssue(issueFixture(), {}).html;
+  const dark = renderIssue(issueFixture(), { theme: 'dark' }).html;
+  assert.match(light, /background-color:#efece7/, 'light page background');
+  assert.doesNotMatch(light, /#1b1922/, 'no dark tokens leak into the light render');
+  assert.match(dark, /background-color:#1b1922/, 'dark page background');
+  assert.doesNotMatch(dark, /#efece7/, 'no light tokens leak into the dark render');
+});
+
+test('the subject carries the item count and week range when the issue provides counts and generatedAt', () => {
+  const issue = { generatedAt: Date.UTC(2026, 7, 21), counts: { article: 2, product: 0, prompt: 0, share: 9, news: 4 }, layout: [] };
+  const { subject } = renderIssue(issue, {});
+  assert.match(subject, /^GBTI Digest · 15 items · Aug 15-21$/);
+  // ctx.subject still overrides the computed one.
+  assert.equal(renderIssue(issue, { subject: 'Custom line' }).subject, 'Custom line');
+});
+
+test('the hidden preheader carries a natural-language counts summary in non-zero-section order', () => {
+  const issue = { generatedAt: Date.UTC(2026, 7, 21), counts: { article: 4, product: 2, prompt: 0, share: 0, news: 3 }, layout: [] };
+  const { html } = renderIssue(issue, {});
+  assert.match(html, /<span style="display:none[^"]*">4 articles, 2 products and 3 news picks from the network this week\.<\/span>/);
+});
+
+test('the text alternative carries filled sections and the collapsed empty line', () => {
+  const { text } = renderIssue(issueFixture(), {});
+  assert.match(text, /NEWS \(2\)/);
+  assert.match(text, /Edge AI roundup/);
+  assert.match(text, /ARTICLES \(1\)/);
+  assert.match(text, /Nothing new in Products since the last issue\./);
+  assert.doesNotMatch(text, /No new products since the last issue\./, 'the per-section note is not carried into text');
+});
+
+test('an item blurb renders when present and is escaped', () => {
+  const issue = { layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1, blurb: 'A short <b>summary</b>.' },
+  ] }] };
+  const { html } = renderIssue(issue, {});
+  assert.match(html, /A short &lt;b&gt;summary&lt;\/b&gt;\./);
+});
+
+test('SECURITY: the row shows NO blurb when the item has a body but no blurb (no body fallback)', () => {
+  const issue = { layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1, body: 'SECRET BODY TEXT', encryptedBody: 'CIPHERTEXT' },
+  ] }] };
+  const { html, text } = renderIssue(issue, {});
+  assert.doesNotMatch(html, /SECRET BODY TEXT/, 'the renderer never reads a body field');
+  assert.doesNotMatch(html, /CIPHERTEXT/, 'and never reads a ciphertext field');
+  assert.doesNotMatch(text, /SECRET BODY TEXT/);
+});
+
+test('a thumbnail renders when the item carries a thumb; absent means no image; an unsafe thumb is dropped', () => {
+  const withThumb = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1, thumb: '/media/x.webp' },
+  ] }] }, {});
+  assert.match(withThumb.html, /<img src="https:\/\/gbti\.network\/media\/x\.webp"[^>]*width="96"/, 'a site-relative thumb is absolutized for email');
+
+  const noThumb = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1 },
+  ] }] }, {});
+  assert.doesNotMatch(noThumb.html, /width="96"/, 'no thumbnail column when the item carries no thumb');
+
+  const badThumb = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1, thumb: 'javascript:x' },
+  ] }] }, {});
+  assert.doesNotMatch(badThumb.html, /javascript:/);
+  assert.doesNotMatch(badThumb.html, /width="96"/, 'an unsafe thumb renders no image');
+});
+
+test('site-relative links are absolutized against ctx.siteUrl (external links pass through)', () => {
+  const issue = { layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/blog/x/', authorName: 'A', date: 1, thumb: '/media/y.webp' },
+  ] }] };
+  const { html } = renderIssue(issue, { siteUrl: 'https://staging.example' });
+  assert.match(html, /<a href="https:\/\/staging\.example\/blog\/x\/"/, 'the item link uses the provided base');
+  assert.match(html, /<img src="https:\/\/staging\.example\/media\/y\.webp"/, 'the thumb uses the provided base');
+  // an external item link is untouched
+  const ext = renderIssue({ layout: [{ key: 'news', label: 'News', empty: false, items: [
+    { title: 'N', url: 'https://news.example/z', source: 'S', date: 1 },
+  ] }] }, { siteUrl: 'https://staging.example' }).html;
+  assert.match(ext, /<a href="https:\/\/news\.example\/z"/);
+});
+
+test('a member item derives its author avatar from the github login; a news item has none', () => {
+  const issue = { layout: [
+    { key: 'news', label: 'News', empty: false, items: [{ title: 'N', url: 'https://n/x', source: 'Src', date: 1 }] },
+    { key: 'article', label: 'Articles', empty: false, items: [{ kind: 'article', title: 'T', url: '/p/', author: 'dikafei', authorName: 'Dika Fei', date: 1 }] },
+  ] };
+  const { html } = renderIssue(issue, {});
+  assert.match(html, /<img src="https:\/\/github\.com\/dikafei\.png\?size=32"[^>]*alt=""/);
+  assert.doesNotMatch(html, /github\.com\/Src\.png/, 'the news source is not treated as an avatar login');
+});
+
+test('empty sections collapse to a single line naming them all; the first issue swaps the cadence clause and shows its launch note', () => {
+  const base = [
+    { key: 'news', label: 'News', empty: false, items: [{ title: 'N', url: 'https://n/x', source: 'Src', date: 1 }] },
+    { key: 'article', label: 'Articles', empty: true, note: 'x', items: [] },
+    { key: 'product', label: 'Products', empty: true, note: 'y', items: [] },
+    { key: 'prompt', label: 'Prompts', empty: true, note: 'z', items: [] },
+  ];
+  const later = renderIssue({ layout: base }, {}).html;
+  assert.match(later, /Nothing new in Articles, Products and Prompts since the last issue\./);
+
+  const first = renderIssue({ launchNote: 'This is the first issue, so it covers the past week rather than everything published before it.', layout: base }, {}).html;
+  assert.match(first, /Nothing new in Articles, Products and Prompts in the past week\./);
+  assert.match(first, /This is the first issue/);
 });
