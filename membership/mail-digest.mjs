@@ -21,6 +21,20 @@
 // dies with it (it triggers on memberItemCount === 0). The owner's empty-section ruling presupposes a window:
 // a note renders "because a visible gap is an invitation to fill it", and there is no gap without a window.
 //
+// `since` AND `exclude` ARE TWO REGIMES, NOT TWO FILTERS TO STACK. `since` windows on publishedAt, which is
+// only a PROXY for "new to the reader": publishedAt is stamped in the client when the PR is OPENED
+// (client/src/operations.mjs), while the item reaches activity-index.json only after merge plus deploy. An item
+// whose publishedAt predates the last compile but which first became visible AFTER it is dropped by `since` and
+// never mailed at all: a held contribution PR, or a deliberately backdated date. `exclude` is the real semantic,
+// the set of urls already mailed, and it cannot lose an item that way.
+//
+// So the compile passes ONE of them per issue, not both:
+//   FIRST ISSUE   since = now - 7d, exclude = null   bounds the launch issue instead of mailing a back catalogue
+//   THEREAFTER    since = null, exclude = mailed urls  everything not yet mailed, no loss window to fall into
+// Both are applied independently when both are supplied, which means stacking them RE-OPENS the loss `exclude`
+// exists to close. That is a legitimate choice for a caller that wants a hard bound and accepts the loss, and it
+// is why the frozen issue records which regime produced it rather than leaving it to be inferred.
+//
 // Item shape IN (the Worker normalizes activity-index entries + public shares to this):
 //   { kind: 'article'|'product'|'prompt'|'share', title, url, author, authorName?, date: number,
 //     visibility: 'public'|'members', ... (any extra fields are dropped by the projection) }
@@ -143,6 +157,10 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * where the reason it is load-bearing lives). Absent means no window, which is what every caller written before
  * this option got, and it is never the right thing for the weekly compile.
  *
+ * `exclude` is the set of urls already mailed, and it is the semantic `since` only approximates. Pass ONE of the
+ * two per issue: `since` bounds the first issue, `exclude` carries every issue after it. Supplying both applies
+ * both, which re-opens the loss window `exclude` closes; see the header note.
+ *
  * `maxNewsThin` OPTIONALLY lifts the news cap on a week with NO member content, so a news-led issue is a
  * real issue rather than a stub. It applies only when every member section is empty, it can only raise the
  * cap and never lower it, and it defaults to no lift, so an explicit maxNews is always a real ceiling. The
@@ -152,7 +170,7 @@ const byDateDesc = (a, b) => (b.date - a.date);
  */
 export function composeIssue(
   { issueId, items = [], news = [], now = Date.now } = {},
-  { perSection = 5, maxNews = 5, maxNewsThin, since } = {},
+  { perSection = 5, maxNews = 5, maxNewsThin, since, exclude } = {},
 ) {
   const id = trimOrNull(issueId);
   if (!id) throw new DigestError('issueId is required');
@@ -169,6 +187,19 @@ export function composeIssue(
   // (date >= since) so an item published at the exact instant of the previous compile lands in exactly one
   // issue: this one. Excluding it would drop it forever, since next week's window starts later still.
   const sinceMs = Number.isFinite(Number(since)) && since != null ? Number(since) : null;
+  // The already-mailed set. Accepts a Set or any iterable of urls; anything else (including a bare object, a
+  // string, or nothing) means NO exclusion. `null` is kept distinct from an EMPTY set on purpose: an empty set
+  // is a real answer on the first issue, and a caller that forgot to pass one is not, so the two must not look
+  // alike in the frozen issue. Bounding the set is the CALLER's job and it is safe to bound: the artifacts cap
+  // at 40 per type, so a url that has aged out of them can never reappear and never needs remembering.
+  const excluded = (() => {
+    if (exclude == null) return null;
+    if (exclude instanceof Set) return new Set([...exclude].map((u) => str(u).trim()).filter(Boolean));
+    if (typeof exclude?.[Symbol.iterator] === 'function' && typeof exclude !== 'string') {
+      return new Set([...exclude].map((u) => str(u).trim()).filter(Boolean));
+    }
+    return null;
+  })();
 
   // Layer 1: drop every non-public item. Layer 2: project each survivor to public-safe fields only.
   const publicItems = (Array.isArray(items) ? items : [])
@@ -178,7 +209,12 @@ export function composeIssue(
     // Windowed AFTER the projection, so it reads the already-normalized numeric `date` rather than whatever
     // shape the caller passed. An undated item has date 0 and therefore never survives a window, which is the
     // right way round: an item with no publication date cannot be shown to be new.
-    .filter((it) => sinceMs === null || it.date >= sinceMs);
+    .filter((it) => sinceMs === null || it.date >= sinceMs)
+    // Matched on the projected `url`, which is the same field the caller records when it mails an item, so the
+    // two sides cannot drift into comparing different strings. Trimmed on both sides and otherwise EXACT: the
+    // urls come from one generator, and normalizing case or trailing slashes here would be inventing a
+    // tolerance the producer does not need and quietly excluding a near-miss that is a different item.
+    .filter((it) => excluded === null || !excluded.has(it.url));
 
   const sections = { article: [], product: [], prompt: [], share: [] };
   for (const it of publicItems) {
@@ -220,7 +256,7 @@ export function composeIssue(
     // that is a bug in the caller every time. News is deliberately not windowed: it is ranked by distinct
     // openers rather than recency, and the gather already returns a bounded recent set, so a story that
     // ingested nine days ago and was opened all week is exactly what belongs at the top.
-    window: { since: sinceMs, appliesTo: 'members' },
+    window: { since: sinceMs, excluded: excluded === null ? null : excluded.size, appliesTo: 'members' },
   };
 }
 

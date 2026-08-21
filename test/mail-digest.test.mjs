@@ -311,7 +311,7 @@ test('WINDOW: news is deliberately NOT windowed, and the issue records the windo
   const news = [{ title: 'opened-all-week', url: 'https://n/1', opens: 40, date: 10 }];
   const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: 5_000 });
   assert.equal(issue.counts.news, 1, 'ranked by openers, not recency, so an older story still leads');
-  assert.deepEqual(issue.window, { since: 5_000, appliesTo: 'members' });
+  assert.deepEqual(issue.window, { since: 5_000, excluded: null, appliesTo: 'members' });
 
   // A compile that forgot the window says so in the stored artifact rather than looking identical to one
   // that meant it. `since: null` in KV is the tell.
@@ -321,4 +321,85 @@ test('WINDOW: news is deliberately NOT windowed, and the issue records the windo
   for (const bad of ['soon', NaN, Infinity, undefined, null, {}]) {
     assert.equal(composeIssue({ issueId: 'i', items: [], news, now: at(1) }, { since: bad }).window.since, null, `since: ${String(bad)}`);
   }
+});
+
+test('EXCLUDE: an already-mailed item is dropped and an unmailed one is kept, both in one call', () => {
+  // The positive control is the whole point here. An exclude test that only proves the mailed item is gone
+  // passes against a filter that drops everything, and that failure would empty every issue after the first.
+  const items = [
+    pub('article', 'mailed-last-week', 5_000),
+    pub('article', 'never-mailed', 4_000),
+    pub('share', 'also-never-mailed', 3_000),
+  ];
+  const exclude = new Set([`https://gbti.network/article/mailed-last-week`]);
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude });
+
+  assert.deepEqual(issue.sections.article.map((x) => x.title), ['never-mailed']);
+  assert.deepEqual(issue.sections.share.map((x) => x.title), ['also-never-mailed']);
+  assert.equal(issue.window.excluded, 1);
+});
+
+test('EXCLUDE: it rescues the item `since` loses, which is the entire reason it exists', () => {
+  // The held-contribution case. publishedAt is stamped when the PR is OPENED, so a contribution held for the
+  // folder owner's review carries a date from BEFORE the last compile and only reaches the artifact after it.
+  // Under a window it is dropped forever and nobody is told. Under the already-mailed set it goes out late.
+  const heldContribution = pub('article', 'reviewed-slowly', 500); // published before the last compile
+  const lastCompile = 1_000;
+
+  const windowed = composeIssue(
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { since: lastCompile },
+  );
+  assert.equal(windowed.counts.article, 0, 'the window loses it');
+
+  const bySentSet = composeIssue(
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { exclude: new Set(['https://gbti.network/article/something-else']) },
+  );
+  assert.equal(bySentSet.counts.article, 1, 'the already-mailed set does not');
+  assert.equal(bySentSet.sections.article[0].title, 'reviewed-slowly');
+
+  // And stacking them re-opens the loss, which is why the regimes are documented as either/or.
+  const stacked = composeIssue(
+    { issueId: 'i', items: [heldContribution], news: [], now: at(1) },
+    { since: lastCompile, exclude: new Set() },
+  );
+  assert.equal(stacked.counts.article, 0, 'both filters apply independently');
+});
+
+test('EXCLUDE: an empty set is a real answer and a missing one is not, so they must not look alike', () => {
+  const items = [pub('article', 'a', 10)];
+  const firstIssue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude: new Set() });
+  assert.equal(firstIssue.counts.article, 1);
+  assert.equal(firstIssue.window.excluded, 0, 'an empty set records 0');
+
+  const forgot = composeIssue({ issueId: 'i', items, news: [], now: at(1) });
+  assert.equal(forgot.window.excluded, null, 'a forgotten set records null, so KV shows which happened');
+});
+
+test('EXCLUDE: takes an array as readily as a Set, and ignores what is not a url collection', () => {
+  const items = [pub('article', 'kept', 10), pub('article', 'dropped', 20)];
+  const viaArray = composeIssue(
+    { issueId: 'i', items, news: [], now: at(1) },
+    { exclude: ['https://gbti.network/article/dropped'] },
+  );
+  assert.deepEqual(viaArray.sections.article.map((x) => x.title), ['kept']);
+
+  // A string is iterable and would otherwise become a set of single characters, excluding nothing while
+  // looking set. Anything that is not a url collection means no exclusion, never a partial one.
+  for (const bad of ['https://gbti.network/article/dropped', 42, {}, true]) {
+    const issue = composeIssue({ issueId: 'i', items, news: [], now: at(1) }, { exclude: bad });
+    assert.equal(issue.counts.article, 2, `exclude: ${String(bad)} must not filter`);
+    assert.equal(issue.window.excluded, null);
+  }
+});
+
+test('EXCLUDE: news is untouched by it, the same as the window', () => {
+  const news = [{ title: 'still-the-top-story', url: 'https://n/1', opens: 40, date: 10 }];
+  const issue = composeIssue(
+    { issueId: 'i', items: [], news, now: at(1) },
+    { exclude: new Set(['https://n/1']) },
+  );
+  assert.equal(issue.counts.news, 1, 'news ranks by openers and is bounded by its gather, not by this');
+  assert.equal(issue.window.appliesTo, 'members');
 });
