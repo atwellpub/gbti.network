@@ -46,16 +46,25 @@ export const SECTION_LABELS = {
 // Each note is worded differently on purpose. On a genuinely thin week a reader sees four of these at once,
 // and four sentences built to the same pattern read as generated filler, which is the opposite of an
 // invitation.
+//
+// THEY SAY "SINCE THE LAST ISSUE", NOT "THIS WEEK", and that is not a style preference. The issue is
+// compiled once and frozen, then the send SMOOTHS across a rate budget, so the last recipient may open the
+// same frozen issue days after the first. "This week" is true for whoever reads it on Tuesday morning and
+// drifts for everyone behind them in the queue. "Since the last issue" is anchored to the cadence rather
+// than to the reading date, so it stays true across the whole spread.
+//
+// Plain sentences, no markdown. The renderer is a table-based HTML email, and a stray asterisk or bracket
+// would reach the reader as an asterisk or bracket. A test enforces it.
 export const EMPTY_SECTION_NOTES = {
-  news: 'No news items were curated this week.',
+  news: 'No news items have been added since the last issue.',
   article:
-    'No new articles were published this week. The blog runs on what members write, so a draft you have been sitting on would land well here.',
+    'No new articles have been published since the last issue. The blog runs on what members write, so a draft you have been sitting on would land well here.',
   product:
-    'No new products this week. If you have shipped something recently, adding it to the directory takes a few minutes.',
+    'No new products since the last issue. If you have shipped something recently, adding it to the directory takes a few minutes.',
   prompt:
-    'No new prompts this week. If you have one you reach for often, it will probably work for somebody else too.',
+    'No new prompts since the last issue. If you have one you reach for often, it will probably work for somebody else too.',
   share:
-    'No shares this week. A share is the cheapest thing to post here: a link and a sentence about why it is worth reading.',
+    'No shares since the last issue. A share is the cheapest thing to post here: a link and a sentence about why it is worth reading.',
 };
 
 /** Thrown for caller-input problems; the handler maps it to a 400 (never a 500). */
