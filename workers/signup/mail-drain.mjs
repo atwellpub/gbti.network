@@ -65,8 +65,9 @@ export function resolveSendGate(env = {}) {
 
 /**
  * Drain ONE issue for at most `cap` sends this tick, inside the fail-closed rate budget and behind the
- * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, dropped, refused, backlog,
- * gate, reason }, where `refused` counts recipients the send gate did not permit (left pending, no attempt).
+ * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, dropped, refused, deferred,
+ * backlog, gate, reason }, where `refused` counts recipients the send gate did not permit and `deferred`
+ * counts recipients whose suppression marker was unreadable this tick; both are left pending with no attempt.
  */
 export async function drainMailIssue(env, {
   kv = env?.SIGNUP_KV,
@@ -83,7 +84,7 @@ export async function drainMailIssue(env, {
   sendEmail,
   from = env?.MAIL_FROM || env?.RESEND_FROM || null,
 } = {}) {
-  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, refused: 0, backlog: 0 };
+  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, refused: 0, deferred: 0, backlog: 0 };
   if (!kv) return { ...zero, reason: 'no kv' };
   if (!issueId) return { ...zero, reason: 'no issue id' };
   if (typeof resolveAddress !== 'function' || typeof renderIssue !== 'function' || typeof sendEmail !== 'function') {
@@ -123,6 +124,7 @@ export async function drainMailIssue(env, {
   let suppressed = 0;
   let dropped = 0; // a hash in the index whose record is gone: pruned from the index, not a failure
   let refused = 0; // a hash the launch send gate does not permit yet: left PENDING, no attempt burned
+  let deferred = 0; // suppression marker unreadable this tick: left PENDING, no attempt burned, retried next tick
   let budgetLeft = allowance;
   const nowMs = () => Number(now());
 
@@ -149,9 +151,18 @@ export async function drainMailIssue(env, {
     // SEND-TIME SUPPRESSION GATE. Checked BEFORE claiming so an unsubscribe never even consumes an attempt or a
     // budget slot. The recipientHash IS the suppression hash (mailHash(secret,email)), so the marker is found by
     // key with no address and no secret needed here.
-    let isSuppressed = false;
-    try { isSuppressed = Boolean(await kv.get(suppressKey(hash))); } catch { isSuppressed = false; }
-    if (isSuppressed) {
+    //
+    // THREE outcomes, not two, and the third is the whole point (SecurityMaster, 2026-08-21). A KV read ERROR is
+    // NOT knowledge that the person is un-suppressed, so we must NOT send: mailing someone who opted out is
+    // exactly what the auto-enrolment rider exists to prevent, and it is invisible after the fact (the record
+    // terminalizes as a normal send). But we must NOT terminalize either: markSuppressed writes a TERMINAL
+    // record, so a transient blip would permanently unsubscribe a legitimate subscriber and nothing would retry.
+    // The correct third outcome is DEFERRED: leave the record pending, claim nothing, count it, retry next tick.
+    // (This mirrors mail-store readBudget: absent means zero, error means unknown, and unknown is fail-closed.)
+    let supp; // true = suppressed, false = definitely absent, null = unreadable
+    try { supp = Boolean(await kv.get(suppressKey(hash))); } catch { supp = null; }
+    if (supp === null) { deferred++; continue; } // unreadable marker: fail-closed, no send, no attempt burned
+    if (supp) {
       await putSend(kv, markSuppressed(rec, { now }));
       await removeFromPending(kv, issueId, hash);
       suppressed++;
@@ -223,7 +234,7 @@ export async function drainMailIssue(env, {
   if (sent > 0) await bumpBudget(kv, day, month, sent);
 
   const backlog = (await readPendingIndex(kv, issueId)).length;
-  return { issueId, sent, failed, suppressed, dropped, refused, backlog, allowance, gate: sendGate.mode };
+  return { issueId, sent, failed, suppressed, dropped, refused, deferred, backlog, allowance, gate: sendGate.mode };
 }
 
 /** A retryable failure: leave the record pending for the next tick if it still has attempts, else terminalize it
@@ -267,6 +278,7 @@ export async function drainMail(env, {
   let failed = 0;
   let suppressed = 0;
   let refused = 0;
+  let deferred = 0;
   const issues = [];
   for (const id of ids) {
     if (tickCapLeft <= 0) break;
@@ -279,9 +291,10 @@ export async function drainMail(env, {
     failed += r.failed;
     suppressed += r.suppressed;
     refused += r.refused || 0;
+    deferred += r.deferred || 0;
     issues.push(r);
   }
-  return { drained: sent, failed, suppressed, refused, issues };
+  return { drained: sent, failed, suppressed, refused, deferred, issues };
 }
 
 function numOrNull(v) {

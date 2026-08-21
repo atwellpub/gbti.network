@@ -125,6 +125,35 @@ test('SUPPRESSION GATE: an unsubscribe marker drops the recipient at send time, 
   assert.equal((await readBudget(kv, dayStr, monthStr)).daily, 1, 'suppression consumed no send budget');
 });
 
+test('SUPPRESSION UNREADABLE: a KV error on the suppress check DEFERS (fail-closed), then sends once it recovers', async () => {
+  // The regulatory-critical asymmetry: a KV read ERROR is NOT knowledge that the person is un-suppressed.
+  // Sending anyway could mail someone who opted out (invisible after the fact); terminalizing as suppressed
+  // would permanently unsubscribe a legitimate subscriber on a transient blip. The correct third outcome is
+  // DEFER: no send, no terminal record, retry next tick.
+  let breakSuppress = true;
+  const kv = makeKV({ throwOn: (k) => breakSuppress && k.startsWith('mail:suppress:') });
+  await seed(kv, 'i1', ['a'], { now: at(1_000_000) });
+  const sender = makeSender();
+
+  const t1 = await drainMailIssue(OPEN, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(t1.deferred, 1, 'an unreadable suppression marker defers, it does not send');
+  assert.equal(t1.sent, 0);
+  assert.equal(sender.sent.length, 0, 'nobody is mailed while their opt-out status is unknown');
+  const rec = await getSend(kv, 'i1', 'a');
+  assert.equal(rec.status, 'pending', 'the deferred record is left pending, not terminalized');
+  assert.equal(rec.attempts, 0, 'a deferral burns no attempt');
+  assert.ok((await readPendingIndex(kv, 'i1')).includes('a'), 'the deferred recipient waits in the backlog');
+  const { dayStr, monthStr } = budgetDateStrings(1_000_000);
+  assert.deepEqual(await readBudget(kv, dayStr, monthStr), { daily: 0, monthly: 0 }, 'a deferral spends no budget');
+
+  // KV recovers: the marker now reads absent, so the recipient sends, exactly once. The blip only delayed it.
+  breakSuppress = false;
+  const t2 = await drainMailIssue(OPEN, { kv, issueId: 'i1', now: at(1_300_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(t2.deferred, 0);
+  assert.equal(t2.sent, 1, 'a transient blip only delayed the send, it did not drop the recipient');
+  assert.deepEqual(sender.sent, ['a@example.com']);
+});
+
 test('NO DOUBLE SEND: re-draining a fully sent issue sends nothing more', async () => {
   const kv = makeKV();
   await seed(kv, 'i1', ['a', 'b'], { now: at(1_000_000) });
