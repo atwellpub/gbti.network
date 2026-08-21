@@ -441,3 +441,40 @@ test('LAUNCH ISSUE: the copy is plain sentences, the same rule the standing note
     assert.match(note, /\.$/, 'ends as a sentence');
   }
 });
+
+test('REGIMES: the floor plus the sent set is the only combination that gets all three cases right', () => {
+  // This pins the guidance itself, because prose in a header comment is not a control and the FIRST version of
+  // that prose said to pass one or the other and produced a live defect. Three claims, one artifact, one call
+  // each. If someone changes the recommended combination, this fails and names which case it broke.
+  const DAY = 86_400_000;
+  const NOW = 2_000 * DAY; // the newsletter began 60 days ago, so this is roughly issue nine
+  const EPOCH = NOW - 60 * DAY;
+  const item = (title, daysAgo) => pub('article', title, NOW - daysAgo * DAY);
+
+  const artifact = [
+    item('new-this-week', 2),
+    item('held-for-review', 12),   // PR opened 12 days ago, merged and deployed only now. After the epoch.
+    item('predates-the-newsletter', 120),
+  ];
+  const titles = (opts) =>
+    composeIssue({ issueId: 'i', items: artifact, news: [], now: at(NOW) }, { perSection: 5, ...opts })
+      .sections.article.map((x) => x.title);
+
+  // A per-issue window alone loses the held contribution. That is the defect exclude was built for.
+  assert.deepEqual(titles({ since: NOW - 7 * DAY }), ['new-this-week']);
+
+  // The sent set alone mails the pre-newsletter archive as if it were this week's news.
+  assert.deepEqual(
+    titles({ since: null, exclude: new Set() }),
+    ['new-this-week', 'held-for-review', 'predates-the-newsletter'],
+  );
+
+  // The floor plus the sent set: the new item and the late one, and nothing from before the newsletter existed.
+  assert.deepEqual(titles({ since: EPOCH, exclude: new Set() }), ['new-this-week', 'held-for-review']);
+
+  // ...and it still excludes what was already mailed, so the floor did not quietly replace the filter.
+  assert.deepEqual(
+    titles({ since: EPOCH, exclude: new Set([`https://gbti.network/article/new-this-week`]) }),
+    ['held-for-review'],
+  );
+});

@@ -28,12 +28,28 @@
 // never mailed at all: a held contribution PR, or a deliberately backdated date. `exclude` is the real semantic,
 // the set of urls already mailed, and it cannot lose an item that way.
 //
-// So the compile passes ONE of them per issue, not both:
-//   FIRST ISSUE   since = now - 7d, exclude = null   bounds the launch issue instead of mailing a back catalogue
-//   THEREAFTER    since = null, exclude = mailed urls  everything not yet mailed, no loss window to fall into
-// Both are applied independently when both are supplied, which means stacking them RE-OPENS the loss `exclude`
-// exists to close. That is a legitimate choice for a caller that wants a hard bound and accepts the loss, and it
-// is why the frozen issue records which regime produced it rather than leaving it to be inferred.
+// CORRECTED 2026-08-21, same day, and the first version of this note caused a live defect. It said to pass ONE
+// of them per issue and never both, and the orchestrator implemented exactly that: `since = null` from issue two
+// onward. With no floor the pool is the WHOLE artifact, so issue two mails the pre-newsletter back catalogue as
+// if it were this week's news, ordered newest-unmailed-first so it walks backwards in time week by week, and the
+// empty-section notes are unreachable again for as long as the archive takes to drain. That is the same
+// hollowing-out the window was added to fix, arrived at from the other side.
+//
+// THEY ARE A FILTER AND A FLOOR, AND THE FLOOR IS NOT OPTIONAL:
+//   FIRST ISSUE   since = now - 7d,             exclude = null          bounds the launch issue
+//   THEREAFTER    since = the newsletter EPOCH, exclude = mailed urls   everything unmailed since it began
+//
+// The epoch is the first issue's own `window.since`, already recorded on that frozen issue, so it needs no new
+// constant and nothing to tune. It means the newsletter covers its own lifetime and never its pre-history: an
+// item published before the newsletter existed is never mailed, and an item published since is mailed exactly
+// once however late it arrives. What re-opens the loss is stacking `exclude` with a TIGHT `since` (a per-issue
+// window), not with a floor: a floor months in the past cannot cut off a contribution held for review for days.
+//
+// The one case the floor does exclude is an item published BEFORE the first issue and merged after it. That is a
+// launch-boundary case, it happens once, and treating a newsletter's second issue as not carrying things from
+// before it existed is the right reading of it rather than a loss.
+//
+// The frozen issue records both, so which regime produced it is readable rather than inferred.
 //
 // Item shape IN (the Worker normalizes activity-index entries + public shares to this):
 //   { kind: 'article'|'product'|'prompt'|'share', title, url, author, authorName?, date: number,
@@ -185,9 +201,10 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * `firstIssue` swaps the empty-section notes for their launch wording and attaches `launchNote`. Only ever
  * true once, and the caller already knows it: it is the same condition that made `resolveSince` bootstrap.
  *
- * `exclude` is the set of urls already mailed, and it is the semantic `since` only approximates. Pass ONE of the
- * two per issue: `since` bounds the first issue, `exclude` carries every issue after it. Supplying both applies
- * both, which re-opens the loss window `exclude` closes; see the header note.
+ * `exclude` is the set of urls already mailed, and it is the semantic `since` only approximates. From issue two
+ * onward pass BOTH: `exclude` is the filter and `since` is the newsletter's epoch floor. `exclude` alone mails
+ * the pre-newsletter back catalogue; a PER-ISSUE `since` alongside it re-opens the loss `exclude` closes. See
+ * the header note, which said the wrong thing first and explains why.
  *
  * `maxNewsThin` OPTIONALLY lifts the news cap on a week with NO member content, so a news-led issue is a
  * real issue rather than a stub. It applies only when every member section is empty, it can only raise the
