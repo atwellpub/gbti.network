@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   composeIssue, hasContent, issueKey, isPublicItem, SECTION_KINDS, DigestError,
   SECTION_ORDER, SECTION_LABELS, EMPTY_SECTION_NOTES, shouldSend,
+  FIRST_ISSUE_NOTE, FIRST_ISSUE_SECTION_NOTES,
 } from '../membership/mail-digest.mjs';
 
 const at = (t) => () => t;
@@ -402,4 +403,41 @@ test('EXCLUDE: news is untouched by it, the same as the window', () => {
   );
   assert.equal(issue.counts.news, 1, 'news ranks by openers and is bounded by its gather, not by this');
   assert.equal(issue.window.appliesTo, 'members');
+});
+
+test('LAUNCH ISSUE: nothing below the line says "since the last issue" to somebody reading their first', () => {
+  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) }, { firstIssue: true });
+  assert.equal(issue.launchNote, FIRST_ISSUE_NOTE);
+  for (const section of issue.layout) {
+    assert.ok(section.note, `${section.key} still carries a note`);
+    assert.doesNotMatch(section.note, /last issue/i, `${section.key} must not reference an issue that never existed`);
+    assert.match(section.note, /in the past week/i, `${section.key} names the span it actually covers`);
+  }
+});
+
+test('LAUNCH ISSUE: every issue after it is untouched, which is the half that runs 51 weeks a year', () => {
+  const issue = composeIssue({ issueId: 'i', items: [], news: [], now: at(1) });
+  assert.equal(issue.launchNote, null, 'the template renders the line by its presence, so absence must be null');
+  for (const section of issue.layout) assert.match(section.note, /since the last issue/i);
+});
+
+test('LAUNCH ISSUE: the derived notes cannot drift from the ones they are derived from', () => {
+  // Derived rather than hand-written twice, so this asserts the derivation actually fired for every key
+  // instead of silently returning the original. A no-op replace is the failure mode of a derived table.
+  assert.deepEqual(Object.keys(FIRST_ISSUE_SECTION_NOTES).sort(), Object.keys(EMPTY_SECTION_NOTES).sort());
+  for (const [key, note] of Object.entries(FIRST_ISSUE_SECTION_NOTES)) {
+    assert.notEqual(note, EMPTY_SECTION_NOTES[key], `${key} must actually differ from the standing copy`);
+    assert.doesNotMatch(note, /last issue/i);
+    // Only the cadence clause moves. The invitation each note carries is copy the owner reviewed, and a
+    // substitution that ate any of it would be a silent rewrite.
+    assert.equal(note, EMPTY_SECTION_NOTES[key].replace('since the last issue', 'in the past week'));
+  }
+});
+
+test('LAUNCH ISSUE: the copy is plain sentences, the same rule the standing notes are held to', () => {
+  // The renderer is a table-based HTML email, so a stray asterisk or bracket reaches the reader as one.
+  for (const note of [FIRST_ISSUE_NOTE, ...Object.values(FIRST_ISSUE_SECTION_NOTES)]) {
+    assert.doesNotMatch(note, /[*_`[\]<>]|—|–/, `plain sentences only: ${note}`);
+    assert.match(note, /\.$/, 'ends as a sentence');
+  }
 });

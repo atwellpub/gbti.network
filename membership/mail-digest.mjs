@@ -90,6 +90,31 @@ export const EMPTY_SECTION_NOTES = {
     'No shares since the last issue. A share is the cheapest thing to post here: a link and a sentence about why it is worth reading.',
 };
 
+// THE LAUNCH ISSUE says two things that are false on issue one, and both are only ever wrong once.
+//
+// The notes above are anchored to "since the last issue", which is exactly right from issue two onward and
+// reads as a mistake to somebody opening their FIRST issue: there was no last one. And the first issue's
+// window bootstraps to seven days rather than reaching back over everything published before it, so a reader
+// who knows the network may wonder where an article from last month went.
+//
+// One sentence covers both. It states the issue is the first, which retires "the last issue", and states the
+// span it covers, which explains the absence rather than leaving it to be noticed. The section notes swap the
+// cadence clause for the span in the same breath, so nothing below the line contradicts the line.
+//
+// The swap is DERIVED rather than a second hand-written table, so the two sets cannot drift apart when the
+// copy is edited. It is safe to derive because every note contains the phrase verbatim and a test upstream of
+// this one already asserts that for all five; if that invariant ever breaks, the test breaks with it rather
+// than the substitution silently doing nothing.
+export const FIRST_ISSUE_NOTE =
+  'This is the first issue, so it covers the past week rather than everything published before it.';
+
+const LAST_ISSUE_PHRASE = 'since the last issue';
+const FIRST_ISSUE_PHRASE = 'in the past week';
+
+export const FIRST_ISSUE_SECTION_NOTES = Object.fromEntries(
+  Object.entries(EMPTY_SECTION_NOTES).map(([key, note]) => [key, note.replace(LAST_ISSUE_PHRASE, FIRST_ISSUE_PHRASE)]),
+);
+
 /** Thrown for caller-input problems; the handler maps it to a 400 (never a 500). */
 export class DigestError extends Error {}
 
@@ -157,6 +182,9 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * where the reason it is load-bearing lives). Absent means no window, which is what every caller written before
  * this option got, and it is never the right thing for the weekly compile.
  *
+ * `firstIssue` swaps the empty-section notes for their launch wording and attaches `launchNote`. Only ever
+ * true once, and the caller already knows it: it is the same condition that made `resolveSince` bootstrap.
+ *
  * `exclude` is the set of urls already mailed, and it is the semantic `since` only approximates. Pass ONE of the
  * two per issue: `since` bounds the first issue, `exclude` carries every issue after it. Supplying both applies
  * both, which re-opens the loss window `exclude` closes; see the header note.
@@ -166,11 +194,11 @@ const byDateDesc = (a, b) => (b.date - a.date);
  * cap and never lower it, and it defaults to no lift, so an explicit maxNews is always a real ceiling. The
  * compile cron is where to set it; 8 is the suggested value.
  *
- * @returns { issueId, generatedAt, sections, topNews, layout, counts, isEmpty, window }
+ * @returns { issueId, generatedAt, sections, topNews, layout, counts, isEmpty, window, launchNote }
  */
 export function composeIssue(
   { issueId, items = [], news = [], now = Date.now } = {},
-  { perSection = 5, maxNews = 5, maxNewsThin, since, exclude } = {},
+  { perSection = 5, maxNews = 5, maxNewsThin, since, exclude, firstIssue = false } = {},
 ) {
   const id = trimOrNull(issueId);
   if (!id) throw new DigestError('issueId is required');
@@ -248,7 +276,7 @@ export function composeIssue(
     generatedAt: Number(now()),
     sections,
     topNews,
-    layout: buildLayout(sections, topNews),
+    layout: buildLayout(sections, topNews, Boolean(firstIssue)),
     counts,
     isEmpty,
     // The frozen issue records its OWN window, so a compile that forgot to pass one is visible in the stored
@@ -257,6 +285,9 @@ export function composeIssue(
     // openers rather than recency, and the gather already returns a bounded recent set, so a story that
     // ingested nine days ago and was opened all week is exactly what belongs at the top.
     window: { since: sinceMs, excluded: excluded === null ? null : excluded.size, appliesTo: 'members' },
+    // null on every issue but the first, so the template renders the line by its presence and never has to
+    // know which issue number it is holding.
+    launchNote: firstIssue ? FIRST_ISSUE_NOTE : null,
   };
 }
 
@@ -265,7 +296,8 @@ export function composeIssue(
  * items first (in canonical order), then the empty ones (in that same canonical order) carrying their note.
  * PURE, and it reads only the already-projected public-safe items, so it cannot widen the leak guard.
  */
-function buildLayout(sections, topNews) {
+function buildLayout(sections, topNews, firstIssue = false) {
+  const notes = firstIssue ? FIRST_ISSUE_SECTION_NOTES : EMPTY_SECTION_NOTES;
   const itemsFor = (key) => (key === 'news' ? topNews : sections[key] ?? []);
   const entry = (key) => {
     const items = itemsFor(key);
@@ -275,7 +307,7 @@ function buildLayout(sections, topNews) {
       label: SECTION_LABELS[key] ?? key,
       items,
       empty,
-      note: empty ? EMPTY_SECTION_NOTES[key] ?? null : null,
+      note: empty ? notes[key] ?? null : null,
     };
   };
   const all = SECTION_ORDER.map(entry);
