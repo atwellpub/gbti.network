@@ -25,6 +25,13 @@
 // inside (callers inject now). The reconcile builder (scripts/lib/follower-index.mjs) and the erasure sweep
 // (scripts/lib/erase-member.mjs) wrap these with IO.
 
+// The github_id validator is the ONE shared definition, a dependency-free leaf in the lower layer. It is
+// imported here for this module's internal use and re-exported below, so importers (scripts/lib/follower-index.mjs
+// and the tests) keep a single import site while exactly one definition lives in the tree. See that module for
+// why it REJECTS a padded or non-numeric value rather than cleaning it, and why the length bound matters when the
+// id becomes the reverse-index KEY (followers:<github_id>).
+import { normalizeGithubId } from '../clients/github-id.mjs';
+
 export const FOLLOWERS_KEY = (githubId) => `followers:${githubId}`;
 
 // Bounds the KV value size defensively. A follower entry is a few dozen bytes, so this is megabytes of headroom
@@ -32,22 +39,8 @@ export const FOLLOWERS_KEY = (githubId) => `followers:${githubId}`;
 // shows the author) but they are not recorded here, so they would miss follow-publish notifications.
 export const MAX_FOLLOWERS = 100000;
 
-// A github_id is an immutable numeric identifier (Stripe metadata primary key). This validator matches the
-// house numeric-id standard (clients/stripe.mjs numericGithubId): a char-by-char digit scan with an explicit
-// length bound. Two reasons it earns its place over a bare regex here: (1) this id becomes the reverse-index
-// KEY (followers:<github_id>), so an absurdly long or non-numeric value must never reach a key, and the length
-// bound caps it; (2) a char scan rejects ANY non-digit (whitespace, punctuation, a stray control character)
-// rather than only the shapes a regex author remembered. Fail-closed: a bad value returns null / throws / is
-// dropped. (Note: /^[0-9]+$/ WITHOUT the `m` flag already rejects a trailing newline in JS -- `$` matches only
-// the true end of string there, not before a line break -- so the newline is not the reason; the length bound
-// and the shared house shape are.)
-export function normalizeGithubId(v) {
-  if (v == null) return null;
-  const s = String(v);
-  if (s.length < 1 || s.length > 20) return null; // bounded: current GitHub ids are ~9-10 digits, 20 is generous
-  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c < 48 || c > 57) return null; }
-  return s;
-}
+// Re-export the shared github_id validator (imported above) so this module's importers have one import site.
+export { normalizeGithubId };
 
 /** Thrown for a bad follower id on the WRITE path. A malformed STORED entry never throws: normalizeFollowers
  *  drops it, so a read can never crash. */
