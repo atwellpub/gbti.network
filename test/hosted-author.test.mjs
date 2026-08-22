@@ -12,6 +12,7 @@ import {
   adminHostedBranchFor,
   parseAdminHostedRef,
   validateHostedRequest,
+  imagePathProblem,
   HOSTED_MAX_FILES,
   HOSTED_MAX_FILE_BYTES,
 } from '../membership/hosted-author.mjs';
@@ -314,4 +315,55 @@ test('validateHostedRequest: allowAnyFolder=true, an image upload to another mem
     itemId: 'x', folder: 'atwellpub', allowAnyFolder: true,
   });
   assert.equal(r.ok, true);
+});
+
+// sow-157 (2026-08-22): IMAGE_PATH_TAIL_RE carried the `i` flag while every one of its character classes was
+// lowercase, so the flag silently widened all of them. The SECURITY properties held throughout, which is why
+// it survived review; what it cost was correctness, silently. On a case-sensitive filesystem an accepted
+// `POSTS/` or `My-Slug/` writes a second directory the Astro build never reads, so the upload reports success
+// and the image never appears.
+//
+// BOTH DIRECTIONS ARE PINNED HERE ON PURPOSE. A one-sided test passes whichever way the regex happens to go:
+// assert only the rejections and a regex that rejects everything is green; assert only the acceptances and
+// the original bug is green. Neither half means anything without the other.
+test('validateHostedRequest: image paths are case-SENSITIVE, and each half is pinned', () => {
+  const b64 = Buffer.from('x').toString('base64');
+  const r = (path, folder = 'atwellpub') => validateHostedRequest({ files: [{ path, contentBase64: b64 }], itemId: 'x', folder });
+  const ok = (p) => r(p).ok;
+
+  // ACCEPTED: the lowercase convention, in both the flat and co-located shapes.
+  assert.equal(ok('members/atwellpub/images/cover.png'), true);
+  assert.equal(ok('members/atwellpub/posts/my-slug/images/fig-2.webp'), true);
+
+  // REJECTED: every segment that used to slip through on the `i` flag.
+  assert.equal(ok('members/atwellpub/POSTS/my-slug/images/a.png'), false, 'uppercase content type');
+  assert.equal(ok('members/atwellpub/posts/My-Slug/images/a.png'), false, 'uppercase item slug');
+  assert.equal(ok('members/atwellpub/posts/my-slug/IMAGES/a.png'), false, 'uppercase images dir');
+  assert.equal(ok('members/atwellpub/images/Cover.png'), false, 'uppercase filename');
+  assert.equal(ok('members/atwellpub/images/cover.PNG'), false, 'uppercase extension');
+
+  // The security properties are UNCHANGED by this, and are re-asserted so a future widening cannot quietly
+  // trade one for the other.
+  assert.equal(ok('members/atwellpub/images/../../house/x.png'), false, 'still no traversal');
+  assert.equal(ok('members/atwellpub/posts/a/b/images/x.png'), false, 'still no nested depth');
+  assert.equal(ok('members/atwellpub/images/x.png.php'), false, 'still no double extension');
+  assert.equal(ok('members/other/images/x.png'), false, 'still folder-scoped');
+});
+
+test('imagePathProblem NAMES the offending segment instead of failing blankly', () => {
+  // The point of the fix is that the member can act on it. A generic "must be a png under images/" for a
+  // path that IS a png under images/ is the message that leaves them staring at a working-looking upload.
+  const cased = imagePathProblem('posts/My-Slug/images/a.png');
+  assert.match(cased, /lowercase/i);
+  assert.match(cased, /"My-Slug"/, 'the offending segment is quoted back');
+  assert.match(cased, /never appear/, 'and the consequence is stated, since it is otherwise invisible');
+
+  // A genuinely malformed path still gets the shape message, not the casing one.
+  const shape = imagePathProblem('images/evil.svg');
+  assert.match(shape, /png, jpg, webp, or gif/);
+  assert.doesNotMatch(shape, /lowercase/i);
+
+  // And a good path has no problem at all.
+  assert.equal(imagePathProblem('posts/my-slug/images/a.png'), null);
+  assert.equal(imagePathProblem('images/cover.webp'), null);
 });

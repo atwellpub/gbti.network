@@ -35,7 +35,45 @@ export const HOSTED_MAX_IMAGE_TOTAL_BYTES = 4_194_304; // 4 MB of images per req
 // the caller's folder prefix is stripped so it stays folder-scoped, the type restricted to the three content
 // subdirectories, and the slug restricted to the same charset ANY_MEMBER_FOLDER_RE uses. Neither the slug
 // nor the filename class admits `/`, and the slug admits no `.` either, so no traversal is expressible.
-const IMAGE_PATH_TAIL_RE = /^(?:(?:posts|products|prompts)\/[a-z0-9][a-z0-9-]{0,63}\/)?images\/[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp|gif)$/i;
+// NO `i` FLAG, AND ITS ABSENCE IS THE POINT (sow-157, 2026-08-22). Every class here is lowercase, so the
+// flag silently widened all of them and `POSTS/My-Slug/images/A.PNG` was accepted. The SECURITY properties
+// held either way (no traversal, no nested depth, no double extension, no escape from the member's tree),
+// which is why this survived review: the cost is correctness, and it is a silent one.
+//
+// On a case-sensitive filesystem an accepted `POSTS/` or `My-Slug/` writes a SECOND directory that the Astro
+// build never reads. The upload returns success, the member sees a confirmation, and the image simply never
+// appears. That is the worst failure shape available for a member-facing action, because nothing anywhere
+// reports a fault.
+//
+// The extension is held to lowercase TOO, which is the part worth explaining because it looks unkind to a
+// phone that produces `IMG_4021.JPG`. The web client's `sanitizeImageName` (src/lib/workbench-client-core.mjs)
+// already lowercases the entire leaf before upload, and its own contract says it exists so that the client
+// and this wall AGREE ON WHAT AN IMAGE FILENAME IS. If this accepted `photo.JPG` while the client would only
+// ever produce `photo.jpg`, they would not agree, and the one path that reaches here uppercase is a
+// non-web client, which gets a precise error telling it exactly what to change. An explicit rejection turns
+// an invisible failure into a visible one; silently lowercasing here would fix the render and leave the
+// member wondering why their file has a different name.
+const IMAGE_PATH_TAIL_RE = /^(?:(?:posts|products|prompts)\/[a-z0-9][a-z0-9-]{0,63}\/)?images\/[a-z0-9][a-z0-9._-]*\.(?:png|jpe?g|webp|gif)$/;
+// The same pattern with `i` restored, used ONLY to tell "wrong case" apart from "wrong shape" so the error
+// can say which. It is never a gate: a tail must satisfy the strict pattern above to be accepted.
+const IMAGE_PATH_TAIL_ANYCASE_RE = new RegExp(IMAGE_PATH_TAIL_RE.source, 'i');
+
+/**
+ * Why `tail` is not an acceptable image path, or null when it is fine. Exported for tests and for the
+ * caller's error message: naming the offending segment is the whole value of the fix, since the member
+ * otherwise has a success response and a broken page and no way to connect the two.
+ */
+export function imagePathProblem(tail) {
+  const t = String(tail ?? '');
+  if (IMAGE_PATH_TAIL_RE.test(t)) return null;
+  if (IMAGE_PATH_TAIL_ANYCASE_RE.test(t)) {
+    const upper = t.split('/').filter((seg) => seg !== seg.toLowerCase());
+    return `image paths must be lowercase, but ${upper.map((s) => JSON.stringify(s)).join(', ')} `
+      + 'is not. An uppercase path writes a directory the site build never reads, so the upload would '
+      + 'succeed and the image would never appear. Rename it in lowercase and upload again.';
+  }
+  return 'an uploaded image must be a png, jpg, webp, or gif under your images/ folder';
+}
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /** The exact decoded byte length of a base64 string, or -1 if it is not well-formed base64. Node-free (no atob):
@@ -186,7 +224,8 @@ export function validateHostedRequest({ files, itemId, folder, allowAnyFolder = 
       // sow-158 image upload: a binary entry is a base64-encoded raster image, own-folder images/ only, capped.
       if (typeof f.content === 'string') return bad('a file cannot carry both content and contentBase64');
       const tail = f.path.slice(matchedPrefix.length);
-      if (!IMAGE_PATH_TAIL_RE.test(tail)) return bad('an uploaded image must be a png, jpg, webp, or gif under your images/ folder');
+      const imageProblem = imagePathProblem(tail);
+      if (imageProblem) return bad(imageProblem);
       const bytes = base64DecodedBytes(f.contentBase64);
       if (bytes < 0) return bad('an uploaded image is not valid base64');
       if (bytes === 0) return bad('an uploaded image is empty');
