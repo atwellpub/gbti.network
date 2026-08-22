@@ -430,13 +430,13 @@ export async function eraseCouponRedemptions({ githubId, env = process.env, fetc
     await putKvValue({ key: countKey, value: String(Math.max(0, current - 1)), env, fetchImpl });
     scrubbed++;
   }
-  if (unreadableCounters.length) {
-    return {
-      scrubbed,
-      incomplete: true,
-      unreadable: unreadableCounters.length,
-      reason: `redemption counter unreadable for ${unreadableCounters.join(', ')}: NOT decremented (left high rather than reset)`,
-    };
+  const notes = [];
+  if (unreadableCounters.length) notes.push(`redemption counter unreadable for ${unreadableCounters.join(', ')}: NOT decremented (left high rather than reset)`);
+  // A redemption record whose value the sweep could not read was never in `mine`, so it was never deleted. The
+  // fold self-heals on its next run; an erasure does not, so this must not be reported as a clean sweep.
+  if (listed.unreadable) notes.push(`${listed.unreadable} redemption record(s) could not be read and were NOT deleted`);
+  if (notes.length) {
+    return { scrubbed, incomplete: true, unreadable: unreadableCounters.length + (listed.unreadable || 0), reason: notes.join('; ') };
   }
   return { scrubbed };
 }

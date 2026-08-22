@@ -44,22 +44,28 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
   } while (cursor);
 
   const redemptions = [];
+  // Keys whose VALUE could not be read. The key list above is fail-closed (a failed page aborts the sweep) but a
+  // per-record read failure cannot abort it, so it is COUNTED and reported instead of vanishing. It matters
+  // because the two consumers differ: the reconcile fold recomputes from redemptions every run and self-heals,
+  // while erasure is a ONE-SHOT operator action nobody re-runs, so a record dropped there survives permanently.
+  let unreadable = 0;
   for (const name of names) {
     const m = KEY_RE.exec(name);
     if (!m) continue; // an unexpected key shape contributes nothing (fail closed)
     try {
       const res = await fetchImpl(`${apiBase}/values/${encodeURIComponent(name)}`, { headers });
-      if (!res?.ok) continue;
+      if (!res?.ok) { unreadable++; continue; }
       const value = await res.json().catch(() => null);
       if (!value?.until) continue;
       // sow-185: `tier` is present only on records written after the Worker began stamping it. An older
       // record carries none and falls back to the registry lookup in planCouponGrants.
       redemptions.push({ code: m[1], githubId: m[2], login: value.login ?? null, redeemedAt: value.redeemedAt ?? null, until: value.until, tier: value.tier ?? null });
     } catch {
-      // one bad record never aborts the sweep
+      // one bad record never aborts the sweep, but it is not silent either
+      unreadable++;
     }
   }
-  return { available: true, redemptions };
+  return { available: true, redemptions, unreadable };
 }
 
 /**

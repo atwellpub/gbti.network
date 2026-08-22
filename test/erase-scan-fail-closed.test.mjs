@@ -236,3 +236,25 @@ test('minimizeCouponGrant does not report "no grant to minimize" when it could n
   assert.equal(absent.skipped, true);
   assert.match(absent.reason, /no coupon grant/);
 });
+
+test('a redemption record whose value could not be read is NOT reported as a clean sweep', async () => {
+  // SowMaster's consumer analysis: the reconcile fold recomputes every run and self-heals, but an erasure is a
+  // one-shot operator action nobody re-runs, so a record dropped from this sweep is never deleted at all.
+  const mk = (recordOk) => async (url, init = {}) => {
+    if (init.method === 'PUT' || init.method === 'DELETE') return { ok: true };
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [{ name: 'redemption:CAPPED:9' }], result_info: {} }) };
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    if (key === 'redemptions:CAPPED') return { ok: true, status: 200, text: async () => '47' };
+    if (!recordOk) return { ok: false, status: 500 };
+    const v = { code: 'CAPPED', githubId: '9', until: '2027-01-01T00:00:00.000Z' };
+    return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
+  };
+  const broken = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(false) });
+  assert.equal(broken.incomplete, true, 'an unreadable redemption record must not pass as a clean sweep');
+  assert.match(broken.reason, /could not be read and were NOT deleted/);
+
+  // CONTROL: readable, so the record is found and scrubbed and nothing is flagged.
+  const ok = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(true) });
+  assert.equal(ok.scrubbed, 1);
+  assert.ok(!ok.incomplete);
+});
