@@ -44,11 +44,14 @@ export async function putIssue(kv, issue) {
 
 // ---------- per-recipient send records ----------
 
+/** Read + normalize one per-recipient send record. THROWS on an unreadable key; returns null only for a genuine
+ *  miss. The swallow this replaced conflated the two, so a transient read blip looked identical to a deleted
+ *  record and the drain PRUNED a live recipient permanently (booked as `dropped`, an orphan send record left
+ *  behind, indistinguishable from the case the suite certifies as correct). The drain now defers an unreadable
+ *  read (fail-closed, retry) and prunes only a genuine null. Same three-state model as readCounter below. */
 export async function getSend(kv, issueId, recipientHash) {
   if (!kv || !issueId || !recipientHash) return null;
-  let raw = null;
-  try { raw = await kv.get(sendKey(issueId, recipientHash), 'json'); } catch { raw = null; }
-  return normalizeMailSend(raw);
+  return normalizeMailSend(await kv.get(sendKey(issueId, recipientHash), 'json'));
 }
 
 /** Write a send record; a TERMINAL record (sent/failed/suppressed) gets a TTL so the store self-prunes, while a
@@ -62,9 +65,14 @@ export async function putSend(kv, item) {
 
 // ---------- the pending index ----------
 
+/** Read an issue's fairness-ordered pending index (deduped). Empty for a genuinely empty or absent index; THROWS
+ *  on an unreadable key. The swallow this replaced lived in this SHARED helper, so an unreadable index looked
+ *  identical to a drained one at every caller at once: the drain's main window read reported "drained" and sent
+ *  nothing with no signal, activeIssueIds silently dropped the issue, and removeFromPending silently skipped its
+ *  write. Each caller now owns its disposition (drain: fail-closed with a reason; activeIssueIds: include it so the
+ *  drain re-attempts; removeFromPending: an explicit, observable, self-healing no-op). */
 export async function readPendingIndex(kv, issueId) {
-  let raw = null;
-  try { raw = await kv.get(MAIL_PENDING_KEY(issueId), 'json'); } catch { raw = null; }
+  const raw = await kv.get(MAIL_PENDING_KEY(issueId), 'json');
   const hashes = raw && Array.isArray(raw.hashes) ? raw.hashes.filter((x) => typeof x === 'string' && x) : [];
   return [...new Set(hashes)];
 }
@@ -73,12 +81,20 @@ async function writePendingIndex(kv, issueId, hashes) {
   await kv.put(MAIL_PENDING_KEY(issueId), JSON.stringify({ hashes: [...new Set(hashes)] }));
 }
 
-/** Remove one recipient from an issue's pending index once its record is terminal. Read-modify-write; a lost
- *  update is self-healing because the next tick re-reads the (still-terminal) record and re-removes it. */
+/** Remove one recipient from an issue's pending index once its record is terminal. Read-modify-write. An
+ *  unreadable index is a self-healing no-op BY DESIGN: the next tick re-reads the still-terminal record and
+ *  re-removes it, so this one caller catches the read here rather than let it abort a drain tick that has already
+ *  sent. The self-heal is now EXPLICIT and OBSERVABLE (it was a silent swallow inside the shared read): the return
+ *  says whether the removal applied and whether the index was unreadable, so a caller that needs completeness (the
+ *  erasure path) can tell a real no-op from a skipped one instead of reading the success shape over an unread index. */
 export async function removeFromPending(kv, issueId, recipientHash) {
-  const hashes = await readPendingIndex(kv, issueId);
+  let hashes;
+  try { hashes = await readPendingIndex(kv, issueId); }
+  catch { return { removed: false, indexUnreadable: true }; }
   const next = hashes.filter((h) => h !== recipientHash);
-  if (next.length !== hashes.length) await writePendingIndex(kv, issueId, next);
+  if (next.length === hashes.length) return { removed: false, indexUnreadable: false };
+  await writePendingIndex(kv, issueId, next);
+  return { removed: true, indexUnreadable: false };
 }
 
 /** The issueIds that still have a non-empty pending index (usually one). The drain iterates these. Bounded by a
@@ -91,8 +107,12 @@ export async function activeIssueIds(kv, { limit = 50 } = {}) {
     const res = await kv.list({ prefix: 'mail:pending:', cursor });
     for (const k of res?.keys ?? []) {
       const issueId = k.name.slice('mail:pending:'.length);
-      const hashes = await readPendingIndex(kv, issueId);
-      if (hashes.length) out.push(issueId);
+      // readPendingIndex now THROWS on an unreadable index. INCLUDE such an issue so the drain re-attempts it and
+      // fail-closes there (with a visible reason), never silently dropping an issue we simply could not inspect.
+      let hashes;
+      try { hashes = await readPendingIndex(kv, issueId); }
+      catch { hashes = null; }
+      if (hashes == null || hashes.length) out.push(issueId);
       if (out.length >= limit) break;
     }
     if (res?.list_complete || !res?.cursor) break;
@@ -116,9 +136,23 @@ export async function enqueueIssue(kv, issue, recipientHashes, { now = Date.now,
   const ordered = rotateOrder(recipientHashes, issue.issueId); // canonical + rotated send order
   const pending = [];
   let enqueued = 0;
+  let readErrors = 0;
   for (let idx = 0; idx < ordered.length; idx++) {
     const recipientHash = ordered[idx];
-    const existing = await getSend(kv, issue.issueId, recipientHash);
+    let existing;
+    try {
+      existing = await getSend(kv, issue.issueId, recipientHash);
+    } catch {
+      // getSend now THROWS on an unreadable existing record (was a swallow-to-null that let a read blip look like a
+      // fresh recipient and buildMailSend a SECOND record over a terminal one -> a re-send). We cannot tell pending
+      // from terminal here, so fail-closed BOTH ways: do NOT create a new record (never resurrect a terminal one),
+      // and KEEP the recipient in the index (never drop a live one; a genuinely terminal record is pruned by the
+      // drain next tick). Count it so the caller can surface an incomplete enqueue. Stays non-throwing for
+      // compileWeeklyIssue's "never throws" contract.
+      readErrors++;
+      pending.push(recipientHash);
+      continue;
+    }
     if (existing) {
       // Idempotent re-run: keep a record that is still working; do not resurrect a terminal one into pending.
       if (existing.status === 'pending' || existing.status === 'claimed') pending.push(recipientHash);
@@ -130,18 +164,21 @@ export async function enqueueIssue(kv, issue, recipientHashes, { now = Date.now,
     enqueued++;
   }
   await writePendingIndex(kv, issue.issueId, pending);
-  return { issueId: issue.issueId, enqueued, pending: pending.length, total: ordered.length };
+  return { issueId: issue.issueId, enqueued, pending: pending.length, total: ordered.length, readErrors };
 }
 
 // ---------- subscriber resolution ----------
 
-/** Read + normalize a subscriber record by its hash, or null. The drain uses this to resolve the address (a
- *  member from Stripe, an anon by decrypting emailEnc). */
+/** Read + normalize a subscriber record by its hash. THROWS on an unreadable key; returns null only for a genuine
+ *  miss. The swallow this replaced collapsed the two into null: the drain's own comment one line above its call
+ *  says a throw is transient and a null is permanent, yet the swallow handed it the permanent value on a transient
+ *  fault, so a POST-claim read blip terminalized a claimed recipient as `failed` (a permanent drop, one attempt
+ *  already burned). Callers now separate the states: the drain retries an unreadable read and terminalizes only a
+ *  genuine null; mail-compile counts it as a read error; mail-subscribe treats it as "no existing record". Same
+ *  three-state model as getSend above and readCounter below. */
 export async function getSubscriber(kv, hash) {
   if (!kv || !hash) return null;
-  let raw = null;
-  try { raw = await kv.get(subscriberKey(hash), 'json'); } catch { raw = null; }
-  return normalizeSubscriber(raw);
+  return normalizeSubscriber(await kv.get(subscriberKey(hash), 'json'));
 }
 
 /**
@@ -236,13 +273,24 @@ export async function readBudget(kv, dayStr, monthStr) {
 
 /** Increment both counters by n (after n sends actually left). Read-modify-write, TTL'd so counters self-prune.
  *  Single drain per tick means no concurrent writer under normal operation; a cron overlap is rare and only
- *  UNDER-counts (never over-sends) because the claim guard already bounds a tick's sends. */
+ *  UNDER-counts (never over-sends) because the claim guard already bounds a tick's sends.
+ *
+ *  FAIL-CLOSED on an unreadable base. readCounter returns 0 for ABSENT (a legitimate first-of-the-day) and null
+ *  for an ERROR or a corrupt value. The `|| 0` this replaced collapsed the two, so a transient read blip turned a
+ *  base of, say, 89 into 0 and wrote `0 + n`: that does not under-count, it RESETS the ceiling downward, and the
+ *  cap the owner's send gate depends on is then blown by roughly a full window before the counter catches up. On a
+ *  null base we now SKIP that counter's write entirely (leaving the true value in place, at worst under-counting
+ *  this one tick's n, the safe direction) and report it in `skipped` so the drain can surface it. */
 export async function bumpBudget(kv, dayStr, monthStr, n) {
-  if (!(n > 0)) return;
+  if (!(n > 0)) return { skipped: [] };
   const dayKey = budgetDayKey(dayStr);
   const monthKey = budgetMonthKey(monthStr);
-  const day = (await readCounter(kv, dayKey)) || 0;
-  const month = (await readCounter(kv, monthKey)) || 0;
-  await kv.put(dayKey, String(day + n), { expirationTtl: DAY_COUNTER_TTL_SECONDS });
-  await kv.put(monthKey, String(month + n), { expirationTtl: MONTH_COUNTER_TTL_SECONDS });
+  const day = await readCounter(kv, dayKey);
+  const month = await readCounter(kv, monthKey);
+  const skipped = [];
+  if (day === null) skipped.push('daily');
+  else await kv.put(dayKey, String(day + n), { expirationTtl: DAY_COUNTER_TTL_SECONDS });
+  if (month === null) skipped.push('monthly');
+  else await kv.put(monthKey, String(month + n), { expirationTtl: MONTH_COUNTER_TTL_SECONDS });
+  return { skipped };
 }

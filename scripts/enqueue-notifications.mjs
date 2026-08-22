@@ -252,14 +252,28 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
     items.push({ issueId: issue.issueId, author: c.author, slug: c.slug, type: c.type, recipients: recipients.length });
   }
 
-  // Surface unreadable records LOUDLY rather than let a partial scan read as a clean, complete one (the failure
-  // mode SecurityMaster flagged: a dropped read is a silently-missed recipient). Recoverable on re-run.
-  if (readErrors) console.log(`WARNING: ${readErrors} KV record(s) unreadable this run; those followers were skipped (fail-closed) and are picked up on the next run (idempotent enqueue).`);
+  // Surface unreadable records LOUDLY and ACTIONABLY. A dropped read is a silently-missed recipient
+  // (SecurityMaster). The earlier wording said these were "picked up on the next run", which was FALSE: this
+  // workflow fires only on push and workflow_dispatch, and the */5 drain drains an already-enqueued issue but never
+  // re-resolves recipients, so a skipped follower is DROPPED, not deferred, until the fan-out itself is re-run. Name
+  // the exact re-run so the fix is a copy-paste, not a self-recovery that never happens.
+  if (readErrors) {
+    const rerun = added.length ? added.join(' ') : '<the just-published content path(s)>';
+    console.log(`WARNING: ${readErrors} KV record(s) were UNREADABLE this run; those followers were SKIPPED (fail-closed) and NOT emailed.`);
+    console.log('  This is NOT retried automatically: the fan-out runs only on push / workflow_dispatch, and the drain never re-resolves recipients, so a skipped follower stays dropped until the fan-out is re-run.');
+    console.log('  Re-running is safe to repeat: the issueId is deterministic and enqueue is additive, so a re-run only ADDS the now-readable followers to the same issue (no double-send).');
+    console.log(`  Re-run:  gh workflow run syndicate-content.yml -f added='${rerun}'`);
+  }
   if (!apply) console.log('\nDry-run only. Re-run with --apply to enqueue notification issues to KV.');
   else console.log(`enqueued ${enqueued} send record(s) across ${items.filter((i) => i.recipients).length} issue(s); the drain sends them behind the fail-closed gate.`);
   return { enqueued, notified, items, readErrors };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((e) => { console.error(e); process.exit(1); });
+  main()
+    // Exit non-zero when any record was unreadable, so the (continue-on-error) CI step goes visibly non-green and
+    // someone reads the actionable WARNING above and runs the named re-run. Set HERE, in the CLI entry only, never
+    // inside main(): a test that calls main() directly must not mutate its own process exit code.
+    .then((res) => { if (res && res.readErrors > 0) process.exitCode = 1; })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

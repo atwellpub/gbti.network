@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { drainMail, drainMailIssue, budgetDateStrings, resolveSendGate, MAIL_CAP_DEFAULTS, numOrNull } from '../workers/signup/mail-drain.mjs';
 import { enqueueIssue, getSend, readPendingIndex, readBudget, bumpBudget, MAIL_PENDING_KEY } from '../workers/signup/mail-store.mjs';
-import { sendKey, markClaimed, budgetDayKey } from '../membership/mail-queue.mjs';
+import { sendKey, markClaimed, budgetDayKey, budgetMonthKey } from '../membership/mail-queue.mjs';
 import { suppressKey, subscriberKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
 import { renderIssue as realRenderIssue } from '../membership/mail-render.mjs';
@@ -516,4 +516,80 @@ test('numOrNull: absent and non-numeric are null (the pre-existing, correct beha
   assert.equal(numOrNull(null), null);
   assert.equal(numOrNull('abc'), null, 'non-numeric garble falls to the default');
   assert.equal(numOrNull('NaN'), null);
+});
+
+// ---------- the swallow sweep: an unreadable KV read must DEFER/RETRY, never drop a live recipient ----------
+// (SowMaster/SecurityMaster, 2026-08-22). The store helpers now THROW on an unreadable read; these prove the drain
+// handles each throw as fail-closed (defer or retry, no attempt burned wrongly, no orphan, no counter reset),
+// rather than the old swallow-to-null that terminalized or pruned a live recipient on a transient blip.
+
+test('an UNREADABLE send record is DEFERRED (left pending, no attempt), never pruned into an un-drainable orphan', async () => {
+  const kv = makeKV();
+  await seed(kv, 'i1', ['a', 'b'], { now: at(1_000_000) });
+  const sender = makeSender();
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === sendKey('i1', 'a')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const r = await drainMailIssue(OPEN, { kv: kvErr, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r.deferred, 1, 'the unreadable record is DEFERRED');
+  assert.equal(r.dropped, 0, 'it is NOT pruned as a gone record (the old swallow-to-null booked it as dropped)');
+  assert.equal(r.sent, 1, 'the readable recipient still sends');
+  assert.deepEqual(sender.sent, ['b@example.com']);
+  assert.ok((await readPendingIndex(kv, 'i1')).includes('a'), 'the deferred recipient STAYS in the index for a later tick');
+  assert.equal((await getSend(kv, 'i1', 'a')).status, 'pending', 'its record is untouched: no attempt burned, no orphan');
+});
+
+test('an UNREADABLE subscriber record RETRIES (released to pending), never terminalizes a live subscriber as failed', async () => {
+  const kv = makeKV();
+  await seed(kv, 'i1', ['a'], { now: at(1_000_000) });
+  const sender = makeSender();
+  // The send record reads fine (so the record IS claimed), but the SUBSCRIBER record is unreadable this tick.
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === subscriberKey('a')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const r = await drainMailIssue(OPEN, { kv: kvErr, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r.sent, 0);
+  assert.equal(r.failed, 0, 'a read blip does NOT terminalize the recipient as failed (the old swallow-to-null did)');
+  assert.equal(sender.sent.length, 0);
+  const rec = await getSend(kv, 'i1', 'a');
+  assert.equal(rec.status, 'pending', 'the claim was released back to pending for a retry');
+  assert.equal(rec.attempts, 1, 'exactly the one claim attempt was spent (retry budget intact)');
+  assert.ok((await readPendingIndex(kv, 'i1')).includes('a'), 'still pending for the next tick');
+});
+
+test('an UNREADABLE pending index sends nothing this tick with a DISTINCT reason (not a silent "drained")', async () => {
+  const kv = makeKV();
+  await seed(kv, 'i1', ['a'], { now: at(1_000_000) });
+  const sender = makeSender();
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === MAIL_PENDING_KEY('i1')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const r = await drainMailIssue(OPEN, { kv: kvErr, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r.reason, 'pending index unreadable', 'the shared read no longer collapses an unreadable index into a clean "drained"');
+  assert.equal(r.sent, 0);
+  assert.equal(sender.sent.length, 0);
+  assert.ok((await readPendingIndex(kv, 'i1')).includes('a'), 'the backlog is untouched, retried next tick');
+});
+
+test('the drain surfaces budgetSkipped and never RESETS a counter that becomes unreadable at bump time', async () => {
+  const kv = makeKV();
+  await seed(kv, 'i1', ['a'], { now: at(1_000_000) });
+  const { dayStr, monthStr } = budgetDateStrings(1_000_000);
+  await bumpBudget(kv, dayStr, monthStr, 40); // pre-seed both counters to 40 on the clean kv
+  const sender = makeSender();
+  const dayKey = budgetDayKey(dayStr);
+  let dayGets = 0;
+  // The day counter reads fine for the pre-send allowance check (get #1) but throws at the post-send bump (get #2).
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === dayKey) { dayGets++; if (dayGets >= 2) throw new Error('kv get failed'); }
+    return kv.get(key, type);
+  } };
+  const r = await drainMailIssue(OPEN, { kv: kvErr, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r.sent, 1, 'the send still happens (the allowance read succeeded)');
+  assert.deepEqual(r.budgetSkipped, ['daily'], 'the drain surfaces that the daily counter could not be booked this tick');
+  assert.equal(kv.m.get(dayKey).value, '40', 'the daily counter is NOT reset downward (the old `|| 0` wrote 0 + 1 = 1, blowing the ceiling)');
+  assert.equal(kv.m.get(budgetMonthKey(monthStr)).value, '41', 'the readable monthly counter still books the send');
 });

@@ -106,6 +106,34 @@ test('listRecipientHashes returns receivable subscribers and drops an unreceivab
   assert.ok(!hashes.includes('bad'), 'a record with no usable address is excluded');
 });
 
+test('listRecipientHashes COUNTS an unreadable subscriber record and still returns the readable ones', async () => {
+  // getSubscriber now THROWS on an unreadable record (was a swallow-to-null that dropped the recipient silently).
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1', 'r2', 'r3']);
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === subscriberKey('r2')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const { hashes, truncated, readErrors } = await listRecipientHashes(kvErr);
+  assert.deepEqual([...hashes].sort(), ['r1', 'r3'], 'the readable subscribers are still returned; one blip does not abort the walk');
+  assert.equal(readErrors, 1, 'the unreadable record is COUNTED, not swallowed (a swallow would silently short the base)');
+  assert.equal(truncated, false, 'the page walk itself completed; readErrors is the separate incompleteness signal');
+});
+
+test('compileWeeklyIssue surfaces recipientsTruncated + recipientReadErrors when a subscriber record is unreadable', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1', 'r2', 'r3']);
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === subscriberKey('r2')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const r = await compileWeeklyIssue({ SIGNUP_KV: kvErr, NEWS_KV: {} }, deps(kvErr));
+  assert.equal(r.ok, true);
+  assert.equal(r.recipients, 2, 'only the readable subscribers are enqueued (the unreadable one is skipped this compile)');
+  assert.equal(r.recipientReadErrors, 1, 'the read error is surfaced for the cron log');
+  assert.equal(r.recipientsTruncated, true, 'a silently-short base is folded into the truncated signal the cron MUST surface');
+});
+
 test('compileWeeklyIssue: composes ONCE, excludes the members item, ranks news by opens, enqueues everyone', async () => {
   const kv = makeKV();
   seedSubscribers(kv, ['r1', 'r2', 'r3']);

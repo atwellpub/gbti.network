@@ -209,10 +209,11 @@ export async function gatherNewsEntries(env, { kv = env?.SIGNUP_KV, queryItems =
  * (default 200 pages) is a runaway backstop, and a truncated walk is logged by the caller, never silent.
  */
 export async function listRecipientHashes(kv, { pageBudget = 200 } = {}) {
-  if (!kv?.list) return { hashes: [], truncated: false };
+  if (!kv?.list) return { hashes: [], truncated: false, readErrors: 0 };
   const hashes = [];
   let cursor;
   let truncated = true;
+  let readErrors = 0;
   for (let page = 0; page < pageBudget; page++) {
     let res;
     try {
@@ -223,14 +224,19 @@ export async function listRecipientHashes(kv, { pageBudget = 200 } = {}) {
     for (const k of res?.keys ?? []) {
       const hash = k.name.slice(MAIL_SUBSCRIBER_PREFIX.length);
       if (!hash) continue;
+      // getSubscriber now THROWS on an unreadable record (was a swallow-to-null). COUNT it and skip this one hash
+      // rather than let a single read blip abort the whole base walk; the caller folds readErrors into the
+      // truncated signal, so a frozen issue is never enqueued against a silently short recipient base.
+      let sub;
       // eslint-disable-next-line no-await-in-loop -- bounded page, and the reads pipeline within a page below
-      const sub = await getSubscriber(kv, hash);
+      try { sub = await getSubscriber(kv, hash); }
+      catch { readErrors++; continue; }
       if (sub && canReceive(sub)) hashes.push(hash);
     }
     if (res?.list_complete || !res?.cursor) { truncated = false; break; }
     cursor = res.cursor;
   }
-  return { hashes, truncated };
+  return { hashes, truncated, readErrors };
 }
 
 /**
@@ -278,7 +284,7 @@ export async function compileWeeklyIssue(env, {
     composed = true;
   }
 
-  const { hashes, truncated } = await listRecipientHashes(kv);
+  const { hashes, truncated, readErrors } = await listRecipientHashes(kv);
   const enq = await enqueueIssue(kv, issue, hashes, { now });
 
   return {
@@ -288,7 +294,10 @@ export async function compileWeeklyIssue(env, {
     recipients: hashes.length,
     enqueued: enq?.enqueued ?? 0,
     pending: enq?.pending ?? 0,
-    recipientsTruncated: truncated, // the caller MUST surface this: a truncated base under-sends silently otherwise
+    // A truncated page walk OR any unreadable subscriber record leaves the base silently short; fold both so the
+    // cron surfaces one honest "under-sent" signal, and keep the raw read-error count for the log.
+    recipientsTruncated: truncated || readErrors > 0, // the caller MUST surface this: a short base under-sends silently otherwise
+    recipientReadErrors: readErrors,
     counts: issue?.counts ?? null,
     // The resolved window, surfaced for the cron log. firstIssue: since = launch floor, excluded null. Thereafter:
     // since = the coupled floor (the epoch until an issue ages out of the exclude window, then the compile time of

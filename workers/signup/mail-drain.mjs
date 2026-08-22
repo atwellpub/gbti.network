@@ -102,7 +102,7 @@ export async function drainMailIssue(env, {
   sendEmail,
   from = env?.MAIL_FROM || env?.RESEND_FROM || null,
 } = {}) {
-  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, refused: 0, deferred: 0, backlog: 0 };
+  const zero = { issueId, sent: 0, failed: 0, suppressed: 0, dropped: 0, refused: 0, deferred: 0, backlog: 0, budgetSkipped: [] };
   if (!kv) return { ...zero, reason: 'no kv' };
   if (!issueId) return { ...zero, reason: 'no issue id' };
   if (typeof resolveAddress !== 'function' || typeof renderIssue !== 'function' || typeof sendEmail !== 'function') {
@@ -113,7 +113,12 @@ export async function drainMailIssue(env, {
   const issue = await getIssue(kv, issueId);
   if (!issue) return { ...zero, reason: 'issue not found' };
 
-  const pending = await readPendingIndex(kv, issueId);
+  // readPendingIndex now THROWS on an unreadable index (was a shared swallow-to-[]). An unreadable index is NOT an
+  // empty one: send nothing this tick with a distinct reason and retry next tick, rather than reporting the silent
+  // "drained" the swallow produced (which looked like clean completion).
+  let pending;
+  try { pending = await readPendingIndex(kv, issueId); }
+  catch { return { ...zero, reason: 'pending index unreadable' }; }
   if (!pending.length) return { ...zero, reason: 'drained', backlog: 0 };
 
   // LAUNCH SEND GATE (fail-closed), resolved once per issue. A globally-CLOSED gate is the default: it sends
@@ -159,7 +164,14 @@ export async function drainMailIssue(env, {
   for (const hash of windowHashes) {
     if (budgetLeft <= 0) break;
 
-    let rec = await getSend(kv, issueId, hash);
+    // getSend THROWS on an unreadable record and returns null only for a genuine miss (mail-store three-state
+    // model). DEFER an unreadable read: leave it pending, burn no attempt, retry next tick. PRUNING it instead
+    // (the old swallow-to-null did) would delete a live recipient from the index while its record still sits in KV,
+    // an orphan `pending attempts=0` row nothing ever drains and nothing marks for repair. Same shape as the
+    // suppression defer above. Only a genuine null (record expired/deleted) is pruned.
+    let rec;
+    try { rec = await getSend(kv, issueId, hash); }
+    catch { deferred++; continue; }
     if (!rec) { await removeFromPending(kv, issueId, hash); dropped++; continue; } // record expired/deleted
 
     // Terminal record lingering in the index (a lost removal): prune it, do not send.
@@ -217,7 +229,15 @@ export async function drainMailIssue(env, {
 
     // Resolve the address at send time. A member resolves from Stripe, an anon by decrypting emailEnc; both are
     // the injected resolver's job. A THROW is transient (retry); a null return is permanent (no recipient).
-    const subscriber = await getSubscriber(kv, hash);
+    // getSubscriber now THROWS on an unreadable record instead of swallowing it to null, so this claimed record
+    // RETRIES on a read blip (like resolveAddress below) rather than terminalizing a live subscriber as failed.
+    let subscriber;
+    try {
+      subscriber = await getSubscriber(kv, hash);
+    } catch {
+      await retryOrFail(kv, claimed, maxAttempts, now, issueId, () => { failed++; });
+      continue;
+    }
     if (!subscriber || !canReceive(subscriber)) {
       await putSend(kv, markFailed(claimed, { now })); // no active subscriber record: terminal, not retried
       await removeFromPending(kv, issueId, hash);
@@ -277,10 +297,18 @@ export async function drainMailIssue(env, {
 
   // Record the sends against the rate budget ONCE (after the fact). Under-counting on a rare cron overlap is
   // safe (it never over-sends, because the claim guard already bounds a tick); over-counting never happens.
-  if (sent > 0) await bumpBudget(kv, day, month, sent);
+  // bumpBudget now SKIPS (never resets) a counter whose base is unreadable and reports which in `skipped`; surface
+  // it so a monitor sees that this tick's sends could not be booked against the ceiling (an under-count, the safe
+  // direction, but not silent). The old `|| 0` reset the ceiling downward, blowing the owner's send gate.
+  let budgetSkipped = [];
+  if (sent > 0) { const b = await bumpBudget(kv, day, month, sent); budgetSkipped = b?.skipped ?? []; }
 
-  const backlog = (await readPendingIndex(kv, issueId)).length;
-  return { issueId, sent, failed, suppressed, dropped, refused, deferred, backlog, allowance, gate: sendGate.mode };
+  // Tail backlog is a monitoring stat; readPendingIndex now THROWS on an unreadable index, so never let a stat read
+  // at the very end discard the result of a tick that already sent. Fall back to the pre-drain window count.
+  let backlog;
+  try { backlog = (await readPendingIndex(kv, issueId)).length; }
+  catch { backlog = pending.length; }
+  return { issueId, sent, failed, suppressed, dropped, refused, deferred, backlog, budgetSkipped, allowance, gate: sendGate.mode };
 }
 
 /** A retryable failure: leave the record pending for the next tick if it still has attempts, else terminalize it

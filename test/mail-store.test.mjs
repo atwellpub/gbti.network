@@ -175,6 +175,75 @@ test('bumpBudget increments both counters and TTLs them', async () => {
   assert.deepEqual(await readBudget(kv, '2026-08-18', '2026-08'), { daily: 5, monthly: 5 });
 });
 
+// ---------- the three-state read contract (SowMaster/SecurityMaster swallow sweep, 2026-08-22) ----------
+// ABSENT (null/0, legitimate), PRESENT (a value), UNREADABLE (a read error). The helpers below used to swallow a
+// throw into null, collapsing UNREADABLE into ABSENT: a transient blip then looked identical to a deleted record
+// and cost a live recipient. They now THROW on unreadable so each caller can defer/retry; ABSENT stays null.
+
+test('getSend THROWS on an unreadable record (never swallows to null); a genuine miss is still null', async () => {
+  const kv = makeKV();
+  assert.equal(await getSend(kv, 'i1', 'missing'), null, 'a genuine miss is null');
+  const kvErr = makeKV({ throwOn: (k) => k === sendKey('i1', 'a') });
+  await assert.rejects(() => getSend(kvErr, 'i1', 'a'), /kv get failed/,
+    'an unreadable record throws so the drain DEFERS it, never prunes a live recipient into an un-drainable orphan');
+});
+
+test('getSubscriber THROWS on an unreadable record (never swallows to null); a genuine miss is still null', async () => {
+  const kv = makeKV();
+  assert.equal(await getSubscriber(kv, 'missing'), null, 'a genuine miss is null');
+  const kvErr = makeKV({ throwOn: (k) => k === subscriberKey('h1') });
+  await assert.rejects(() => getSubscriber(kvErr, 'h1'), /kv get failed/,
+    'a claimed record RETRIES on a read blip instead of terminalizing a live subscriber as failed');
+});
+
+test('bumpBudget never RESETS a counter on an unreadable base; it skips that write and reports it', async () => {
+  const m = new Map();
+  let failDay = false;
+  const kv = {
+    async get(key) {
+      if (failDay && key === budgetDayKey('2026-08-18')) throw new Error('kv get failed');
+      const e = m.get(key); return e == null ? null : e.value;
+    },
+    async put(key, value, opts) { m.set(key, { value: String(value), opts: opts || null }); },
+  };
+  await bumpBudget(kv, '2026-08-18', '2026-08', 89); // seed both to 89
+  failDay = true;
+  const r = await bumpBudget(kv, '2026-08-18', '2026-08', 10);
+  assert.deepEqual(r.skipped, ['daily'], 'the unreadable daily counter is skipped, not written');
+  // the OLD `|| 0` collapsed the unreadable read to 0 and wrote 0 + 10 = 10, blowing the ceiling downward.
+  assert.equal(m.get(budgetDayKey('2026-08-18')).value, '89', 'the daily counter is UNTOUCHED, never reset to 10');
+  assert.equal(m.get(budgetMonthKey('2026-08')).value, '99', 'the readable monthly counter still increments');
+});
+
+test('readPendingIndex THROWS on an unreadable index; removeFromPending is an OBSERVABLE self-healing no-op', async () => {
+  const kv = makeKV();
+  await enqueueIssue(kv, issueOf('i1'), ['a', 'b'], { now: at(0) });
+  assert.deepEqual(await removeFromPending(kv, 'i1', 'a'), { removed: true, indexUnreadable: false });
+  assert.deepEqual(await removeFromPending(kv, 'i1', 'zzz'), { removed: false, indexUnreadable: false },
+    'removing an absent hash is a readable no-op');
+  const kvErr = makeKV({ throwOn: (k) => k === MAIL_PENDING_KEY('i1') });
+  await assert.rejects(() => readPendingIndex(kvErr, 'i1'), /kv get failed/, 'the shared read no longer swallows');
+  assert.deepEqual(await removeFromPending(kvErr, 'i1', 'b'), { removed: false, indexUnreadable: true },
+    'the write path surfaces the unread index instead of silently skipping (was a hidden swallow in the shared read)');
+});
+
+test('enqueueIssue KEEPS a recipient whose existing record is unreadable and never resurrects a terminal one', async () => {
+  const kv = makeKV();
+  await enqueueIssue(kv, issueOf('i1'), ['a', 'b'], { now: at(0) });
+  await putSend(kv, markSent(await getSend(kv, 'i1', 'a'), { now: at(1) })); // a is terminal (sent)
+  // A re-run with a's existing record unreadable (a transient read blip on the idempotency check).
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === sendKey('i1', 'a')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const res = await enqueueIssue(kvErr, issueOf('i1'), ['a', 'b'], { now: at(2) });
+  assert.equal(res.readErrors, 1, 'the unreadable existing record is counted');
+  assert.equal(res.enqueued, 0, 'no NEW record is created (the swallow-to-null would have built a SECOND record over the terminal one)');
+  assert.deepEqual((await readPendingIndex(kv, 'i1')).sort(), ['a', 'b'],
+    'the recipient is KEPT in the index (fail-closed toward not dropping a live one; a terminal record is pruned by the drain next tick)');
+  assert.equal((await getSend(kv, 'i1', 'a')).status, 'sent', 'the terminal record was not overwritten with a fresh pending one');
+});
+
 test('MAIL_PENDING_KEY is the documented shape', () => {
   assert.equal(MAIL_PENDING_KEY('2026-08-18'), 'mail:pending:2026-08-18');
 });
