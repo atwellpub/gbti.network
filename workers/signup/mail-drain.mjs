@@ -81,14 +81,19 @@ export function resolveSendGate(env = {}) {
  * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, dropped, refused, deferred,
  * backlog, gate, reason }, where `refused` counts recipients the send gate did not permit and `deferred`
  * counts recipients whose suppression marker was unreadable this tick; both are left pending with no attempt.
+ *
+ * The cap defaults here are the SAME bounded constants the outer drainMail resolves, NOT null. This is
+ * exported and will grow a second direct caller (a per-event notification sender), so an omitted cap must
+ * mean the ceiling, not unbounded: closing the fail-open class one layer in, where the future caller cannot
+ * be reviewed yet. A direct caller that genuinely wants no ceiling has to pass dailyCap: null on purpose.
  */
 export async function drainMailIssue(env, {
   kv = env?.SIGNUP_KV,
   issueId,
   now = Date.now,
-  cap = 10,
-  dailyCap = null,
-  monthlyCap = null,
+  cap = DEFAULT_MAX_PER_TICK,
+  dailyCap = DEFAULT_DAILY_CAP,
+  monthlyCap = DEFAULT_MONTHLY_CAP,
   dayStr = null,
   monthStr = null,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,

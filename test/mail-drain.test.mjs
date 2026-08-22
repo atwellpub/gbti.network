@@ -432,3 +432,60 @@ test('CAP FLOOR: with the daily cap raised and NO monthly var, the DEFAULT month
   await drainMail(env, { kv, now: at(1_000_000), perTickCap: hashes.length, ...deps(sender) });
   assert.equal(sender.sent.length, 5, 'bounded by the default monthly cap remaining (default - pre-spent), not unbounded');
 });
+
+// CLASS CLOSED: the two tests above prove the OUTER drainMail resolves a bounded cap. But drainMailIssue is
+// EXPORTED and sow-186's per-event notification sender is the next natural caller to invoke it DIRECTLY, for a
+// different queue, bypassing drainMail. If the inner signature defaults were null (unbounded), that future caller
+// would reproduce the exact fail-open one layer in, and the outer tests would stay green because they never touch
+// the inner defaults. These two drive drainMailIssue with NO cap args at all and assert the inner default binds;
+// they go RED if drainMailIssue's dailyCap/monthlyCap defaults return to null. This closes the class, not the
+// instance, which matters because the second caller does not exist yet and so cannot be reviewed.
+
+test('CAP FLOOR (inner): drainMailIssue with NO cap args is bounded by the DEFAULT daily cap, never unbounded', async () => {
+  const hashes = Array.from({ length: MAIL_CAP_DEFAULTS.daily + 30 }, (_, i) => `h${i}`); // more recipients than the cap
+
+  // Default path: call the exported inner directly, the way a second queue's sender would, passing NO
+  // dailyCap/monthlyCap. Raise `cap` above the daily default so the DAILY cap is the binding constraint and only the
+  // inner default can limit it. If the inner default regressed to null (unbounded), all recipients would send.
+  const kvDefault = makeKV();
+  await seed(kvDefault, 'i1', hashes);
+  const senderDefault = makeSender();
+  const rDefault = await drainMailIssue(OPEN, { kv: kvDefault, issueId: 'i1', now: at(1_000_000), cap: hashes.length, ...deps(senderDefault) });
+  assert.equal(rDefault.sent, MAIL_CAP_DEFAULTS.daily, 'the inner default daily cap binds a direct caller, not unbounded');
+  assert.equal(senderDefault.sent.length, MAIL_CAP_DEFAULTS.daily);
+
+  // Contrast, on a FRESH kv: an EXPLICIT dailyCap: null is what the buggy default used to be, and it sends every
+  // recipient. This documents the fail-open the default now avoids, and makes the assertion above self-proving: the
+  // default cannot be null, because null demonstrably sends all of them here, not MAIL_CAP_DEFAULTS.daily.
+  const kvNull = makeKV();
+  await seed(kvNull, 'i1', hashes);
+  const senderNull = makeSender();
+  const rNull = await drainMailIssue(OPEN, { kv: kvNull, issueId: 'i1', now: at(1_000_000), cap: hashes.length, dailyCap: null, monthlyCap: null, ...deps(senderNull) });
+  assert.equal(rNull.sent, hashes.length, 'explicit dailyCap: null is unbounded, which is exactly why null must not be the default');
+  assert.ok(rNull.sent > rDefault.sent, 'the bounded default sends strictly fewer than the unbounded explicit-null path');
+});
+
+test('CAP FLOOR (inner): drainMailIssue with the daily cap raised and NO monthly arg, the DEFAULT monthly cap binds', async () => {
+  const { dayStr, monthStr } = budgetDateStrings(1_000_000);
+  const hashes = Array.from({ length: 40 }, (_, i) => `h${i}`);
+
+  // Default monthly path: pass an explicit high dailyCap so daily does not bind, but leave monthlyCap UNSET, so only
+  // the inner monthly default can limit the tick. Pre-spend the month to five short of the default.
+  const kvDefault = makeKV();
+  await bumpBudget(kvDefault, dayStr, monthStr, MAIL_CAP_DEFAULTS.monthly - 5);
+  await seed(kvDefault, 'i1', hashes);
+  const senderDefault = makeSender();
+  const rDefault = await drainMailIssue(OPEN, { kv: kvDefault, issueId: 'i1', now: at(1_000_000), cap: hashes.length, dailyCap: 100000, ...deps(senderDefault) });
+  assert.equal(rDefault.sent, 5, 'the inner default monthly cap remaining binds a direct caller, not unbounded');
+  assert.equal(senderDefault.sent.length, 5);
+
+  // Contrast, on a FRESH kv pre-spent identically: an EXPLICIT monthlyCap: null ignores the pre-spend and sends every
+  // recipient, which is the fail-open the default now avoids.
+  const kvNull = makeKV();
+  await bumpBudget(kvNull, dayStr, monthStr, MAIL_CAP_DEFAULTS.monthly - 5);
+  await seed(kvNull, 'i1', hashes);
+  const senderNull = makeSender();
+  const rNull = await drainMailIssue(OPEN, { kv: kvNull, issueId: 'i1', now: at(1_000_000), cap: hashes.length, dailyCap: 100000, monthlyCap: null, ...deps(senderNull) });
+  assert.equal(rNull.sent, hashes.length, 'explicit monthlyCap: null is unbounded, which is exactly why null must not be the default');
+  assert.ok(rNull.sent > rDefault.sent, 'the bounded monthly default sends strictly fewer than the unbounded explicit-null path');
+});
