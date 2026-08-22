@@ -11,9 +11,28 @@
 
 import { authorizeMember } from './membership-content.mjs';
 import { recordAuthedUsage } from './analytics.mjs'; // SOW-061 P3: follow usage by tier
-import { FollowError, normalizeFollows, applyFollow } from '../../membership/member-follows.mjs';
+import { FollowError, normalizeFollows, applyFollow, normalizeUsername } from '../../membership/member-follows.mjs';
+import { FOLLOWERS_KEY, normalizeFollowers, applyFollower } from '../../membership/member-followers.mjs'; // SOW-186 phase 3: reverse index
 
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`;
+
+/** SOW-186 phase 3: keep the reverse follower index (followers:<followedUsername>) in step with a follow /
+ *  unfollow, so the follow-publish delivery can enumerate an author's followers cheaply. BEST-EFFORT: the
+ *  forward store (follows:<github_id>) is the source of truth and has ALREADY been written when this runs, so a
+ *  reverse-index hiccup logs and returns rather than failing an otherwise-good follow. applyFollower is
+ *  idempotent, so a later follow/unfollow of the same author self-corrects any drift, and reconcile can rebuild
+ *  the index from the forward graph (a follow-up). */
+async function maintainFollowerIndex(kv, { followedUsername, followerGithubId, on, now }) {
+  try {
+    const key = FOLLOWERS_KEY(followedUsername);
+    const stored = normalizeFollowers(await kv.get(key, 'json'));
+    const next = applyFollower(stored, { githubId: followerGithubId, on }, { now });
+    await kv.put(key, JSON.stringify(next));
+  } catch (err) {
+    // Drift is observable and self-healing; never fail the follow for it.
+    console.warn(JSON.stringify({ evt: 'follower-index-drift', on, error: err?.message || String(err) }));
+  }
+}
 
 export async function handleFollows(request, env, { kv = env?.SIGNUP_KV, now = Date.now, authorize = authorizeMember, ...authDeps } = {}) {
   if (!kv) return { status: 500, body: { error: 'misconfigured', message: 'the follow store is not configured' } };
@@ -45,6 +64,13 @@ export async function handleFollows(request, env, { kv = env?.SIGNUP_KV, now = D
     throw err;
   }
   await kv.put(key, JSON.stringify(next));
+  // SOW-186 phase 3: mirror into the reverse follower index for cheap drain-time enumeration. Keyed by the
+  // FOLLOWED username (already validated by applyFollow above); the forward write is the source of truth, so
+  // this is best-effort and never fails the request.
+  const followedUsername = normalizeUsername(payload?.username);
+  if (followedUsername) {
+    await maintainFollowerIndex(kv, { followedUsername, followerGithubId: auth.githubId, on: payload?.on !== false, now });
+  }
   recordAuthedUsage(env, auth, 'follow', request); // SOW-061 P3: a follow/unfollow write, recorded by effective tier
   return { status: 200, body: { ok: true, following: next.following } };
 }

@@ -27,6 +27,8 @@ import { removeGrantEntryIfPresent, listCouponRedemptions, GRANDFATHERED_PATH } 
 import { couponLockKey, COUPON_LOCK_VALUE } from '../../membership/coupon-lock.mjs'; // sow-212: the minimized lock
 import { mailHash } from '../../membership/mail-suppress.mjs'; // SOW-166: the keyed identity behind every mail key
 import { eraseSubscriberMail } from '../../workers/signup/mail-store.mjs'; // SOW-166: the one shared mail eraser
+import { normalizeFollows, followingUsernames } from '../../membership/member-follows.mjs'; // SOW-186 phase 3
+import { FOLLOWERS_KEY, normalizeFollowers, applyFollower } from '../../membership/member-followers.mjs'; // SOW-186 phase 3
 
 export const ACTIVITY_KEY = (githubId) => `activity:${githubId}`;
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`; // SOW-023 subscription graph
@@ -83,10 +85,57 @@ export async function erasePrefs({ githubId, env = process.env, fetchImpl = glob
 /** SOW-150/186 right-to-erasure: hard-delete the member's INBOUND notification store (mentions + followed-author
  *  publishes addressed to them). Per-recipient, keyed by their own github_id, so this is a computed-key delete
  *  like activity/follows. The follow GRAPH that produced these (who they follow, and their entry in others'
- *  reverse follower index) is erased separately (eraseFollows + the reverse-index scrub, SOW-186 phase 3). */
+ *  reverse follower index) is erased separately (eraseFollows + eraseReverseFollows, SOW-186 phase 3). */
 export async function eraseNotifications({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
   return deleteKvKey({ key: NOTIFICATIONS_KEY(String(githubId)), env, fetchImpl });
+}
+
+/**
+ * SOW-186 phase 3 right-to-erasure, BOTH directions of the reverse follower index (followers:<username>):
+ *   - AS A FOLLOWER: read follows:<github_id> (the member's outbound list) and remove their github_id from
+ *     followers:<eachFollowedUsername>. This erases the member's follow CHOICES from the reverse index AND
+ *     stops a followed author's next publish from re-creating a notifications:<github_id> for an erased member.
+ *   - AS A FOLLOWED TARGET: delete followers:<username> (the dangling inbound index keyed by the erased
+ *     member). The follower github_ids in it are OTHER members' data, preserved in their own forward follows:
+ *     lists (the source of truth), so deleting this derived index loses nothing recoverable.
+ *
+ * ORDER IS LOAD-BEARING: this reads follows:<github_id>, so it MUST run BEFORE the `follows` step deletes it.
+ * The step order in runErasure enforces it. Reported no-op without CF creds. A targeted scrub (via the member's
+ * own outbound list), never a full followers:* scan.
+ */
+export async function eraseReverseFollows({ githubId, username = null, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  const accountId = env.CF_ACCOUNT_ID, namespaceId = env.CF_KV_NAMESPACE_ID, apiToken = env.CF_API_TOKEN;
+  if (!accountId || !namespaceId || !apiToken) return { skipped: true, reason: 'CF creds not set' };
+  const id = String(githubId);
+  const readJson = async (key) => { const t = await readKvValue({ key, env, fetchImpl }); if (t == null) return null; try { return JSON.parse(t); } catch { return null; } };
+
+  // AS A FOLLOWER: use the member's OWN outbound list to scrub only the reverse sets they appear in.
+  let outboundScrubbed = 0;
+  const fwd = await readJson(FOLLOWS_KEY(id));
+  if (fwd) {
+    for (const followedUsername of followingUsernames(normalizeFollows(fwd))) {
+      const key = FOLLOWERS_KEY(followedUsername);
+      const before = normalizeFollowers(await readJson(key));
+      const after = applyFollower(before, { githubId: id, on: false });
+      if (after.followers.length !== before.followers.length) {
+        await putKvValue({ key, value: JSON.stringify(after), env, fetchImpl });
+        outboundScrubbed++;
+      }
+    }
+  }
+
+  // AS A FOLLOWED TARGET: delete the dangling inbound index keyed by this member's username.
+  let inboundDeleted = false;
+  if (username) {
+    const key = FOLLOWERS_KEY(String(username).toLowerCase());
+    if ((await readKvValue({ key, env, fetchImpl })) !== null) {
+      await deleteKvKey({ key, env, fetchImpl });
+      inboundDeleted = true;
+    }
+  }
+  return { scrubbed: outboundScrubbed + (inboundDeleted ? 1 : 0), outboundScrubbed, inboundDeleted };
 }
 
 /** Hard-delete a member's hosted draft store (SOW-157: staged authoring state, may contain unpublished text). */
@@ -467,6 +516,7 @@ export function planErasure({ githubId, username } = {}) {
     { step: 'coupon-redemptions', auto: true, tool: 'erase-member.mjs --apply', action: `Delete every redemption:<CODE>:${githubId} record (the id is in the key name) and decrement each shared redemptions:<CODE> counter.` },
     { step: 'activity', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the edge-store keys ${ACTIVITY_KEY(githubId)} (favorites + collections) and ${FOLLOWS_KEY(githubId)} (the follow graph).` },
     { step: 'notifications', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete ${NOTIFICATIONS_KEY(githubId)} (SOW-150/186: the member's inbound notifications -- mentions + followed-author publishes).` },
+    { step: 'reverse-follows', auto: true, tool: 'erase-member.mjs --apply', action: `SOW-186: remove github_id ${githubId} from followers:<each followed username> (read from follows:${githubId}, so BEFORE the follows delete) and delete ${username ? FOLLOWERS_KEY(username) : 'followers:<username>'} (the inbound index). Follower github_ids survive in their own forward follows: lists.` },
     { step: 'lookup-cache', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the lookup-cache key ${LOOKUP_KEY(githubId)} (github_id -> Stripe customer_id).` },
     { step: 'share-votes', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every per-target share-vote set (upvotes:share:*); syndication queue items auto-expire via TTL.` },
     { step: 'news-opens', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every per-item news detail-open set (news-opens:*, SOW-111).` },
@@ -692,6 +742,8 @@ export async function runErasure({
   };
 
   await runStep('activity', () => eraseActivity({ githubId, env, fetchImpl }));
+  // SOW-186 phase 3: reads follows:<id>, so it MUST precede the follows delete below.
+  await runStep('reverse-follows', () => eraseReverseFollows({ githubId, username, env, fetchImpl }));
   await runStep('follows', () => eraseFollows({ githubId, env, fetchImpl }));
   await runStep('notifications', () => eraseNotifications({ githubId, env, fetchImpl })); // SOW-150/186: inbound notification store
   await runStep('prefs', () => erasePrefs({ githubId, env, fetchImpl })); // SOW-046: categories + followed news channels

@@ -8,8 +8,9 @@ import {
   deleteKvKey, eraseActivity, eraseFollows, eraseLookupCache, eraseShareVotes, eraseNewsOpens, planErasure, runErasure,
   eraseDiscordRoles, eraseContent, eraseStripeCustomer, ACTIVITY_KEY, FOLLOWS_KEY, LOOKUP_KEY, MEMBERS_INDEX_PATH,
   eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY, minimizeCouponGrant, eraseCouponLock,
-  minimizeRedeemedInvites, eraseNotifications, NOTIFICATIONS_KEY,
+  minimizeRedeemedInvites, eraseNotifications, NOTIFICATIONS_KEY, eraseReverseFollows,
 } from '../scripts/lib/erase-member.mjs';
+import { FOLLOWERS_KEY } from '../membership/member-followers.mjs';
 import { GRANDFATHERED_PATH } from '../scripts/lib/coupon-grants.mjs';
 import { couponLockKey } from '../membership/coupon-lock.mjs';
 import { parseArgs } from '../scripts/erase-member.mjs';
@@ -50,6 +51,35 @@ test('eraseNotifications targets notifications:<github_id> (SOW-150/186)', async
   await eraseNotifications({ githubId: 7, env: CF, fetchImpl: async (url) => { key = decodeURIComponent(url.split('/values/')[1]); return { ok: true }; } });
   assert.equal(key, NOTIFICATIONS_KEY('7'));
   await assert.rejects(() => eraseNotifications({ githubId: '' }), /github_id is required/);
+});
+
+test('SOW-186: eraseReverseFollows scrubs the member from the reverse sets they follow AND deletes their own inbound index', async () => {
+  const { fetchImpl, calls } = fakeKvFetch({
+    keys: [],
+    values: {
+      // the erased member (9, "zoe") follows alice + bob
+      'follows:9': JSON.stringify({ following: [{ username: 'alice', addedAt: 1 }, { username: 'bob', addedAt: 2 }] }),
+      // AS A FOLLOWER: alice's reverse set contains 9 (must be scrubbed) + 7 (must stay); bob's has only 7 (no change)
+      [FOLLOWERS_KEY('alice')]: JSON.stringify({ followers: [{ githubId: '9', addedAt: 1 }, { githubId: '7', addedAt: 1 }] }),
+      [FOLLOWERS_KEY('bob')]: JSON.stringify({ followers: [{ githubId: '7', addedAt: 1 }] }),
+      // AS A FOLLOWED TARGET: zoe's own inbound index exists and must be deleted
+      [FOLLOWERS_KEY('zoe')]: JSON.stringify({ followers: [{ githubId: '3', addedAt: 1 }] }),
+    },
+  });
+  const r = await eraseReverseFollows({ githubId: '9', username: 'zoe', env: CF, fetchImpl });
+  assert.equal(r.outboundScrubbed, 1, 'only alice changed (bob did not contain 9)');
+  assert.equal(r.inboundDeleted, true);
+  // alice's set was written back WITHOUT 9 but WITH 7
+  const alicePut = calls.put.find((p) => p.key === FOLLOWERS_KEY('alice'));
+  assert.ok(alicePut, 'alice reverse set rewritten');
+  assert.deepEqual(JSON.parse(alicePut.body).followers, [{ githubId: '7', addedAt: 1 }]);
+  assert.ok(!calls.put.some((p) => p.key === FOLLOWERS_KEY('bob')), 'bob unchanged -> no write');
+  assert.ok(calls.deleted.includes(FOLLOWERS_KEY('zoe')), "the erased member's own inbound index is deleted");
+});
+
+test('eraseReverseFollows is a reported no-op without CF credentials', async () => {
+  const r = await eraseReverseFollows({ githubId: '9', username: 'zoe' });
+  assert.equal(r.skipped, true);
 });
 
 test('eraseFollows targets follows:<github_id> (SOW-023)', async () => {
@@ -476,7 +506,7 @@ test('planErasure marks the auto-driven steps auto and keeps the irreversible on
   assert.ok(activity.action.includes('activity:9'));
   assert.ok(activity.action.includes('follows:9'), 'the auto step also deletes the follow graph');
   // SOW-024: content, activity, lookup-cache, discord, members-index are now AUTO-DRIVEN
-  for (const step of ['content', 'activity', 'notifications', 'lookup-cache', 'discord', 'members-index']) {
+  for (const step of ['content', 'activity', 'notifications', 'reverse-follows', 'lookup-cache', 'discord', 'members-index']) {
     assert.equal(plan.find((s) => s.step === step).auto, true, step);
   }
   const notif = plan.find((s) => s.step === 'notifications');

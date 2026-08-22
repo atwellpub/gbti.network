@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleFollows, eraseMemberFollows, FOLLOWS_KEY } from '../workers/signup/membership-follows.mjs';
+import { FOLLOWERS_KEY, normalizeFollowers } from '../membership/member-followers.mjs'; // SOW-186 phase 3
 
 function fakeKv(initial = {}) {
   const m = new Map(Object.entries(initial));
@@ -74,4 +75,39 @@ test('eraseMemberFollows hard-deletes the follow record (right-to-erasure)', asy
   const r = await eraseMemberFollows({}, '42', { kv });
   assert.deepEqual(r, { ok: true, key: 'follows:42' });
   assert.equal(kv.store.has('follows:42'), false);
+});
+
+// --- SOW-186 phase 3: the reverse follower index maintained at follow-time ---
+
+test('POST follow: the caller is added to followers:<followedUsername> (reverse index)', async () => {
+  const kv = fakeKv();
+  await handleFollows(req('POST', { username: 'Alice' }), {}, { kv, authorize: paid, now });
+  const rev = normalizeFollowers(JSON.parse(kv.store.get(FOLLOWERS_KEY('alice'))));
+  assert.deepEqual(rev.followers, [{ githubId: '42', addedAt: 5000 }], 'the follower github_id lands under the FOLLOWED username');
+});
+
+test('POST unfollow: the caller is removed from followers:<followedUsername>', async () => {
+  const kv = fakeKv({
+    [FOLLOWS_KEY('42')]: JSON.stringify({ following: [{ username: 'alice', addedAt: 1 }], updatedAt: 1 }),
+    [FOLLOWERS_KEY('alice')]: JSON.stringify({ followers: [{ githubId: '42', addedAt: 1 }, { githubId: '7', addedAt: 1 }], updatedAt: 1 }),
+  });
+  await handleFollows(req('POST', { username: 'alice', on: false }), {}, { kv, authorize: paid, now });
+  const rev = normalizeFollowers(JSON.parse(kv.store.get(FOLLOWERS_KEY('alice'))));
+  assert.deepEqual(rev.followers, [{ githubId: '7', addedAt: 1 }], 'only the caller is removed; other followers stay');
+});
+
+test('reverse-index maintenance is best-effort: a reverse-write failure never fails the follow', async () => {
+  // A KV whose PUT rejects ONLY for the reverse key; the forward write must still succeed and return 200.
+  const m = new Map();
+  const kv = {
+    store: m,
+    async get(k, type) { const v = m.get(k); return type === 'json' && typeof v === 'string' ? JSON.parse(v) : (v ?? null); },
+    async put(k, v) { if (k.startsWith('followers:')) throw new Error('kv down'); m.set(k, v); },
+    async delete(k) { m.delete(k); },
+  };
+  const r = await handleFollows(req('POST', { username: 'alice' }), {}, { kv, authorize: paid, now });
+  assert.equal(r.status, 200, 'the follow succeeds despite the reverse-index write failing');
+  assert.deepEqual(r.body.following, [{ username: 'alice', addedAt: 5000 }]);
+  assert.ok(m.has(FOLLOWS_KEY('42')), 'the forward (source-of-truth) write landed');
+  assert.ok(!m.has(FOLLOWERS_KEY('alice')), 'the reverse write was dropped, not retried into a failure');
 });
