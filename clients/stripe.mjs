@@ -57,8 +57,16 @@ export function createStripeClient({ apiKey, fetch = globalThis.fetch, baseUrl =
   /**
    * A GitHub user id as a bare digit string, or null if it is not one. Deliberately strict: no sign, no
    * whitespace inside, no exponent, no leading plus. Length-capped so an absurd value cannot be sent onward.
-   * Not anchored with $ alone, because in JS `$` also matches before a trailing newline, so a value ending in
-   * one would pass a naive check; the character class plus the explicit length bound closes that.
+   *
+   * CORRECTED 2026-08-22 (@UnifiedWorker caught it, verified on node v22). An earlier version of this comment
+   * said /^[0-9]+$/ would accept "123\n" because `$` matches before a trailing newline. THAT IS FALSE IN
+   * JAVASCRIPT. Without the `m` flag, JS `$` matches only the true end of input, so /^[0-9]+$/.test("123\n")
+   * is false. The before-a-final-newline behaviour is Perl, PCRE and Python; importing it into a claim about
+   * JS is the mistake, and it is recorded here rather than quietly deleted so nobody restores the rationale.
+   *
+   * The real reasons for a character scan are the ones that survive: an explicit LENGTH BOUND (a regex alone
+   * accepts an arbitrarily long digit run, and this value is interpolated into a query), and having no anchor
+   * semantics to get wrong in the first place. The true JS behaviour is pinned in test/member-followers.test.mjs.
    */
   function numericGithubId(v) {
     const s = String(v ?? '').trim();

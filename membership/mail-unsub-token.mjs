@@ -113,10 +113,17 @@ export async function verifyUnsubRequest({ hash, token, secret, retired = [] }) 
   // A hash is a SHA-256 hex digest. Rejecting anything else keeps a malformed or injected identifier from ever
   // reaching a KV key builder, and costs nothing because the value is machine-generated on our own side.
   //
-  // A LENGTH TEST PLUS A NEGATED CLASS, NOT AN ANCHORED MATCH. In JavaScript `$` also matches immediately
-  // BEFORE a trailing newline, so /^[0-9a-f]{64}$/ accepts "<64 hex>\n". The trim above happens to remove that
-  // today, which means an anchored form would be correct only by accident and would silently start letting a
-  // newline through the moment someone moved or dropped the trim. This form has no anchors to misread.
+  // A LENGTH TEST PLUS A NEGATED CLASS, NOT AN ANCHORED MATCH.
+  //
+  // CORRECTED 2026-08-22 (@UnifiedWorker caught it, verified on node v22). This comment previously claimed
+  // that JS `$` matches immediately before a trailing newline, so /^[0-9a-f]{64}$/ would accept "<64 hex>\n".
+  // THAT IS FALSE IN JAVASCRIPT: without the `m` flag, `$` matches only the true end of input. The
+  // before-a-final-newline behaviour belongs to Perl, PCRE and Python. Left visible rather than deleted so the
+  // folklore is not reintroduced by someone who half-remembers it, as I did.
+  //
+  // The form is still the right one, on reasons that hold: an explicit LENGTH CHECK is exact where a quantifier
+  // is easy to misread, and a negated class states "no character outside this set" directly, with no anchor
+  // semantics to get wrong. The true JS behaviour is pinned in test/member-followers.test.mjs.
   if (h.length !== 64 || /[^0-9a-f]/.test(h)) return { ok: false, hash: null };
   for (const candidate of [secret, ...(Array.isArray(retired) ? retired : [])]) {
     // eslint-disable-next-line no-await-in-loop -- at most a handful of keys, and they must be tried serially
