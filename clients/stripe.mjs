@@ -3,6 +3,8 @@
 // objects and arrays (metadata[github_id]=..., expand[]=data.subscriptions). `findCustomerByGithubId`
 // satisfies the deriveStatus() client contract in membership/derive-status.mjs.
 
+import { normalizeGithubId } from './github-id.mjs';
+
 export class StripeError extends Error {
   constructor(status, body) {
     super(`stripe error ${status}: ${body}`);
@@ -54,30 +56,6 @@ export function createStripeClient({ apiKey, fetch = globalThis.fetch, baseUrl =
 
   const EXPAND_SUBS = { 'expand[]': 'data.subscriptions' };
 
-  /**
-   * A GitHub user id as a bare digit string, or null if it is not one. Deliberately strict: no sign, no
-   * whitespace inside, no exponent, no leading plus. Length-capped so an absurd value cannot be sent onward.
-   *
-   * CORRECTED 2026-08-22 (@UnifiedWorker caught it, verified on node v22). An earlier version of this comment
-   * said /^[0-9]+$/ would accept "123\n" because `$` matches before a trailing newline. THAT IS FALSE IN
-   * JAVASCRIPT. Without the `m` flag, JS `$` matches only the true end of input, so /^[0-9]+$/.test("123\n")
-   * is false. The before-a-final-newline behaviour is Perl, PCRE and Python; importing it into a claim about
-   * JS is the mistake, and it is recorded here rather than quietly deleted so nobody restores the rationale.
-   *
-   * The real reasons for a character scan are the ones that survive: an explicit LENGTH BOUND (a regex alone
-   * accepts an arbitrarily long digit run, and this value is interpolated into a query), and having no anchor
-   * semantics to get wrong in the first place. The true JS behaviour is pinned in test/member-followers.test.mjs.
-   */
-  function numericGithubId(v) {
-    const s = String(v ?? '').trim();
-    if (s.length < 1 || s.length > 20) return null;
-    for (let i = 0; i < s.length; i++) {
-      const c = s.charCodeAt(i);
-      if (c < 48 || c > 57) return null;
-    }
-    return s;
-  }
-
   return {
     _req: req,
 
@@ -100,7 +78,7 @@ export function createStripeClient({ apiKey, fetch = globalThis.fetch, baseUrl =
      * a guard at the boundary holds for all of them, including callers not yet written.
      */
     async searchCustomerByGithubId(githubId) {
-      const id = numericGithubId(githubId);
+      const id = normalizeGithubId(githubId);
       if (!id) return null; // fail closed: never search on an id we could not validate
       const r = await req('GET', '/customers/search', {
         query: `metadata['github_id']:'${id}'`,

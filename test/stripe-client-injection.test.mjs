@@ -43,14 +43,19 @@ test('stripe: non-numeric and malformed ids are refused without a request', asyn
   assert.equal(seen.length, 0, 'not one of those may produce a request');
 });
 
-test('stripe: a trailing newline does not sneak past the check', async () => {
+test('stripe: a padded id is REFUSED, not silently cleaned (changed 2026-08-22)', async () => {
   const { client, seen } = spyClient();
-  // JS `$` also matches BEFORE a trailing newline, so a naive /^[0-9]+$/ would accept "123\n".
-  // Here it is trimmed to a clean id rather than being passed through with the newline attached.
-  const r = await client.searchCustomerByGithubId('125175036\n');
-  assert.equal(r?.id, 'cus_1');
-  assert.ok(decodeURIComponent(seen[0]).includes("'125175036'"), 'the newline must not reach the query');
-  assert.ok(!decodeURIComponent(seen[0]).includes('\n'), 'no raw newline in the outgoing query');
+  // This test previously asserted the OPPOSITE: that '125175036\n' was trimmed and searched. The rule is now
+  // reject-do-not-clean, agreed with @UnifiedWorker, so that one concept has one answer across every gate.
+  // A padded github_id means something upstream is already wrong, and cleaning it hides that. Refusing reads as
+  // "no such customer", i.e. NOT paid, which is the fail-closed direction for a membership check.
+  //
+  // (The old test's stated rationale was also wrong: JS `$` without `m` does NOT match before a trailing
+  // newline, so /^[0-9]+$/ would have rejected "123\n" anyway. That is Perl/PCRE/Python behaviour.)
+  for (const padded of ['125175036\n', ' 125175036', '125175036 ', '\t125175036']) {
+    assert.equal(await client.searchCustomerByGithubId(padded), null, `must refuse: ${JSON.stringify(padded)}`);
+  }
+  assert.equal(seen.length, 0, 'no request may be issued for a padded id');
 });
 
 test('stripe: findCustomerByGithubId inherits the guard (it is the deriveStatus contract)', async () => {
