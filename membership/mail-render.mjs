@@ -265,21 +265,22 @@ function emptyLineHtml(empties, p, firstIssue, siteUrl) {
 // membership page carries the current price). It reuses the perks language the footer already shipped rather
 // than introducing new promotional copy. The sentinels are inert test locators for the placement/proportion/
 // emphasis guards. The same block renders for every recipient of the issue (compile-once, Q12): harmless to a
-// paid member, and per-recipient targeting would break the single frozen issue. The CTA is OPT-IN: it renders
-// only when the compile passes ctx.membershipCta === true (and there is editorial content). Default-off is
-// deliberate and fail-safe, and it is the reason this is code and not a task-queue note: wiring the send without
-// an explicit decision produces an editorial-only email, never an unapproved solicitation, so the owner's
-// approval is the affirmative act that turns the CTA on rather than a suppression someone must remember. The
-// copy is accuracy-checked: it names commenting, member Shares and Discord, which are gated; it does NOT claim
-// collections, which SOW-077 gives a free signed-in member (the route is authorizeMember, not authorizePaid).
+// paid member, and per-recipient targeting would break the single frozen issue. OWNER 2026-08-21: the CTA is
+// ON by default (renders when there is editorial content and the compile has not set ctx.membershipCta ===
+// false), so a compile suppresses a given issue by passing false rather than opting each one in. The COPY is
+// the owner's, from the design mockup, corrected on one clause: it names comments and the members Discord
+// (paid-gated) and publishing under the Content Creator plan (sow-185), and it deliberately does NOT claim
+// "saved collections", which SOW-077 gives a FREE signed-in member (the /membership/activity route authorizes
+// with authorizeMemberCheap, not authorizePaid). That accuracy is pinned by a guard, because the mockup keeps
+// the false collections claim in two places and a future re-derivation would reintroduce it.
 function membershipCtaHtml(p, siteUrl) {
   const href = escapeHtml(absUrl('/membership/', siteUrl));
   return `<!--membership-cta-->`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:30px 28px 0">`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:${p.inkSoft};mso-line-height-rule:exactly;line-height:18px">`
-    + `Reading the digest is free. Membership adds commenting, member Shares and the Discord community. `
-    + `<a href="${href}" style="color:${p.footerLink};text-decoration:underline">About membership</a>`
+    + `Membership adds comments on any item and the members Discord. Publishing your own prompts, skills and products is part of the Content Creator plan. `
+    + `<a href="${href}" style="color:${p.footerLink};text-decoration:underline">Compare plans</a>`
     + `</div>`
     + `</td></tr></table>`
     + `<!--/membership-cta-->`;
@@ -405,7 +406,7 @@ export function renderIssue(issue, ctx = {}) {
   const emptyText = empties.length ? `\n\n${emptyPhrase(empties, firstIssue)}` : '';
   // The text-side CTA mirrors the html: one modest line, after all editorial, only when the html renders it.
   const ctaText = showCta
-    ? `\n\nReading the digest is free. Membership adds commenting, member Shares and the Discord community: ${siteUrl}/membership/`
+    ? `\n\nMembership adds comments on any item and the members Discord. Publishing your own prompts, skills and products is part of the Content Creator plan. Compare plans: ${siteUrl}/membership/`
     : '';
 
   const text = `GBTI DIGEST${range ? ` (${range.short})` : ''}\n`

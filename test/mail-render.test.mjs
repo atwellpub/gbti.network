@@ -266,7 +266,8 @@ const ED = '<!--editorial:';
 const ctaCount = (h) => (h.match(/<!--membership-cta-->/g) || []).length;
 const ctaBlock = (h) => h.slice(h.indexOf(CTA_OPEN), h.indexOf(CTA_CLOSE));
 const vistext = (h) => h.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
-// The CTA is OPT-IN (fail-safe default off), so a guard about the CTA must opt in to have a CTA to guard.
+// The CTA is ON by default (owner 2026-08-21); CTA_ON opts it in EXPLICITLY so a guard about the CTA holds a
+// CTA to guard regardless of the default, and reads as a deliberate opt-in at the call site.
 const CTA_ON = { membershipCta: true };
 
 test('CAN-SPAM 1: editorial content precedes the membership solicitation', () => {
@@ -343,7 +344,7 @@ test('CAN-SPAM 8: no CTA on an all-editorial-empty issue even when opted in (a s
   ] };
   const { html, text } = renderIssue(allEmpty, CTA_ON);
   assert.equal(ctaCount(html), 0, 'opting in does not force a CTA onto an issue with no editorial');
-  assert.doesNotMatch(text, /About membership|\/membership\//);
+  assert.doesNotMatch(text, /Compare plans|\/membership\//);
 });
 
 test('CAN-SPAM 9: the CTA is ON by default and suppressible per issue: omitted or true renders one, false suppresses it', () => {
@@ -354,8 +355,20 @@ test('CAN-SPAM 9: the CTA is ON by default and suppressible per issue: omitted o
   assert.equal(ctaCount(renderIssue(issueFixture(), {}).html), 1, 'omitting the flag renders the CTA (default on)');
   assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: true }).html), 1);
   assert.equal(ctaCount(renderIssue(issueFixture(), { membershipCta: false }).html), 0, 'membershipCta:false suppresses it for this issue');
-  // the accuracy fix: the CTA does not claim collections (a free-tier perk under SOW-077)
-  assert.doesNotMatch(renderIssue(issueFixture(), {}).html, /collections/i);
+});
+
+test('CAN-SPAM 10: the CTA copy names no benefit a free signed-in member already has (no "collections" claim)', () => {
+  // OWNER 2026-08-21 shipped the design mockup copy, corrected on one clause. The mockup claims "saved
+  // collections" as a membership benefit in TWO places, but /membership/activity (SOW-024 favorites +
+  // collections) authorizes with authorizeMemberCheap, NOT authorizePaid: a FREE signed-in member already has
+  // collections. This pins the corrected copy against a future re-derivation from the still-wrong mockup.
+  // The html check is scoped to the CTA block so a member's own content title mentioning "collections" cannot
+  // false-trip it; the text mirror is checked whole, which is safe because issueFixture carries no such text
+  // and the text CTA literal is the only place the copy could introduce it.
+  const { html, text } = renderIssue(issueFixture(), CTA_ON);
+  assert.equal(ctaCount(html), 1, 'a CTA must exist for this guard to mean anything');
+  assert.doesNotMatch(ctaBlock(html), /collections/i, 'the html CTA must not claim collections as a membership benefit');
+  assert.doesNotMatch(text, /collections/i, 'the text CTA must not claim collections either');
 });
 
 test('empty sections collapse to a single line naming them all; the first issue swaps the cadence clause and shows its launch note', () => {
