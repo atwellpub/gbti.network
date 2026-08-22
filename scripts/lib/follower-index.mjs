@@ -18,9 +18,7 @@
 
 import { normalizeFollows } from '../../membership/member-follows.mjs';
 import { normalizeUsername } from '../../membership/member-follows.mjs';
-import { FOLLOWERS_KEY, normalizeFollowers, MAX_FOLLOWERS } from '../../membership/member-followers.mjs';
-
-const NUMERIC_ID_RE = /^[0-9]+$/;
+import { FOLLOWERS_KEY, normalizeFollowers, normalizeGithubId, MAX_FOLLOWERS } from '../../membership/member-followers.mjs';
 
 /**
  * Pure: project the forward follow graph into the reverse index. Takes:
@@ -37,8 +35,8 @@ export function buildReverseIndex(forwardEntries, membersIndex, { now = Date.now
   const inverse = new Map();
   const pairs = membersIndex instanceof Map ? membersIndex.entries() : Object.entries(membersIndex || {});
   for (const [gid, uname] of pairs) {
-    const id = String(gid);
-    if (!NUMERIC_ID_RE.test(id) || typeof uname !== 'string') continue;
+    const id = normalizeGithubId(gid); // becomes the followers:<github_id> KEY, so reject a newline-suffixed id
+    if (id == null || typeof uname !== 'string') continue;
     const u = normalizeUsername(uname);
     if (u) inverse.set(u, id);
   }
@@ -48,8 +46,8 @@ export function buildReverseIndex(forwardEntries, membersIndex, { now = Date.now
   const reverse = new Map();
   let unresolved = 0;
   for (const entry of Array.isArray(forwardEntries) ? forwardEntries : []) {
-    const followerId = String(entry?.githubId ?? '');
-    if (!NUMERIC_ID_RE.test(followerId)) continue;
+    const followerId = normalizeGithubId(entry?.githubId);
+    if (followerId == null) continue;
     for (const rec of normalizeFollows(entry?.follows).following) {
       const followedId = inverse.get(rec.username);
       if (!followedId) { unresolved++; continue; } // fail-safe skip: no github_id for this followed username

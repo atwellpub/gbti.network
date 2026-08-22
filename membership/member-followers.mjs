@@ -32,9 +32,22 @@ export const FOLLOWERS_KEY = (githubId) => `followers:${githubId}`;
 // shows the author) but they are not recorded here, so they would miss follow-publish notifications.
 export const MAX_FOLLOWERS = 100000;
 
-// A github_id is an immutable numeric identifier (Stripe metadata primary key). Enforcing the shape here keeps
-// junk out of the index and matches the numeric-id validation the Stripe lookup already relies on.
-const GITHUB_ID_RE = /^[0-9]+$/;
+// A github_id is an immutable numeric identifier (Stripe metadata primary key). This validator matches the
+// house numeric-id standard (clients/stripe.mjs numericGithubId): a char-by-char digit scan with an explicit
+// length bound. Two reasons it earns its place over a bare regex here: (1) this id becomes the reverse-index
+// KEY (followers:<github_id>), so an absurdly long or non-numeric value must never reach a key, and the length
+// bound caps it; (2) a char scan rejects ANY non-digit (whitespace, punctuation, a stray control character)
+// rather than only the shapes a regex author remembered. Fail-closed: a bad value returns null / throws / is
+// dropped. (Note: /^[0-9]+$/ WITHOUT the `m` flag already rejects a trailing newline in JS -- `$` matches only
+// the true end of string there, not before a line break -- so the newline is not the reason; the length bound
+// and the shared house shape are.)
+export function normalizeGithubId(v) {
+  if (v == null) return null;
+  const s = String(v);
+  if (s.length < 1 || s.length > 20) return null; // bounded: current GitHub ids are ~9-10 digits, 20 is generous
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (c < 48 || c > 57) return null; }
+  return s;
+}
 
 /** Thrown for a bad follower id on the WRITE path. A malformed STORED entry never throws: normalizeFollowers
  *  drops it, so a read can never crash. */
@@ -53,8 +66,8 @@ export function normalizeFollowers(raw) {
     const seen = new Set();
     for (const f of raw.followers) {
       if (!f || typeof f !== 'object') continue;
-      const githubId = f.githubId == null ? '' : String(f.githubId);
-      if (!GITHUB_ID_RE.test(githubId) || seen.has(githubId)) continue;
+      const githubId = normalizeGithubId(f.githubId);
+      if (githubId == null || seen.has(githubId)) continue;
       seen.add(githubId);
       out.followers.push({ githubId, addedAt: Number(f.addedAt) || 0 });
     }
@@ -67,8 +80,8 @@ export function normalizeFollowers(raw) {
 /** Add (on:true) or remove (on:false) a follower github_id. Idempotent: adding an existing / removing an absent
  *  id is a no-op that leaves updatedAt untouched, so the Worker glue can skip a redundant KV write. */
 export function applyFollower(store, { githubId, on = true }, { now = Date.now } = {}) {
-  const id = githubId == null ? '' : String(githubId);
-  if (!GITHUB_ID_RE.test(id)) throw new FollowersError('a numeric github_id is required');
+  const id = normalizeGithubId(githubId);
+  if (id == null) throw new FollowersError('a numeric github_id is required');
   const s = normalizeFollowers(store);
   const exists = s.followers.some((f) => f.githubId === id);
   if (on && !exists) {

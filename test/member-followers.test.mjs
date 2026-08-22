@@ -5,12 +5,34 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   emptyFollowers, normalizeFollowers, applyFollower, followerIds, FollowersError, MAX_FOLLOWERS, FOLLOWERS_KEY,
+  normalizeGithubId,
 } from '../membership/member-followers.mjs';
 
 const now = () => 1000;
 
 test('FOLLOWERS_KEY is keyed by the followed member github_id (immutable), not their username', () => {
   assert.equal(FOLLOWERS_KEY('12345'), 'followers:12345');
+});
+
+test('normalizeGithubId adopts the house numeric-id standard: digit char-scan + explicit length bound', () => {
+  assert.equal(normalizeGithubId('12345'), '12345');
+  assert.equal(normalizeGithubId(12345), '12345');
+  // The char scan rejects ANY non-digit, control characters included. (In JS /^[0-9]+$/ WITHOUT the `m` flag
+  // already rejects a trailing newline, so that is not the reason to prefer a char scan; the length bound and
+  // the shared house shape are. This asserts the true JS behaviour so the rationale cannot drift into folklore.)
+  assert.equal(/^[0-9]+$/.test('123\n'), false, 'JS `$` without `m` matches only the true end of string');
+  assert.equal(normalizeGithubId('123\n'), null, 'a stray control character is rejected either way');
+  assert.equal(normalizeGithubId('12 3'), null, 'internal whitespace is rejected');
+  assert.equal(normalizeGithubId(''), null);
+  assert.equal(normalizeGithubId('12a'), null);
+  assert.equal(normalizeGithubId('1'.repeat(21)), null, 'the length bound rejects an absurd id');
+  assert.equal(normalizeGithubId(null), null);
+});
+
+test('normalizeFollowers drops a newline-suffixed follower id; applyFollower throws on it', () => {
+  const s = normalizeFollowers({ followers: [{ githubId: '7', addedAt: 1 }, { githubId: '9\n', addedAt: 2 }] });
+  assert.deepEqual(s.followers, [{ githubId: '7', addedAt: 1 }], 'the "9\\n" entry is dropped, not stored');
+  assert.throws(() => applyFollower(emptyFollowers(), { githubId: '9\n', on: true }, { now }), FollowersError);
 });
 
 test('emptyFollowers / normalizeFollowers: always the canonical shape, tolerant of junk', () => {
