@@ -40,10 +40,10 @@ function fakeFetch(map) {
   };
 }
 
-// Dates sit INSIDE the first-issue bootstrap window (now = 2026-08-25 13:00, so since = 2026-08-18 13:00); if
-// they did not, the content window would drop them and these tests would be measuring the window, not the
-// compile. The members stub is in-window too, so it is dropped by VISIBILITY (the property under test), not by
-// its date.
+// Dates sit INSIDE the first-issue bootstrap window (now = 2026-08-25 13:00, so since = now - 90 days =
+// 2026-05-27 13:00; owner ruling 2026-08-22, BOOTSTRAP_MS); if they did not, the content window would drop them
+// and these tests would be measuring the window, not the compile. The members stub is in-window too, so it is
+// dropped by VISIBILITY (the property under test), not by its date.
 const ACTIVITY = { entries: [
   { type: 'post', slug: 'p', title: 'Public post', url: '/articles/p/', author: 'ann', publishedAt: Date.UTC(2026, 7, 22), visibility: 'public' },
   { type: 'post', slug: 'm', title: 'Members stub', url: '/articles/m/', author: 'ann', publishedAt: Date.UTC(2026, 7, 23), visibility: 'members' },
@@ -123,7 +123,7 @@ test('compileWeeklyIssue: composes ONCE, excludes the members item, ranks news b
   const issue = await getIssue(kv, 'weekly-2026-08-25');
   assert.ok(issue, 'the issue is frozen in KV');
   // No prior issue seeded -> the FIRST-issue regime: a bootstrap window, no exclude set, launch wording.
-  assert.equal(issue.window.since, Date.UTC(2026, 7, 25, 13, 0, 0) - 7 * 24 * 3600 * 1000, 'first issue bootstraps the window to now - 7 days (never null)');
+  assert.equal(issue.window.since, Date.UTC(2026, 7, 25, 13, 0, 0) - 90 * 24 * 3600 * 1000, 'first issue bootstraps the window to now - 90 days (owner ruling 2026-08-22; never null)');
   assert.equal(issue.window.excluded, null, 'first issue carries no exclude set');
   assert.equal(r.firstIssue, true, 'the compile surfaces the launch regime');
   assert.deepEqual(issue.sections.article.map((a) => a.title), ['Public post'], 'the members stub was excluded by composeIssue');
@@ -168,15 +168,15 @@ test('compileWeeklyIssue with no kv is a safe no-op', async () => {
 
 // ---------- resolveWindow: the two composeIssue regimes (SowMaster ruling; `since` OR `exclude`, never both) ----------
 
-const WEEK = 7 * 24 * 3600 * 1000;
+const BOOTSTRAP = 90 * 24 * 3600 * 1000; // the first-issue window (owner ruling 2026-08-22, BOOTSTRAP_MS), was 7d
 const gen = (mo, day) => Date.UTC(2026, mo, day, 13, 0, 0);
 
-test('resolveWindow (FIRST issue): no prior -> since = now - 7d, exclude null, firstIssue true', async () => {
+test('resolveWindow (FIRST issue): no prior -> since = now - 90d, exclude null, firstIssue true', async () => {
   const kv = makeKV();
   const nowMs = gen(7, 25);
   assert.deepEqual(
     await resolveWindow(kv, { nowMs, currentIssueId: 'weekly-2026-08-25' }),
-    { firstIssue: true, since: nowMs - WEEK, exclude: null },
+    { firstIssue: true, since: nowMs - BOOTSTRAP, exclude: null },
   );
 });
 
@@ -228,15 +228,17 @@ test('compileWeeklyIssue FIRST issue: launch window drops an out-of-window item,
   const kv = makeKV();
   seedSubscribers(kv, ['r1']);
   const activity = { entries: [
+    // now = 2026-08-25, so the 90-day launch window opens ~2026-05-27. `in` (08-22) is inside; `out` (04-15) is
+    // well before the window and must be dropped by the launch bound.
     { type: 'post', slug: 'in', title: 'In launch window', url: '/articles/in/', author: 'ann', publishedAt: Date.UTC(2026, 7, 22), visibility: 'public' },
-    { type: 'post', slug: 'out', title: 'Before launch window', url: '/articles/out/', author: 'ann', publishedAt: Date.UTC(2026, 7, 10), visibility: 'public' },
+    { type: 'post', slug: 'out', title: 'Before launch window', url: '/articles/out/', author: 'ann', publishedAt: Date.UTC(2026, 3, 15), visibility: 'public' },
   ] };
   const d = { ...deps(kv), fetchImpl: fakeFetch({ '/activity-index.json': activity, '/shares-index.json': { entries: [] } }), queryItems: async () => ({ items: [] }) };
   const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, d);
   assert.equal(r.firstIssue, true);
   const issue = await getIssue(kv, 'weekly-2026-08-25');
   assert.deepEqual(issue.sections.article.map((a) => a.title), ['In launch window'], 'the pre-window item is dropped by the launch bound');
-  assert.equal(issue.window.since, gen(7, 25) - WEEK);
+  assert.equal(issue.window.since, gen(7, 25) - BOOTSTRAP);
   assert.equal(issue.window.excluded, null);
   assert.ok(issue.launchNote, 'a first issue carries the launch note');
 });

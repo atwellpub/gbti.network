@@ -29,7 +29,12 @@ import { NEWS_OPENS_KEY } from './membership-news-opened.mjs';
 
 const SITE_URL_DEFAULT = 'https://gbti.network';
 const MAIL_ISSUE_PREFIX = 'mail:issue:';
-const WEEK_MS = 7 * 24 * 3600 * 1000;
+// The FIRST issue's bootstrap window (owner ruling 2026-08-22): 90 days, not 7. The newest member content at
+// launch was 18 days old, so a 7-day inaugural window composes to ZERO member items (QAmaster measured 7d = 0,
+// 30d = 2, 90d = 7 items), and an empty first issue is the worst first impression for a list nobody has
+// unsubscribed from yet. This widens the INAUGURAL issue ONLY; every later issue stays weekly via the rolling
+// floor + exclude below, which do not read this constant.
+const BOOTSTRAP_MS = 90 * 24 * 3600 * 1000;
 const MEMBER_SECTION_KEYS = ['article', 'product', 'prompt', 'share'];
 
 /**
@@ -61,7 +66,8 @@ async function listPriorIssueIds(kv, { currentIssueId, pageBudget = 50 } = {}) {
  * TOGETHER, not alternatives (SowMaster ruling + PublicationMaster correction, 2026-08-21; composeIssue chains
  * both filters):
  *   - FIRST issue (no prior frozen issue): { firstIssue: true, since: nowMs - bootstrapMs, exclude: null }.
- *     A bounded, launch-worded issue rather than the newest-N-ever back catalogue.
+ *     A bounded, launch-worded issue rather than the newest-N-ever back catalogue. bootstrapMs defaults to
+ *     BOOTSTRAP_MS (90 days, owner ruling 2026-08-22) so the inaugural issue is not empty; see the constant.
  *   - THEREAFTER (a prior exists): { firstIssue: false, since: the COUPLED floor, exclude: <mailed urls> }.
  *     The floor drops everything published too long ago to still be excludable; exclude drops what has already
  *     been mailed. Together: mail everything published since the newsletter began that has not been mailed yet,
@@ -81,7 +87,7 @@ async function listPriorIssueIds(kv, { currentIssueId, pageBudget = 50 } = {}) {
  * and there is no separate accumulator to drift: both the mailed set and the floor are read from the frozen
  * issues themselves.
  */
-export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = WEEK_MS, historyDepth = 26, pageBudget = 50 } = {}) {
+export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = BOOTSTRAP_MS, historyDepth = 26, pageBudget = 50 } = {}) {
   const priorIds = await listPriorIssueIds(kv, { currentIssueId, pageBudget });
   if (priorIds.length === 0) {
     return { firstIssue: true, since: Number(nowMs) - bootstrapMs, exclude: null };
