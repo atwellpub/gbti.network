@@ -17,6 +17,7 @@ import {
   budgetRemaining, DEFAULT_MAX_ATTEMPTS,
 } from '../../membership/mail-queue.mjs';
 import { suppressKey } from '../../membership/mail-suppress.mjs';
+import { makeUnsubToken } from '../../membership/mail-unsub-token.mjs';
 import { canReceive } from '../../membership/mail-subscriber.mjs';
 import {
   getIssue, getSend, putSend, readPendingIndex, removeFromPending, getSubscriber,
@@ -104,6 +105,16 @@ export async function drainMailIssue(env, {
   const sendGate = resolveSendGate(env);
   if (sendGate.mode === 'closed') return { ...zero, reason: 'send gate closed', backlog: pending.length };
 
+  // ONE-CLICK UNSUBSCRIBE, minted per recipient below (RFC 8058). Both inputs are issue-wide, so verify them
+  // ONCE here: the signing key MAIL_UNSUB_KEY, and PUBLIC_BASE_URL (the origin that also serves the
+  // /mail/unsubscribe route). Missing either => send NOTHING and hold the whole backlog pending (claim
+  // nothing, burn no attempt), because an email with no working opt-out must never go out: it is unlawful, it
+  // fails Gmail/Yahoo bulk-sender rules, and it lands us in spam. Fail-closed, the same shape as the gate
+  // above. postalAddress is DELIBERATELY not built or passed (owner withdrew it 2026-08-21, CAN-SPAM
+  // primary-purpose position); renderIssue renders no postal line when it is absent, which is the intended state.
+  const unsubBase = String(env?.PUBLIC_BASE_URL ?? '').trim().replace(/\/$/, '');
+  if (!env?.MAIL_UNSUB_KEY || !unsubBase) return { ...zero, reason: 'unsubscribe not configured', backlog: pending.length };
+
   // The tick allowance: the tighter of the per-tick cap and the remaining rate budget. FAIL-CLOSED: an
   // unreadable counter makes budgetRemaining 0, so nothing sends this tick.
   const { dayStr: d0, monthStr: m0 } = budgetDateStrings(Number(now()));
@@ -174,6 +185,15 @@ export async function drainMailIssue(env, {
     // Placed AFTER the suppression gate so an unsubscribe is still honored for a not-yet-permitted recipient.
     if (!sendGate.allows(hash)) { refused++; continue; }
 
+    // Mint THIS recipient's one-click unsubscribe URL (RFC 8058: /mail/unsubscribe?h=<mailHash>&t=<token>, the
+    // hash is the pseudonymous recipient id, never the address). The issue-wide key/base are checked above, so a
+    // null token here is a per-recipient crypto or hash-shape failure: REFUSE (leave pending, burn no attempt,
+    // count it, the same shape as the suppression defer and the send-gate refusal). Minted BEFORE the claim so a
+    // recipient with no mintable opt-out never even consumes an attempt.
+    const unsubToken = await makeUnsubToken(env.MAIL_UNSUB_KEY, hash);
+    if (!unsubToken) { refused++; continue; }
+    const unsubscribeUrl = `${unsubBase}/mail/unsubscribe?h=${encodeURIComponent(hash)}&t=${encodeURIComponent(unsubToken)}`;
+
     // Claim (burns one attempt) and persist BEFORE any external work, so a cron overlap cannot double-send.
     const claimed = markClaimed(rec, { now });
     await putSend(kv, claimed);
@@ -203,20 +223,19 @@ export async function drainMailIssue(env, {
     }
 
     // Render from the FROZEN issue (same content for everyone; the renderer personalizes the unsubscribe link
-    // off the per-recipient url). A render throw is treated as retryable rather than dropping the recipient.
+    // off the per-recipient url built above). A render throw is treated as retryable rather than dropping the
+    // recipient.
     //
-    // SEND-CAPABILITY PREREQUISITE (SecurityMaster, 2026-08-21): before ANY cron wires a real send, this ctx
-    // MUST carry the fields renderIssue actually reads, and a recipient for whom they cannot be built MUST be
-    // refused here (leave pending, burn no attempt, count it), the same shape as the suppression defer above:
-    //   - unsubscribeUrl: mint makeUnsubToken(env.MAIL_UNSUB_KEY, hash) and build the /mail/unsubscribe URL;
-    //     a null token (no key) => refuse (an email with no working opt-out must never be sent).
-    //   - postalAddress: env.MAIL_POSTAL_ADDRESS, a USPS PO box / CMRA, city+state only, NEVER the LLC's
-    //     registered home address; unset => refuse (CAN-SPAM 7704(a)(5)).
-    // renderIssue DEFAULTS both, so a mismatch fails SILENT into a CAN-SPAM violation, not a crash: the guard
-    // has to be explicit, and the send gate is the only thing keeping this latent until then.
+    // SEND-CAPABILITY (sow-166, wired 2026-08-22): the ctx carries `unsubscribeUrl`, and a recipient for whom it
+    // could not be built was already refused above (never reaching here), so the renderer never falls back to its
+    // no-url "manage your subscription" footer on a real send. renderIssue DEFAULTS a missing url to that
+    // fallback, which is a safe RENDERING choice but an unsafe SENDING one; the drain, not the renderer, is what
+    // makes the SENDING choice, which is why the guard lives here and the seam is covered by a drain-output test.
+    // postalAddress is DELIBERATELY not passed (owner withdrew it 2026-08-21); renderIssue then renders no postal
+    // line, the intended CAN-SPAM primary-purpose state.
     let message;
     try {
-      message = renderIssue(issue, { recipientHash: hash, subscriber, from });
+      message = renderIssue(issue, { recipientHash: hash, subscriber, from, unsubscribeUrl });
     } catch {
       await retryOrFail(kv, claimed, maxAttempts, now, issueId, () => { failed++; });
       continue;

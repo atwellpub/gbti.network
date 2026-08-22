@@ -91,6 +91,11 @@ import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phas
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
+import { compileWeeklyIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
+import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
+import { renderIssue } from '../../membership/mail-render.mjs'; // SOW-166: the send-ready template (injected into the drain)
+import { resolveSubscriberEmail } from '../../membership/mail-address.mjs'; // SOW-166: anon decrypt / member-from-Stripe address resolution
+import { createResendClient } from '../../clients/resend.mjs'; // SOW-166: transactional send (injected into the drain)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf, requireOrigin } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF (+ Origin-only for form-POST routes)
 
@@ -762,10 +767,49 @@ async function handleWebhook(request, env) {
  * to live channels at a time nobody is watching for them. An unrecognised schedule now runs NOTHING and says
  * so loudly, which is the failure a person can actually find.
  */
+/**
+ * SOW-166: the injected IO the mail drain needs. Address resolution is bi-modal (mail-address.mjs): an anon
+ * subscriber's emailEnc is decrypted under MAIL_EMAIL_KEY; a member's address is fetched from their Stripe
+ * Customer (the platform stores no member address of its own). renderIssue is the pure template. sendEmail is
+ * the Resend transactional send, constructed lazily so an unset key never throws at wiring time. Every path is
+ * fail-closed inside the drain: a null address or a thrown send is treated as "no usable address" / retryable,
+ * never a silent success.
+ */
+function mailDrainDeps(env) {
+  const fetchMemberEmail = async ({ githubId, customerId }) => {
+    if (!env.STRIPE_SECRET_KEY) return null;
+    const stripe = createStripeClient({ apiKey: env.STRIPE_SECRET_KEY });
+    const customer = customerId ? await stripe.getCustomer(customerId) : await stripe.searchCustomerByGithubId(githubId);
+    return customer?.email || null;
+  };
+  const resolveAddress = (subscriber) => resolveSubscriberEmail(subscriber, { key: env.MAIL_EMAIL_KEY, fetchMemberEmail });
+  const sendEmail = (message) => {
+    if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
+    return createResendClient({ apiKey: env.RESEND_API_KEY }).sendEmail(message);
+  };
+  return { resolveAddress, renderIssue, sendEmail };
+}
+
+/**
+ * SOW-166: the shared 5-minute tick runs the syndication drain AND the smoothed mail drain. The mail drain is
+ * independently fail-closed (it sends nothing until the owner opens the send gate), so the two COMPOSE on one
+ * schedule rather than the mail drain replacing the syndication drain (the old catch-all bug in reverse).
+ * allSettled so a failure in one never suppresses the other, and both outcomes are logged by scheduled().
+ */
+async function drainFiveMinute(env) {
+  const [syndication, mail] = await Promise.allSettled([
+    drainSyndication(env),
+    drainMail(env, mailDrainDeps(env)),
+  ]);
+  const settle = (r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message ?? r.reason) });
+  return { syndication: settle(syndication), mail: settle(mail) };
+}
+
 const CRON_JOBS = new Map([
   ['0 * * * *', { run: ingest, label: 'news ingest' }],                 // fetch sources, dedupe, AI-classify, prune -> NEWS_KV
   ['30 * * * *', { run: backfillImages, label: 'news image backfill' }], // scrape og:images for stored items lacking one (SOW-050)
-  ['*/5 * * * *', { run: drainSyndication, label: 'syndication drain' }], // post items past the one-hour hold (SOW-058)
+  ['0 14 * * 2', { run: (env) => compileWeeklyIssue(env), label: 'weekly digest compile' }], // SOW-166: Tuesday 14:00 UTC (Tue morning US, owner Q8); freeze one issue + enqueue, sends nothing
+  ['*/5 * * * *', { run: drainFiveMinute, label: 'syndication + mail drain' }], // SOW-058 syndication + SOW-166 mail drain
 ]);
 
 /**

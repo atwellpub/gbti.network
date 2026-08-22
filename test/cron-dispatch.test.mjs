@@ -10,13 +10,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { resolveCronJob } from '../workers/signup/index.mjs';
 
-// The three strings in workers/signup/wrangler.toml, under BOTH [triggers] and [env.production.triggers].
-const CONFIGURED = ['0 * * * *', '30 * * * *', '*/5 * * * *'];
+// The four strings in workers/signup/wrangler.toml, under BOTH [triggers] and [env.production.triggers]. The
+// fourth is the SOW-166 weekly digest compile; the 5-minute tick now runs the syndication drain AND the mail
+// drain, composed, so its label changed.
+const CONFIGURED = ['0 * * * *', '30 * * * *', '*/5 * * * *', '0 14 * * 2'];
 
 test('cron dispatch: each configured schedule routes to its own distinct job', () => {
   const labels = CONFIGURED.map((c) => resolveCronJob(c)?.label);
-  assert.deepEqual(labels, ['news ingest', 'news image backfill', 'syndication drain']);
-  assert.equal(new Set(labels).size, 3, 'three schedules, three DIFFERENT jobs, which the catch-all did not guarantee');
+  assert.deepEqual(labels, ['news ingest', 'news image backfill', 'syndication + mail drain', 'weekly digest compile']);
+  assert.equal(new Set(labels).size, 4, 'four schedules, four DIFFERENT jobs, which the catch-all did not guarantee');
   for (const c of CONFIGURED) assert.equal(typeof resolveCronJob(c).run, 'function');
 });
 
@@ -45,9 +47,20 @@ test('cron dispatch: an unrecognised schedule runs NOTHING and reports it', asyn
   assert.match(errors.join(' '), /0 9 \* \* 1/, 'naming the cron that was not understood');
 });
 
-test('cron dispatch: the weekly-digest case specifically, since that is the one this prevents', async () => {
-  // SOW-166 is not wired to a cron. If someone adds one WITHOUT extending CRON_JOBS, the old code ran the
-  // syndication drain. Now it runs nothing, which is the difference between a quiet misroute and a fixable one.
+test('cron dispatch: the weekly-digest schedule IS now wired, and routes to the compile (SOW-166)', () => {
+  // SOW-166 wired the weekly digest to 0 14 * * 2 (Tuesday 14:00 UTC), added to CRON_JOBS and to both
+  // wrangler trigger blocks. It must resolve to the compile, not to the syndication drain the old catch-all
+  // would have run.
+  const job = resolveCronJob('0 14 * * 2');
+  assert.equal(job?.label, 'weekly digest compile', 'the weekly cron routes to the compile');
+  assert.equal(typeof job?.run, 'function');
+});
+
+test('cron dispatch: a digest-SHAPED but unconfigured cron still runs NOTHING, never a silent syndicate', async () => {
+  // The protection the catch-all removal buys is unchanged: a plausible-looking weekly cron that was NOT added
+  // to CRON_JOBS (here Thursday 14:00, not the configured Tuesday) resolves to null and schedules no work,
+  // rather than silently running the syndication drain in its place.
+  assert.equal(resolveCronJob('0 14 * * 4'), null, 'an unconfigured digest-shaped cron does not resolve');
   const scheduledWork = [];
   const realError = console.error;
   console.error = () => {};

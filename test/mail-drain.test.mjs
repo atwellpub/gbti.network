@@ -8,6 +8,7 @@ import { enqueueIssue, getSend, readPendingIndex, readBudget, MAIL_PENDING_KEY }
 import { sendKey, markClaimed, budgetDayKey } from '../membership/mail-queue.mjs';
 import { suppressKey, subscriberKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
+import { renderIssue as realRenderIssue } from '../membership/mail-render.mjs';
 
 const at = (t) => () => t;
 const issueOf = (id) => ({ issueId: id, sections: { article: [], product: [], prompt: [], share: [] }, topNews: [], counts: {}, isEmpty: false, generatedAt: 0 });
@@ -55,10 +56,15 @@ const deps = (sender) => ({ resolveAddress, renderIssue, sendEmail: sender.sendE
 
 const BIG = { dailyCap: 1000, monthlyCap: 30000 };
 
+// The one-click unsubscribe config is ALSO fail-closed and issue-wide: the drain sends nothing without both the
+// signing key and the endpoint origin (an email with no working opt-out must never go out). Every send test
+// supplies them alongside the open gate. A dedicated test below proves the fail-closed behaviour when they are absent.
+const UNSUB = { MAIL_UNSUB_KEY: 'test-unsub-signing-key', PUBLIC_BASE_URL: 'https://signup.gbti.network' };
+
 // The LAUNCH SEND GATE is fail-closed by default: with no gate configured the drain sends to NOBODY. Every test
 // below that exercises real send mechanics must OPEN the gate explicitly, so a test that forgets to configure it
-// proves the fail-closed default by sending zero. OPEN = the deliberate full-send flip.
-const OPEN = { MAIL_SEND_UNRESTRICTED: 'true' };
+// proves the fail-closed default by sending zero. OPEN = the deliberate full-send flip, with unsubscribe wired.
+const OPEN = { ...UNSUB, MAIL_SEND_UNRESTRICTED: 'true' };
 
 test('HAPPY PATH: many recipients drain exactly-once over ticks, records terminalize, budget counts each send', async () => {
   const kv = makeKV();
@@ -287,7 +293,7 @@ test('SEND GATE allowlist: only listed hashes send; recipient #2 is REFUSED, lef
   const offBefore = await getSend(kv, 'i1', 'off');
 
   // 'on' is on the allowlist, 'off' is not.
-  const r = await drainMailIssue({ MAIL_SEND_ALLOWLIST: 'on' }, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  const r = await drainMailIssue({ ...UNSUB, MAIL_SEND_ALLOWLIST: 'on' }, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
   assert.equal(r.gate, 'allowlist');
   assert.equal(r.sent, 1, 'exactly the one allowlisted recipient sends');
   assert.equal(r.refused, 1, 'the un-listed recipient #2 is REFUSED');
@@ -302,7 +308,7 @@ test('SEND GATE allowlist: only listed hashes send; recipient #2 is REFUSED, lef
   assert.equal((await readBudget(kv, dayStr, monthStr)).daily, 1, 'only the permitted send counts against the rate budget');
 
   // widen the allowlist on a later tick: the waiting recipient now delivers, and still exactly once each
-  const r2 = await drainMailIssue({ MAIL_SEND_ALLOWLIST: 'on off' }, { kv, issueId: 'i1', now: at(1_300_000), cap: 10, ...BIG, ...deps(sender) });
+  const r2 = await drainMailIssue({ ...UNSUB, MAIL_SEND_ALLOWLIST: 'on off' }, { kv, issueId: 'i1', now: at(1_300_000), cap: 10, ...BIG, ...deps(sender) });
   assert.equal(r2.sent, 1);
   assert.equal(r2.refused, 0);
   assert.deepEqual([...sender.sent].sort(), ['off@example.com', 'on@example.com']);
@@ -337,4 +343,58 @@ test('resolveSendGate: three modes; unrestricted needs the EXACT string; allowli
   assert.equal(g.allows('e'), false);
   // unrestricted takes precedence even when an allowlist is also present
   assert.equal(resolveSendGate({ MAIL_SEND_UNRESTRICTED: 'true', MAIL_SEND_ALLOWLIST: 'a' }).mode, 'unrestricted');
+});
+
+// SOW-166 (2026-08-22): the RENDERER<->DRAIN seam. Before this, mail-render.test.mjs proved the renderer's
+// no-url fallback and mail-drain.test.mjs proved queue mechanics, but NOTHING asserted what the DRAIN's rendered
+// output actually contained, so the drain passing no unsubscribeUrl produced a plausible footer ("manage your
+// subscription from gbti.network", the word "unsubscribe" absent entirely) and the whole suite stayed green. The
+// renderer's fallback is a safe RENDERING choice and an unsafe SENDING one; the drain makes the sending choice,
+// so the regression test belongs here, on the drain's output, with the REAL renderer (a stub would re-pass the
+// same green suite QAMaster flagged).
+test('SEAM: the drain mints a per-recipient one-click unsubscribe URL into the SENT email (html + text)', async () => {
+  const kv = makeKV();
+  await enqueueIssue(kv, { issueId: 'i1', layout: [], counts: {}, generatedAt: 0, topNews: [], isEmpty: true }, ['abc'], { now: at(1_000_000) });
+  await kv.put(subscriberKey('abc'), JSON.stringify(buildSubscriber({ hash: 'abc', source: 'anon', emailEnc: 'enc:abc' }, { now: at(1_000_000) })));
+
+  const captured = [];
+  const sendEmail = async (msg) => { captured.push(msg); return { id: 're_seam' }; };
+  const r = await drainMailIssue(OPEN, {
+    kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG,
+    resolveAddress, renderIssue: realRenderIssue, sendEmail, from: 'digest@gbti.network',
+  });
+  assert.equal(r.sent, 1);
+  assert.equal(captured.length, 1, 'exactly one email was rendered and sent');
+
+  const { html, text } = captured[0];
+  for (const [part, name] of [[html, 'html'], [text, 'text']]) {
+    // `?h=abc` precedes the `&` (raw in text, &amp; in the html href), so this substring holds in both parts.
+    assert.ok(part.includes(`${UNSUB.PUBLIC_BASE_URL}/mail/unsubscribe?h=abc`), `${name} carries the routed unsubscribe URL with this recipient's hash`);
+    assert.match(part, /unsubscribe/i, `${name} names unsubscribe (the exact word the broken no-url fallback lacked)`);
+  }
+  const tok = text.match(/[?&]t=([^&\s"<]+)/);
+  assert.ok(tok && tok[1].length > 10, 'a real signed unsubscribe token is present, not a bare url');
+});
+
+test('SEAM FAIL-CLOSED: with the gate OPEN but unsubscribe unconfigured, the drain sends NOTHING and holds the backlog', async () => {
+  const kv = makeKV();
+  await seed(kv, 'i1', ['a', 'b'], { now: at(1_000_000) });
+  const sender = makeSender();
+
+  // Gate open (unrestricted) but NO MAIL_UNSUB_KEY: an email with no working opt-out must never go out.
+  const r = await drainMailIssue({ MAIL_SEND_UNRESTRICTED: 'true' }, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r.reason, 'unsubscribe not configured');
+  assert.equal(r.sent, 0);
+  assert.equal(sender.sent.length, 0, 'nothing is mailed without a mintable opt-out');
+  assert.equal(r.backlog, 2, 'the whole backlog is held, not dropped');
+  for (const h of ['a', 'b']) {
+    const rec = await getSend(kv, 'i1', h);
+    assert.equal(rec.status, 'pending', 'a held backlog stays pending');
+    assert.equal(rec.attempts, 0, 'and burns no attempt');
+  }
+
+  // Symmetrically: a key but no PUBLIC_BASE_URL is equally fail-closed (the URL cannot be built either way).
+  const r2 = await drainMailIssue({ MAIL_SEND_UNRESTRICTED: 'true', MAIL_UNSUB_KEY: 'k' }, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
+  assert.equal(r2.reason, 'unsubscribe not configured');
+  assert.equal(sender.sent.length, 0, 'still nothing sent without a base URL');
 });

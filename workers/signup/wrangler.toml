@@ -131,9 +131,11 @@ dataset = "gbti_ext_usage"
 # 5 minutes past the hour and is far cheaper than per-minute. Wrangler does NOT inherit triggers into named envs,
 # so the same crons are repeated under [env.production.triggers].
 [triggers]
-# UnifiedWorker: */5 = syndication drain (SOW-058); 0 = news ingest; 30 = news og:image backfill. The scheduled()
-# handler in index.mjs dispatches on controller.cron against these exact strings.
-crons = ["*/5 * * * *", "0 * * * *", "30 * * * *"]
+# UnifiedWorker: */5 = syndication drain (SOW-058) + weekly-digest mail drain (SOW-166), composed on one tick;
+# 0 = news ingest; 30 = news og:image backfill; 0 14 * * 2 = the SOW-166 weekly digest compile (Tuesday 14:00
+# UTC). The scheduled() handler in index.mjs dispatches on controller.cron against these exact strings; an
+# unrecognised string runs NOTHING (no catch-all), so a new cron MUST be added to CRON_JOBS too.
+crons = ["*/5 * * * *", "0 * * * *", "30 * * * *", "0 14 * * 2"]
 
 # Secrets set out-of-band (wrangler secret put / .dev.vars), listed here for documentation only:
 #   STRIPE_SECRET_KEY            restricted: create-customer + checkout only (least privilege)
@@ -272,7 +274,7 @@ dataset = "gbti_ext_usage"
 
 # SOW-058: the syndication drain cron for production (wrangler does not inherit the top-level [triggers]).
 [env.production.triggers]
-crons = ["*/5 * * * *", "0 * * * *", "30 * * * *"]
+crons = ["*/5 * * * *", "0 * * * *", "30 * * * *", "0 14 * * 2"]
 
 # SOW-124: retain production Worker logs in the dashboard (wrangler does not inherit the top-level block).
 [env.production.observability]
