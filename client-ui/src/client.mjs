@@ -154,6 +154,7 @@ export function createHttpClient({ baseUrl = '', token, fetch = globalThis.fetch
     inviteCreate: ({ campaign, note, expiresAt }) => request('POST', '/api/invites', { campaign, note, expiresAt }),
     inviteUpdate: ({ code, action, note }) => request('PATCH', '/api/invites', { code, action, note }),
     quotePool: () => request('GET', '/api/quote-pool'), // SOW-063 P3: the splash quote pool { quotes } for the manager
+    wordPool: () => request('GET', '/api/word-pool'), // sow-259: the word-of-the-day pool { words } for the manager
     contentChannelPool: () => request('GET', '/api/content-channel-pool'), // SOW-087: the category -> Discord-channel map { channels }
     setContentChannel: ({ category, channelId }) => request('POST', '/api/admin', { action: 'content-channel-set', category, channelId }), // SOW-087
     removeContentChannel: ({ category }) => request('POST', '/api/admin', { action: 'content-channel-remove', category }), // SOW-087
@@ -172,6 +173,9 @@ export function createHttpClient({ baseUrl = '', token, fetch = globalThis.fetch
     addQuote: ({ text, author }) => request('POST', '/api/admin', { action: 'quote-add', text, author }), // SOW-063 P3
     removeQuote: ({ text }) => request('POST', '/api/admin', { action: 'quote-remove', text }), // SOW-063 P3
     setQuoteEnabled: ({ text, enabled }) => request('POST', '/api/admin', { action: 'quote-toggle', text, enabled }), // SOW-063 P3
+    addWord: ({ word, partOfSpeech, definition }) => request('POST', '/api/admin', { action: 'word-add', word, partOfSpeech, definition }), // sow-259
+    removeWord: ({ word }) => request('POST', '/api/admin', { action: 'word-remove', word }), // sow-259
+    setWordEnabled: ({ word, enabled }) => request('POST', '/api/admin', { action: 'word-toggle', word, enabled }), // sow-259
     openPulls: () => request('GET', '/api/open-pulls'), // SOW-038 P2: admin-gated open content-PR queue { pulls }
     syndicationQueue: () => request('GET', '/api/syndication'), // SOW-058: superadmin tracker { pending, sent, cancelled, failed }
     cancelSyndication: ({ id }) => request('POST', '/api/syndication/cancel', { id }), // SOW-058: superadmin reject/cancel

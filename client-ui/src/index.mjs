@@ -25,6 +25,7 @@ import './elements/gbti-categories-workspace.mjs'; // SOW-100: the Admin -> Cate
 import './elements/gbti-tag-explorer.mjs'; // SOW-100 follow-on: the Admin -> Tags explorer
 import './elements/gbti-news-source-manager.mjs'; // SOW-056 P2: superadmin news-source manager
 import './elements/gbti-quote-manager.mjs'; // SOW-063 P3: superadmin splash-quote manager
+import './elements/gbti-word-manager.mjs'; // sow-259: admin word-of-the-day manager
 import './elements/gbti-coupon-manager.mjs'; // SOW-119: superadmin coupon manager
 import './elements/gbti-syndication-tracker.mjs'; // SOW-058: superadmin syndication tracker
 import './elements/gbti-channel-map-manager.mjs'; // SOW-087: superadmin category-channel map + template + flag-word editor

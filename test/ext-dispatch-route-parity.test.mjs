@@ -84,6 +84,10 @@ const PRE_AUTH = new Set([
   '/api/onboarding-status',   // SOW-026: drives the first-run sign-in step; must answer before sign-in
   // SOW-079/087: the admin MANAGER reads are public git-native data (house/*.yml), so they load tokenless.
   '/api/taxonomy', '/api/news-source-pool', '/api/quote-pool',
+  // sow-259: the word-of-the-day pool joins them. Gating it would protect nothing that is not already public:
+  // the same pool ships as a CDN artifact at /words.json on the static site, which is how the homepage rail card
+  // reads it. It is curated config in a public repo with no personal data in it.
+  '/api/word-pool',
   '/api/content-channel-pool', '/api/moderation-flag-pool', '/api/syndication-template-pool',
   '/api/coupon-pool', '/api/news-engagement', '/api/content-engagement', '/api/syndication-settings',
 ]);

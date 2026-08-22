@@ -25,6 +25,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <nav class="adm-tabs" role="tablist" aria-label="Admin sections" data-admin-tabs hidden>
           <button type="button" role="tab" data-tab="admin" aria-selected="false">Admin tools</button>
           <button type="button" role="tab" data-tab="quotes" data-min="admin" aria-selected="false" hidden>Splash quotes</button>
+          <button type="button" role="tab" data-tab="words" data-min="admin" aria-selected="false" hidden>Word of the day</button>
           <button type="button" role="tab" data-tab="news-sources" data-min="admin" aria-selected="false" hidden>News sources</button>
           <button type="button" role="tab" data-tab="coupons" data-min="admin" aria-selected="false" hidden>Coupons</button>
         </nav>
@@ -38,6 +39,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <div class="adm-card" data-panel="quotes" hidden>
           <h2 class="h2">Splash quotes</h2>
           <gbti-quote-manager></gbti-quote-manager>
+        </div>
+        {/* sow-259: the word-of-the-day pool that feeds the homepage rail card. */}
+        <div class="adm-card" data-panel="words" hidden>
+          <h2 class="h2">Word of the day</h2>
+          <gbti-word-manager></gbti-word-manager>
         </div>
         <div class="adm-card" data-panel="news-sources" hidden>
           <h2 class="h2">News sources</h2>
@@ -83,6 +89,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         // Import the admin+ config managers so their custom elements upgrade; the tab bar controls which shows.
         await Promise.all([
           import('../../client-ui/src/elements/gbti-quote-manager.mjs'),
+          import('../../client-ui/src/elements/gbti-word-manager.mjs'),
           import('../../client-ui/src/elements/gbti-news-source-manager.mjs'),
           import('../../client-ui/src/elements/gbti-coupon-manager.mjs'),
         ]);

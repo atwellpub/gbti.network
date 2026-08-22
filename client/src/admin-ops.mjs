@@ -17,6 +17,7 @@ import { ban, unban, grandfather, revokeGrandfather, grantRole, SuperadminAction
 import { addCategory as addCategoryEdit, renameLabel as renameLabelEdit, TaxonomyEditError } from '../../membership/taxonomy-edits.mjs';
 import { addSource as addSourceEdit, removeSource as removeSourceEdit, setSourceEnabled as setSourceEnabledEdit, NewsSourceEditError } from '../../membership/news-source-edits.mjs'; // SOW-056 P2
 import { addQuote as addQuoteEdit, removeQuote as removeQuoteEdit, setQuoteEnabled as setQuoteEnabledEdit, QuoteEditError } from '../../membership/quote-edits.mjs'; // SOW-063 P3
+import { addWord as addWordEdit, removeWord as removeWordEdit, setWordEnabled as setWordEnabledEdit, WordEditError } from '../../membership/word-edits.mjs'; // sow-259
 import { setChannel as setChannelEdit, removeChannel as removeChannelEdit, ContentChannelEditError } from '../../membership/content-channels-edits.mjs'; // SOW-087
 import { addFlagTerm as addFlagTermEdit, removeFlagTerm as removeFlagTermEdit, ModerationFlagEditError } from '../../membership/moderation-flags-edits.mjs'; // SOW-087
 import { setTemplate as setTemplateEdit, setNewsEngagement as setNewsEngagementEdit, setContentEngagement as setContentEngagementEdit, setSyndicationSettings as setSyndicationSettingsEdit, SYNDICATION_CHANNEL_NAMES, TemplateEditError } from '../../membership/syndication-template-edits.mjs'; // SOW-087 + SOW-111 + SOW-088 + SOW-126
@@ -399,6 +400,51 @@ export async function setQuoteEnabled(ctx, { text, enabled } = {}) {
   const on = !!enabled;
   return editQuotes(ctx, (parsed) => setQuoteEnabledEdit(parsed, { text, enabled: on }, actionCtx(ctx)),
     { branch: `gbti/quote-${on ? 'enable' : 'disable'}-${quoteSlug(text)}`, message: `${on ? 'Enable' : 'Disable'} quote`, title: `${on ? 'Enable' : 'Disable'} quote`, noopMsg: `quote already ${on ? 'enabled' : 'disabled'}` });
+}
+
+// sow-259: the admin word-of-the-day pool manager. Byte-for-byte the quote-manager shape: apply the pure
+// word-edits core to the parsed house/words.yml and open an auto-merged house PR (admin-owned via CODEOWNERS; the
+// gate is the real boundary). Edits go live at the Pages-deploy cadence, when the rebuilt /words.json ships.
+// Words are keyed by the word itself (no id).
+const WORDS_PATH = 'house/words.yml';
+const wordSlug = (word) => slugOf(String(word || '').slice(0, 40)) || 'word';
+
+/** Read the current word pool for the manager UI. Public data; read-only. */
+export async function getWordPool(ctx) {
+  const raw = (await ctx.reader?.readFile?.(WORDS_PATH)) || '';
+  let parsed;
+  try { parsed = yaml.load(raw) || {}; } catch { parsed = {}; }
+  return { words: Array.isArray(parsed.words) ? parsed.words : [] };
+}
+
+async function editWords(ctx, edit, { branch, message, title, noopMsg }) {
+  requireRole(ctx, canBanGrandfather, 'admin');
+  const { repo } = requireRepo(ctx);
+  const raw = (await ctx.reader?.readFile?.(WORDS_PATH)) || '';
+  let parsed;
+  try { parsed = yaml.load(raw) || {}; } catch { parsed = {}; }
+  let result;
+  try { result = edit(parsed); }
+  catch (err) { if (err instanceof WordEditError) throw new OperationError('bad-request', err.message); throw err; }
+  if (!result.changed) return noop(noopMsg, result.audit);
+  const pr = await adminPublish(ctx, { repo, branch, files: [{ path: WORDS_PATH, content: leadingComment(raw) + dumpYaml(result.next) }], message, title, body: prBody(null, result.audit) });
+  return { ...pr, changed: true, audit: result.audit };
+}
+
+export async function addWord(ctx, { word, partOfSpeech, definition } = {}) {
+  return editWords(ctx, (parsed) => addWordEdit(parsed, { word, partOfSpeech, definition }, actionCtx(ctx)),
+    { branch: `gbti/word-add-${wordSlug(word)}`, message: `Add word (${word || 'unknown'})`, title: `Add word: ${word || 'unknown'}`, noopMsg: 'word already present' });
+}
+
+export async function removeWord(ctx, { word } = {}) {
+  return editWords(ctx, (parsed) => removeWordEdit(parsed, { word }, actionCtx(ctx)),
+    { branch: `gbti/word-remove-${wordSlug(word)}`, message: 'Remove word', title: 'Remove word', noopMsg: 'no such word' });
+}
+
+export async function setWordEnabled(ctx, { word, enabled } = {}) {
+  const on = !!enabled;
+  return editWords(ctx, (parsed) => setWordEnabledEdit(parsed, { word, enabled: on }, actionCtx(ctx)),
+    { branch: `gbti/word-${on ? 'enable' : 'disable'}-${wordSlug(word)}`, message: `${on ? 'Enable' : 'Disable'} word`, title: `${on ? 'Enable' : 'Disable'} word`, noopMsg: `word already ${on ? 'enabled' : 'disabled'}` });
 }
 
 // SOW-087: the superadmin channel-map + template + flag-word editors. Same shape as the news-source manager

@@ -81,6 +81,7 @@
         <button class="admin-tab" type="button" data-tab="tags">Tags</button>
         <button class="admin-tab" type="button" data-tab="news">News sources</button>
         <button class="admin-tab" type="button" data-tab="quotes">Quotes</button>
+        <button class="admin-tab" type="button" data-tab="words">Word of the day</button>
         <button class="admin-tab" type="button" data-tab="coupons">Coupons</button>
         <button class="admin-tab" type="button" data-tab="syndication">Syndication</button>
       </div>
@@ -113,6 +114,11 @@
         <section class="admin-card" data-panel="quotes">
           <div class="admin-card-h"><h2>Quotes</h2><p>The new-tab splash quotes. Edits open an auto-merged house PR.</p></div>
           <div class="admin-card-b"><div class="admin-sub"><gbti-quote-manager></gbti-quote-manager></div></div>
+        </section>
+        <section class="admin-card" data-panel="words">
+          <!-- sow-259: the word-of-the-day pool that feeds the homepage rail card. -->
+          <div class="admin-card-h"><h2>Word of the day</h2><p>The git-native word pool, rotating one word every 24 hours on the site homepage. Edits open an auto-merged house PR.</p></div>
+          <div class="admin-card-b"><div class="admin-sub"><gbti-word-manager></gbti-word-manager></div></div>
         </section>
         <section class="admin-card" data-panel="coupons">
           <!-- SOW-119: the coupon registry (git-native config) + KV usage + the shareable invite links. -->

@@ -26,6 +26,7 @@ import { isCleanPath } from '../../membership/classify-pr.mjs';
 import { adminHostedBranchFor } from '../../membership/hosted-author.mjs';
 import { ban, unban, grandfather, revokeGrandfather, grantRole } from '../../membership/superadmin-actions.mjs'; // sow-161 increments 2-3
 import { addQuote, removeQuote, setQuoteEnabled } from '../../membership/quote-edits.mjs'; // sow-161 increment 4
+import { addWord, removeWord, setWordEnabled, MAX_WORD, MAX_PART_OF_SPEECH, MAX_DEFINITION } from '../../membership/word-edits.mjs'; // sow-259
 import { addSource, removeSource, setSourceEnabled } from '../../membership/news-source-edits.mjs'; // sow-161 increment 4
 import { addCouponEdit, updateCouponEdit } from '../../membership/coupon-edits.mjs'; // sow-161 increment 4 (coupons)
 import { normalizeCouponCode, COUPON_CODE_RE } from '../../membership/coupons.mjs'; // sow-161 increment 4 (coupons)
@@ -86,6 +87,22 @@ function quoteInput(p) {
   const enabled = p?.enabled === undefined ? undefined : Boolean(p.enabled);
   return { ok: true, args: { text, author, enabled } };
 }
+// words (sow-259): a required word key (+ optional partOfSpeech / definition / enabled). The caps are IMPORTED from
+// the pure core rather than re-declared, because the whole point of matching them is that they cannot drift: a
+// literal copied here would silently diverge the first time the core changed, which is the exact failure the
+// quote/news-source caps above were written to prevent (they still hold their numbers by hand).
+// `definition` is required for an ADD and absent for a remove/toggle, so it is checked only when present; the pure
+// core throws a clean WordEditError on a missing one, surfaced as a 400 by the config branch.
+function wordInput(p) {
+  const word = typeof p?.word === 'string' ? p.word.trim() : '';
+  if (!word || word.length > MAX_WORD) return { ok: false, status: 400, body: { error: 'bad_request', message: `a word is required (max ${MAX_WORD} chars)` } };
+  const partOfSpeech = typeof p?.partOfSpeech === 'string' ? p.partOfSpeech.trim() : undefined;
+  if (partOfSpeech && partOfSpeech.length > MAX_PART_OF_SPEECH) return { ok: false, status: 400, body: { error: 'bad_request', message: `the part of speech is too long (max ${MAX_PART_OF_SPEECH} chars)` } };
+  const definition = typeof p?.definition === 'string' ? p.definition.trim() : undefined;
+  if (definition && definition.length > MAX_DEFINITION) return { ok: false, status: 400, body: { error: 'bad_request', message: `the definition is too long (max ${MAX_DEFINITION} chars)` } };
+  const enabled = p?.enabled === undefined ? undefined : Boolean(p.enabled);
+  return { ok: true, args: { word, partOfSpeech, definition, enabled } };
+}
 // news sources: an add with { name, url(http/s), optional id/description }, or a remove/toggle by id.
 function sourceAddInput(p) {
   const name = typeof p?.name === 'string' ? p.name.trim() : '';
@@ -131,6 +148,7 @@ function couponUpdateInput(p) {
 
 const CONFIG_ACTIONS = new Set([
   'quote-add', 'quote-remove', 'quote-toggle',
+  'word-add', 'word-remove', 'word-toggle',
   'news-source-add', 'news-source-remove', 'news-source-toggle',
   'coupon-add', 'coupon-update',
 ]);
@@ -138,6 +156,9 @@ const CONFIG_OP = {
   'quote-add': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: addQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
   'quote-remove': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: removeQuote, input: quoteInput, slug: (a) => idSlug(a.text) },
   'quote-toggle': { path: 'house/quotes.yml', rank: ROLE_RANK.admin, fn: setQuoteEnabled, input: quoteInput, slug: (a) => idSlug(a.text) },
+  'word-add': { path: 'house/words.yml', rank: ROLE_RANK.admin, fn: addWord, input: wordInput, slug: (a) => idSlug(a.word) },
+  'word-remove': { path: 'house/words.yml', rank: ROLE_RANK.admin, fn: removeWord, input: wordInput, slug: (a) => idSlug(a.word) },
+  'word-toggle': { path: 'house/words.yml', rank: ROLE_RANK.admin, fn: setWordEnabled, input: wordInput, slug: (a) => idSlug(a.word) },
   'news-source-add': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: addSource, input: sourceAddInput, slug: (a) => idSlug(a.id || a.name) },
   'news-source-remove': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: removeSource, input: (p) => sourceIdInput(p), slug: (a) => idSlug(a.id) },
   'news-source-toggle': { path: 'house/news-sources.yml', rank: ROLE_RANK.admin, fn: setSourceEnabled, input: (p) => sourceIdInput(p, { enabled: true }), slug: (a) => idSlug(a.id) },
@@ -351,6 +372,22 @@ export async function membershipAdminQuotePool(request, env, deps = {}) {
   if (!load.ok) return { status: load.status, body: load.body };
   const quotes = Array.isArray(load.parsed?.quotes) ? load.parsed.quotes : [];
   return { status: 200, body: { ok: true, quotes } };
+}
+
+/** sow-259: the word-of-the-day pool READ for the manager UI. Admin-gated, same shape as the quote pool. */
+export async function membershipAdminWordPool(request, env, deps = {}) {
+  const {
+    fetchImpl = globalThis.fetch, authorize = authorizeAdmin, allowCookie = false,
+    upstream = env?.UPSTREAM_REPO || 'gbti-network/gbti.network',
+  } = deps;
+  const admin = await authorize(request, env, { ...deps, allowCookie });
+  if (!admin.ok) return { status: admin.status, body: admin.body };
+  let instToken;
+  try { instToken = await getInstallationToken(env, deps); } catch { return { status: 500, body: { error: 'misconfigured', message: 'the publishing app is not configured' } }; }
+  const load = await loadHouseYaml(fetchImpl, instToken, upstream, 'house/words.yml');
+  if (!load.ok) return { status: load.status, body: load.body };
+  const words = Array.isArray(load.parsed?.words) ? load.parsed.words : [];
+  return { status: 200, body: { ok: true, words } };
 }
 
 // sow-161 increment 4: the news-source-manager pool READ (admin-gated). The FULL pool from house/news-sources.yml

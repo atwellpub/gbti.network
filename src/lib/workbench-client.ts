@@ -570,6 +570,10 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
     async addQuote(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-add', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
     async removeQuote(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-remove', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
     async setQuoteEnabled(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'quote-toggle', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+    wordPool() { return workerGet('/membership/admin/word-pool'); }, // sow-259: { ok, words }
+    async addWord(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'word-add', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+    async removeWord(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'word-remove', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
+    async setWordEnabled(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'word-toggle', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },
     // sow-161 increment 4: the news-source config manager (full pool read + the three write actions).
     newsSourcePool() { return workerGet('/membership/admin/news-source-pool'); }, // { ok, sources }
     async addNewsSource(args: any = {}) { const r = await workerPost('/membership/admin/author', { action: 'news-source-add', ...args }); return { ...r, prNumber: r?.number ?? null, prUrl: r?.html_url ?? null }; },

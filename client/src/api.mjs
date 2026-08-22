@@ -68,7 +68,7 @@ import { fieldsFor } from './form-fields.mjs';
 import { renderMarkdown } from './markdown.mjs';
 import {
   banMember, unbanMember, grandfatherMember, ungrandfatherMember, setMemberRole, deplatformContent, removeContent, republishContent, applyCategoryBatch, applyTagEdit,
-  getTaxonomy, addContentCategory, renameContentCategoryLabel, getNewsSourcePool, getQuotePool,
+  getTaxonomy, addContentCategory, renameContentCategoryLabel, getNewsSourcePool, getQuotePool, getWordPool,
   getContentChannelPool, getModerationFlagPool, getSyndicationTemplatePool,
   setContentChannel, removeContentChannel, addModerationFlagTerm, removeModerationFlagTerm, setSyndicationTemplate, setSyndicationTemplates,
   getNewsEngagementSettings, setNewsEngagementSettings, getContentEngagementSettings, setContentEngagementSettings, getSyndicationSettings, setSyndicationSettings,
@@ -199,6 +199,7 @@ export async function handleApi(reqInfo, ctx) {
   if (method === 'GET' && pathname === '/api/taxonomy') return run(() => getTaxonomy(ctx)); // SOW-055: the canonical category tree for the manager UI
   if (method === 'GET' && pathname === '/api/news-source-pool') return run(() => getNewsSourcePool(ctx)); // SOW-056/079: news-source pool (npm parity with the extension)
   if (method === 'GET' && pathname === '/api/quote-pool') return run(() => getQuotePool(ctx)); // SOW-063/079: splash quote pool (npm parity with the extension)
+  if (method === 'GET' && pathname === '/api/word-pool') return run(() => getWordPool(ctx)); // sow-259: word-of-the-day pool
   if (method === 'GET' && pathname === '/api/discord-channels') return run(() => listDiscordChannels(ctx)); // SOW-100: channel names
   if (method === 'GET' && pathname === '/api/content-channel-pool') return run(() => getContentChannelPool(ctx)); // SOW-087
   if (method === 'GET' && pathname === '/api/moderation-flag-pool') return run(() => getModerationFlagPool(ctx)); // SOW-087

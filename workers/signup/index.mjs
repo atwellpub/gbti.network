@@ -89,7 +89,7 @@ import { listRepoDrafts } from './membership-repo-drafts.mjs'; // sow-194: owner
 import { listSharesFeed } from './membership-shares.mjs'; // sow-158 Part 3: tier-gated community Shares feed
 import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phase A: server-side fork main sync
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
-import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
+import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool, membershipAdminWordPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads (sow-259 adds the word pool)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf, requireOrigin } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF (+ Origin-only for form-POST routes)
 
@@ -1241,6 +1241,17 @@ export default {
         if (method === 'GET') {
           const r = await membershipAdminQuotePool(request, env, { allowCookie: true });
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+        }
+      }
+      // sow-259: the word-of-the-day pool read. Note this follows the COUPON-pool shape, not the quote-pool one
+      // above: corsHeaders(credentials) already sets Vary: 'Origin, Authorization', and respelling Vary here would
+      // DROP Origin from it, which the coupon route's own comment warns about.
+      if (pathname === '/membership/admin/word-pool') {
+        const cors = corsHeaders(request, env, { credentials: true });
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        if (method === 'GET') {
+          const r = await membershipAdminWordPool(request, env, { allowCookie: true });
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }
       if (pathname === '/membership/admin/news-source-pool') {

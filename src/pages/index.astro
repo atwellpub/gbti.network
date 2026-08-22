@@ -17,6 +17,7 @@ import PricingAccordion from '../components/home/PricingAccordion.astro';
 import ExtensionBanner from '../components/home/ExtensionBanner.astro';
 import PersonalizeModal from '../components/home/PersonalizeModal.astro';
 import HomeShareModal from '../components/home/HomeShareModal.astro';
+import WordOfTheDay from '../components/home/WordOfTheDay.astro';
 import { authorItem } from '../lib/avatars';
 import { contentIcon } from '../lib/content-icons';
 import { topLevelCategories } from '../lib/taxonomy';
@@ -275,6 +276,10 @@ const SHOPTALK = {
           </div>
         </div>
       )}
+
+      <!-- sow-259: word of the day. Deliberately LAST in the rail: the slots above it are conversion
+           surfaces (join, workbench, popular, live), and a vocabulary card should not push those down. -->
+      <WordOfTheDay />
     </aside>
   </div>
 </div>
