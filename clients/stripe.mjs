@@ -54,13 +54,48 @@ export function createStripeClient({ apiKey, fetch = globalThis.fetch, baseUrl =
 
   const EXPAND_SUBS = { 'expand[]': 'data.subscriptions' };
 
+  /**
+   * A GitHub user id as a bare digit string, or null if it is not one. Deliberately strict: no sign, no
+   * whitespace inside, no exponent, no leading plus. Length-capped so an absurd value cannot be sent onward.
+   * Not anchored with $ alone, because in JS `$` also matches before a trailing newline, so a value ending in
+   * one would pass a naive check; the character class plus the explicit length bound closes that.
+   */
+  function numericGithubId(v) {
+    const s = String(v ?? '').trim();
+    if (s.length < 1 || s.length > 20) return null;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c < 48 || c > 57) return null;
+    }
+    return s;
+  }
+
   return {
     _req: req,
 
-    /** Stripe Search (eventually consistent ~1 min). Returns the first match with subs expanded, or null. */
+    /**
+     * Stripe Search (eventually consistent ~1 min). Returns the first match with subs expanded, or null.
+     *
+     * THE ID IS VALIDATED BEFORE IT IS INTERPOLATED, AND THAT IS NOT DEFENSIVE PADDING. The value lands inside
+     * a SINGLE-QUOTED LITERAL in Stripe's search query language, not in a form field or a URL path, so it is
+     * the one interpolation in this client that a crafted value can break OUT of rather than merely corrupt.
+     * A `githubId` containing a quote closes the literal early and the remainder is parsed as query syntax,
+     * which is a query-injection against the registry that decides who is a paid member.
+     *
+     * GitHub user ids are positive integers, so anything else cannot be a real id and there is nothing to lose
+     * by refusing it. Refusing returns null, which is the SAME answer as "no such customer", and every caller
+     * already treats a null as not-paid (the house fail-closed rule: no mapping means NOT paid). So a rejected
+     * id denies access rather than granting it.
+     *
+     * The callers are widening, which is why this is enforced HERE rather than at each of them. It is reached
+     * from the PR gate, signup, checkout, reconcile, erase-member and the digest's member-address resolution;
+     * a guard at the boundary holds for all of them, including callers not yet written.
+     */
     async searchCustomerByGithubId(githubId) {
+      const id = numericGithubId(githubId);
+      if (!id) return null; // fail closed: never search on an id we could not validate
       const r = await req('GET', '/customers/search', {
-        query: `metadata['github_id']:'${githubId}'`,
+        query: `metadata['github_id']:'${id}'`,
         limit: 1,
         ...EXPAND_SUBS,
       });
