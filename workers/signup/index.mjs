@@ -73,6 +73,7 @@ import { drainSyndication } from './syndication-drain.mjs';
 import { ingest } from './news/src/ingest.mjs'; // UnifiedWorker: the hourly news RSS fetch + AI classify (was the gbti-news worker)
 import { backfillImages } from './news/src/backfill.mjs'; // UnifiedWorker: the :30 og:image backfill
 import { handleFollows } from './membership-follows.mjs';
+import { handleNotifications } from './membership-notifications.mjs'; // SOW-150/186: the per-member notification store (bell source)
 import { handleDrafts } from './membership-drafts.mjs'; // SOW-157: the hosted draft store
 import { handleEarnings } from './membership-earnings.mjs'; // SOW-083 P2: the member's own earnings ledger
 import { handleCommentEcho } from './membership-comment-echo.mjs'; // SOW-076 P1: optimistic comment echoes (instant-feel)
@@ -1098,6 +1099,21 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
         if (method === 'GET' || method === 'POST') {
           const r = await handleFollows(request, env);
+          return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
+        }
+      }
+
+      // SOW-150 / SOW-186: the per-member NOTIFICATION store (the activity bell's server-backed source) in the
+      // deletable edge store. Signed-in, non-banned (the FREE tier, SOW-060; authorizeMember denies banned),
+      // per-member, private, ERASABLE (SOW-024). The caller only ever reads/marks THEIR OWN. Per-token body, so
+      // never cached and varied on the bearer. The WRITE path is server-side (deliverNotification), not exposed
+      // here, so a member cannot post rows into a bell. GET reads the list; POST /seen marks seen.
+      if (pathname === '/membership/notifications' || pathname === '/membership/notifications/seen') {
+        const cors = corsHeaders(request, env, { credentials: true }); // sow-158 Phase 1b: credentialed cookie route
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+        const isSeen = pathname === '/membership/notifications/seen';
+        if ((isSeen && method === 'POST') || (!isSeen && method === 'GET')) {
+          const r = await handleNotifications(request, env);
           return json(r.body, r.status, { ...cors, 'Cache-Control': 'no-store' });
         }
       }

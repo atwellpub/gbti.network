@@ -8,7 +8,7 @@ import {
   deleteKvKey, eraseActivity, eraseFollows, eraseLookupCache, eraseShareVotes, eraseNewsOpens, planErasure, runErasure,
   eraseDiscordRoles, eraseContent, eraseStripeCustomer, ACTIVITY_KEY, FOLLOWS_KEY, LOOKUP_KEY, MEMBERS_INDEX_PATH,
   eraseCouponGrant, eraseCouponRedemptions, COUPON_GRANT_KEY, minimizeCouponGrant, eraseCouponLock,
-  minimizeRedeemedInvites,
+  minimizeRedeemedInvites, eraseNotifications, NOTIFICATIONS_KEY,
 } from '../scripts/lib/erase-member.mjs';
 import { GRANDFATHERED_PATH } from '../scripts/lib/coupon-grants.mjs';
 import { couponLockKey } from '../membership/coupon-lock.mjs';
@@ -43,6 +43,13 @@ test('eraseActivity targets activity:<github_id> and requires an id', async () =
   await eraseActivity({ githubId: 7, env: CF, fetchImpl: async (url) => { key = decodeURIComponent(url.split('/values/')[1]); return { ok: true }; } });
   assert.equal(key, ACTIVITY_KEY('7'));
   await assert.rejects(() => eraseActivity({ githubId: '' }), /github_id is required/);
+});
+
+test('eraseNotifications targets notifications:<github_id> (SOW-150/186)', async () => {
+  let key;
+  await eraseNotifications({ githubId: 7, env: CF, fetchImpl: async (url) => { key = decodeURIComponent(url.split('/values/')[1]); return { ok: true }; } });
+  assert.equal(key, NOTIFICATIONS_KEY('7'));
+  await assert.rejects(() => eraseNotifications({ githubId: '' }), /github_id is required/);
 });
 
 test('eraseFollows targets follows:<github_id> (SOW-023)', async () => {
@@ -409,6 +416,7 @@ test('runErasure --apply composes the auto steps, fail-isolates a thrown step, a
   const byStep = Object.fromEntries(r.steps.map((s) => [s.step, s.outcome]));
   assert.equal(byStep['activity'], 'deleted');
   assert.equal(byStep['follows'], 'deleted');
+  assert.equal(byStep['notifications'], 'deleted'); // SOW-150/186: the inbound notification store joins the sweep
   assert.equal(byStep['lookup-cache'], 'deleted');
   assert.equal(byStep['content'], 'skipped'); // no github client
   // discord getMember threw inside eraseDiscordRoles, which catches it -> member null -> skipped (not error)
@@ -468,9 +476,11 @@ test('planErasure marks the auto-driven steps auto and keeps the irreversible on
   assert.ok(activity.action.includes('activity:9'));
   assert.ok(activity.action.includes('follows:9'), 'the auto step also deletes the follow graph');
   // SOW-024: content, activity, lookup-cache, discord, members-index are now AUTO-DRIVEN
-  for (const step of ['content', 'activity', 'lookup-cache', 'discord', 'members-index']) {
+  for (const step of ['content', 'activity', 'notifications', 'lookup-cache', 'discord', 'members-index']) {
     assert.equal(plan.find((s) => s.step === step).auto, true, step);
   }
+  const notif = plan.find((s) => s.step === 'notifications');
+  assert.ok(notif.action.includes('notifications:9'), 'the notifications step names the per-member key');
   // crypto-shred, stripe (irreversible, opt-in), kv-mirror, de-index stay MANUAL
   for (const step of ['crypto-shred', 'stripe', 'kv-mirror', 'de-index']) {
     assert.equal(plan.find((s) => s.step === step).auto, false, step);

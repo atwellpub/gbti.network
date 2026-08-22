@@ -30,6 +30,7 @@ import { eraseSubscriberMail } from '../../workers/signup/mail-store.mjs'; // SO
 
 export const ACTIVITY_KEY = (githubId) => `activity:${githubId}`;
 export const FOLLOWS_KEY = (githubId) => `follows:${githubId}`; // SOW-023 subscription graph
+export const NOTIFICATIONS_KEY = (githubId) => `notifications:${githubId}`; // SOW-150/186 per-member notification store
 export const DRAFTS_KEY = (githubId) => `drafts:${githubId}`; // SOW-157 hosted draft staging
 export const PREFS_KEY = (githubId) => `prefs:${githubId}`; // SOW-046 member prefs (categories + followed news channels)
 export const LOOKUP_KEY = (githubId) => `gh:${githubId}`; // the github_id -> Stripe customer_id lookup cache
@@ -77,6 +78,15 @@ export async function eraseFollows({ githubId, env = process.env, fetchImpl = gl
 export async function erasePrefs({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   if (!githubId) throw new Error('a github_id is required');
   return deleteKvKey({ key: PREFS_KEY(String(githubId)), env, fetchImpl });
+}
+
+/** SOW-150/186 right-to-erasure: hard-delete the member's INBOUND notification store (mentions + followed-author
+ *  publishes addressed to them). Per-recipient, keyed by their own github_id, so this is a computed-key delete
+ *  like activity/follows. The follow GRAPH that produced these (who they follow, and their entry in others'
+ *  reverse follower index) is erased separately (eraseFollows + the reverse-index scrub, SOW-186 phase 3). */
+export async function eraseNotifications({ githubId, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  if (!githubId) throw new Error('a github_id is required');
+  return deleteKvKey({ key: NOTIFICATIONS_KEY(String(githubId)), env, fetchImpl });
 }
 
 /** Hard-delete a member's hosted draft store (SOW-157: staged authoring state, may contain unpublished text). */
@@ -456,6 +466,7 @@ export function planErasure({ githubId, username } = {}) {
     { step: 'coupon-grant', auto: true, tool: 'erase-member.mjs --apply', action: `MINIMIZE ${COUPON_GRANT_KEY(githubId)}: write a keyed-hash lock, then delete the raw-id record. The one-coupon-per-member lock SURVIVES erasure (owner ruling 2026-08-11); needs COUPON_LOCK_KEY.` },
     { step: 'coupon-redemptions', auto: true, tool: 'erase-member.mjs --apply', action: `Delete every redemption:<CODE>:${githubId} record (the id is in the key name) and decrement each shared redemptions:<CODE> counter.` },
     { step: 'activity', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the edge-store keys ${ACTIVITY_KEY(githubId)} (favorites + collections) and ${FOLLOWS_KEY(githubId)} (the follow graph).` },
+    { step: 'notifications', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete ${NOTIFICATIONS_KEY(githubId)} (SOW-150/186: the member's inbound notifications -- mentions + followed-author publishes).` },
     { step: 'lookup-cache', auto: true, tool: 'erase-member.mjs --apply', action: `Hard-delete the lookup-cache key ${LOOKUP_KEY(githubId)} (github_id -> Stripe customer_id).` },
     { step: 'share-votes', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every per-target share-vote set (upvotes:share:*); syndication queue items auto-expire via TTL.` },
     { step: 'news-opens', auto: true, tool: 'erase-member.mjs --apply', action: `Scrub github_id ${githubId} from every per-item news detail-open set (news-opens:*, SOW-111).` },
@@ -682,6 +693,7 @@ export async function runErasure({
 
   await runStep('activity', () => eraseActivity({ githubId, env, fetchImpl }));
   await runStep('follows', () => eraseFollows({ githubId, env, fetchImpl }));
+  await runStep('notifications', () => eraseNotifications({ githubId, env, fetchImpl })); // SOW-150/186: inbound notification store
   await runStep('prefs', () => erasePrefs({ githubId, env, fetchImpl })); // SOW-046: categories + followed news channels
   await runStep('drafts', () => eraseDrafts({ githubId, env, fetchImpl })); // SOW-157: hosted draft staging
   await runStep('lookup-cache', () => eraseLookupCache({ githubId, env, fetchImpl }));
