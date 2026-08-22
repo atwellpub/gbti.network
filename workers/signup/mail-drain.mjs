@@ -28,6 +28,18 @@ import {
 // cannot strand a recipient forever. Three `*/5` ticks.
 const CLAIM_STALE_MS = 15 * 60 * 1000;
 
+// CODE-SIDE rate-cap FLOORS (owner ruling 2026-08-22, QAmaster finding). The wrangler MAIL_DAILY_CAP /
+// MAIL_MONTHLY_CAP / MAIL_MAX_PER_TICK vars are for TUNING; these constants are for CORRECTNESS. An UNSET var
+// used to resolve to null through numOrNull, and null means UNBOUNDED: with only the per-tick 10 as a live
+// ceiling, the `*/5` tick could send 2,880 a day against a 100-a-day free tier. That was a FAIL-OPEN cap, unlike
+// the fail-closed COUNTER (an unreadable counter sends nothing). So the caps now fall back to these bounded
+// defaults, never to null. Sized under Resend's free tier (100/day, 3,000/month) with headroom for retries. A
+// var set to 0 is still honored as a deliberate kill switch (numOrNull(0) === 0, and 0 ?? default === 0).
+const DEFAULT_DAILY_CAP = 90;
+const DEFAULT_MONTHLY_CAP = 2500;
+const DEFAULT_MAX_PER_TICK = 10;
+export const MAIL_CAP_DEFAULTS = Object.freeze({ daily: DEFAULT_DAILY_CAP, monthly: DEFAULT_MONTHLY_CAP, perTick: DEFAULT_MAX_PER_TICK });
+
 /** UTC day (YYYY-MM-DD) and month (YYYY-MM) strings from a ms timestamp. The Worker wiring MAY pass operator-
  *  timezone strings instead (so the daily window rolls at Central midnight); the counter only needs the compile
  *  and the drain to agree, and UTC is the safe default. Kept out of the pure core (it reads the calendar). */
@@ -287,9 +299,9 @@ export async function drainMail(env, {
   kv = env?.SIGNUP_KV,
   now = Date.now,
   issueId = null,
-  perTickCap = Number(env?.MAIL_MAX_PER_TICK ?? 10),
-  dailyCap = numOrNull(env?.MAIL_DAILY_CAP),
-  monthlyCap = numOrNull(env?.MAIL_MONTHLY_CAP),
+  perTickCap = numOrNull(env?.MAIL_MAX_PER_TICK) ?? DEFAULT_MAX_PER_TICK,
+  dailyCap = numOrNull(env?.MAIL_DAILY_CAP) ?? DEFAULT_DAILY_CAP,
+  monthlyCap = numOrNull(env?.MAIL_MONTHLY_CAP) ?? DEFAULT_MONTHLY_CAP,
   dayStr = null,
   monthStr = null,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,

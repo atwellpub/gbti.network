@@ -3,8 +3,8 @@
 // crashed-tick (stale-claim) recovery. No network, no Resend, no Stripe.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drainMail, drainMailIssue, budgetDateStrings, resolveSendGate } from '../workers/signup/mail-drain.mjs';
-import { enqueueIssue, getSend, readPendingIndex, readBudget, MAIL_PENDING_KEY } from '../workers/signup/mail-store.mjs';
+import { drainMail, drainMailIssue, budgetDateStrings, resolveSendGate, MAIL_CAP_DEFAULTS } from '../workers/signup/mail-drain.mjs';
+import { enqueueIssue, getSend, readPendingIndex, readBudget, bumpBudget, MAIL_PENDING_KEY } from '../workers/signup/mail-store.mjs';
 import { sendKey, markClaimed, budgetDayKey } from '../membership/mail-queue.mjs';
 import { suppressKey, subscriberKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
@@ -397,4 +397,38 @@ test('SEAM FAIL-CLOSED: with the gate OPEN but unsubscribe unconfigured, the dra
   const r2 = await drainMailIssue({ MAIL_SEND_UNRESTRICTED: 'true', MAIL_UNSUB_KEY: 'k' }, { kv, issueId: 'i1', now: at(1_000_000), cap: 10, ...BIG, ...deps(sender) });
   assert.equal(r2.reason, 'unsubscribe not configured');
   assert.equal(sender.sent.length, 0, 'still nothing sent without a base URL');
+});
+
+// ---------- the rate caps are FAIL-SAFE, not fail-open (owner ruling 2026-08-22; QAmaster finding) ----------
+// The existing budget tests all pass an EXPLICIT cap (BIG, or a small number), so they prove the mechanism honours
+// a cap it is GIVEN. Nothing proved a cap is given: an UNSET MAIL_DAILY_CAP/MAIL_MONTHLY_CAP resolved to null and
+// null meant UNBOUNDED (a fail-OPEN cap, unlike the fail-closed counter). These two tests go RED if the caps ever
+// return to unbounded, by driving the drain with NO cap vars and asserting a bounded default binds. They are the
+// missing subject: a check that passes on an absent cap, not a present one.
+
+test('CAP FLOOR: with no cap vars set, the drain is bounded by the DEFAULT daily cap, never unbounded', async () => {
+  const kv = makeKV();
+  const hashes = Array.from({ length: MAIL_CAP_DEFAULTS.daily + 30 }, (_, i) => `h${i}`); // more recipients than the cap
+  await seed(kv, 'i1', hashes);
+  const sender = makeSender();
+  // OPEN opens the gate + configures unsubscribe but sets NO MAIL_DAILY_CAP/MAIL_MONTHLY_CAP. perTickCap is raised
+  // ABOVE the daily default so the DAILY cap is the binding constraint, not the per-tick throttle. If the daily cap
+  // regressed to null (unbounded), every recipient would send.
+  const r = await drainMail(OPEN, { kv, now: at(1_000_000), perTickCap: hashes.length, ...deps(sender) });
+  assert.equal(sender.sent.length, MAIL_CAP_DEFAULTS.daily, 'bounded by the code default daily cap, not unbounded');
+  assert.equal(r.drained, MAIL_CAP_DEFAULTS.daily);
+});
+
+test('CAP FLOOR: with the daily cap raised and NO monthly var, the DEFAULT monthly cap still binds', async () => {
+  const kv = makeKV();
+  const { dayStr, monthStr } = budgetDateStrings(1_000_000);
+  // Pre-spend the month to five short of the DEFAULT monthly cap; raise the daily cap so it does not bind, and
+  // leave MAIL_MONTHLY_CAP UNSET so it must fall back to the default. Only the monthly default can limit the tick.
+  await bumpBudget(kv, dayStr, monthStr, MAIL_CAP_DEFAULTS.monthly - 5);
+  const hashes = Array.from({ length: 40 }, (_, i) => `h${i}`);
+  await seed(kv, 'i1', hashes);
+  const sender = makeSender();
+  const env = { ...OPEN, MAIL_DAILY_CAP: '100000' }; // daily does not bind; monthly var absent -> default binds
+  await drainMail(env, { kv, now: at(1_000_000), perTickCap: hashes.length, ...deps(sender) });
+  assert.equal(sender.sent.length, 5, 'bounded by the default monthly cap remaining (default - pre-spent), not unbounded');
 });

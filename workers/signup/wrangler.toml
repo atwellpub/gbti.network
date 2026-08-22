@@ -26,6 +26,13 @@ head_sampling_rate = 1
 # checkout return URLs.
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+# SOW-166 digest rate caps (owner ruling 2026-08-22). PLAIN NUMBERS, not secrets: reviewable + tunable here
+# without a code change. mail-drain.mjs ALSO carries bounded code defaults (MAIL_CAP_DEFAULTS) so an unset var can
+# never mean unbounded; these are the tuning knobs, the code default is the correctness floor. Sized under
+# Resend's free tier (100/day, 3,000/month) with retry headroom. Set MAIL_DAILY_CAP = "0" to pause all sends.
+MAIL_DAILY_CAP = "90"
+MAIL_MONTHLY_CAP = "2500"
+MAIL_MAX_PER_TICK = "10"
 # sow-158 Phase 1b: origins allowed to make CREDENTIALED (cookie) calls to the member endpoints (comma-separated,
 # no trailing slash). Shared by the CORS reflect-origin policy AND the CSRF Origin check. A local dev host adds
 # http://localhost:4321 via .dev.vars; keep this tight (never a wildcard, which cannot co-exist with credentials).
@@ -189,6 +196,11 @@ crons = ["*/5 * * * *", "0 * * * *", "30 * * * *", "0 14 * * 2"]
 # Worker reads in production must be listed here):
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+# SOW-166 digest rate caps (owner ruling 2026-08-22). Plain numbers, not secrets; the code carries bounded
+# defaults (MAIL_CAP_DEFAULTS) so an unset var can never mean unbounded. Under Resend free tier with headroom.
+MAIL_DAILY_CAP = "90"
+MAIL_MONTHLY_CAP = "2500"
+MAIL_MAX_PER_TICK = "10"
 CORS_ALLOWED_ORIGINS = "https://gbti.network"   # sow-158 Phase 1b: credentialed-CORS + CSRF Origin allow-list (never a wildcard)
 COOKIE_DOMAIN = "gbti.network"   # sow-158 web-login fix: scope the readable gbti_csrf cookie to the registrable domain so the static site (gbti.network) can read it while the Worker serves the OAuth callback from signup.gbti.network. Unset in dev = host-only.
 GITHUB_CONTENT_REPO = "gbti-network/gbti.network"
