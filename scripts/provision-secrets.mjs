@@ -51,7 +51,23 @@ const REGISTRY = [
   // digest cannot enrol anybody today. Generate each in a password manager and paste; see secrets-ops.
   { name: 'MAIL_SUPPRESS_KEY', targets: ['worker'], note: 'Keys mailHash, the one-way identity behind every digest key (subscriber, send-state, unsubscribe marker). NEVER ROTATE: rotation orphans every suppression marker and silently re-contacts people who opted out. ALSO needed in the local .env, because erase-member computes the hash to delete a member mail records.' },
   { name: 'MAIL_UNSUB_KEY', targets: ['worker'], note: 'Keys the one-click unsubscribe capability token. Deliberately separate from MAIL_SUPPRESS_KEY: opposite rotation stories, and sharing one welds them so neither can move. Rotatable additively via MAIL_UNSUB_KEYS.' },
-  { name: 'MAIL_ADDRESS_KEY', targets: ['worker'], note: 'Standing AES-256-GCM key for emailEnc, an ANONYMOUS subscriber stored address (member rows store none). Base64 of exactly 32 bytes. NOT MEMBER_CONTENT_KEY, whose rotation is key-destroying and would destroy the addresses.' },
+  // ADDED 2026-08-22, surfaced by test/secret-names-match-code.test.mjs on its first run. The GitHub App
+  // credentials were read by workers/signup/github-app.mjs (which THROWS without them) and named in a
+  // wrangler.toml comment, but were on no checklist. They are set in production today, so this is not an
+  // outage: it is a re-provisioning gap, which is exactly the kind that stays invisible until the day someone
+  // stands up a second environment or has to restore this one. All three are required together; the App is
+  // configured or it is not.
+  { name: 'GITHUB_APP_ID', targets: ['worker'], note: 'GitHub App id for the hosted authoring + fork-sync path. Non-secret identifier, but required: github-app.mjs throws without it.' },
+  { name: 'GITHUB_APP_INSTALLATION_ID', targets: ['worker'], note: 'The App installation id on the content org/repo. Required alongside GITHUB_APP_ID.' },
+  { name: 'GITHUB_APP_PRIVATE_KEY', targets: ['worker'], note: 'PEM (PKCS8 or RSA) signing key for the GitHub App JWT. Secret. Rotate by generating a new key in the App settings and revoking the old one; the App keeps working across the overlap.' },
+
+  // NAME CORRECTED 2026-08-22. This row said MAIL_ADDRESS_KEY, which NOTHING READS. The Worker reads
+  // env.MAIL_EMAIL_KEY (workers/signup/mail-subscribe.mjs, workers/signup/index.mjs). A checklist that tracks a
+  // name the code does not read is worse than no row: provisioning MAIL_ADDRESS_KEY would report GREEN here while
+  // the Worker still saw nothing, and subscribe would keep returning its neutral anti-enumeration response, so
+  // every signup would look successful and no confirmation mail would ever arrive, with nothing going red.
+  // The checker must track what the CODE reads. If the env var is ever renamed, both move together.
+  { name: 'MAIL_EMAIL_KEY', targets: ['worker'], note: 'Standing AES-256-GCM key for emailEnc, an ANONYMOUS subscriber stored address (member rows store none). Base64 of exactly 32 bytes. NOT MEMBER_CONTENT_KEY, whose rotation is key-destroying and would destroy the addresses. EFFECTIVELY NEVER-ROTATE: decryptEmail takes a single key with no retired-key map, so a rotation makes every stored address unreadable.' },
   { name: 'TURNSTILE_SECRET_KEY', targets: ['worker'], note: 'Signup bot check.' },
   { name: 'DISCORD_BOT_TOKEN', targets: ['worker', 'actions'], caution: 'human-todo flags resetting this before launch (session-exposed).' },
   { name: 'GH_BOT_TOKEN', targets: ['actions'], localName: 'GITHUB_BOT_TOKEN', note: 'gbtilabs PAT for Actions (gate/reconcile/award).' },
