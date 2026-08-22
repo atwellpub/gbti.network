@@ -12,6 +12,7 @@ import {
   readKvValueStrict, kvRestShim, findMemberSubscriberHashes, eraseCouponRedemptions, minimizeCouponGrant,
 } from '../scripts/lib/erase-member.mjs';
 import { deriveAuditStatus } from '../scripts/lib/erase-audit.mjs';
+import { listCouponRedemptions } from '../scripts/lib/coupon-grants.mjs';
 
 const CF = { CF_ACCOUNT_ID: 'acct', CF_KV_NAMESPACE_ID: 'ns', CF_API_TOKEN: 'tok' };
 
@@ -237,11 +238,16 @@ test('minimizeCouponGrant does not report "no grant to minimize" when it could n
   assert.match(absent.reason, /no coupon grant/);
 });
 
-test('a redemption record whose value could not be read is NOT reported as a clean sweep', async () => {
-  // SowMaster's consumer analysis: the reconcile fold recomputes every run and self-heals, but an erasure is a
-  // one-shot operator action nobody re-runs, so a record dropped from this sweep is never deleted at all.
+test('a redemption record whose value could not be read is now DELETED, not merely reported', async () => {
+  // ORIGINAL INTENT, PRESERVED: a record that leaves the sweep must never pass as a clean run. That was first
+  // met by COUNTING the drop and reporting `incomplete`. The key-only filter meets it more strongly, by not
+  // dropping the record at all: the code and github_id are in the key, so the value read is irrelevant to
+  // erasure. The assertion is re-pointed at the better outcome rather than deleted, because the thing being
+  // defended is "no silent residue", not the particular way it was signalled.
+  const deleted = [];
   const mk = (recordOk) => async (url, init = {}) => {
-    if (init.method === 'PUT' || init.method === 'DELETE') return { ok: true };
+    if (init.method === 'DELETE') { deleted.push(decodeURIComponent(url.split('/values/')[1])); return { ok: true }; }
+    if (init.method === 'PUT') return { ok: true };
     if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [{ name: 'redemption:CAPPED:9' }], result_info: {} }) };
     const key = decodeURIComponent(url.split('/values/')[1]);
     if (key === 'redemptions:CAPPED') return { ok: true, status: 200, text: async () => '47' };
@@ -249,12 +255,77 @@ test('a redemption record whose value could not be read is NOT reported as a cle
     const v = { code: 'CAPPED', githubId: '9', until: '2027-01-01T00:00:00.000Z' };
     return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
   };
-  const broken = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(false) });
-  assert.equal(broken.incomplete, true, 'an unreadable redemption record must not pass as a clean sweep');
-  assert.match(broken.reason, /could not be read and were NOT deleted/);
 
-  // CONTROL: readable, so the record is found and scrubbed and nothing is flagged.
+  const broken = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(false) });
+  assert.ok(deleted.includes('redemption:CAPPED:9'), 'an unreadable value must not stop the record being deleted');
+  assert.equal(broken.scrubbed, 1);
+  assert.ok(!broken.incomplete, 'nothing was left behind, so there is nothing to report');
+
+  // CONTROL: readable, same outcome, so the deletion above is not an artefact of the failure path.
+  deleted.length = 0;
   const ok = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(true) });
+  assert.ok(deleted.includes('redemption:CAPPED:9'));
   assert.equal(ok.scrubbed, 1);
-  assert.ok(!ok.incomplete);
+});
+
+test('QAmaster four-record case: EVERY redemption key naming the member is deleted, whatever its value does', async () => {
+  // Three ways a record left this sweep, only one of which was counted. Erasure needs the code and the
+  // github_id and both are in the KEY, so it must not depend on the value parsing at all.
+  //   GOOD    reads cleanly
+  //   NOUNTIL reads cleanly, valid object, but no `until`  -> was dropped, UNCOUNTED
+  //   STRVAL  reads cleanly, body is a JSON string          -> was dropped, UNCOUNTED
+  //   FAIL    value read 500s                               -> was dropped, counted
+  const deleted = [];
+  const bodies = {
+    'redemption:GOOD:42': { code: 'GOOD', githubId: '42', until: '2027-01-01T00:00:00.000Z' },
+    'redemption:NOUNTIL:42': { code: 'NOUNTIL', githubId: '42' },
+    'redemption:STRVAL:42': 'a bare string',
+  };
+  const keys = ['redemption:GOOD:42', 'redemption:NOUNTIL:42', 'redemption:STRVAL:42', 'redemption:FAIL:42'];
+  const fetchImpl = async (url, init = {}) => {
+    if (init.method === 'DELETE') { deleted.push(decodeURIComponent(url.split('/values/')[1])); return { ok: true }; }
+    if (init.method === 'PUT') return { ok: true };
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: keys.map((name) => ({ name })), result_info: {} }) };
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    if (key.startsWith('redemptions:')) return { ok: true, status: 200, text: async () => '9' };
+    if (key === 'redemption:FAIL:42') return { ok: false, status: 500 };
+    const v = bodies[key];
+    return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
+  };
+
+  const r = await eraseCouponRedemptions({ githubId: '42', env: CF, fetchImpl });
+  assert.deepEqual(deleted.sort(), keys.slice().sort(),
+    'all four of this member\'s redemption records must be deleted; three of them used to survive silently');
+  assert.equal(r.scrubbed, 4);
+  assert.ok(!r.incomplete, 'nothing was left behind, so nothing to report');
+});
+
+test('an unrecognised key under redemption: is reported, because we cannot tell whose it is', async () => {
+  const fetchImpl = async (url, init = {}) => {
+    if (init.method === 'DELETE' || init.method === 'PUT') return { ok: true };
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [{ name: 'redemption:weird-shape' }], result_info: {} }) };
+    return { ok: true, status: 200, text: async () => '1', json: async () => ({}) };
+  };
+  const r = await eraseCouponRedemptions({ githubId: '42', env: CF, fetchImpl });
+  assert.equal(r.incomplete, true);
+  assert.match(r.reason, /unrecognised shape/);
+});
+
+test('the grant fold still gets CONTENT-filtered redemptions, since its disposition is the opposite one', async () => {
+  // The same sweep serves two consumers with opposite needs. `matches` must not change what the fold sees:
+  // a record without `until` is genuinely unusable to it and must stay out of `redemptions`.
+  const keys = ['redemption:GOOD:42', 'redemption:NOUNTIL:42'];
+  const bodies = {
+    'redemption:GOOD:42': { code: 'GOOD', githubId: '42', until: '2027-01-01T00:00:00.000Z' },
+    'redemption:NOUNTIL:42': { code: 'NOUNTIL', githubId: '42' },
+  };
+  const fetchImpl = async (url) => {
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: keys.map((name) => ({ name })), result_info: {} }) };
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    const v = bodies[key];
+    return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
+  };
+  const listed = await listCouponRedemptions({ env: CF, fetchImpl });
+  assert.deepEqual(listed.redemptions.map((r) => r.code), ['GOOD'], 'the fold still sees only usable records');
+  assert.equal(listed.matches.length, 2, 'erasure sees both, because both are records this member has');
 });

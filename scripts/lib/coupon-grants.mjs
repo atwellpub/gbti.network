@@ -49,9 +49,16 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
   // because the two consumers differ: the reconcile fold recomputes from redemptions every run and self-heals,
   // while erasure is a ONE-SHOT operator action nobody re-runs, so a record dropped there survives permanently.
   let unreadable = 0;
+  // Every key whose SHAPE identifies a redemption, independent of whether its value could be read or parsed.
+  // The code and the github_id are both in the key, so a consumer that needs only those (erasure) can work from
+  // this and is immune to every value-side failure below. A consumer that needs the record's CONTENT (the grant
+  // fold, which reads `until`/`tier`/`login`) must keep using `redemptions`.
+  const matches = [];
+  let unmatchedKeys = 0;   // under the redemption: prefix but not this shape: we cannot tell whose they are
   for (const name of names) {
     const m = KEY_RE.exec(name);
-    if (!m) continue; // an unexpected key shape contributes nothing (fail closed)
+    if (!m) { unmatchedKeys++; continue; }
+    matches.push({ key: name, code: m[1], githubId: m[2] });
     try {
       const res = await fetchImpl(`${apiBase}/values/${encodeURIComponent(name)}`, { headers });
       if (!res?.ok) { unreadable++; continue; }
@@ -65,7 +72,7 @@ export async function listCouponRedemptions({ env = process.env, fetchImpl = glo
       unreadable++;
     }
   }
-  return { available: true, redemptions, unreadable };
+  return { available: true, redemptions, unreadable, matches, unmatchedKeys };
 }
 
 /**

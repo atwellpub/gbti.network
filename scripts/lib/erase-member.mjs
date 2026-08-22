@@ -414,7 +414,13 @@ export async function eraseCouponRedemptions({ githubId, env = process.env, fetc
   const listed = await listCouponRedemptions({ env, fetchImpl });
   if (!listed.available) return { skipped: true, reason: listed.reason };
   const id = String(githubId);
-  const mine = (listed.redemptions ?? []).filter((r) => String(r.githubId) === id);
+  // KEY-ONLY on purpose (QAmaster, 2026-08-22). Erasure needs the code and the github_id, and BOTH are in the
+  // key, so it must not filter `redemptions`: that list is built from records whose VALUE parsed and carried an
+  // `until`, and a record dropped for either reason is one this member still has. Which failure is benign is a
+  // property of the CONSUMER, not of the data: for the grant fold, a record it cannot parse is schema drift and
+  // skipping it is right; for erasure, "read it and it was the wrong shape" ends exactly where "could not read
+  // it" ends, with the record still sitting there. Filtering on the key match is immune to all of it.
+  const mine = (listed.matches ?? []).filter((r) => String(r.githubId) === id);
   let scrubbed = 0;
   const unreadableCounters = [];
   for (const r of mine) {
@@ -432,11 +438,13 @@ export async function eraseCouponRedemptions({ githubId, env = process.env, fetc
   }
   const notes = [];
   if (unreadableCounters.length) notes.push(`redemption counter unreadable for ${unreadableCounters.join(', ')}: NOT decremented (left high rather than reset)`);
-  // A redemption record whose value the sweep could not read was never in `mine`, so it was never deleted. The
-  // fold self-heals on its next run; an erasure does not, so this must not be reported as a clean sweep.
-  if (listed.unreadable) notes.push(`${listed.unreadable} redemption record(s) could not be read and were NOT deleted`);
+  // `listed.unreadable` is deliberately NOT reported here any more: since `mine` comes from the key match, a
+  // record whose value could not be read is still deleted, so it no longer shortens this member's erasure.
+  // An UNMATCHED key is different. It is under the redemption: prefix in a shape we do not recognise, so we
+  // cannot tell whose it is, and one of them could be this member's.
+  if (listed.unmatchedKeys) notes.push(`${listed.unmatchedKeys} key(s) under redemption: have an unrecognised shape and could not be attributed; one may belong to this member`);
   if (notes.length) {
-    return { scrubbed, incomplete: true, unreadable: unreadableCounters.length + (listed.unreadable || 0), reason: notes.join('; ') };
+    return { scrubbed, incomplete: true, unreadable: unreadableCounters.length + (listed.unmatchedKeys || 0), reason: notes.join('; ') };
   }
   return { scrubbed };
 }
