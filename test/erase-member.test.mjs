@@ -283,8 +283,11 @@ function fakeKvFetch({ keys, values }) {
     }
     const key = decodeURIComponent(url.split('/values/')[1]);
     const v = values[key];
-    if (v === undefined) return { ok: false };
-    return { ok: true, json: async () => (typeof v === 'string' ? JSON.parse(v) : v), text: async () => String(v) };
+    // A MISSING key is a 404 here, matching Cloudflare. A bare { ok: false } modelled "absent" and "the read
+    // failed" as the same response, and that ambiguity is exactly what let a transient failure be read as an
+    // empty prior value and written back over real data (the shared coupon counter, sow-024).
+    if (v === undefined) return { ok: false, status: 404 };
+    return { ok: true, status: 200, json: async () => (typeof v === 'string' ? JSON.parse(v) : v), text: async () => String(v) };
   };
   return { fetchImpl, calls };
 }

@@ -115,8 +115,13 @@ export async function eraseReverseFollows({ githubId, env = process.env, fetchIm
 
   // AS A FOLLOWED TARGET: delete the member's own inbound follower list (github_id-keyed now).
   let inboundDeleted = false;
+  let inboundUnreadable = false;
   const inboundKey = FOLLOWERS_KEY(id);
-  if ((await readKvValue({ key: inboundKey, env, fetchImpl })) !== null) {
+  // Strict: a failed read here used to look exactly like "no such record", so a transient 500 left the member's
+  // own follower list in place and the step reported the same numbers as a run where it was never there.
+  const inbound = await readKvValueStrict({ key: inboundKey, env, fetchImpl });
+  if (!inbound.ok) inboundUnreadable = true;
+  else if (inbound.value !== null) {
     await deleteKvKey({ key: inboundKey, env, fetchImpl });
     inboundDeleted = true;
   }
@@ -134,7 +139,11 @@ export async function eraseReverseFollows({ githubId, env = process.env, fetchIm
       outboundScrubbed++;
     }
   }
-  return { scrubbed: outboundScrubbed + (inboundDeleted ? 1 : 0), outboundScrubbed, inboundDeleted, ...(incompleteScan(listed, 'followers:') || {}) };
+  const scanNote = incompleteScan(listed, 'followers:');
+  const note = inboundUnreadable
+    ? { incomplete: true, unreadable: (scanNote?.unreadable ?? 0) + 1, reason: `the member's own ${inboundKey} could not be read and was NOT deleted${scanNote ? `; ${scanNote.reason}` : ''}` }
+    : scanNote;
+  return { scrubbed: outboundScrubbed + (inboundDeleted ? 1 : 0), outboundScrubbed, inboundDeleted, ...(note || {}) };
 }
 
 /** Hard-delete a member's hosted draft store (SOW-157: staged authoring state, may contain unpublished text). */
@@ -295,6 +304,28 @@ export async function eraseContentOpens({ githubId, env = process.env, fetchImpl
 }
 
 /** GET one raw KV value via the REST API (used for the shared coupon counter). Missing creds = null. */
+/**
+ * Read one KV value, keeping ABSENT and UNREADABLE apart. `readKvValue` collapses both to null, which is fine for
+ * a caller asking "is there something here" and DANGEROUS for one that computes a new value FROM the old one: a
+ * transient read failure then looks like a zero or empty prior state, and the write destroys real data.
+ *
+ * Returns `{ ok: true, value }` where a null value means genuinely absent (404), or `{ ok: false, status }` when
+ * the read failed and we therefore know nothing about what the key holds.
+ */
+export async function readKvValueStrict({ key, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const accountId = env.CF_ACCOUNT_ID;
+  const namespaceId = env.CF_KV_NAMESPACE_ID;
+  const apiToken = env.CF_API_TOKEN;
+  if (!accountId || !namespaceId || !apiToken) return { ok: false, value: null, status: null, reason: 'CF creds not set' };
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`;
+  const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${apiToken}` } });
+  if (res && res.status === 404) return { ok: true, value: null, status: 404 };   // genuinely absent
+  if (!res || !res.ok) return { ok: false, value: null, status: res ? res.status : null };
+  const text = res.text ? await res.text().catch(() => null) : null;
+  if (text === null) return { ok: false, value: null, status: res.status ?? null };
+  return { ok: true, value: text, status: res.status ?? 200 };
+}
+
 export async function readKvValue({ key, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const accountId = env.CF_ACCOUNT_ID;
   const namespaceId = env.CF_KV_NAMESPACE_ID;
@@ -353,8 +384,13 @@ export async function minimizeCouponGrant({ githubId, env = process.env, fetchIm
   if (!lockKey) {
     return { skipped: true, reason: 'COUPON_LOCK_KEY not set: raw coupon-grant KEPT rather than delete the one-per-member lock' };
   }
-  const existing = await readKvValue({ key: couponGrantKey(String(githubId)), env, fetchImpl });
-  if (existing === null) return { skipped: true, reason: 'no coupon grant to minimize' };
+  // Strict: "we could not read the grant" must not be reported as "there is no grant to minimize", or a transient
+  // failure silently leaves identifying coupon data in place while the run records the step as a clean skip.
+  const existing = await readKvValueStrict({ key: couponGrantKey(String(githubId)), env, fetchImpl });
+  if (!existing.ok) {
+    return { incomplete: true, unreadable: 1, reason: 'coupon grant could not be read, so it was NOT minimized; re-run' };
+  }
+  if (existing.value === null) return { skipped: true, reason: 'no coupon grant to minimize' };
   await putKvValue({ key: lockKey, value: COUPON_LOCK_VALUE, env, fetchImpl });
   return deleteKvKey({ key: couponGrantKey(String(githubId)), env, fetchImpl });
 }
@@ -380,12 +416,27 @@ export async function eraseCouponRedemptions({ githubId, env = process.env, fetc
   const id = String(githubId);
   const mine = (listed.redemptions ?? []).filter((r) => String(r.githubId) === id);
   let scrubbed = 0;
+  const unreadableCounters = [];
   for (const r of mine) {
     await deleteKvKey({ key: redemptionKey(r.code, id), env, fetchImpl });
     const countKey = redemptionCountKey(r.code);
-    const current = Number(await readKvValue({ key: countKey, env, fetchImpl })) || 0;
+    // MUST be a strict read. The old plain read collapsed a failed fetch to null, Number(null) || 0 is 0, and the
+    // decrement then wrote "0" over a SHARED counter: one transient 500 reset a capped coupon to zero redemptions
+    // and handed back its entire capacity, which is precisely the harm the note above says is being prevented.
+    // Skipping the decrement leaves the counter one too HIGH, which under-grants capacity and is the safe side.
+    const read = await readKvValueStrict({ key: countKey, env, fetchImpl });
+    if (!read.ok) { unreadableCounters.push(r.code); continue; }
+    const current = Number(read.value) || 0;
     await putKvValue({ key: countKey, value: String(Math.max(0, current - 1)), env, fetchImpl });
     scrubbed++;
+  }
+  if (unreadableCounters.length) {
+    return {
+      scrubbed,
+      incomplete: true,
+      unreadable: unreadableCounters.length,
+      reason: `redemption counter unreadable for ${unreadableCounters.join(', ')}: NOT decremented (left high rather than reset)`,
+    };
   }
   return { scrubbed };
 }
@@ -481,7 +532,13 @@ export function kvRestShim({ env = process.env, fetchImpl = globalThis.fetch } =
   const headers = { Authorization: `Bearer ${apiToken}` };
   return {
     async get(key, type) {
-      const text = await readKvValue({ key, env, fetchImpl });
+      // THROWS on an unreadable key, returns null only for a genuine miss. Real Workers KV behaves this way, and
+      // the whole point of this shim is that the script side and the Worker side run the SAME erasure logic. The
+      // previous version swallowed a failed read into null, which made findMemberSubscriberHashes' fail-closed
+      // catch DEAD on the script path: an unreadable subscriber record was silently reported as a clean scan.
+      const read = await readKvValueStrict({ key, env, fetchImpl });
+      if (!read.ok) throw new Error(`KV read failed for ${key}: ${read.status ?? read.reason ?? 'no response'}`);
+      const text = read.value;
       if (text == null) return null;
       if (type !== 'json') return text;
       try { return JSON.parse(text); } catch { return null; }

@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import {
   listKvByPrefix, eraseShareVotes, eraseNewsOpens, eraseContentOpens,
   scrubConversionSnapshots, minimizeRedeemedInvites, eraseReverseFollows, runErasure,
+  readKvValueStrict, kvRestShim, findMemberSubscriberHashes, eraseCouponRedemptions, minimizeCouponGrant,
 } from '../scripts/lib/erase-member.mjs';
 import { deriveAuditStatus } from '../scripts/lib/erase-audit.mjs';
 
@@ -25,8 +26,12 @@ function mkFetch({ keys = [], values = {}, unreadable = new Set(), unparsed = ne
     }
     const key = decodeURIComponent(url.split('/values/')[1]);
     if (unreadable.has(key)) return { ok: false, status: 500 };
-    if (unparsed.has(key)) return { ok: true, json: async () => 'a bare string, not an object' };
-    return { ok: true, json: async () => values[key] ?? {} };
+    if (unparsed.has(key)) return { ok: true, status: 200, json: async () => 'a bare string, not an object', text: async () => '"a bare string, not an object"' };
+    const v = values[key];
+    // A genuinely MISSING key is a 404, which is what Cloudflare returns. Modelling it as a bare { ok: false }
+    // would make it indistinguishable from a transient failure, which is the very thing under test here.
+    if (v === undefined) return { ok: false, status: 404 };
+    return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
   };
   return { fetchImpl, writes };
 }
@@ -130,4 +135,104 @@ test('END TO END: an unreadable record surfaces as an incomplete step and a part
   assert.equal(step.outcome, 'incomplete', 'a keyspace we could not fully read is not an `ok` step');
   assert.match(step.detail, /could not be read/);
   assert.equal(r.record.status, 'partial', 'the compliance artifact must not claim a complete erasure');
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// The SECOND fail-open, found by QAmaster: readKvValue collapses "absent" and "read failed" into one null.
+// Three erasure sites depended on that null, and one of them WROTE from it. These tests drive the REAL adapter
+// rather than a test double, because the previous double threw where the adapter returned null, so the whole
+// existing suite passed identically with the bug present and with it fixed.
+// ---------------------------------------------------------------------------------------------------------
+
+test('readKvValueStrict keeps a 404 (absent) apart from a 500 (we cannot tell)', async () => {
+  const at = async (status) => readKvValueStrict({ key: 'k', env: CF, fetchImpl: async () => ({ ok: status === 200, status, text: async () => 'v' }) });
+  const absent = await at(404);
+  assert.equal(absent.ok, true, 'a 404 is a definite answer: the key is not there');
+  assert.equal(absent.value, null);
+  const failed = await at(500);
+  assert.equal(failed.ok, false, 'a 500 tells us nothing about what the key holds');
+  const found = await at(200);
+  assert.deepEqual([found.ok, found.value], [true, 'v']);
+});
+
+test('kvRestShim.get THROWS on an unreadable key and returns null only for a genuine miss', async () => {
+  const shim = (status) => kvRestShim({ env: CF, fetchImpl: async () => ({ ok: status === 200, status, text: async () => '{"a":1}' }) });
+  assert.equal(await shim(404).get('k', 'json'), null, 'a miss is still a null, matching real Workers KV');
+  await assert.rejects(() => shim(500).get('k', 'json'), /KV read failed/);
+  assert.deepEqual(await shim(200).get('k', 'json'), { a: 1 });
+});
+
+test('findMemberSubscriberHashes is fail-closed THROUGH THE REAL SHIM, not just through a throwing double', async () => {
+  // The bug this pins: the shim returned null on a failed read, so the fail-closed catch inside the scan was
+  // unreachable on the script path and an unreadable subscriber record was reported as a clean, complete scan.
+  const mk = (valueOk) => kvRestShim({
+    env: CF,
+    fetchImpl: async (url) => {
+      if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [{ name: 'mail:subscriber:aaa' }], list_complete: true }) };
+      if (!valueOk) return { ok: false, status: 500 };
+      return { ok: true, status: 200, text: async () => JSON.stringify({ source: 'member', githubId: '9', hash: 'aaa' }) };
+    },
+  });
+
+  const broken = await findMemberSubscriberHashes(mk(false), { githubId: '9' });
+  assert.equal(broken.ok, false, 'an unreadable subscriber record must not yield a clean scan');
+  assert.match(broken.error, /subscriber read failed/);
+
+  // CONTROL: an empty hashes list proves nothing on its own. With the read succeeding, the same probe finds the
+  // record, so the refusal above is caused by the failed read and not by the harness never matching anything.
+  const ok = await findMemberSubscriberHashes(mk(true), { githubId: '9' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.hashes, ['aaa'], 'the control finds the record the broken case could not read');
+});
+
+test('eraseCouponRedemptions never writes a SHARED counter it could not read', async () => {
+  // The destructive one. A failed read made Number(null) || 0 === 0, and the decrement wrote "0" over a counter
+  // holding every other member's redemptions, handing back the whole capacity of a capped coupon.
+  const puts = [];
+  const mk = (counterOk) => async (url, init = {}) => {
+    if (init.method === 'PUT') { puts.push({ key: decodeURIComponent(url.split('/values/')[1]), body: init.body }); return { ok: true }; }
+    if (init.method === 'DELETE') return { ok: true };
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [{ name: 'redemption:CAPPED:9' }], result_info: {} }) };
+    const key = decodeURIComponent(url.split('/values/')[1]);
+    if (key === 'redemptions:CAPPED') {
+      return counterOk ? { ok: true, status: 200, text: async () => '47' } : { ok: false, status: 500 };
+    }
+    const v = { code: 'CAPPED', githubId: '9', until: '2027-01-01T00:00:00.000Z' };
+    return { ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) };
+  };
+
+  const broken = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(false) });
+  assert.equal(broken.incomplete, true, 'an undecremented counter must be reported, not silently passed over');
+  assert.match(broken.reason, /NOT decremented/);
+  assert.equal(puts.filter((p) => p.key.startsWith('redemptions:')).length, 0,
+    'a counter we could not read must NEVER be written: writing 0 uncaps the coupon for everyone else');
+
+  // CONTROL: with the counter readable the decrement still happens, so the refusal above is the failed read.
+  puts.length = 0;
+  const ok = await eraseCouponRedemptions({ githubId: '9', env: CF, fetchImpl: mk(true) });
+  assert.ok(!ok.incomplete);
+  assert.equal(puts.find((p) => p.key === 'redemptions:CAPPED').body, '46', '47 -> 46');
+});
+
+test('eraseReverseFollows reports the member\'s OWN follower list when it could not be read', async () => {
+  const fetchImpl = async (url, init = {}) => {
+    if (init.method === 'DELETE' || init.method === 'PUT') return { ok: true };
+    if (url.includes('/keys?')) return { ok: true, status: 200, json: async () => ({ result: [], result_info: {} }) };
+    return { ok: false, status: 500 }; // the inbound followers:9 read fails
+  };
+  const r = await eraseReverseFollows({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(r.incomplete, true);
+  assert.match(r.reason, /followers:9 could not be read and was NOT deleted/);
+  assert.equal(r.inboundDeleted, false);
+});
+
+test('minimizeCouponGrant does not report "no grant to minimize" when it could not read the grant', async () => {
+  const env = { ...CF, COUPON_LOCK_KEY: 'a'.repeat(64) };
+  const r = await minimizeCouponGrant({ githubId: '9', env, fetchImpl: async () => ({ ok: false, status: 500 }) });
+  assert.equal(r.incomplete, true, '"we could not look" is not "there was nothing there"');
+  assert.ok(!r.skipped);
+  // CONTROL: a genuine 404 IS a definite absence and stays a clean skip.
+  const absent = await minimizeCouponGrant({ githubId: '9', env, fetchImpl: async () => ({ ok: false, status: 404 }) });
+  assert.equal(absent.skipped, true);
+  assert.match(absent.reason, /no coupon grant/);
 });
