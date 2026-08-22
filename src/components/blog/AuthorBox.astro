@@ -5,6 +5,7 @@ import { getCollection } from 'astro:content';
 import { authorDisplay, authorHref, formatDate } from '../../lib/authors';
 import { buildAvatarIndex } from '../../lib/avatars';
 import Avatar from '../Avatar.astro';
+import SubscribeButton from '../SubscribeButton.astro'; // SOW-186 C1: follow-the-author control (inert; upgrades for a signed-in member)
 
 interface Props {
   author: string;
@@ -32,7 +33,10 @@ const href = authorHref(author);
       </p>
     )}
   </div>
-  <a href={href} class="ab-link">View profile <svg class="ar" viewBox="0 0 24 24" width="15" height="15"><use href="#ico-arrow"/></svg></a>
+  <div class="ab-actions">
+    <SubscribeButton username={author} name={name} variant="ghost" />
+    <a href={href} class="ab-link">View profile <svg class="ar" viewBox="0 0 24 24" width="15" height="15"><use href="#ico-arrow"/></svg></a>
+  </div>
 </div>
 
 <style>
@@ -44,15 +48,16 @@ const href = authorHref(author);
   .ab-name:hover { color: var(--green-700); }
   .ab-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 2px; font-size: 13px; color: var(--fg-mute); }
   .ab-sep { opacity: .55; }
+  .ab-actions { flex: none; display: flex; align-items: center; gap: 14px; }
   .ab-link { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--green-700); white-space: nowrap; }
   .ab-link .ar { transition: transform .2s ease; }
   .ab-link:hover { color: var(--green-600); }
   .ab-link:hover .ar { transform: translateX(3px); }
   @media (max-width: 560px) {
     .author-box { flex-wrap: wrap; }
-    /* The link drops to its own row, indented to line up under the text column (46px avatar + 15px gap).
+    /* The actions drop to their own row, indented to line up under the text column (46px avatar + 15px gap).
        The width must SUBTRACT that indent: `width: 100%` with a left margin is 100% + 61px, which overflowed
        the card by 61px on every article, prompt and product page (caught by check:overflow, sow-172). */
-    .ab-link { width: calc(100% - 61px); margin-left: 61px; }
+    .ab-actions { width: calc(100% - 61px); margin-left: 61px; flex-wrap: wrap; }
   }
 </style>

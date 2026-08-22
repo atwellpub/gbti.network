@@ -29,21 +29,22 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
         </p>
         <div class="sm-actions mt24">
           <a href="/membership/" class="btn btn-primary">Become a member</a>
-          <a href="/extension/" class="btn btn-ghost">Already a member? Sign in</a>
+          <button type="button" class="btn btn-ghost" data-signin>Already a member? Sign in</button>
           <button type="button" class="btn btn-ghost" data-subscribe-close>Maybe later</button>
         </div>
       </div>
-      {/* State 2: a signed-in identity (or the signup hint) but the control never upgraded, meaning
-          the GBTI extension is missing here -> the get-the-extension nudge. */}
-      <div data-sub-state="extension" hidden>
-        <p class="eyebrow" style="color:var(--green-700)">Extension required</p>
-        <h3 class="h3 mt8">Follow from the GBTI extension</h3>
+      {/* State 2: a signed-in identity (SOW-030 signal or the signup hint) but the control never upgraded,
+          meaning there is no active WEBSITE session on this page -> sign in. SOW-186 C1: post-SOW-158 the follow
+          toggle upgrades for a signed-in WEBSITE member too, so this is a sign-in nudge, not extension-required.
+          The site sign-in is install-aware (SOW-019 SigninModal): it routes an extension user to the extension. */}
+      <div data-sub-state="signin" hidden>
+        <p class="eyebrow" style="color:var(--green-700)">Sign in to follow</p>
+        <h3 class="h3 mt8">Sign in to follow</h3>
         <p class="body mt12" style="color:var(--fg-soft)">
-          Follows work from the GBTI browser extension. Install it and sign in, and this button becomes
-          a working follow toggle.
+          Sign in to follow this member and get their latest posts, products, prompts, and shares in your feed.
         </p>
         <div class="sm-actions mt24">
-          <a href="/extension/" class="btn btn-primary">Get the extension</a>
+          <button type="button" class="btn btn-primary" data-signin>Sign in</button>
           <button type="button" class="btn btn-ghost" data-subscribe-close>Maybe later</button>
         </div>
       </div>
@@ -61,11 +62,23 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
 </style>
 
 <script>
-  // One handler set, shared across every SubscribeButton instance on the page. The dialog picks its
-  // state AT OPEN TIME (owner directive, 2026-07-21): a visitor with no identity gets the join/trial
-  // nudge; an identity (the SOW-030 signal or the signup hint) whose control never upgraded means the
-  // extension is missing here, so they get the get-the-extension nudge. When the extension is present
-  // and signed in, <gbti-subscribe> upgrades into the real toggle and this dialog never opens.
+  // SOW-186 C1: SubscribeButton is the inert follow control. It upgrades three ways:
+  //  1) EXTENSION member: the SOW-030 signal + relay follow into the extension (unchanged).
+  //  2) WEBSITE member (post-SOW-158): a cookie session upgrades <gbti-subscribe> into a live follow toggle on
+  //     the site itself (setClient + import the element), so the dialog never opens for them.
+  //  3) Everyone else: the dialog picks its state at open time - a visitor with no identity gets the join
+  //     nudge; an identity with no active website session gets the sign-in nudge (install-aware SigninModal).
+  import { onMemberSignal, currentIdentity, readMemberSignal } from '../lib/member-signal';
+
+  // Read a non-HttpOnly cookie (the gbti_csrf double-submit token); its presence is the cheap "there is a web
+  // session" signal the gated pages already use, with no network. (Same helper Comments.astro uses.)
+  function readCookie(name: string): string | null {
+    for (const part of document.cookie.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq >= 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim() || null;
+    }
+    return null;
+  }
   function hasIdentity(): boolean {
     if (document.documentElement.dataset.gbtiMember) return true;
     try { return !!localStorage.getItem('gbti_hello'); } catch { return false; }
@@ -75,14 +88,10 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
     const dlg = wrap.querySelector('[data-subscribe-modal]') as HTMLDialogElement | null;
     if (!btn || !dlg) return;
     btn.addEventListener('click', () => {
-      // Owner QA 2026-07-22: with the extension installed AND a signed-in member, never show the
-      // dialog; relay into the extension. (The upgraded shadow toggle normally covers this path; this is the
-      // fallback when it has not.)
-      // SOW-143: relay to the member's in-extension profile detail view so the follow lands on the RIGHT member.
-      // The username may be absent (the prompts directory renders <SubscribeButton> with none and fills it from
-      // JS), so fall back to the workspace Subscriptions tab (the pre-143 behavior) when it is missing/invalid.
-      // Shape note: `member=` (not `read=`) so an extension build that predates this route finds no deep read and
-      // lands on the activity feed, rather than erroring in the content reader.
+      // With the extension installed AND a signed-in member, never show the dialog; relay into the extension.
+      // (The upgraded shadow toggle normally covers this path; this is the fallback when it has not.) SOW-143:
+      // relay to the member's in-extension profile detail view so the follow lands on the RIGHT member; the
+      // username may be absent, so fall back to the workspace Subscriptions tab.
       const de = document.documentElement.dataset;
       if (de.gbtiExtension && de.gbtiMember) {
         const u = ((wrap as HTMLElement).dataset.gbtiUsername || '').trim().toLowerCase();
@@ -93,14 +102,40 @@ const { name = 'this member', username, variant = 'primary' } = Astro.props;
         document.dispatchEvent(new CustomEvent('gbti:open', { detail }));
         return;
       }
-      const extensionNeeded = hasIdentity();
+      const signinNeeded = hasIdentity();
       dlg.querySelectorAll('[data-sub-state]').forEach((s) => {
-        (s as HTMLElement).hidden = s.getAttribute('data-sub-state') !== (extensionNeeded ? 'extension' : 'join');
+        (s as HTMLElement).hidden = s.getAttribute('data-sub-state') !== (signinNeeded ? 'signin' : 'join');
       });
       dlg.showModal();
     });
     dlg.querySelectorAll('[data-subscribe-close]').forEach((c) => c.addEventListener('click', () => dlg.close()));
+    // A [data-signin] control inside the dialog: close this dialog; the global SigninModal (BaseLayout) opens
+    // the install-aware sign-in on the same click via its delegated [data-signin] listener.
+    dlg.querySelectorAll('[data-signin]').forEach((c) => c.addEventListener('click', () => dlg.close()));
     // Click on the backdrop (outside the card) closes the dialog.
     dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
   });
+
+  // Upgrade <gbti-subscribe> for a signed-in WEBSITE member (a real cookie session), mirroring Comments.astro.
+  // REUSES the header's cached cookie hydration (no extra /membership/status call). An anonymous visitor
+  // resolves to null, nothing is imported, and the inert dialog fallback stays, so their page weight is unchanged.
+  let upgraded = false;
+  async function upgradeFollows(signal: any) {
+    if (!signal || !signal.login) return; // signed out / not yet resolved -> leave the inert fallback
+    // Hide the follow control on the member's OWN content (no "follow yourself"). Site-scoped guard: the
+    // element itself is host-agnostic, but here the signed-in login is known.
+    const mine = String(signal.login).toLowerCase();
+    document.querySelectorAll('.subscribe-wrap').forEach((wrap) => {
+      if (((wrap as HTMLElement).dataset.gbtiUsername || '').trim().toLowerCase() === mine) (wrap as HTMLElement).style.display = 'none';
+    });
+    if (upgraded || !readCookie('gbti_csrf')) return; // an extension-only signal has no web session to authenticate
+    upgraded = true;
+    const signupBase = document.documentElement.dataset.signupBase || '';
+    const { createWorkbenchClient } = await import('../lib/workbench-client');
+    const { setClient } = await import('../../client-ui/src/base.mjs');
+    setClient(createWorkbenchClient({ signupBase, login: String(signal.login), githubId: signal.githubId != null ? String(signal.githubId) : null }));
+    await import('../../client-ui/src/elements/gbti-subscribe.mjs');
+  }
+  upgradeFollows(currentIdentity(readMemberSignal())); // extension/cookie signal, if present, before hydration
+  onMemberSignal(upgradeFollows);                      // the winning cookie member arrives here once hydrated
 </script>
