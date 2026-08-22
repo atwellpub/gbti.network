@@ -28,7 +28,11 @@ export function deriveAuditStatus(steps = []) {
   const enacted = steps.filter((s) => s.outcome !== 'skipped');
   if (enacted.length === 0) return 'noop';
   const errored = enacted.filter((s) => s.outcome === 'error');
-  if (errored.length === 0) return 'complete';
+  // A step that could not READ part of the keyspace it was scrubbing has not proven those records are gone. It is
+  // not an error (it did the work it could see) but it must never total up to `complete`, or the compliance
+  // artifact asserts an erasure the run cannot evidence.
+  const incomplete = enacted.filter((s) => s.outcome === 'incomplete');
+  if (errored.length === 0) return incomplete.length ? 'partial' : 'complete';
   if (errored.length === enacted.length) return 'failed';
   return 'partial';
 }

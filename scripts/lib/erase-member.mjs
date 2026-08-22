@@ -134,7 +134,7 @@ export async function eraseReverseFollows({ githubId, env = process.env, fetchIm
       outboundScrubbed++;
     }
   }
-  return { scrubbed: outboundScrubbed + (inboundDeleted ? 1 : 0), outboundScrubbed, inboundDeleted };
+  return { scrubbed: outboundScrubbed + (inboundDeleted ? 1 : 0), outboundScrubbed, inboundDeleted, ...(incompleteScan(listed, 'followers:') || {}) };
 }
 
 /** Hard-delete a member's hosted draft store (SOW-157: staged authoring state, may contain unpublished text). */
@@ -151,12 +151,31 @@ export async function eraseLookupCache({ githubId, env = process.env, fetchImpl 
   return deleteKvKey({ key: LOOKUP_KEY(String(githubId)), env, fetchImpl });
 }
 
-/** List KV entries (key + parsed JSON value) under a prefix via the REST API. Missing creds = a reported no-op. */
+/**
+ * List KV entries under a prefix via the REST API. Missing creds = a reported no-op.
+ *
+ * Returns `{ available, keys, entries, dropped }`. The KEY LIST is fail-closed: a failed page THROWS, because a
+ * short list is indistinguishable from a short keyspace. The per-key VALUE READ must not throw, or one unreadable
+ * record would fail an entire scan, so it is REPORTED instead: `keys` is every key that was listed, `entries` is
+ * only those whose value read succeeded AND parsed as a JSON object, and `dropped` counts the difference.
+ * `keys.length === entries.length + dropped` always holds.
+ *
+ * `dropped` SPLITS BY CAUSE into `unreadable` (the read failed, so we could not tell what the key holds) and
+ * `unparsed` (the read succeeded and the value was not a JSON object). They are different facts and a caller
+ * should treat them differently: `unreadable` is a blind spot an erasure MUST refuse on, while `unparsed` is a
+ * schema mismatch that is often benign. A guard that fails closed on the combined count refuses on benign schema
+ * drift, and a guard that cries wolf is a guard someone switches off.
+ *
+ * A CALLER THAT ERASES MUST CHECK `unreadable`. A key dropped that way is a record that was NOT scrubbed, and
+ * reporting the scrub count on its own makes "we could not read whether this record names them" look exactly
+ * like "it does not". A caller that only needs to know which keys exist should read `keys` and never fetch a
+ * value at all.
+ */
 export async function listKvByPrefix({ prefix, env = process.env, fetchImpl = globalThis.fetch } = {}) {
   const accountId = env.CF_ACCOUNT_ID;
   const namespaceId = env.CF_KV_NAMESPACE_ID;
   const apiToken = env.CF_API_TOKEN;
-  if (!accountId || !namespaceId || !apiToken) return { available: false, reason: 'CF creds not set', entries: [] };
+  if (!accountId || !namespaceId || !apiToken) return { available: false, reason: 'CF creds not set', entries: [], keys: [], dropped: 0, unreadable: 0, unparsed: 0 };
   const apiBase = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`;
   const headers = { Authorization: `Bearer ${apiToken}` };
   const keys = [];
@@ -171,14 +190,34 @@ export async function listKvByPrefix({ prefix, env = process.env, fetchImpl = gl
     if (!cursor) break;
   }
   const entries = [];
+  let unreadable = 0;   // the read itself failed: we could not tell what is in this key
+  let unparsed = 0;     // the read succeeded and the value was not a JSON object: a schema mismatch, not a blind spot
   for (const key of keys) {
     const res = await fetchImpl(`${apiBase}/values/${encodeURIComponent(key)}`, { headers });
-    if (!res || !res.ok) continue;
+    if (!res || !res.ok) { unreadable++; continue; }
     let value = null;
     try { value = await res.json(); } catch { value = null; }
     if (value && typeof value === 'object') entries.push({ key, value });
+    else unparsed++;
   }
-  return { available: true, entries };
+  return { available: true, entries, keys, dropped: unreadable + unparsed, unreadable, unparsed };
+}
+
+/**
+ * The shared refusal for a scan-and-scrub erasure step. `listKvByPrefix` reports the keys it could not read, and
+ * each of those is a record that MAY name this member and was NOT scrubbed. A step's own count says only what it
+ * DID change, so without this the audit record cannot tell "there was nothing to scrub" from "we could not look".
+ * Only `unreadable` triggers it: an `unparsed` value was read successfully and simply is not the shape this step
+ * scrubs, which is schema drift rather than a blind spot.
+ */
+function incompleteScan(listed, prefix) {
+  if (!listed?.unreadable) return null;
+  const total = listed.keys?.length ?? 0;
+  return {
+    incomplete: true,
+    unreadable: listed.unreadable,
+    reason: `${listed.unreadable} of ${total} ${prefix}* record(s) could not be read and were NOT scrubbed`,
+  };
 }
 
 /** PUT a KV value via the REST API. Missing creds = a reported no-op. */
@@ -212,7 +251,7 @@ export async function eraseShareVotes({ githubId, env = process.env, fetchImpl =
       scrubbed++;
     }
   }
-  return { scrubbed };
+  return { scrubbed, ...(incompleteScan(listed, 'upvotes:share:') || {}) };
 }
 
 /**
@@ -232,7 +271,7 @@ export async function eraseNewsOpens({ githubId, env = process.env, fetchImpl = 
       scrubbed++;
     }
   }
-  return { scrubbed };
+  return { scrubbed, ...(incompleteScan(listed, 'news-opens:') || {}) };
 }
 
 /**
@@ -252,7 +291,7 @@ export async function eraseContentOpens({ githubId, env = process.env, fetchImpl
       scrubbed++;
     }
   }
-  return { scrubbed };
+  return { scrubbed, ...(incompleteScan(listed, 'content-opens:') || {}) };
 }
 
 /** GET one raw KV value via the REST API (used for the shared coupon counter). Missing creds = null. */
@@ -376,14 +415,14 @@ export async function minimizeRedeemedInvites({ githubId, env = process.env, fet
   if (!listed.available) return { skipped: true, reason: listed.reason };
   const id = String(githubId);
   let minimized = 0;
-  // listKvByPrefix returns { key, value } with the value ALREADY PARSED, and it drops anything that did not
-  // parse as an object, so a corrupt record is skipped upstream rather than needing a second read here.
+  // listKvByPrefix returns { key, value } with the value ALREADY PARSED. A record it could not READ is one that
+  // may name this member and was not minimized, so it is carried out as `incomplete` rather than skipped quietly.
   for (const { key, value } of listed.entries ?? []) {
     if (String(value?.redeemedBy ?? '') !== id) continue;
     await putKvValue({ key, value: JSON.stringify({ ...value, redeemedBy: null, redeemedByLogin: null }), env, fetchImpl });
     minimized++;
   }
-  return { minimized };
+  return { minimized, ...(incompleteScan(listed, INVITE_KEY_PREFIX) || {}) };
 }
 
 /** Hard-delete the member's OWN frozen conversion snapshot (SOW-059: their attribution + invite/collaboration record). */
@@ -409,7 +448,7 @@ export async function scrubConversionSnapshots({ githubId, env = process.env, fe
     const cleaned = scrubCounterpart(value, String(githubId));
     if (cleaned) { await putKvValue({ key, value: JSON.stringify(cleaned), env, fetchImpl }); scrubbed++; }
   }
-  return { scrubbed };
+  return { scrubbed, ...(incompleteScan(listed, 'conv:') || {}) };
 }
 
 /**
@@ -648,8 +687,21 @@ export function planErasure({ githubId, username } = {}) {
 
 /** Reduce a step result to its identity-free audit outcome (no personal fields). outcome in
  *  deleted|removed|drafted|skipped|error. `detail` is a generic string (a reason or a count), never PII. */
+/** Flatten the numbers a step reports into one audit-legible detail string. */
+function stepCounts(res) {
+  const bits = [];
+  for (const k of ['scrubbed', 'minimized', 'matched', 'scanned', 'unreadable']) {
+    if (typeof res?.[k] === 'number') bits.push(`${k}:${res[k]}`);
+  }
+  return bits.join(' ');
+}
+
 function summarizeStep(step, res) {
   if (res?.error) return { step, outcome: 'error', detail: String(res.error).slice(0, 120) };
+  // Ranked ABOVE every success branch on purpose: a step that could not see the whole keyspace, or could not read
+  // some of it, has not proven the records are gone. Recording that as `ok` would make the audit artifact claim
+  // more than the run did, which is the one thing an erasure record must never do.
+  if (res?.incomplete) return { step, outcome: 'incomplete', detail: [res.reason, stepCounts(res)].filter(Boolean).join(' ').slice(0, 200) };
   if (res?.skipped) return { step, outcome: 'skipped', detail: res.reason };
   if (res?.deleted === false) return { step, outcome: 'skipped', detail: res.reason };
   if (res?.deleted === true) return { step, outcome: 'deleted' };
@@ -657,6 +709,9 @@ function summarizeStep(step, res) {
   if (typeof res?.scrubbed === 'number') return { step, outcome: res.scrubbed ? 'deleted' : 'skipped', detail: res.scrubbed ? `votes:${res.scrubbed}` : 'none' };
   if (typeof res?.flipped === 'number') return { step, outcome: 'drafted', detail: `pr#${res.pr} flipped:${res.flipped} index:${res.indexRemoved ? 'removed' : 'kept'} grant:${res.grantRemoved ? 'removed' : 'kept'}` };
   if (Array.isArray(res?.removed)) return { step, outcome: res.removed.length ? 'removed' : 'skipped', detail: res.removed.length ? res.removed.join('+') : (res.reason || 'no roles held') };
+  if (typeof res?.minimized === 'number') return { step, outcome: res.minimized ? 'deleted' : 'skipped', detail: stepCounts(res) };
+  // eraseMailRecords reports matched/scanned rather than a scrub count; without this its normal run is a bare `ok`.
+  if (typeof res?.matched === 'number') return { step, outcome: res.matched ? 'deleted' : 'skipped', detail: stepCounts(res) };
   return { step, outcome: 'ok' };
 }
 
