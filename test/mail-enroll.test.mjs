@@ -182,7 +182,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, resolveIdentities, renderReport } from '../scripts/mail-enroll.mjs';
+import { parseArgs, resolveIdentities, renderReport, enactPlan } from '../scripts/mail-enroll.mjs';
 import { planMailEnrollment as planM, planFollowBackfill as planF, enrollmentCounts as counts_ } from '../scripts/lib/mail-enroll.mjs';
 
 const execFileP = promisify(execFile);
@@ -319,4 +319,63 @@ test('the two unreachable populations are reported separately, because they are 
   });
   assert.match(text, /OVERRIDE-ONLY, no Stripe Customer \(1\)/);
   assert.match(text, /STRIPE CUSTOMER WITH AN EMPTY EMAIL \(1\)/, 'the fixable group is called out as fixable');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// THE ENACT PATH, EXECUTED. Found by @QAmaster: every mutation above is planner-side, so the write guard
+// had no coverage and deleting half of it changed no result. These run the writer with an injectable put.
+// ---------------------------------------------------------------------------------------------------
+
+const capture = () => { const w = []; return { w, put: async (key, value) => { w.push({ key, value }); } }; };
+
+test('enactPlan writes a subscriber record per enrolment and a follows record per member', async () => {
+  const mailPlan = planM({ members: POPULATION, identities: identities(), suppressed: new Set(['h7']), enrolled: new Set(['h8']) });
+  const followPlan = planF({ members: POPULATION, now: NOW });
+  const { w, put } = capture();
+
+  const r = await enactPlan({ mailPlan, followPlan, apply: true, put });
+  assert.equal(r.skipped, false);
+  assert.equal(r.subscribers, 4, 'the four enrollable members');
+  assert.equal(r.follows, 7, 'everyone except the banned member');
+  assert.equal(w.length, 11);
+
+  const subs = w.filter((e) => e.key.startsWith('mail:subscriber:'));
+  assert.equal(subs.length, 4);
+  // Every written record is a MEMBER record carrying githubId, which erasure scans for, and NO address.
+  for (const e of subs) {
+    assert.equal(e.value.source, 'member');
+    assert.ok(e.value.githubId, 'githubId present, or erasure cannot find this record');
+    assert.equal(e.value.emailEnc, null, 'a member record never stores the address');
+  }
+  // And the suppressed / already-enrolled hashes were not among them.
+  const written = new Set(subs.map((e) => e.key));
+  assert.ok(!written.has('mail:subscriber:h7'), 'the unsubscribed member was not written');
+  assert.ok(!written.has('mail:subscriber:h8'), 'the already-enrolled member was not rewritten');
+
+  const foll = w.filter((e) => e.key.startsWith('follows:'));
+  assert.ok(!foll.some((e) => e.key === 'follows:5'), 'the banned member got no follows record');
+});
+
+test('enactPlan writes NOTHING on a dry run', async () => {
+  const mailPlan = planM({ members: POPULATION, identities: identities() });
+  const followPlan = planF({ members: POPULATION, now: NOW });
+  const { w, put } = capture();
+  const r = await enactPlan({ mailPlan, followPlan, apply: false, put });
+  assert.equal(r.skipped, true);
+  assert.equal(w.length, 0, 'not one put');
+});
+
+test('enactPlan writes NOTHING when the plan is blocked, even with apply set', async () => {
+  // The guard QAmaster found surviving. It is unreachable in production today, because --apply without a key
+  // exits at the first gate, but `blocked` is a general cannot-write flag: the day anything else sets it,
+  // this is the only thing between a blocked plan and a write at population scale.
+  const noKey = new Map(POPULATION.map((m) => [m.githubId, { hash: null, reason: IDENTITY_REASON.NO_KEY }]));
+  const mailPlan = planM({ members: POPULATION, identities: noKey });
+  assert.equal(mailPlan.blocked, true);
+  const followPlan = planF({ members: POPULATION, now: NOW });
+  const { w, put } = capture();
+
+  const r = await enactPlan({ mailPlan, followPlan, apply: true, put });
+  assert.equal(r.skipped, true, 'blocked beats apply');
+  assert.equal(w.length, 0, 'and in particular the follow writes did not proceed either');
 });

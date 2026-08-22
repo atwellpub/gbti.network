@@ -184,6 +184,40 @@ export function renderReport({ mailPlan, followPlan, counts, apply, haveKey, uns
   return out.join('\n');
 }
 
+/**
+ * Write the plan. Extracted from main and taking an injectable `put` so the enact path can be EXECUTED under
+ * test with no network, which the mutation audit found it never was: every mutation was planner-side, so
+ * deleting the `blocked` half of the write guard changed no test result.
+ *
+ * `blocked` is checked here and not only at the gates, and the distinction matters more than it looks.
+ * Today it can only be set by a missing MAIL_SUPPRESS_KEY, and `--apply` without that key already exits at
+ * the first gate, so this guard is currently unreachable in production. It is a GENERAL cannot-write flag,
+ * though: the day anything else sets it, this is the only thing standing between a blocked plan and a write,
+ * and an unreachable guard with no test is one that vanishes in a refactor without a single test going red.
+ */
+export async function enactPlan({ mailPlan, followPlan, apply = false, put } = {}) {
+  if (!apply || mailPlan?.blocked) return { skipped: true, subscribers: 0, follows: 0 };
+
+  let subscribers = 0;
+  for (const s of mailPlan.enroll) {
+    // buildSubscriber REQUIRES githubId on a member record: erasure finds member records by scanning
+    // mail:subscriber:* and matching it, so one without it would send mail and be invisible to deletion.
+    const rec = buildSubscriber({ hash: s.hash, source: 'member', githubId: s.githubId });
+    await put(subscriberKey(s.hash), rec);
+    subscribers += 1;
+    // THE mail:member-hash:<github_id> POINTER IS DELIBERATELY NOT WRITTEN. sow-186 DROPPED that bridge once
+    // it was established that a member record already carries githubId, so the fan-out and erasure both scan
+    // for it instead of maintaining an index. Nothing goes here; the requirement above is what replaced it.
+  }
+
+  let follows = 0;
+  for (const w of followPlan.writes) {
+    await put(`${FOLLOWS_PREFIX}${w.githubId}`, w.next);
+    follows += 1;
+  }
+  return { skipped: false, subscribers, follows };
+}
+
 async function main() {
   const { apply, json } = parseArgs(process.argv.slice(2));
   const env = process.env;
@@ -241,21 +275,9 @@ async function main() {
     console.log(renderReport({ mailPlan, followPlan, counts, apply, haveKey, unsubProven, population: populationSummary(members) }));
   }
 
-  if (!apply || mailPlan.blocked) return;
-
-  for (const s of mailPlan.enroll) {
-    const rec = buildSubscriber({ hash: s.hash, source: 'member', githubId: s.githubId });
-    await putKvValue({ key: subscriberKey(s.hash), value: rec, env });
-    // THE mail:member-hash:<github_id> POINTER IS DELIBERATELY NOT WRITTEN HERE YET. It belongs to sow-186
-    // and its owner is shipping a single key builder plus a writer so there is exactly one spelling of that
-    // key across writer, reader and eraser. Spelling it here would be the second spelling, which is the
-    // failure that produced two nearly identical follow-module names in this codebase already. This is the
-    // call site to add it to when that writer lands.
-  }
-  for (const w of followPlan.writes) {
-    await putKvValue({ key: `${FOLLOWS_PREFIX}${w.githubId}`, value: w.next, env });
-  }
-  console.log(`mail-enroll: wrote ${mailPlan.enroll.length} subscriber records and ${followPlan.writes.length} follow records.`);
+  const enacted = await enactPlan({ mailPlan, followPlan, apply, put: (key, value) => putKvValue({ key, value, env }) });
+  if (enacted.skipped) return;
+  console.log(`mail-enroll: wrote ${enacted.subscribers} subscriber records and ${enacted.follows} follow records.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
