@@ -382,3 +382,52 @@ test('sow-194: fail CLOSED if the draft index cannot be enumerated (the builder 
   assert.ok(errors.some((e) => /could not enumerate repo drafts.*failing closed/.test(e)), errors.join('; '));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// sow-166 / SecurityMaster 2026-08-22: no subscriber hash may enter the tracked config. MAIL_SEND_ALLOWLIST
+// entries are mailHash values, person-keyed identifiers of real addresses, and wrangler.toml is committed to a
+// public repo. These pin the guard AND its precision, because a guard that reds on the mere word would be
+// bypassed rather than obeyed.
+function wranglerRoot(toml) {
+  const root = tmpRoot();
+  fs.mkdirSync(path.join(root, 'workers/signup'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'workers/signup/wrangler.toml'), toml);
+  fs.writeFileSync(path.join(root, 'house/_enc/ok.enc'), validEnvelope);
+  return root;
+}
+const HASH64 = 'a'.repeat(64);
+
+test('guard: FAILS when wrangler.toml assigns MAIL_SEND_ALLOWLIST', () => {
+  const root = wranglerRoot(`name = "signup"\nMAIL_SEND_ALLOWLIST = "${HASH64}"\n`);
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => e.includes('MAIL_SEND_ALLOWLIST')), 'the assignment must be caught');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('guard: FAILS on a bare 64-hex value even under a different var name', () => {
+  const root = wranglerRoot(`name = "signup"\nSOME_OTHER_VAR = "${HASH64}"\n`);
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.ok(errors.some((e) => e.includes('64-character hex')), 'the mailHash SHAPE must be caught too');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('guard: does NOT fire on the name in a COMMENT (precision, not word-matching)', () => {
+  const root = wranglerRoot('name = "signup"\n# MAIL_SEND_ALLOWLIST is set via `wrangler secret put`, never here.\n');
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, [], 'documenting the correct practice must not red the build');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('guard: does NOT fire on the 32-hex KV namespace and account ids already in the file', () => {
+  const root = wranglerRoot(`name = "signup"\naccount_id = "${'b'.repeat(32)}"\nid = "${'c'.repeat(32)}"\n`);
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, [], '32-hex ids are legitimate and must not be confused with a mailHash');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('guard: a repo with no wrangler.toml is simply not checked', () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'house/_enc/ok.enc'), validEnvelope);
+  const { errors } = checkBuildSecrets({ root, env: {} });
+  assert.deepEqual(errors, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});

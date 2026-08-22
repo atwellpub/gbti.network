@@ -315,6 +315,53 @@ export function checkBuildSecrets({ root, distDir = path.join(root, 'dist'), env
     }
   }
 
+  // sow-166 / SecurityMaster 2026-08-22: NO SUBSCRIBER HASH MAY ENTER THE TRACKED CONFIG.
+  //
+  // MAIL_SEND_ALLOWLIST's entries are `mailHash` values, which are person-keyed identifiers of real people's
+  // email addresses. wrangler.toml is COMMITTED to a PUBLIC, forkable repository, so setting the allowlist
+  // there writes a pseudonymous record of named individuals into immutable public history. That is the class
+  // of record the storage boundary puts in KV and never in git, "hiding is not deleting" applies to it
+  // permanently, and it cannot satisfy a right-to-erasure request.
+  //
+  // The sharper reason is specific to THIS hash. A mailHash is only pseudonymous while MAIL_SUPPRESS_KEY is
+  // secret, because an email address is guessable and a keyed digest of a guessable value is confirmable by
+  // whoever holds the key. That key NEVER rotates by design (rotating it orphans every suppression marker),
+  // so a committed hash is a permanent record whose sole protection can never be invalidated. If the key ever
+  // leaks, every hash ever committed becomes confirmable retroactively, with no remedy.
+  //
+  // THIS IS A GUARD RATHER THAN A NOTE IN THE RUNBOOK ON PURPOSE. The original runbook instruction said to set
+  // it as a plain var in wrangler.toml, on the reasoning that the value is not secret. That confuses two
+  // senses of secret: the value needs no protecting, but it must still never enter git. A written correction
+  // would be one more control that exists only in prose, and the person most likely to make this mistake is
+  // whoever is mid-launch computing hashes with the key already in hand, thinking about plumbing.
+  //
+  // Correct home: `wrangler secret put MAIL_SEND_ALLOWLIST`. Same tunability, no commit.
+  const wranglerPath = path.join(root, 'workers/signup/wrangler.toml');
+  if (fs.existsSync(wranglerPath)) {
+    const toml = fs.readFileSync(wranglerPath, 'utf8');
+    // Only a real assignment counts. The name appears in comments and docs legitimately, and a guard that
+    // reds on the word rather than the setting would be untrustworthy and would train people to bypass it.
+    const assigned = /^\s*MAIL_SEND_ALLOWLIST\s*=/m.test(toml);
+    if (assigned) {
+      errors.push(
+        'workers/signup/wrangler.toml assigns MAIL_SEND_ALLOWLIST. Its entries are mailHash values, which are '
+        + 'person-keyed identifiers of real email addresses, and this file is committed to a public repo. '
+        + 'Set it with `npx wrangler secret put MAIL_SEND_ALLOWLIST --env production` instead.',
+      );
+    }
+    // Backstop for the same mistake under a different name: a bare SHA-256 hex token is the mailHash shape.
+    // KV namespace ids and account ids in this file are 32 hex, so 64 is unambiguous. Bounded on both sides
+    // so a longer hex run (a hash of something else) does not silently match a 64-char window inside it.
+    const hex64 = toml.match(/(?<![0-9a-fA-F])[0-9a-f]{64}(?![0-9a-fA-F])/);
+    if (hex64) {
+      errors.push(
+        'workers/signup/wrangler.toml contains a bare 64-character hex value, which is the shape of a '
+        + 'subscriber mailHash. Person-keyed identifiers must not be committed. If this is not a mailHash, '
+        + 'move it to a secret anyway or narrow this guard deliberately.',
+      );
+    }
+  }
+
   return { errors, notes };
 }
 
