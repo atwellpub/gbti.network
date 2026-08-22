@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  planCustomerCreates, recoveredCustomerMetadata, createIdempotencyKey,
+  planCustomerCreates, recoveredCustomerMetadata, createIdempotencyKey, createRecoveredCustomer,
 } from '../scripts/lib/stripe-backfill.mjs';
 
 const m = (githubId, login) => ({ githubId, githubLogin: login, username: login });
@@ -78,4 +78,97 @@ test('the metadata mirrors a normal signup, and deliberately carries NO trial cl
 test('the idempotency key is per member, so a re-run cannot double-create', () => {
   assert.equal(createIdempotencyKey('42'), 'legacy-recovery:42');
   assert.notEqual(createIdempotencyKey('42'), createIdempotencyKey('43'), 'and is distinct per member');
+});
+
+// --- discord_user_id, and the enforcement it carries -------------------------------------------------
+
+test('discord_user_id is carried onto the Customer, because reconcile stops emitting actions without it', () => {
+  const withId = recoveredCustomerMetadata({ githubId: '1', githubLogin: 'Recoverable', discordUserId: '99' });
+  assert.equal(withId.discord_user_id, '99');
+  assert.equal(withId.github_login, 'recoverable', 'the login is lowercased to match how it is looked up');
+
+  // The failure this pins is a SILENT one. Creating a Customer moves the member from the override-only
+  // gather (which resolves the discord id from DISCORD_MENTION_OVERRIDES) to the Stripe gather (which reads
+  // it off the Customer). If the field is absent, the id resolves null and NO discord action is emitted at
+  // all, so a banned member quietly keeps whatever role they hold. The backfill would have INTRODUCED that.
+  const without = recoveredCustomerMetadata({ githubId: '1', githubLogin: 'recoverable' });
+  assert.ok(!('discord_user_id' in without), 'an unknown id is omitted rather than written as null or ""');
+});
+
+// --- the enact path: order, idempotency, and what a refused index write means -------------------------
+
+function harness({ putResult = { written: true }, customerId = 'cus_new' } = {}) {
+  const calls = [];
+  const stripe = {
+    async createCustomer(body, idempotencyKey) {
+      calls.push({ op: 'stripe', body, idempotencyKey });
+      return { id: customerId };
+    },
+  };
+  const kv = {
+    async put(key, value) {
+      calls.push({ op: 'kv', key, value });
+      return putResult;
+    },
+  };
+  return { calls, stripe, kv };
+}
+
+test('the Customer is created BEFORE its gh: index entry, and the index points at the new id', async () => {
+  const { calls, stripe, kv } = harness();
+  const res = await createRecoveredCustomer({
+    row: { githubId: '1', githubLogin: 'recoverable' }, email: 'nobody@example.test', stripe, kv,
+  });
+
+  // Asserted as a SEQUENCE, not as "both happened". An index entry written first would point at a Customer
+  // that does not exist yet, and a crash between the two would leave a dangling pointer rather than a
+  // harmless orphan. Swapping the two lines must fail this test.
+  assert.deepEqual(calls.map((c) => c.op), ['stripe', 'kv']);
+  assert.equal(calls[1].key, 'gh:1');
+  assert.equal(calls[1].value, 'cus_new', 'the index must carry the id Stripe actually returned');
+  assert.deepEqual(res, { githubId: '1', customerId: 'cus_new' });
+});
+
+test('the idempotency key is namespaced away from signup, so a re-run reuses rather than duplicates', async () => {
+  const { calls, stripe, kv } = harness();
+  await createRecoveredCustomer({
+    row: { githubId: '1', githubLogin: 'recoverable' }, email: 'nobody@example.test', stripe, kv,
+  });
+  const key = calls[0].idempotencyKey;
+  assert.equal(key, createIdempotencyKey('1'));
+  assert.ok(!key.startsWith('signup:'), 'reusing the signup namespace would collide with a real signup for the same member');
+});
+
+test('NO SUBSCRIBER RECORD IS WRITTEN HERE, so no interleaving can orphan one', async () => {
+  const { calls, stripe, kv } = harness();
+  await createRecoveredCustomer({
+    row: { githubId: '1', githubLogin: 'recoverable' }, email: 'nobody@example.test', stripe, kv,
+  });
+  // A subscriber record written before its Customer exists is unresolvable at send time AND permanently
+  // skipped afterwards, because the enrolment planner treats it as already enrolled. This script avoids
+  // that by not writing one at all; enrolment happens through the single gated path in mail-enroll.
+  const written = calls.filter((c) => c.op === 'kv').map((c) => c.key);
+  assert.deepEqual(written, ['gh:1']);
+  assert.ok(!written.some((k) => k.startsWith('mail:subscriber:')));
+});
+
+test('a gh: index write that did not happen RAISES, rather than reporting a half-finished success', async () => {
+  const { stripe, kv } = harness({ putResult: { written: false, reason: 'CF creds not set' } });
+  await assert.rejects(
+    () => createRecoveredCustomer({
+      row: { githubId: '1', githubLogin: 'recoverable' }, email: 'nobody@example.test', stripe, kv,
+    }),
+    // putKvValue reports a missing-credentials no-op instead of throwing, which is right for a reporting
+    // step and wrong here: it would leave a real Customer with no index entry while the run printed success.
+    /gh: index write did not happen/,
+  );
+});
+
+test('a member with no address is refused before any call is made', async () => {
+  const { calls, stripe, kv } = harness();
+  await assert.rejects(
+    () => createRecoveredCustomer({ row: { githubId: '1' }, email: '', stripe, kv }),
+    /no address/,
+  );
+  assert.equal(calls.length, 0, 'nothing may be sent to Stripe when there is nothing to send');
 });

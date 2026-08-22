@@ -236,15 +236,41 @@ test('the report NAMES unreachable members and never just counts them', () => {
   assert.ok(!text.includes('@example.test'), 'no address reaches the report');
 });
 
-test('an EMPTY unreachable list is reported as suspect, not as clean', () => {
-  // email:null exists by construction, so nobody unreachable usually means the override-only gather did not
-  // run. A report that called that "clean" would launder a broken check into a green result.
+// The empty-unreachable case has TWO causes that look identical on the page: nobody is unreachable, or
+// nobody was examined. The report is not allowed to guess between them, and the distinguishing evidence is
+// the number of override-only members the gather actually returned. Each of the three branches is pinned,
+// because the earlier version called EVERY zero suspect, which was true only while the recovered members
+// had no Customers and would have gone false the moment the backfill succeeded. A report that keeps crying
+// suspect after the thing is fixed trains its reader to skip the one line here that ever matters.
+function zeroCaseReport(population) {
   const mailPlan = planM({ members: [member('1', 'paid')], identities: identities() });
   const followPlan = planF({ members: [member('1', 'paid')], now: NOW });
-  const text = renderReport({
+  return renderReport({
     mailPlan, followPlan, counts: counts_(mailPlan, followPlan), apply: false, haveKey: true, unsubProven: true,
+    population,
   });
+}
+
+test('an empty unreachable list is SUSPECT when the override-only gather returned nobody', () => {
+  const text = zeroCaseReport({ total: 1, byStatus: {}, overrideOnlyGathered: 0 });
   assert.match(text, /TREAT THIS AS SUSPECT/);
+  assert.ok(!/REAL clean result/.test(text));
+});
+
+test('an empty unreachable list is a REAL clean result when the gather returned members', () => {
+  // This is the state the recovery backfill produces on success. Reporting it as suspect would be wrong.
+  const text = zeroCaseReport({ total: 22, byStatus: {}, overrideOnlyGathered: 20 });
+  assert.match(text, /REAL clean result/);
+  assert.match(text, /returned 20 member\(s\)/, 'the count is cited, not asserted in prose');
+  assert.ok(!/TREAT THIS AS SUSPECT/.test(text));
+});
+
+test('an empty unreachable list is UNVERIFIED when the run did not measure the gather at all', () => {
+  // The third state is the honest one: no measurement was taken, so the report may not claim either.
+  const text = zeroCaseReport(null);
+  assert.match(text, /UNVERIFIED/);
+  assert.ok(!/REAL clean result/.test(text));
+  assert.ok(!/TREAT THIS AS SUSPECT/.test(text));
 });
 
 test('--apply REFUSES without MAIL_SUPPRESS_KEY, proven by running it', async () => {
@@ -290,6 +316,18 @@ test('the report opens with the population it measured everything against', asyn
   assert.equal(pop.total, 8);
   assert.equal(pop.byStatus.banned, 1);
   assert.equal(pop.byStatus.paid, 4);
+
+  // THE GATHER COUNT MUST BE COUNTED, NOT CONSTANT. It is the sole evidence the report uses to tell an
+  // empty unreachable list apart from a gather that never ran, so a version that always answered zero
+  // would keep the report reading SUSPECT forever while claiming a measurement it never took. That failure
+  // points the safe way and is therefore the kind nobody notices. Two members here are override-only.
+  const tagged = [
+    { ...member('20', 'paid'), _gather: 'override-only' },
+    { ...member('21', 'paid'), _gather: 'override-only' },
+    { ...member('22', 'paid'), _gather: 'stripe' },
+  ];
+  assert.equal(populationSummary(tagged).overrideOnlyGathered, 2);
+  assert.equal(populationSummary([]).overrideOnlyGathered, 0, 'and an empty population really is zero');
 
   const mailPlan = planM({ members: POPULATION, identities: identities() });
   const followPlan = planF({ members: POPULATION, now: NOW });

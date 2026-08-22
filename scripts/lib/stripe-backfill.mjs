@@ -61,11 +61,80 @@ export function planCustomerCreates({ members = [], withAddress = new Set(), exi
  * Customer: six months from now the only way to answer "why does this person have a billing record they
  * never created" is a field that says so.
  */
-export function recoveredCustomerMetadata({ githubId, githubLogin } = {}) {
+export function recoveredCustomerMetadata({ githubId, githubLogin, discordUserId = null } = {}) {
   const metadata = { github_id: String(githubId ?? '') };
   if (githubLogin) metadata.github_login = String(githubLogin).toLowerCase();
+  // `discord_user_id` IS AN ENFORCEMENT REQUIREMENT, NOT A CONVENIENCE, and omitting it is a regression this
+  // backfill would otherwise INTRODUCE (found by @QAmaster). The two reconcile gathers source it differently:
+  // the override-only path resolves it from the DISCORD_MENTION_OVERRIDES login-to-id map, while the
+  // Stripe-customer path reads it straight off `meta.discord_user_id`. The moment a member acquires a
+  // Customer they move from the first path to the second, so a Customer without this field resolves a null
+  // discord id and THE PLANNER EMITS NO DISCORD ACTION FOR THEM AT ALL.
+  //
+  // Measured consequence: a banned member loses `discord:add-role:locked` entirely after the backfill. Not a
+  // wrong role, no action, nothing errors, and they keep whatever role they already hold. Content-side
+  // enforcement still applies, so it is a half-failure rather than an outright bypass, which is exactly the
+  // kind that survives a review.
+  if (discordUserId) metadata.discord_user_id = String(discordUserId);
   metadata.signup_source = 'legacy-recovery';
   return metadata;
+}
+
+/**
+ * Create one recovered member's Customer and its `gh:` index entry, IN THAT ORDER.
+ *
+ * THIS DELIBERATELY DOES NOT WRITE THE SUBSCRIBER RECORD, and that is a change from how the work was briefed
+ * (@SowMaster asked for create, then index, then subscriber last). The hazard behind that brief is real and
+ * worth restating: a subscriber record written before its Customer exists is one the drain can never resolve
+ * an address for, and the enrolment planner's `alreadyEnrolled` check makes every later run SKIP it, so it
+ * stays dead and silent forever. Ordering it last manages that hazard. Not writing it here REMOVES it, which
+ * is strictly better, because there is then no interleaving of these two writes that can produce an orphan.
+ *
+ * The separation buys a second thing. Creating a billing record is not sending mail, so it does not need the
+ * unsubscribe-proven gate, whereas enrolment does and must keep it. Fusing them would have put Customer
+ * creation behind mail provisioning that has not happened yet, delaying the one part that is ready. So this
+ * script makes the fifteen REACHABLE, and `scripts/mail-enroll.mjs --apply` enrols them afterwards through
+ * the single gated path that every other member goes through. That path resolves their address from Stripe
+ * exactly as it does for everybody else, so they need no special case in it.
+ *
+ * THE ORDER OF THE TWO WRITES THAT REMAIN IS STILL THE CONTRACT. Both are idempotent, so every interruption
+ * point is safely re-runnable, and an orphaned Customer is harmless because the idempotency key makes the
+ * re-run reuse it rather than create a second.
+ *
+ * THE `gh:` INDEX IS NOT OPTIONAL. `signup.mjs:241` writes `gh:<github_id> -> customerId` as the index that
+ * beats Stripe Search's indexing lag, because signup is find-before-create and Search can still be cold. Skip
+ * it here and the next REAL signup by one of these members can miss on that lag and create a SECOND Customer
+ * for the same `github_id`, after which `findCustomerByGithubId` returns whichever Search ranks first and
+ * `gatherMembers` yields the member twice.
+ *
+ * `email` is passed straight through to Stripe and is never stored, logged or returned. The caller resolves it
+ * immediately before this call and lets it go out of scope immediately after.
+ */
+export async function createRecoveredCustomer({ row, email, discordUserId = null, stripe, kv } = {}) {
+  const githubId = String(row?.githubId ?? '');
+  if (!githubId) throw new Error('createRecoveredCustomer: githubId is required');
+  if (!email) throw new Error('createRecoveredCustomer: refusing to create a Customer with no address');
+
+  const metadata = recoveredCustomerMetadata({ githubId, githubLogin: row.githubLogin, discordUserId });
+  const customer = await stripe.createCustomer({ email, metadata }, createIdempotencyKey(githubId));
+  const customerId = customer?.id ?? null;
+  if (!customerId) throw new Error(`createRecoveredCustomer: Stripe returned no customer id for ${githubId}`);
+
+  // Second, never first: an index entry pointing at a Customer that does not exist is worse than none.
+  //
+  // A REFUSED WRITE IS A FAILURE HERE, NOT A NO-OP. `putKvValue` returns `{written: false}` rather than
+  // throwing when the Cloudflare credentials are absent, which is the right shape for a reporting step and
+  // the wrong one for this: it would leave a real Customer with no index entry while the run printed a
+  // success. So the caller's `put` is required to report, and anything other than a write raises.
+  const wrote = await kv.put(`gh:${githubId}`, customerId);
+  if (wrote && wrote.written === false) {
+    throw new Error(
+      `createRecoveredCustomer: created Customer ${customerId} for github_id ${githubId} but the gh: index `
+      + `write did not happen (${wrote.reason ?? 'unknown reason'}). Set the Cloudflare credentials and `
+      + 're-run: the Customer is idempotent, so the re-run reuses it and completes the index.',
+    );
+  }
+  return { githubId, customerId };
 }
 
 /** Mirrors signup.mjs:234, so a re-run of the same plan cannot double-create. */

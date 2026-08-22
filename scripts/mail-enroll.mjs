@@ -107,7 +107,11 @@ export function populationSummary(members = []) {
     const k = m?.effective?.status ?? 'unknown';
     byStatus[k] = (byStatus[k] ?? 0) + 1;
   }
-  return { total: members.length, byStatus };
+  // MEASURED, not assumed. The unreachable zero-case below distinguishes "nobody is unreachable" from
+  // "nobody was looked at" by citing this number, so it has to come from counting the rows that actually
+  // came back from the override-only gather.
+  const overrideOnlyGathered = members.filter((m) => m?._gather === 'override-only').length;
+  return { total: members.length, byStatus, overrideOnlyGathered };
 }
 
 export function renderReport({ mailPlan, followPlan, counts, apply, haveKey, unsubProven, population = null }) {
@@ -171,12 +175,27 @@ export function renderReport({ mailPlan, followPlan, counts, apply, haveKey, uns
       }
     }
   } else {
-    // A zero here is a RED FLAG, not a clean result: email:null exists by construction at
-    // scripts/reconcile.mjs:488, so an empty list usually means the override-only gather did not run.
+    // A ZERO HERE HAS TWO CAUSES AND THEY LOOK IDENTICAL, so the report must not guess between them. It
+    // reads back the number of override-only members the gather actually RETURNED, rather than asserting
+    // which cause applies. The earlier wording called every zero suspect, which was right while the
+    // recovered members had no Customers and goes FALSE the moment they do: once the backfill succeeds, a
+    // genuinely clean zero is the expected result, and a report that still cried suspect would train its
+    // reader to ignore the one line that ever matters here.
+    const gathered = population?.overrideOnlyGathered;
     out.push('UNREACHABLE MEMBERS: none reported.');
-    out.push('  TREAT THIS AS SUSPECT rather than clean. Override-only members carry email:null by');
-    out.push('  construction, so an empty list here usually means the override-only gather did not run,');
-    out.push('  not that everybody is reachable. Check that the grandfather list is non-empty first.');
+    if (typeof gathered === 'number' && gathered > 0) {
+      out.push(`  This is a REAL clean result. The override-only gather returned ${gathered} member(s) and an`);
+      out.push('  address resolved for every one of them, so the list is empty because nobody is unreachable.');
+    } else if (gathered === 0) {
+      out.push('  TREAT THIS AS SUSPECT. The override-only gather returned NOBODY, so this list is empty');
+      out.push('  because nothing was examined, not because everybody is reachable. Members carrying a');
+      out.push('  grandfather grant and no Stripe Customer have email:null by construction');
+      out.push('  (scripts/reconcile.mjs:488), so they cannot all have been reachable. Check that the');
+      out.push('  grandfather list loaded before believing this line.');
+    } else {
+      out.push('  UNVERIFIED: this run did not measure the override-only gather, so it cannot tell an empty');
+      out.push('  list apart from a gather that never ran.');
+    }
   }
 
   if (mailPlan.enroll.length) {
