@@ -1,21 +1,31 @@
-// SOW-186 phase 3: the REVERSE follower index -- "who follows member <username>". The forward store
-// (membership/member-follows.mjs, follows:<github_id>) answers "who does this member follow"; it CANNOT answer
-// "who follows this author" without scanning every member. The follow-publish delivery (SOW-186 phase 4) needs
-// exactly that enumeration, once per issue, so this derived index makes it an O(1) lookup instead of an
-// O(all-members) scan. It EARNS its place by making drain-time enumeration cheap, NOT by paying for eager
-// fan-out at follow time.
+// SOW-186 phase 3 (REWORKED 2026-08-22): the REVERSE follower index -- "who follows member <github_id>". The
+// forward store (membership/member-follows.mjs, follows:<github_id>) answers "who does this member follow"; it
+// CANNOT answer "who follows this author" without scanning every member. The per-event-immediate follow-publish
+// email (SOW-186 phase 4) needs exactly that enumeration, once per publish, so this derived index makes it an
+// O(1) lookup instead of an O(all-members) scan. It EARNS its place by making delivery-time enumeration cheap,
+// NOT by paying for eager fan-out at follow time.
 //
-// Keyed by the FOLLOWED member's USERNAME (followers:<username>), mirroring the forward store, which also keys
-// the followed by username (a follow record stores { username }). Keeping both indexes on the same handle means
-// follow-time writes need NO username->github_id resolution (pure, never lossy), and a rename is handled by the
-// SAME reconcile mechanism that already fixes username references in the forward graph. The VALUES are follower
-// github_ids (the erasable identities); the KEY is a public username (not sensitive).
+// Keyed by the FOLLOWED member's IMMUTABLE github_id (followers:<github_id>), NEVER by their username.
+// GENERAL PRINCIPLE (SOW-186 KEY DECISION): anything the DELIVERY path depends on is keyed by an immutable
+// identifier (github_id), never by a mutable username. A username belongs in a value or a display field, never
+// in a key a delivery step must look up. The earlier username-keyed version (b103f609) was rename-broken and
+// unfixable by a rebuild, because the forward values are stale on a rename too; keying by github_id makes the
+// index rename-PROOF. The VALUES are follower github_ids (the erasable identities); the KEY is the followed
+// member's public numeric github_id.
+//
+// This index is DERIVED state, and reconcile is its SOLE owner and healer: it is BUILT/reconverged from the
+// forward graph on every reconcile run (scripts/lib/follower-index.mjs), a full recompute with stale-key
+// deletion, so additions, unfollows, renames and erasures all self-heal. The follow hot path writes ONLY the
+// forward store (membership-follows.mjs no longer mirrors here at follow time). RESIDUAL: rename-proof is not
+// rename-harmless -- reconcile resolves each stored followed-username to a github_id and skips the one member
+// who just renamed until members-index is repaired, so a renamed author misses email fan-out in the meantime
+// (the in-app bell reads the forward graph directly, so it is never stale). See sow-186 and Q30.
 //
 // Pure, node-free: each function takes a plain store + a command and returns a NEW store. No IO, no Date.now()
-// inside (callers inject now). The Worker glue (membership-follows.mjs) and the erasure sweep
+// inside (callers inject now). The reconcile builder (scripts/lib/follower-index.mjs) and the erasure sweep
 // (scripts/lib/erase-member.mjs) wrap these with IO.
 
-export const FOLLOWERS_KEY = (username) => `followers:${username}`;
+export const FOLLOWERS_KEY = (githubId) => `followers:${githubId}`;
 
 // Bounds the KV value size defensively. A follower entry is a few dozen bytes, so this is megabytes of headroom
 // and realistically never reached in a co-op; past it a new follower's forward follow still works (the feed

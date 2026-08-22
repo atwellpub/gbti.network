@@ -53,32 +53,35 @@ test('eraseNotifications targets notifications:<github_id> (SOW-150/186)', async
   await assert.rejects(() => eraseNotifications({ githubId: '' }), /github_id is required/);
 });
 
-test('SOW-186: eraseReverseFollows scrubs the member from the reverse sets they follow AND deletes their own inbound index', async () => {
+test('SOW-186 (reworked): eraseReverseFollows deletes the member github_id-keyed inbound index AND prefix-scan-scrubs them from every reverse set', async () => {
+  // The reworked index is keyed by github_id. Erasure holds only the erased member's OWN id (9), not the ids of
+  // the members they follow, so it finds its outbound reflection by a resolution-FREE prefix scan of followers:*,
+  // not by reading follows:9 (that read, and its ordering dependency, are gone).
   const { fetchImpl, calls } = fakeKvFetch({
-    keys: [],
+    keys: [FOLLOWERS_KEY('9'), FOLLOWERS_KEY('100'), FOLLOWERS_KEY('200')],
     values: {
-      // the erased member (9, "zoe") follows alice + bob
-      'follows:9': JSON.stringify({ following: [{ username: 'alice', addedAt: 1 }, { username: 'bob', addedAt: 2 }] }),
-      // AS A FOLLOWER: alice's reverse set contains 9 (must be scrubbed) + 7 (must stay); bob's has only 7 (no change)
-      [FOLLOWERS_KEY('alice')]: JSON.stringify({ followers: [{ githubId: '9', addedAt: 1 }, { githubId: '7', addedAt: 1 }] }),
-      [FOLLOWERS_KEY('bob')]: JSON.stringify({ followers: [{ githubId: '7', addedAt: 1 }] }),
-      // AS A FOLLOWED TARGET: zoe's own inbound index exists and must be deleted
-      [FOLLOWERS_KEY('zoe')]: JSON.stringify({ followers: [{ githubId: '3', addedAt: 1 }] }),
+      // AS A FOLLOWED TARGET: the erased member's own inbound index (who follows 9) exists and must be deleted.
+      [FOLLOWERS_KEY('9')]: JSON.stringify({ followers: [{ githubId: '3', addedAt: 1 }] }),
+      // AS A FOLLOWER: member 100's reverse set contains 9 (scrub) + 7 (stay); member 200's has only 7 (no change).
+      [FOLLOWERS_KEY('100')]: JSON.stringify({ followers: [{ githubId: '9', addedAt: 1 }, { githubId: '7', addedAt: 1 }] }),
+      [FOLLOWERS_KEY('200')]: JSON.stringify({ followers: [{ githubId: '7', addedAt: 1 }] }),
     },
   });
-  const r = await eraseReverseFollows({ githubId: '9', username: 'zoe', env: CF, fetchImpl });
-  assert.equal(r.outboundScrubbed, 1, 'only alice changed (bob did not contain 9)');
+  const r = await eraseReverseFollows({ githubId: '9', env: CF, fetchImpl });
+  assert.equal(r.outboundScrubbed, 1, 'only member 100 changed (200 did not contain 9)');
   assert.equal(r.inboundDeleted, true);
-  // alice's set was written back WITHOUT 9 but WITH 7
-  const alicePut = calls.put.find((p) => p.key === FOLLOWERS_KEY('alice'));
-  assert.ok(alicePut, 'alice reverse set rewritten');
-  assert.deepEqual(JSON.parse(alicePut.body).followers, [{ githubId: '7', addedAt: 1 }]);
-  assert.ok(!calls.put.some((p) => p.key === FOLLOWERS_KEY('bob')), 'bob unchanged -> no write');
-  assert.ok(calls.deleted.includes(FOLLOWERS_KEY('zoe')), "the erased member's own inbound index is deleted");
+  // member 100's set was written back WITHOUT 9 but WITH 7
+  const put100 = calls.put.find((p) => p.key === FOLLOWERS_KEY('100'));
+  assert.ok(put100, 'member 100 reverse set rewritten');
+  assert.deepEqual(JSON.parse(put100.body).followers, [{ githubId: '7', addedAt: 1 }]);
+  assert.ok(!calls.put.some((p) => p.key === FOLLOWERS_KEY('200')), 'member 200 unchanged -> no write');
+  assert.ok(calls.deleted.includes(FOLLOWERS_KEY('9')), "the erased member's own inbound index is deleted");
+  // The inbound key is skipped by the scan (already deleted), so it is never rewritten.
+  assert.ok(!calls.put.some((p) => p.key === FOLLOWERS_KEY('9')), 'the deleted inbound key is not re-put by the scan');
 });
 
 test('eraseReverseFollows is a reported no-op without CF credentials', async () => {
-  const r = await eraseReverseFollows({ githubId: '9', username: 'zoe' });
+  const r = await eraseReverseFollows({ githubId: '9' });
   assert.equal(r.skipped, true);
 });
 

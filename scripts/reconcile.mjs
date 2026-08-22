@@ -36,6 +36,7 @@ import { syncFavoriteCounts, readCountsFromDisk, readFavoritedByFromDisk, readMe
 import { syncCouponGrants, readGrandfatheredFromDisk, readCouponsFromDisk, listCouponRedemptions, planCouponGrants } from './lib/coupon-grants.mjs'; // SOW-119 (+ sow-218: pre-apply, sow-185: explicit tier)
 import { syncEnrollments } from './lib/enroll-members.mjs'; // SOW-157: hosted-member index enrollment
 import { syncUpvoteCounts, readCountsFromDisk as readUpvoteCountsFromDisk } from './lib/upvote-counts.mjs';
+import { syncFollowerIndex } from './lib/follower-index.mjs'; // SOW-186 phase 3: build/heal followers:<github_id> from the forward graph
 import { main as promotePopular } from './promote-popular.mjs'; // SOW-126: the engagement-triggered popular promoter
 import { mergeState, alreadyLabeled, conflictComment, CONFLICT_LABEL, isStuckAutomergeBot } from './lib/pr-conflict.mjs';
 
@@ -827,6 +828,27 @@ async function main() {
       );
     } catch (e) {
       console.error('reconcile: upvote-counts sync FAILED:', e?.message ?? e);
+      process.exitCode = 1;
+    }
+  }
+
+  // SOW-186 phase 3: reconverge the reverse follower index (followers:<github_id>) from the forward follow graph
+  // (follows:<github_id>) in KV. This is the SOLE writer of the reverse index (the follow hot path only writes
+  // the forward store); a full recompute with stale-key deletion, so unfollows, renames, erasures, and the
+  // retired username-keyed entries all self-heal. KV -> KV (private follower ids stay in the edge store, nothing
+  // reaches git), so it needs CF creds but no GitHub client. Unresolvable followed-usernames are skipped fail-safe.
+  if (dryRun) {
+    console.log('reconcile: DRY RUN would reconverge the reverse follower index followers:<github_id> from follows:* in KV (requires CF creds).');
+  } else {
+    try {
+      const r = await syncFollowerIndex({ env, now: () => now.getTime(), membersIndex: readMembersIndexFromDisk(ROOT) });
+      console.log(
+        r.synced
+          ? `reconcile: reverse follower index synced (${r.followedTargets} target(s): ${r.written} written, ${r.unchanged} unchanged, ${r.deleted} stale deleted; ${r.unresolved} unresolved follow edge(s) skipped).`
+          : `reconcile: reverse follower index sync SKIPPED (${r.reason}).`,
+      );
+    } catch (e) {
+      console.error('reconcile: reverse follower index sync FAILED:', e?.message ?? e);
       process.exitCode = 1;
     }
   }

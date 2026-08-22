@@ -77,37 +77,28 @@ test('eraseMemberFollows hard-deletes the follow record (right-to-erasure)', asy
   assert.equal(kv.store.has('follows:42'), false);
 });
 
-// --- SOW-186 phase 3: the reverse follower index maintained at follow-time ---
+// --- SOW-186 phase 3 (REWORKED 2026-08-22): the hot path writes ONLY the forward store ---
+// The reverse follower index is now DERIVED state that reconcile reconverges from the forward graph
+// (scripts/lib/follower-index.mjs); the follow handler must not write followers:* at all. These tests pin that
+// invariant so a re-added follow-time mirror (the retired b103f609 behaviour) goes red.
 
-test('POST follow: the caller is added to followers:<followedUsername> (reverse index)', async () => {
+test('POST follow: writes ONLY follows:<github_id>, never a followers:* reverse key', async () => {
   const kv = fakeKv();
   await handleFollows(req('POST', { username: 'Alice' }), {}, { kv, authorize: paid, now });
-  const rev = normalizeFollowers(JSON.parse(kv.store.get(FOLLOWERS_KEY('alice'))));
-  assert.deepEqual(rev.followers, [{ githubId: '42', addedAt: 5000 }], 'the follower github_id lands under the FOLLOWED username');
+  assert.ok(kv.store.has(FOLLOWS_KEY('42')), 'the forward store is written');
+  const reverseKeys = [...kv.store.keys()].filter((k) => k.startsWith('followers:'));
+  assert.deepEqual(reverseKeys, [], 'the hot path writes no reverse-index key (reconcile owns it)');
 });
 
-test('POST unfollow: the caller is removed from followers:<followedUsername>', async () => {
+test('POST unfollow: still touches ONLY the forward store, leaving any reverse index to reconcile', async () => {
   const kv = fakeKv({
     [FOLLOWS_KEY('42')]: JSON.stringify({ following: [{ username: 'alice', addedAt: 1 }], updatedAt: 1 }),
-    [FOLLOWERS_KEY('alice')]: JSON.stringify({ followers: [{ githubId: '42', addedAt: 1 }, { githubId: '7', addedAt: 1 }], updatedAt: 1 }),
+    // A pre-existing reverse entry (as reconcile would have built it) must be left untouched by the hot path.
+    [FOLLOWERS_KEY('99')]: JSON.stringify({ followers: [{ githubId: '42', addedAt: 1 }, { githubId: '7', addedAt: 1 }], updatedAt: 1 }),
   });
   await handleFollows(req('POST', { username: 'alice', on: false }), {}, { kv, authorize: paid, now });
-  const rev = normalizeFollowers(JSON.parse(kv.store.get(FOLLOWERS_KEY('alice'))));
-  assert.deepEqual(rev.followers, [{ githubId: '7', addedAt: 1 }], 'only the caller is removed; other followers stay');
-});
-
-test('reverse-index maintenance is best-effort: a reverse-write failure never fails the follow', async () => {
-  // A KV whose PUT rejects ONLY for the reverse key; the forward write must still succeed and return 200.
-  const m = new Map();
-  const kv = {
-    store: m,
-    async get(k, type) { const v = m.get(k); return type === 'json' && typeof v === 'string' ? JSON.parse(v) : (v ?? null); },
-    async put(k, v) { if (k.startsWith('followers:')) throw new Error('kv down'); m.set(k, v); },
-    async delete(k) { m.delete(k); },
-  };
-  const r = await handleFollows(req('POST', { username: 'alice' }), {}, { kv, authorize: paid, now });
-  assert.equal(r.status, 200, 'the follow succeeds despite the reverse-index write failing');
-  assert.deepEqual(r.body.following, [{ username: 'alice', addedAt: 5000 }]);
-  assert.ok(m.has(FOLLOWS_KEY('42')), 'the forward (source-of-truth) write landed');
-  assert.ok(!m.has(FOLLOWERS_KEY('alice')), 'the reverse write was dropped, not retried into a failure');
+  const rev = normalizeFollowers(JSON.parse(kv.store.get(FOLLOWERS_KEY('99'))));
+  assert.deepEqual(rev.followers, [{ githubId: '42', addedAt: 1 }, { githubId: '7', addedAt: 1 }], 'the reverse index is unchanged by an unfollow (reconcile heals it later)');
+  const fwd = JSON.parse(kv.store.get(FOLLOWS_KEY('42')));
+  assert.deepEqual(fwd.following, [], 'only the forward store reflects the unfollow');
 });

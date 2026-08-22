@@ -9,8 +9,8 @@ import {
 
 const now = () => 1000;
 
-test('FOLLOWERS_KEY is keyed by the followed username', () => {
-  assert.equal(FOLLOWERS_KEY('alice'), 'followers:alice');
+test('FOLLOWERS_KEY is keyed by the followed member github_id (immutable), not their username', () => {
+  assert.equal(FOLLOWERS_KEY('12345'), 'followers:12345');
 });
 
 test('emptyFollowers / normalizeFollowers: always the canonical shape, tolerant of junk', () => {
