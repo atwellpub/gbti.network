@@ -3,7 +3,7 @@
 // crashed-tick (stale-claim) recovery. No network, no Resend, no Stripe.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drainMail, drainMailIssue, budgetDateStrings, resolveSendGate, MAIL_CAP_DEFAULTS } from '../workers/signup/mail-drain.mjs';
+import { drainMail, drainMailIssue, budgetDateStrings, resolveSendGate, MAIL_CAP_DEFAULTS, numOrNull } from '../workers/signup/mail-drain.mjs';
 import { enqueueIssue, getSend, readPendingIndex, readBudget, bumpBudget, MAIL_PENDING_KEY } from '../workers/signup/mail-store.mjs';
 import { sendKey, markClaimed, budgetDayKey } from '../membership/mail-queue.mjs';
 import { suppressKey, subscriberKey, SUPPRESS_VALUE } from '../membership/mail-suppress.mjs';
@@ -488,4 +488,32 @@ test('CAP FLOOR (inner): drainMailIssue with the daily cap raised and NO monthly
   const rNull = await drainMailIssue(OPEN, { kv: kvNull, issueId: 'i1', now: at(1_000_000), cap: hashes.length, dailyCap: 100000, monthlyCap: null, ...deps(senderNull) });
   assert.equal(rNull.sent, hashes.length, 'explicit monthlyCap: null is unbounded, which is exactly why null must not be the default');
   assert.ok(rNull.sent > rDefault.sent, 'the bounded monthly default sends strictly fewer than the unbounded explicit-null path');
+});
+
+// numOrNull is what stands between a wrangler var and the `?? DEFAULT` fallback. The failure it guards is
+// INDISTINGUISHABILITY: Number("") is 0, so a declared-but-blank var (or a never-created secret read as "")
+// would resolve to a real 0 and stop sending FOREVER, identical to the documented "0" pause, with no alarm.
+// One assertion per state, because each interesting input ("", " ", "-5", "1e9") fails differently and a
+// single loose assertion would pass on whichever one you happened to write. Cases verified against the parse.
+test('numOrNull: empty and whitespace are ABSENT (fall to default), only explicit "0" pauses', () => {
+  assert.equal(numOrNull('0'), 0, 'explicit "0" is a deliberate pause and must stay 0');
+  assert.equal(numOrNull(''), null, 'empty string is absent, not a real 0 (else a blank var stops sends forever)');
+  assert.equal(numOrNull(' '), null, 'whitespace-only is absent, not a real 0');
+  assert.equal(numOrNull('  '), null, 'multi-space is absent, not a real 0');
+});
+test('numOrNull: negatives are rejected (fall to default), not passed through', () => {
+  assert.equal(numOrNull('-5'), null, 'a negative cap is nonsense; fall to the bounded default, do not send -5');
+  assert.equal(numOrNull(-1), null, 'a numeric negative is rejected too');
+});
+test('numOrNull: well-formed numbers pass, including trimmed and large-magnitude values', () => {
+  assert.equal(numOrNull('90'), 90);
+  assert.equal(numOrNull(90), 90);
+  assert.equal(numOrNull('90 '), 90, 'a trailing space (dashboard paste) is trimmed, NOT rejected to the default');
+  assert.equal(numOrNull('1e9'), 1e9, 'a finite large value passes UNCLAMPED: raising the cap is a legitimate op, caught by the resolved-bounds log, not a parse guard');
+});
+test('numOrNull: absent and non-numeric are null (the pre-existing, correct behaviour)', () => {
+  assert.equal(numOrNull(undefined), null);
+  assert.equal(numOrNull(null), null);
+  assert.equal(numOrNull('abc'), null, 'non-numeric garble falls to the default');
+  assert.equal(numOrNull('NaN'), null);
 });

@@ -319,6 +319,15 @@ export async function drainMail(env, {
   const ids = issueId ? [issueId] : await activeIssueIds(kv);
   if (!ids.length) return { drained: 0, reason: 'no active issue' };
 
+  // Log the three resolved bounds on ONE line whenever the gate is open and there is work, so an operator sees
+  // them in RELATION: a magnitude/paste error (a 2500 daily sitting next to a 2500 monthly, or 9000 typed for
+  // 90) is only obvious side by side, and it is the one error class no parse guard catches. Logged, never
+  // clamped. Gated on an open send gate so the default closed gate (pre-launch) does not log every */5 tick
+  // against a permanently pending issue.
+  if (resolveSendGate(env).mode !== 'closed') {
+    console.log(JSON.stringify({ evt: 'mail-drain-bounds', perTickCap, dailyCap, monthlyCap, activeIssues: ids.length }));
+  }
+
   let tickCapLeft = Math.max(0, Number(perTickCap) || 0);
   let sent = 0;
   let failed = 0;
@@ -343,8 +352,17 @@ export async function drainMail(env, {
   return { drained: sent, failed, suppressed, refused, deferred, issues };
 }
 
-function numOrNull(v) {
+// Coerce a wrangler var to a cap number, else null so the caller's `?? DEFAULT` binds. Empty and
+// whitespace-only are treated as ABSENT (a declared-but-blank var, or a never-created secret read as ""),
+// NOT as an explicit 0: Number("") is 0, which would be a silent permanent stop indistinguishable from the
+// documented "0" pause. Negatives are rejected the same way. So an explicit "0" is the ONLY value that pauses.
+// A trailing-space "90 " is trimmed, not rejected (dashboard pastes carry one). "1e9" is finite and passes
+// UNCLAMPED on purpose (an operator upgrading Resend must be able to raise the cap); a wrong-magnitude but
+// well-formed value is the one class no parse guard can catch, so drainMail LOGS the resolved bounds instead.
+export function numOrNull(v) {
   if (v == null) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  const s = String(v).trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
