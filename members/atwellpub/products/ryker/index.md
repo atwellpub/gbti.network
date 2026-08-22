@@ -32,11 +32,15 @@ gallery:
   - ./images/ryker-shot-3.webp
   - ./images/ryker-shot-4.webp
   - ./images/ryker-shot-5.webp
+video: "o0HQG7Ie5zY"
 links:
+  - type: download
+    url: https://chromewebstore.google.com/detail/gohpdgonoaihfjfhhjioaejhnhhjmkkp
+    label: Install from the Chrome Web Store
+    primary: true
   - type: download
     url: https://www.npmjs.com/package/@gbti/ryker
     label: Install the drop-in from npm
-    primary: true
   - type: repository
     url: https://github.com/gbti-network/ryker
   - type: documentation
@@ -73,9 +77,9 @@ what you changed while you do it.
 
 ## Two ways to use it
 
-**As a Chrome extension.** Click the toolbar button on any HTML page to edit
-that document in place. Or open the Ryker workspace and load a Markdown or HTML
-file from your own disk. On a tab Chrome will not let it touch, a new tab or a
+**As a Chrome extension.** Install it from the Chrome Web Store, then click
+the toolbar button on any HTML page to edit that document in place. Or open
+the Ryker workspace and load a Markdown or HTML file from your own disk. On a tab Chrome will not let it touch, a new tab or a
 `chrome://` page, the button opens the workspace instead of failing.
 
 **As a drop-in.** Add Ryker to an HTML document with npx and it travels with the
