@@ -109,6 +109,28 @@ test('subscribe: a new address writes a pending opt-in under mail:optin:, sends 
   assert.ok(!kv.m.get(optinKey(hash)).value.includes('Reader@Example.com'), 'no raw address in the pending record');
 });
 
+test('subscribe: a FAILED confirmation send stays NEUTRAL (anti-enumeration) but is LOGGED, not swallowed', async () => {
+  // SecurityMaster, 2026-08-22: discarding sendConfirmationEmail's return meant a mail-provisioning gap failed
+  // EVERY subscriber silently. The response must stay byte-identical (neutral is the anti-enumeration answer);
+  // the boolean must be captured so the failure is visible, not discovered by a subscriber who never gets a link.
+  const kv = makeKV();
+  const throwingSend = async () => { throw new Error('resend down'); };
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => { warnings.push(a.map(String).join(' ')); };
+  let res;
+  try {
+    res = await handleSubscribe(jsonReq({ email: 'reader@example.com' }), { ...ENV, SIGNUP_KV: kv }, { send: throwingSend, rateLimitFn: allow });
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(res.status, 200, 'the response is byte-identical to the happy path: a failed provider is not an enumeration oracle');
+  assert.deepEqual(await res.json(), { ok: true });
+  const hash = await mailHash(SUPPRESS_KEY, 'reader@example.com');
+  assert.ok(kv.m.get(optinKey(hash)), 'the pending opt-in is still written (the send failure is downstream of the write)');
+  assert.ok(warnings.some((w) => /confirmation send did not complete/.test(w)), 'the failed confirmation send is LOGGED, not swallowed');
+});
+
 test('subscribe: a malformed email is a 400 with no opt-in and no send', async () => {
   const kv = makeKV();
   const { sent, send } = sink();

@@ -142,6 +142,8 @@ test('eraseSubscriberMail wipes the record + all send state across EVERY issue, 
 
   const res = await eraseSubscriberMail(kv, h);
   assert.equal(res.subscriber, 1);
+  assert.equal(res.ok, true, 'a complete erasure reports ok');
+  assert.deepEqual(res.errors, [], 'and carries no errors');
   assert.equal(res.sends, 2, 'both per-issue send records deleted');
   assert.equal(await getSubscriber(kv, h), null, 'subscriber record erased');
   assert.equal(await getSend(kv, 'i1', h), null, 'send record in i1 erased');
@@ -150,6 +152,74 @@ test('eraseSubscriberMail wipes the record + all send state across EVERY issue, 
   assert.deepEqual(await readPendingIndex(kv, 'i2'), [], 'hash removed from i2 pending');
   assert.ok(kv.m.get(suppressKey(h)), 'the suppression marker survives erasure (cannot un-suppress)');
   assert.ok(await getSend(kv, 'i1', 'other'), 'a different subscriber in the same issue is untouched');
+});
+
+// ---------- eraseSubscriberMail must NEVER report the success shape while personal data survives ----------
+// (SecurityMaster, 2026-08-22). A GDPR erasure that returns { subscriber:1, sends:0, issues:0 } byte-identically
+// whether the identity record was deleted or the delete threw is the one outcome this path cannot have.
+
+test('eraseSubscriberMail reports ok:false when the identity-record DELETE throws (the record may survive)', async () => {
+  const m = new Map();
+  m.set(subscriberKey('h1'), { value: JSON.stringify(buildSubscriber({ hash: 'h1', source: 'anon', emailEnc: 'ENC' }, { now: at(0) })), opts: null });
+  const kv = {
+    m,
+    async get(key, type) { const e = m.get(key); if (e == null) return null; return type === 'json' ? JSON.parse(e.value) : e.value; },
+    async put(key, value, opts) { m.set(key, { value: String(value), opts: opts || null }); },
+    async delete(key) { if (key === subscriberKey('h1')) throw new Error('kv delete failed'); m.delete(key); },
+    async list() { return { keys: [], list_complete: true }; },
+  };
+  const res = await eraseSubscriberMail(kv, 'h1');
+  assert.equal(res.subscriber, 1, 'the record existed');
+  assert.equal(res.ok, false, 'a failed identity delete is NOT a success');
+  assert.ok(res.errors.includes('subscriber-delete'), 'and names why');
+  assert.ok(m.has(subscriberKey('h1')), 'the record really did survive the failed delete');
+});
+
+test('eraseSubscriberMail DELETES a send record even when its read throws, and reports ok:false', async () => {
+  const kv = makeKV();
+  await enqueueIssue(kv, issueOf('i1'), ['h', 'other'], { now: at(0) });
+  await kv.put(subscriberKey('h'), JSON.stringify(buildSubscriber({ hash: 'h', source: 'anon', emailEnc: 'ENC' }, { now: at(0) })));
+  // The send record for h reads with a throw this run (a transient blip), but erasure must still delete it.
+  const kvErr = { ...kv, async get(key, type) {
+    if (key === sendKey('i1', 'h')) throw new Error('kv get failed');
+    return kv.get(key, type);
+  } };
+  const res = await eraseSubscriberMail(kvErr, 'h');
+  assert.equal(res.ok, false, 'an unreadable send record makes the erasure not-proven-complete');
+  assert.ok(res.errors.some((e) => e.startsWith('send-read:')), 'and names the issue');
+  assert.equal(await getSend(kv, 'i1', 'h'), null, 'yet the send record is DELETED (unconditional), never left behind on a read blip');
+  assert.ok(await getSend(kv, 'i1', 'other'), 'a different recipient is untouched');
+});
+
+test('eraseSubscriberMail reports ok:false when the issue-list read throws (remaining pages lost)', async () => {
+  const m = new Map();
+  m.set(subscriberKey('h'), { value: JSON.stringify(buildSubscriber({ hash: 'h', source: 'anon', emailEnc: 'ENC' }, { now: at(0) })), opts: null });
+  const kv = {
+    m,
+    async get(key, type) { const e = m.get(key); if (e == null) return null; return type === 'json' ? JSON.parse(e.value) : e.value; },
+    async put(key, value, opts) { m.set(key, { value: String(value), opts: opts || null }); },
+    async delete(key) { m.delete(key); },
+    async list() { throw new Error('kv list failed'); },
+  };
+  const res = await eraseSubscriberMail(kv, 'h');
+  assert.equal(res.subscriber, 1);
+  assert.equal(res.ok, false, 'a lost issue-list page is NOT a clean "no send records" result');
+  assert.ok(res.errors.includes('issue-list'), 'and names why');
+  assert.equal(m.has(subscriberKey('h')), false, 'the identity record was still deleted (that step ran before the list)');
+});
+
+test('eraseSubscriberMail reports ok:false when there is no list binding (send state cannot be enumerated)', async () => {
+  const m = new Map();
+  m.set(subscriberKey('h'), { value: JSON.stringify(buildSubscriber({ hash: 'h', source: 'anon', emailEnc: 'ENC' }, { now: at(0) })), opts: null });
+  const kv = {
+    async get(key, type) { const e = m.get(key); if (e == null) return null; return type === 'json' ? JSON.parse(e.value) : e.value; },
+    async put(key, value, opts) { m.set(key, { value: String(value), opts: opts || null }); },
+    async delete(key) { m.delete(key); },
+    // no list
+  };
+  const res = await eraseSubscriberMail(kv, 'h');
+  assert.equal(res.ok, false, 'cannot claim completeness without enumerating send state');
+  assert.ok(res.errors.includes('no-list-binding'));
 });
 
 test('readBudget treats an ABSENT counter as 0, an ERROR as null (fail-closed), a corrupt value as null', async () => {

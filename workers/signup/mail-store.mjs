@@ -218,37 +218,60 @@ export async function eraseSubscriber(kv, hash) {
  * keyspace is derived from the EMAIL via mailHash, and a github_id cannot reach it. The erase-member script must
  * compute the hash from the Stripe customer's address and call this BEFORE it deletes the Stripe customer; run
  * afterward, the address (the only input that derives this key) is gone and the record is unreachable by any run.
- * Both callers share it: the erase-member script (a member) and the one-click unsubscribe route (an anon). Best
- * effort + idempotent; returns { subscriber, sends, issues } counts.
+ * Both callers share it: the erase-member script (a member) and the one-click unsubscribe route (an anon).
+ * Idempotent + re-runnable; returns { subscriber, sends, issues, ok, errors }.
+ *
+ * OK IS THE CONTRACT (SecurityMaster, 2026-08-22). This is a GDPR erasure, so it must NEVER return the success
+ * shape while personal data is still in KV. Every failure that could leave a record behind is CAPTURED, not
+ * swallowed: the identity-record delete outcome (eraseSubscriber returns false only when kv.delete threw), a
+ * list read that loses remaining pages, and a per-send read or delete failure. `ok` is false whenever anything
+ * was captured; a caller (the erase-member report, a re-run) treats !ok as "not proven complete, retry". The send
+ * DELETE is now UNCONDITIONAL (idempotent): a read blip counts an error but never leaves the send record behind.
+ * The subscriber-COUNT read stays best-effort (a failed read under-reports, the safe direction, and the delete
+ * after it is unconditional), so it is deliberately NOT an error.
  */
 export async function eraseSubscriberMail(kv, hash) {
   const h = String(hash ?? '').trim();
   const subKey = subscriberKey(h);
-  if (!kv || !subKey) return { subscriber: 0, sends: 0, issues: 0 };
+  if (!kv || !subKey) return { subscriber: 0, sends: 0, issues: 0, ok: false, errors: ['bad hash'] };
+  const errors = [];
+
   let subscriber = 0;
-  try { if (await kv.get(subKey)) subscriber = 1; } catch { /* count is best-effort */ }
-  await eraseSubscriber(kv, h); // deletes the record; leaves the suppression marker
+  try { if (await kv.get(subKey)) subscriber = 1; } catch { /* count is best-effort; the delete below is unconditional */ }
+  // CAPTURE the identity-record delete outcome: false means kv.delete threw and the primary subscriber record of a
+  // GDPR erasure is STILL in KV. Discarding this (the old code did) returned the success shape over a live record.
+  if (!(await eraseSubscriber(kv, h))) errors.push('subscriber-delete');
 
   let sends = 0;
   let issues = 0;
-  if (kv.list) {
+  if (!kv.list) {
+    errors.push('no-list-binding'); // cannot enumerate send state at all, so completeness cannot be claimed
+  } else {
     let cursor;
     for (let page = 0; page < 100; page++) {
       let res;
-      try { res = await kv.list({ prefix: 'mail:issue:', cursor }); } catch { break; }
+      // A list read that throws loses every REMAINING page. Record it (erasure is incomplete) rather than break
+      // into a success shape indistinguishable from a member who genuinely had no mail.
+      try { res = await kv.list({ prefix: 'mail:issue:', cursor }); }
+      catch { errors.push('issue-list'); break; }
       for (const k of res?.keys ?? []) {
         const issueId = k.name.slice('mail:issue:'.length);
         if (!issueId) continue;
         issues++;
         const sk = sendKey(issueId, h);
-        try { if (await kv.get(sk)) { await kv.delete(sk); sends++; } } catch { /* best effort */ }
-        await removeFromPending(kv, issueId, h);
+        // Count presence best-effort, but DELETE UNCONDITIONALLY (idempotent): a read blip must never leave a
+        // personal send record behind. A read or delete throw is an erasure error, not a swallowed success.
+        let existed = false;
+        try { existed = Boolean(await kv.get(sk)); } catch { errors.push(`send-read:${issueId}`); }
+        try { await kv.delete(sk); if (existed) sends++; } catch { errors.push(`send-delete:${issueId}`); }
+        const rm = await removeFromPending(kv, issueId, h);
+        if (rm.indexUnreadable) errors.push(`pending-index:${issueId}`);
       }
       if (res?.list_complete || !res?.cursor) break;
       cursor = res.cursor;
     }
   }
-  return { subscriber, sends, issues };
+  return { subscriber, sends, issues, ok: errors.length === 0, errors };
 }
 
 // ---------- the rate budget (fail-closed) ----------

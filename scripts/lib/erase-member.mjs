@@ -726,19 +726,27 @@ export async function eraseMailRecords({ githubId, stripe = null, env = process.
   }
 
   const totals = { subscriber: 0, sends: 0, issues: 0 };
+  const mailErrors = [];
   for (const h of hashes) {
     const c = await eraseSubscriberMail(kv, h);
     totals.subscriber += c.subscriber || 0;
     totals.sends += c.sends || 0;
     totals.issues += c.issues || 0;
+    // eraseSubscriberMail now reports ok=false when it could not prove it erased everything (identity-record
+    // delete threw, a list page was lost, a send record was unreadable/undeletable). That must surface as an
+    // INCOMPLETE erasure, not be summed away into the success counts.
+    if (!c.ok) mailErrors.push({ hash: h, errors: c.errors || ['unknown'] });
   }
 
   return {
     ...totals,
     matched: hashes.size,
     scanned: scan.scanned,
-    // A truncated scan means we did NOT see the whole keyspace, so this run is not proof of completeness.
-    incomplete: scan.truncated || undefined,
+    // Proof of completeness needs BOTH a full scan AND every per-hash mail erasure succeeding. A truncated scan
+    // means we did not see the whole keyspace; a mail-erasure error means a record may still be in KV. Either one
+    // makes this run NOT proof of completeness, so the report must not read as done.
+    incomplete: (scan.truncated || mailErrors.length > 0) || undefined,
+    mailErrors: mailErrors.length ? mailErrors : undefined,
     stripe: stripeNote,
     emailFallback,
     suppressionMarkerKept: true,

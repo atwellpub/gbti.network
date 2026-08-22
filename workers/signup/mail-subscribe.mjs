@@ -259,13 +259,24 @@ export async function handleSubscribe(request, env, deps = {}) {
   } catch { return neutral; }
   const key = optinKey(hash);
   if (!key) return neutral;
-  try { await kv.put(key, JSON.stringify(pending), { expirationTtl: OPTIN_TTL_SECONDS }); } catch { return neutral; }
+  // A failed opt-in WRITE means confirmation can never succeed (there is no pending record to promote later). Keep
+  // the response byte-identical (neutral is the anti-enumeration answer), but do NOT swallow the failure into an
+  // indistinguishable "check your email": surface it so it is visible in the Worker logs, not found by a user who
+  // never gets confirmed. (SecurityMaster, 2026-08-22.)
+  try { await kv.put(key, JSON.stringify(pending), { expirationTtl: OPTIN_TTL_SECONDS }); }
+  catch (e) { console.warn(`mail-subscribe: pending opt-in write failed for subscriber ${hash}: ${e?.message || e}`); return neutral; }
 
   // Send the confirmation (transactional, NOT the bulk digest send gate). The confirm link points back at THIS
   // Worker (PUBLIC_BASE_URL, falling back to the request origin), the same origin that serves /mail/confirm.
   const base = str(env?.PUBLIC_BASE_URL).trim().replace(/\/$/, '') || new URL(request.url).origin;
   const confirmUrl = `${base}/mail/confirm?h=${encodeURIComponent(hash)}&t=${encodeURIComponent(nonce)}`;
-  await sendConfirmationEmail({ env, to: addr, confirmUrl, send });
+  // CAPTURE the confirmation-send outcome. sendConfirmationEmail returns false when RESEND_API_KEY / the sender is
+  // absent, MAIL_FROM is unset, or the send throws. With this discarded (the old code did), a mail-provisioning gap
+  // failed EVERY subscriber silently: they see the neutral "check your email" page, a pending opt-in sits in KV
+  // until its TTL, and nothing reports it. The response stays neutral (the anti-enumeration property is unchanged);
+  // the boolean is captured for a log so a broken provisioning is visible, not discovered by a missing email.
+  const confirmed = await sendConfirmationEmail({ env, to: addr, confirmUrl, send });
+  if (!confirmed) console.warn(`mail-subscribe: confirmation send did not complete for subscriber ${hash} (check RESEND_API_KEY / MAIL_FROM)`);
   return neutral;
 }
 

@@ -135,7 +135,16 @@ export async function handleUnsubscribe(request, env, deps = {}) {
       '<h1>We could not complete your unsubscribe just now.</h1>'
       + '<p class="muted">Please try the link again in a moment. You have not been unsubscribed yet.</p>', 503);
   }
-  try { await eraseMail(kv, checked.hash); } catch { /* the marker is already written; erasure retries via reconcile */ }
+  // The suppression marker above is the opt-out guarantee (the drain will not mail them), so the response is
+  // honestly "unsubscribed" regardless of what the record cleanup does. But eraseSubscriberMail now reports whether
+  // it PROVED the personal records gone; surface an incomplete cleanup rather than swallow it, so a stranded
+  // record is visible in the logs (and can be retried) instead of silently persisting behind a success page.
+  let mailErased;
+  try { mailErased = await eraseMail(kv, checked.hash); }
+  catch (e) { mailErased = { ok: false, errors: [`threw:${e?.message || e}`] }; }
+  if (mailErased && mailErased.ok === false) {
+    console.warn(`mail-unsubscribe: record cleanup incomplete for ${checked.hash} (${(mailErased.errors || []).join(', ')}); the suppression marker IS written so no further mail is sent; the records need a retry`);
+  }
 
   return page('Unsubscribed',
     '<h1>You have been unsubscribed.</h1>'

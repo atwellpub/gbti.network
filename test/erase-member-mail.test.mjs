@@ -64,6 +64,28 @@ test('sow-166 erasure: the subscriber record and every send record go; the suppr
   assert.equal(store.has('mail:send:2026-W34:otherperson'), true, 'and nobody else in the same issue is touched');
 });
 
+test('sow-166 erasure: a per-hash mail-erasure failure surfaces as INCOMPLETE, never summed into a success', async () => {
+  // SecurityMaster, 2026-08-22: the identity record of a GDPR erasure must never survive behind a success shape.
+  const hash = await mailHash(ENV.MAIL_SUPPRESS_KEY, ADDRESS);
+  const { store, fetchImpl: base } = fakeKvRest({
+    [subscriberKey(hash)]: JSON.stringify({ hash, source: 'member', githubId: '42' }),
+    [suppressKey(hash)]: '1',
+  });
+  // Fail the DELETE of the identity record (a 500). deleteKvKey throws on !ok, so eraseSubscriber returns false.
+  const fetchImpl = async (url, opts = {}) => {
+    const u = new URL(url);
+    const key = decodeURIComponent(u.pathname.split('/values/')[1] || '');
+    if ((opts.method || 'GET') === 'DELETE' && key === subscriberKey(hash)) return { ok: false, status: 500, text: async () => 'boom' };
+    return base(url, opts);
+  };
+  const r = await eraseMailRecords({ githubId: '42', stripe: stripeWith({ id: 'c', email: ADDRESS }), env: ENV, fetchImpl });
+  assert.equal(r.matched, 1, 'the record was found');
+  assert.equal(r.incomplete, true, 'a failed identity delete makes the erasure report INCOMPLETE, not done');
+  assert.ok(Array.isArray(r.mailErrors) && r.mailErrors.length === 1, 'and the failing hash is named');
+  assert.ok(r.mailErrors[0].errors.includes('subscriber-delete'), 'with why it failed');
+  assert.equal(store.has(subscriberKey(hash)), true, 'the record really did survive; reporting success would have been the bug');
+});
+
 test('sow-166 erasure: THE ORDERING. The mail step precedes the stripe step in the dry-run plan', () => {
   const steps = planErasure({ githubId: '42', username: 'someone' }).map((s) => s.step);
   const mail = steps.indexOf('mail');
