@@ -25,7 +25,8 @@ import { couponGrantKey } from '../../workers/signup/coupons.mjs'; // SOW-119 / 
 import { redemptionKey, redemptionCountKey } from '../../membership/coupons.mjs'; // SOW-119 key builders
 import { removeGrantEntryIfPresent, listCouponRedemptions, GRANDFATHERED_PATH } from './coupon-grants.mjs';
 import { couponLockKey, COUPON_LOCK_VALUE } from '../../membership/coupon-lock.mjs'; // sow-212: the minimized lock
-import { mailHash } from '../../membership/mail-suppress.mjs'; // SOW-166: the keyed identity behind every mail key
+import { mailHash, MAIL_SUBSCRIBER_PREFIX } from '../../membership/mail-suppress.mjs'; // SOW-166: the keyed identity behind every mail key
+import { normalizeSubscriber } from '../../membership/mail-subscriber.mjs'; // SOW-166: the record shape the scan matches on
 import { eraseSubscriberMail } from '../../workers/signup/mail-store.mjs'; // SOW-166: the one shared mail eraser
 import { FOLLOWERS_KEY, normalizeFollowers, applyFollower } from '../../membership/member-followers.mjs'; // SOW-186 phase 3
 
@@ -486,24 +487,139 @@ export function kvRestShim({ env = process.env, fetchImpl = globalThis.fetch } =
  * Fails SOFT and says why. Every skip reason is reported rather than swallowed, because "no mail records were
  * deleted" and "we could not tell whether there were any" must never look the same in the audit record.
  */
-export async function eraseMailRecords({ githubId, stripe = null, env = process.env, fetchImpl = globalThis.fetch } = {}) {
-  const secret = env.MAIL_SUPPRESS_KEY;
-  if (!secret) return { skipped: true, reason: 'MAIL_SUPPRESS_KEY not set locally; the mail hash cannot be computed (see secrets-ops)' };
-  if (!stripe) return { skipped: true, reason: 'no Stripe client (set STRIPE_SECRET_KEY); the address is the only input to the hash' };
+/**
+ * Find every MEMBER subscriber record belonging to one person, by SCANNING `mail:subscriber:*` and matching the
+ * record's own identity fields. PURE over the injected kv.
+ *
+ * WHY A SCAN AND NOT AN INDEX. A `source: 'member'` record is REQUIRED to carry `githubId`
+ * (mail-subscriber.mjs buildSubscriber), so the person is already findable from the records themselves. A
+ * maintained `github_id -> hash` index would be a second thing to keep in sync, earning its place only for a hot
+ * O(1) read, and erasure is not one: it runs rarely, per person, and a full scan is cheap at this size.
+ *
+ * MATCHES githubId OR customerId, and the second half is deliberate. normalizeSubscriber is intentionally more
+ * permissive than buildSubscriber and still accepts a stored customerId-only member record, on the stated
+ * reasoning that a normalizer returning null would leave such a record in KV "invisible to every reader
+ * including any cleanup that might remove it". ERASURE IS THAT CLEANUP. Matching only githubId would preserve
+ * visibility for a cleanup that then does not look, and the permissiveness would buy nothing. Honest limit: a
+ * customerId-only record cannot be created today, and matching it needs a customerId we only have while Stripe
+ * still holds the customer. Cheap insurance against a stray, not coverage.
+ *
+ * REPORTS FAILURE AND TRUNCATION EXPLICITLY. `{ ok: false }` on a list error, `truncated: true` if the page cap
+ * is hit. A scan that failed must NEVER be reportable as "found none": for erasure those look identical from
+ * outside and only one of them means the person's records are gone.
+ */
+export async function findMemberSubscriberHashes(kv, { githubId, customerId = null, maxPages = 200 } = {}) {
+  const gid = String(githubId ?? '').trim();
+  const cid = String(customerId ?? '').trim();
+  const hashes = [];
+  let scanned = 0;
+  if (!kv?.list) return { ok: false, error: 'kv has no list capability', hashes, scanned, truncated: false };
+  if (!gid && !cid) return { ok: false, error: 'no github_id or customer_id to match on', hashes, scanned, truncated: false };
 
-  let customer = null;
-  try { customer = await stripe.findCustomerByGithubId(String(githubId)); } catch (e) { return { error: e?.message || 'Stripe lookup failed' }; }
-  if (!customer?.id) return { skipped: true, reason: 'no Stripe customer found (already deleted? this step must run BEFORE the stripe step)' };
-  if (!customer?.email) return { skipped: true, reason: 'Stripe customer has no email; nothing to derive the mail hash from' };
+  let cursor;
+  for (let page = 0; page < maxPages; page++) {
+    let res;
+    try {
+      res = await kv.list({ prefix: MAIL_SUBSCRIBER_PREFIX, cursor });
+    } catch (e) {
+      return { ok: false, error: `subscriber list failed: ${e?.message || e}`, hashes, scanned, truncated: true };
+    }
+    for (const k of res?.keys ?? []) {
+      const name = String(k?.name ?? '');
+      if (!name.startsWith(MAIL_SUBSCRIBER_PREFIX)) continue;
+      scanned++;
+      let raw = null;
+      try {
+        raw = await kv.get(name, 'json');
+      } catch (e) {
+        // A record we could not READ might be the one we must erase, so this cannot be shrugged off.
+        return { ok: false, error: `subscriber read failed for ${name}: ${e?.message || e}`, hashes, scanned, truncated: true };
+      }
+      const rec = normalizeSubscriber(raw);
+      if (!rec || rec.source !== 'member') continue;
+      const mine = (gid && rec.githubId === gid) || (cid && rec.customerId === cid);
+      if (mine) hashes.push(name.slice(MAIL_SUBSCRIBER_PREFIX.length));
+    }
+    cursor = res?.cursor;
+    if (res?.list_complete || !cursor) return { ok: true, hashes, scanned, truncated: false };
+  }
+  // Ran out of pages with a cursor still open: we did NOT see the whole keyspace.
+  return { ok: true, hashes, scanned, truncated: true };
+}
 
-  const hash = await mailHash(secret, customer.email);
-  if (!hash) return { skipped: true, reason: 'mailHash returned null (blank secret or address)' };
-
-  const kv = kvRestShim({ env, fetchImpl });
+/**
+ * Erase this person's mail records. SOW-166.
+ *
+ * THE SCAN IS THE PRIMARY PATH AND STRIPE IS ONLY A SUPPLEMENT. This previously derived the hash from
+ * `customer.email` and did nothing else, which made erasure impossible for three real populations, all of them
+ * reporting a clean skip rather than a failure:
+ *   - a member whose Stripe customer was ALREADY DELETED (the 2026-08-21 ordering hazard, as an actual
+ *     unerasable state rather than a procedural rule),
+ *   - a customer with NO email, which `signup.mjs` can create when the GitHub account exposes none,
+ *   - Stripe unconfigured or unreachable.
+ * The scan needs neither Stripe nor MAIL_SUPPRESS_KEY, so it closes all three. It also retires the ordering
+ * dependency rather than documenting around it: a rule that lives in a runbook is one an operator can violate
+ * with no way to detect the violation afterwards.
+ *
+ * THE SUPPRESSION MARKER IS NEVER TOUCHED, here or in eraseSubscriberMail. It must OUTLIVE the record so a later
+ * re-add cannot silently un-suppress someone who opted out. Deleting it would present as thoroughness AND as a
+ * clean run, because a deleted marker leaves nothing behind to notice.
+ */
+export async function eraseMailRecords({ githubId, stripe = null, env = process.env, fetchImpl = globalThis.fetch, kv: injectedKv = null } = {}) {
+  // kv is injectable so the erase PATH itself is testable, not just the scan helper. Production passes none.
+  const kv = injectedKv || kvRestShim({ env, fetchImpl });
   if (!kv) return { skipped: true, reason: 'CF_ACCOUNT_ID / CF_KV_NAMESPACE_ID / CF_API_TOKEN not set' };
+  const gid = String(githubId ?? '').trim();
+  if (!gid) return { skipped: true, reason: 'no github_id given' };
 
-  const counts = await eraseSubscriberMail(kv, hash);
-  return { ...counts, suppressionMarkerKept: true };
+  // Stripe is consulted OPPORTUNISTICALLY, for the customerId that lets the scan also match a stray
+  // customerId-only record, and for the email fallback below. Its absence is not fatal any more.
+  let customer = null;
+  let stripeNote = 'not consulted';
+  if (stripe) {
+    try {
+      customer = await stripe.findCustomerByGithubId(gid);
+      stripeNote = customer?.id ? 'customer found' : 'no customer found';
+    } catch (e) {
+      stripeNote = `lookup failed: ${e?.message || e}`; // non-fatal: the scan does not need it
+    }
+  }
+
+  const scan = await findMemberSubscriberHashes(kv, { githubId: gid, customerId: customer?.id ?? null });
+  if (!scan.ok) return { error: scan.error, scanned: scan.scanned, stripe: stripeNote };
+
+  const hashes = new Set(scan.hashes);
+
+  // BELT AND BRACES, not the primary path. If Stripe still has an address, add the hash it derives to. This
+  // catches a record the scan could not match on identity (none can be created today) and costs one hash.
+  let emailFallback = 'not used';
+  const secret = env.MAIL_SUPPRESS_KEY;
+  if (secret && customer?.email) {
+    const h = await mailHash(secret, customer.email);
+    if (h) {
+      emailFallback = hashes.has(h) ? 'agreed with the scan' : 'added a hash the scan did not match';
+      hashes.add(h);
+    }
+  }
+
+  const totals = { subscriber: 0, sends: 0, issues: 0 };
+  for (const h of hashes) {
+    const c = await eraseSubscriberMail(kv, h);
+    totals.subscriber += c.subscriber || 0;
+    totals.sends += c.sends || 0;
+    totals.issues += c.issues || 0;
+  }
+
+  return {
+    ...totals,
+    matched: hashes.size,
+    scanned: scan.scanned,
+    // A truncated scan means we did NOT see the whole keyspace, so this run is not proof of completeness.
+    incomplete: scan.truncated || undefined,
+    stripe: stripeNote,
+    emailFallback,
+    suppressionMarkerKept: true,
+  };
 }
 
 export function planErasure({ githubId, username } = {}) {

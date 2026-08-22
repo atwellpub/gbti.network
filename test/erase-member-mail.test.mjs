@@ -94,14 +94,21 @@ test('sow-166 erasure: THE ORDERING, in the orchestrator and not only the plan',
   assert.ok(order.indexOf('stripe-read') < order.indexOf('stripe-delete'), 'the address is read while the customer still exists');
 });
 
-test('sow-166 erasure: every refusal SAYS WHY, so "nothing to delete" never looks like "we could not tell"', async () => {
+// CONTRACT CHANGED 2026-08-22, and the ORIGINAL INTENT OF THESE TWO TESTS IS PRESERVED RATHER THAN DROPPED.
+// They asserted that every refusal says why, so "nothing to delete" never looks like "we could not tell". That
+// is still the rule. What changed is that four of the five old refusals ARE NO LONGER REFUSALS: erasure now
+// finds a member's records by scanning mail:subscriber:* for their githubId, which needs neither Stripe nor
+// MAIL_SUPPRESS_KEY. Those four cases used to mean a whole class of member could not be erased AT ALL while the
+// run reported a clean skip, which is the exact failure the original tests were written to prevent, arriving
+// one level up. So they now assert that erasure SUCCEEDS in those cases and that the audit still records which
+// paths were used.
+const MEMBER_REC = (githubId) => JSON.stringify({ hash: 'aaa', source: 'member', status: 'active', githubId, customerId: null, createdAt: 1, updatedAt: 1 });
+
+test('sow-166 erasure: the only remaining refusals are the ones nothing can work around, and they say why', async () => {
   const { fetchImpl } = fakeKvRest();
   const cases = [
-    ['no MAIL_SUPPRESS_KEY', { env: { ...ENV, MAIL_SUPPRESS_KEY: '' }, stripe: stripeWith({ id: 'c', email: ADDRESS }) }, /MAIL_SUPPRESS_KEY/],
-    ['no Stripe client', { env: ENV, stripe: null }, /Stripe client/],
-    ['customer already deleted', { env: ENV, stripe: stripeWith(null) }, /BEFORE the stripe step/],
-    ['customer has no email', { env: ENV, stripe: stripeWith({ id: 'c' }) }, /no email/],
     ['no CF creds', { env: { MAIL_SUPPRESS_KEY: 'k' }, stripe: stripeWith({ id: 'c', email: ADDRESS }) }, /CF_ACCOUNT_ID/],
+    ['no github_id', { githubId: '', env: ENV, stripe: stripeWith({ id: 'c', email: ADDRESS }) }, /github_id/],
   ];
   for (const [label, opts, expected] of cases) {
     const r = await eraseMailRecords({ githubId: '42', fetchImpl, ...opts });
@@ -110,12 +117,47 @@ test('sow-166 erasure: every refusal SAYS WHY, so "nothing to delete" never look
   }
 });
 
-test('sow-166 erasure: a Stripe failure is an ERROR, not a silent skip', async () => {
-  const { fetchImpl } = fakeKvRest();
+test('sow-166 erasure: the four OLD refusals now ERASE, and the audit says which paths ran', async () => {
+  // Each of these previously returned skipped:true and deleted nothing.
+  const cases = [
+    ['no MAIL_SUPPRESS_KEY', { env: { ...ENV, MAIL_SUPPRESS_KEY: '' }, stripe: stripeWith({ id: 'c', email: ADDRESS }) }],
+    ['no Stripe client', { env: ENV, stripe: null }],
+    ['customer already deleted', { env: ENV, stripe: stripeWith(null) }],
+    ['customer has no email', { env: ENV, stripe: stripeWith({ id: 'c' }) }],
+  ];
+  for (const [label, opts] of cases) {
+    const { fetchImpl, store } = fakeKvRest({ 'mail:subscriber:aaa': MEMBER_REC('42'), 'mail:suppress:aaa': '1' });
+    const r = await eraseMailRecords({ githubId: '42', fetchImpl, ...opts });
+    assert.notEqual(r.skipped, true, `${label}: must no longer refuse`);
+    assert.equal(r.matched, 1, `${label}: the record must be found by the scan`);
+    assert.equal(store.has('mail:subscriber:aaa'), false, `${label}: and actually deleted`);
+    assert.equal(store.has('mail:suppress:aaa'), true, `${label}: the suppression marker must SURVIVE`);
+    assert.equal(r.suppressionMarkerKept, true);
+  }
+});
+
+test('sow-166 erasure: a Stripe failure is SURFACED in the audit and no longer blocks erasure', async () => {
+  const { fetchImpl, store } = fakeKvRest({ 'mail:subscriber:aaa': MEMBER_REC('42') });
   const stripe = { async findCustomerByGithubId() { throw new Error('rate limited'); } };
   const r = await eraseMailRecords({ githubId: '42', stripe, env: ENV, fetchImpl });
-  assert.match(r.error, /rate limited/, 'a lookup failure must surface, or the audit records a clean run that deleted nothing');
-  assert.notEqual(r.skipped, true);
+  assert.match(r.stripe, /rate limited/, 'a lookup failure must still surface in the audit');
+  assert.equal(r.matched, 1, 'but the scan does not depend on Stripe, so erasure proceeds');
+  assert.equal(store.has('mail:subscriber:aaa'), false);
+});
+
+test('sow-166 erasure: a FAILED SCAN is an error and deletes nothing (the new "we could not tell")', async () => {
+  // The original concern, relocated to where it now lives. A scan that could not read the keyspace must never
+  // report matched:0, because for erasure "found none" and "could not look" are indistinguishable from outside
+  // and only one of them means the person's records are gone.
+  const { store } = fakeKvRest({ 'mail:subscriber:aaa': MEMBER_REC('42') });
+  const failing = async (url, opts = {}) => {
+    if (new URL(url).pathname.endsWith('/keys')) throw new Error('kv list unavailable');
+    return { ok: false, status: 500, text: async () => '' };
+  };
+  const r = await eraseMailRecords({ githubId: '42', stripe: null, env: ENV, fetchImpl: failing });
+  assert.ok(r.error, 'must surface the failure');
+  assert.equal(r.matched, undefined, 'and must not claim a match count');
+  assert.equal(store.has('mail:subscriber:aaa'), true, 'nothing may be deleted on a failed scan');
 });
 
 test('sow-166 shim: get honours the json type argument, exactly as a Workers KV binding does', async () => {
