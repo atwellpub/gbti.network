@@ -91,6 +91,7 @@ import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phas
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
+import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
 import { compileWeeklyIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
 import { renderIssue } from '../../membership/mail-render.mjs'; // SOW-166: the send-ready template (injected into the drain)
@@ -1477,6 +1478,16 @@ export default {
       // was granted on the rider that the opt-out always works.
       if (pathname === '/mail/unsubscribe') {
         return await handleUnsubscribe(request, env);
+      }
+
+      // SOW-166: anonymous digest capture. subscribe writes a pending double-opt-in and sends a confirmation
+      // email (it enrolls nobody); confirm promotes the pending opt-in into an active subscriber. Both are
+      // anonymous (no cookie/bearer) and fail-closed: unprovisioned dependencies enroll nobody.
+      if (pathname === '/mail/subscribe') {
+        return await handleSubscribe(request, env);
+      }
+      if (pathname === '/mail/confirm') {
+        return await handleConfirm(request, env);
       }
 
       return json({ error: 'not_found' }, 404);
