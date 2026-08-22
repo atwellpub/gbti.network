@@ -115,6 +115,9 @@ test('postal address renders ONLY when the drain supplies ctx.postalAddress; the
   // Permanent contract: no address on the default render path. This is what keeps the real value, which lives
   // only in the MAIL_POSTAL_ADDRESS worker secret, off any output the drain did not explicitly ask for.
   const bare = renderIssue(issueFixture(), {});
+  // Anchor on the FOOTER, because that is where an address would appear. A header-side anchor (the brand
+  // name) passes even if the whole footer failed to render, which would make the guard below vacuous.
+  assert.match(bare.html, /because you are on the GBTI Network list/, 'the footer must render for the no-address guard to mean anything');
   assert.doesNotMatch(bare.html, /PO Box|Suite|Ste\.|\bLLC\b/i, 'no address text on the default path');
   // A supplied address renders in the html footer and the text alternative. The fixture is an OBVIOUSLY FAKE
   // address on purpose: the real value must never appear in a committed file, a comment, or a commit message.
@@ -207,6 +210,8 @@ test('SECURITY: the row shows NO blurb when the item has a body but no blurb (no
     { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1, body: 'SECRET BODY TEXT', encryptedBody: 'CIPHERTEXT' },
   ] }] };
   const { html, text } = renderIssue(issue, {});
+  assert.match(html, /\/p\//, 'the row must render for these leak guards to mean anything');
+  assert.match(text, /\/p\//, 'and the text alternative too');
   assert.doesNotMatch(html, /SECRET BODY TEXT/, 'the renderer never reads a body field');
   assert.doesNotMatch(html, /CIPHERTEXT/, 'and never reads a ciphertext field');
   assert.doesNotMatch(text, /SECRET BODY TEXT/);
@@ -221,6 +226,7 @@ test('a thumbnail renders when the item carries a thumb; absent means no image; 
   const noThumb = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
     { kind: 'article', title: 'T', url: '/p/', authorName: 'A', date: 1 },
   ] }] }, {});
+  assert.match(noThumb.html, /\/p\//, 'the row must render for the no-thumbnail guard to mean anything');
   assert.doesNotMatch(noThumb.html, /width="96"/, 'no thumbnail column when the item carries no thumb');
 
   const badThumb = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
@@ -310,6 +316,9 @@ test('CAN-SPAM 4: the subject describes editorial content and matches no promoti
 
 test('CAN-SPAM 5: no third-party sponsor block renders (permanent under the position)', () => {
   const { html } = renderIssue(issueFixture(), {});
+  // Footer-anchored for the same reason: a sponsor block would sit in the chrome, so proving the header
+  // rendered proves nothing about the region this guard covers.
+  assert.match(html, /because you are on the GBTI Network list/, 'the footer must render for this absence guard to mean anything');
   assert.doesNotMatch(html, /sponsor/i);
 });
 
