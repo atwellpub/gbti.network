@@ -230,11 +230,30 @@ function incompleteScan(listed, prefix) {
 }
 
 /** PUT a KV value via the REST API. Missing creds = a reported no-op. */
-export async function putKvValue({ key, value, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+/**
+ * Write one KV value. **REFUSES LOUDLY BY DEFAULT when the Cloudflare credentials are absent.**
+ *
+ * It used to return `{written: false, reason}` instead, which is the right shape for a reporting step and the
+ * wrong one for every caller whose NEXT ACTION assumes the write happened. That made safety a property of the
+ * CALLER: eight erasure writers in this file are safe only because each independently returns before reaching a
+ * write when the creds are missing, and they do not even share a mechanism (seven gate on a prefix scan's
+ * `available`, `minimizeCouponGrant` gates on a strict single-key read). Nothing enforced it, and
+ * `await putKvValue(...)` looks identical at a guarded and an unguarded call site, so a ninth writer copying an
+ * existing line would inherit the shape and not the protection. "All current callers are safe" was a fact about
+ * today, not a property of the code (OnboardingMaster, 2026-08-22).
+ *
+ * So the guard is now the default and tolerance is what you write on purpose. Pass `allowMissingCreds: true`
+ * only where a no-op is genuinely correct AND the return is inspected, e.g. a reporting step that prints
+ * "SKIPPED (no creds)". A genuine PUT failure has always thrown and still does.
+ */
+export async function putKvValue({ key, value, env = process.env, fetchImpl = globalThis.fetch, allowMissingCreds = false } = {}) {
   const accountId = env.CF_ACCOUNT_ID;
   const namespaceId = env.CF_KV_NAMESPACE_ID;
   const apiToken = env.CF_API_TOKEN;
-  if (!accountId || !namespaceId || !apiToken) return { written: false, reason: 'CF creds not set' };
+  if (!accountId || !namespaceId || !apiToken) {
+    if (allowMissingCreds) return { written: false, reason: 'CF creds not set' };
+    throw new Error(`KV put refused for ${key}: CF_ACCOUNT_ID / CF_KV_NAMESPACE_ID / CF_API_TOKEN not set. Pass allowMissingCreds:true only if a silent no-op is correct here and you inspect the result.`);
+  }
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`;
   const res = await fetchImpl(url, { method: 'PUT', headers: { Authorization: `Bearer ${apiToken}` }, body: typeof value === 'string' ? value : JSON.stringify(value) });
   if (!res || !res.ok) throw new Error(`KV put failed: ${res ? res.status : 'no response'}`);

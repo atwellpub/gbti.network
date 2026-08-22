@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   listKvByPrefix, eraseShareVotes, eraseNewsOpens, eraseContentOpens,
   scrubConversionSnapshots, minimizeRedeemedInvites, eraseReverseFollows, runErasure,
-  readKvValueStrict, kvRestShim, findMemberSubscriberHashes, eraseCouponRedemptions, minimizeCouponGrant,
+  readKvValueStrict, kvRestShim, findMemberSubscriberHashes, eraseCouponRedemptions, minimizeCouponGrant, putKvValue,
 } from '../scripts/lib/erase-member.mjs';
 import { deriveAuditStatus } from '../scripts/lib/erase-audit.mjs';
 import { listCouponRedemptions } from '../scripts/lib/coupon-grants.mjs';
@@ -328,4 +328,55 @@ test('the grant fold still gets CONTENT-filtered redemptions, since its disposit
   const listed = await listCouponRedemptions({ env: CF, fetchImpl });
   assert.deepEqual(listed.redemptions.map((r) => r.code), ['GOOD'], 'the fold still sees only usable records');
   assert.equal(listed.matches.length, 2, 'erasure sees both, because both are records this member has');
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// putKvValue: the guard is the DEFAULT, tolerance is opt-in. Safety used to be a property of the caller, and
+// every erasure writer re-derived it independently via two different mechanisms, so a new writer inherited
+// nothing and an unguarded call site looked identical to a guarded one.
+// ---------------------------------------------------------------------------------------------------------
+
+test('putKvValue REFUSES LOUDLY with no creds, so a caller cannot silently skip a write it assumes happened', async () => {
+  await assert.rejects(
+    () => putKvValue({ key: 'k', value: 'v', env: {} }),
+    /KV put refused for k/,
+    'a write that did not happen must not look like a write that did',
+  );
+});
+
+test('putKvValue still allows an explicit no-op for a reporting step that inspects the result', async () => {
+  const r = await putKvValue({ key: 'k', value: 'v', env: {}, allowMissingCreds: true });
+  assert.deepEqual([r.written, r.reason], [false, 'CF creds not set']);
+});
+
+test('putKvValue is unchanged on the paths that matter: it writes with creds, and throws on a failed PUT', async () => {
+  const ok = await putKvValue({ key: 'k', value: 'v', env: CF, fetchImpl: async () => ({ ok: true }) });
+  assert.deepEqual([ok.written, ok.key], [true, 'k']);
+  await assert.rejects(
+    () => putKvValue({ key: 'k', value: 'v', env: CF, fetchImpl: async () => ({ ok: false, status: 500 }) }),
+    /KV put failed/,
+    'a genuine PUT failure threw before this change and must still throw',
+  );
+});
+
+test('DRIFT: every erasure writer is reachable only behind a creds guard, whichever mechanism it uses', async () => {
+  // The invariant is re-derived per function and the two derivations do not share a mechanism: most gate on a
+  // prefix scan's `available`, minimizeCouponGrant gates on a strict single-key read. This asserts the PROPERTY
+  // rather than either mechanism, so a ninth writer that invents a third way still has to satisfy it.
+  const writers = [
+    ['eraseReverseFollows', eraseReverseFollows],
+    ['eraseShareVotes', eraseShareVotes],
+    ['eraseNewsOpens', eraseNewsOpens],
+    ['eraseContentOpens', eraseContentOpens],
+    ['scrubConversionSnapshots', scrubConversionSnapshots],
+    ['minimizeRedeemedInvites', minimizeRedeemedInvites],
+    ['eraseCouponRedemptions', eraseCouponRedemptions],
+    ['minimizeCouponGrant', minimizeCouponGrant],
+  ];
+  const boom = async () => { throw new Error('no call should reach the network with creds absent'); };
+  for (const [name, fn] of writers) {
+    const r = await fn({ githubId: '9', env: { COUPON_LOCK_KEY: 'a'.repeat(64) }, fetchImpl: boom });
+    assert.ok(r && (r.skipped === true || r.incomplete === true),
+      `${name} must report rather than proceed when the CF creds are absent, got ${JSON.stringify(r)}`);
+  }
 });
