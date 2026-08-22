@@ -8,6 +8,7 @@ import {
   NOTIFY_EVENT_FOR_TYPE, eventForType, notificationIssueId, buildNotificationIssue, selectEmailRecipients,
 } from '../membership/mail-notify.mjs';
 import { renderNotificationEmail } from '../membership/mail-notify-render.mjs';
+import { renderMailIssue } from '../membership/mail-render-dispatch.mjs';
 
 // ---------- event mapping ----------
 
@@ -170,4 +171,22 @@ test('renderNotificationEmail: a non-http(s) url is dropped to plain text, never
   const { html } = renderNotificationEmail(evil, ctx);
   assert.ok(!html.includes('javascript:alert(1)'), 'an unsafe url never becomes an href');
   assert.ok(html.includes('Hello World'), 'the title still renders as plain text');
+});
+
+// ---------- renderMailIssue: the production dispatcher, BOTH branches through the REAL renderers ----------
+// This is the exact function workers/signup/index.mjs mailDrainDeps injects, so both branches are covered by the
+// line that actually runs (QAmaster gap, 2026-08-22): the notification branch AND the digest branch (which nothing
+// exercised before, since the e2e only drives a notification issue).
+
+test('renderMailIssue routes a notification issue to the follow template', () => {
+  const { subject } = renderMailIssue(baseIssue, ctx);
+  assert.match(subject, /Alice published a new article: Hello World/);
+});
+
+test('renderMailIssue routes a non-notification (digest) issue to the digest renderer', () => {
+  // A minimal frozen digest issue (empty layout is a valid empty week); the digest renderer owns the subject.
+  const digestIssue = { issueId: 'i1', layout: [], counts: {}, generatedAt: 0 };
+  const { subject } = renderMailIssue(digestIssue, ctx);
+  assert.match(subject, /digest/i, 'the digest branch renders the weekly digest, not the follow template');
+  assert.ok(!/published a new/.test(subject), 'a digest issue never renders the follow subject');
 });

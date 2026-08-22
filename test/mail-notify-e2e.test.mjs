@@ -13,7 +13,7 @@ import { drainMailIssue } from '../workers/signup/mail-drain.mjs';
 import { readPendingIndex, getSend } from '../workers/signup/mail-store.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
 import { subscriberKey } from '../membership/mail-suppress.mjs';
-import { renderNotificationEmail } from '../membership/mail-notify-render.mjs';
+import { renderMailIssue } from '../membership/mail-render-dispatch.mjs';
 
 const at = (t) => () => t;
 
@@ -51,12 +51,8 @@ function readFileFor(rel) {
   return null;
 }
 
-// The kind-dispatching renderer the Worker injects (workers/signup/index.mjs mailDrainDeps): a notification issue
-// renders through the real follow template; any other kind through a stub digest renderer. Mirroring it here proves
-// the seam, since the closure itself is not exported.
-const renderByKind = (issue, ctx) => (issue && issue.kind === 'notification'
-  ? renderNotificationEmail(issue, ctx)
-  : { subject: 'WEEKLY DIGEST', html: '<p>digest</p>', text: 'digest' });
+// The drain renders through renderMailIssue -- the EXACT dispatcher workers/signup/index.mjs mailDrainDeps
+// injects in production (exported for this reason, so the tested line is the production line, not a hand-copy).
 
 const resolveAddress = async (sub) => (sub && sub.hash ? `${sub.hash}@example.com` : null);
 const OPEN = { MAIL_UNSUB_KEY: 'test-unsub-signing-key', PUBLIC_BASE_URL: 'https://signup.gbti.network', MAIL_SEND_UNRESTRICTED: 'true' };
@@ -87,11 +83,11 @@ test('E2E: fan-out enqueues only the email-opted-in mailable follower, and the d
   const issueId = 'notify:post:alice:x';
   assert.deepEqual(await readPendingIndex(kv, issueId), ['hA'], 'only follower 11 (hA) is pending; 22 opted out');
 
-  // DRAIN through the UNCHANGED engine with the kind-dispatching renderer.
+  // DRAIN through the UNCHANGED engine with the EXACT production dispatcher (renderMailIssue).
   const sender = makeSender();
   const r = await drainMailIssue(OPEN, {
     kv, issueId, now: at(1_000_000), cap: 10, dailyCap: 1000, monthlyCap: 30000,
-    resolveAddress, renderIssue: renderByKind, sendEmail: sender.sendEmail, from: 'notify@gbti.network',
+    resolveAddress, renderIssue: renderMailIssue, sendEmail: sender.sendEmail, from: 'notify@gbti.network',
   });
 
   assert.equal(r.sent, 1);
@@ -101,7 +97,15 @@ test('E2E: fan-out enqueues only the email-opted-in mailable follower, and the d
   assert.match(msg.subject, /Alice Example published a new article: Hello World/, 'the FOLLOW template rendered, not the digest');
   assert.ok(!msg.html.includes('SECRET-MEMBERS-BODY'), 'the article body never reaches the inbox');
   assert.ok(!msg.text.includes('SECRET-MEMBERS-BODY'));
-  assert.ok(msg.html.toLowerCase().includes('unsubscribe'), 'one-click unsubscribe present');
+  // The four-part unsubscribe assertion (mirrors the digest SEAM test): the drain MINTS the per-recipient URL
+  // and the follow template has to PLACE it, so a template edit is exactly what could break it. The word AND the
+  // routed URL carrying THIS recipient's hash, in BOTH html and text, plus a real signed token.
+  for (const [part, name] of [[msg.html, 'html'], [msg.text, 'text']]) {
+    assert.ok(part.includes(`${OPEN.PUBLIC_BASE_URL}/mail/unsubscribe?h=hA`), `${name} carries the routed unsubscribe URL with this recipient's hash`);
+    assert.match(part, /unsubscribe/i, `${name} names unsubscribe`);
+  }
+  const tok = msg.text.match(/[?&]t=([^&\s"<]+)/);
+  assert.ok(tok && tok[1].length > 10, 'a real signed unsubscribe token is present, not a bare url');
   assert.equal((await getSend(kv, issueId, 'hA')).status, 'sent');
   assert.equal((await readPendingIndex(kv, issueId)).length, 0);
 });
@@ -144,8 +148,35 @@ test('E2E: the send gate stays fail-closed -- an enqueued notification sends NOT
   // CLOSED gate: MAIL_UNSUB config present, but no MAIL_SEND_UNRESTRICTED / allowlist.
   const r = await drainMailIssue({ MAIL_UNSUB_KEY: 'k', PUBLIC_BASE_URL: 'https://signup.gbti.network' }, {
     kv, issueId: 'notify:post:alice:x', now: at(1_000_000), cap: 10, dailyCap: 1000, monthlyCap: 30000,
-    resolveAddress, renderIssue: renderByKind, sendEmail: sender.sendEmail, from: 'notify@gbti.network',
+    resolveAddress, renderIssue: renderMailIssue, sendEmail: sender.sendEmail, from: 'notify@gbti.network',
   });
   assert.equal(r.sent, 0, 'the notification path inherits the digest send gate, fail-closed');
   assert.equal(sender.sent.length, 0);
+});
+
+test('E2E READ-ERROR RESILIENCE: an unreadable subscriber record is COUNTED and skipped, the readable one still enqueues', async () => {
+  // kvRestShim.get now THROWS on an unreadable key (SecurityMaster 2026-08-22). A dropped read here would be a
+  // silently-missed recipient, so the fan-out must count it, surface it, and still deliver to everyone readable.
+  const base = makeKV();
+  await base.put('followers:9001', JSON.stringify({ followers: [{ githubId: '11', addedAt: 1 }, { githubId: '22', addedAt: 1 }], updatedAt: 1 }));
+  await seedMember(base, { hash: 'hA', githubId: '11' });
+  await seedMember(base, { hash: 'hB', githubId: '22' });
+  await base.put('prefs:11', JSON.stringify({ notify: { article: { email: true } } }));
+  await base.put('prefs:22', JSON.stringify({ notify: { article: { email: true } } }));
+
+  // Wrap get so reading follower 22's subscriber record THROWS (a transient KV read failure), like the real shim.
+  const throwingKv = { ...base, async get(key, type) {
+    if (key === subscriberKey('hB')) throw new Error('KV read failed for mail:subscriber:hB: 500');
+    return base.get(key, type);
+  } };
+
+  const res = await enqueueNotifications({
+    argv: ['--apply', '--added', 'members/alice/posts/x/index.md'],
+    env: { SITE_ORIGIN: 'https://gbti.network' },
+    deps: { kv: throwingKv, readFile: readFileFor },
+    now: at(1_000_000),
+  });
+  assert.equal(res.readErrors, 1, 'the unreadable subscriber record is COUNTED, not silently dropped');
+  assert.equal(res.notified, 1, 'the readable, opted-in follower (11) is still notified');
+  assert.deepEqual(await readPendingIndex(base, 'notify:post:alice:x'), ['hA'], 'follower 11 enqueued; 22 skipped fail-closed pending a re-run');
 });

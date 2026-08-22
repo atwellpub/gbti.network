@@ -95,8 +95,7 @@ import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: on
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
 import { compileWeeklyIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
-import { renderIssue } from '../../membership/mail-render.mjs'; // SOW-166: the send-ready template (injected into the drain)
-import { renderNotificationEmail } from '../../membership/mail-notify-render.mjs'; // SOW-186 phase 4: the follow-notification template (dispatched by issue.kind at the seam below)
+import { renderMailIssue } from '../../membership/mail-render-dispatch.mjs'; // SOW-166 digest + SOW-186 phase 4 follow template, routed by issue.kind (exported so this exact dispatcher is the line under test)
 import { resolveSubscriberEmail } from '../../membership/mail-address.mjs'; // SOW-166: anon decrypt / member-from-Stripe address resolution
 import { createResendClient } from '../../clients/resend.mjs'; // SOW-166: transactional send (injected into the drain)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
@@ -792,14 +791,12 @@ function mailDrainDeps(env) {
   };
   // SOW-186 phase 4: the ONLY notification-delivery change to the Worker. The mail drain reads a single renderer
   // through this injected seam and never a kind-specific field, so kind dispatch belongs HERE at the composition
-  // root, not in the drain. A notification-kind issue renders through the lean follow template; every other kind
-  // (the weekly digest) renders through the unchanged renderIssue. drainMail / mail-drain.mjs are untouched, so a
-  // notification issue rides the exact same fail-closed send gate, rate budget, suppression re-check and one-click
-  // unsubscribe as the digest.
-  const renderByKind = (issue, ctx) => (issue && issue.kind === 'notification'
-    ? renderNotificationEmail(issue, ctx)
-    : renderIssue(issue, ctx));
-  return { resolveAddress, renderIssue: renderByKind, sendEmail };
+  // root, not in the drain. renderMailIssue routes a notification-kind issue to the lean follow template and every
+  // other kind (the weekly digest) to the unchanged digest renderer. drainMail / mail-drain.mjs are untouched, so
+  // a notification rides the exact same fail-closed send gate, rate budget, suppression re-check and one-click
+  // unsubscribe as the digest. The dispatcher is a SHARED, EXPORTED function so this production line is the one the
+  // tests exercise, not a hand-copy that can drift (QAmaster, 2026-08-22).
+  return { resolveAddress, renderIssue: renderMailIssue, sendEmail };
 }
 
 /**

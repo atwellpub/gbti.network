@@ -105,21 +105,32 @@ function makeAuthorNameResolver(readFile) {
  *  which mail-subscriber.mjs requires to carry githubId). This is the github_id -> hash resolution the fan-out
  *  needs; it is also why the anon path (no github_id) gets no follow-notification (correct: an anon subscriber
  *  is not a member and follows no one). The drain re-checks suppression + resolves the address per recipient, so
- *  including a member here is safe even if they later unsubscribe or have no address. */
+ *  including a member here is safe even if they later unsubscribe or have no address.
+ *
+ *  READ ERRORS ARE COUNTED, NOT SWALLOWED (SecurityMaster, 2026-08-22). kvRestShim.get now THROWS on an
+ *  UNREADABLE key (null only for a genuine 404). A dropped subscriber record here means a follower silently
+ *  misses their email, so a per-record read error is CAUGHT, COUNTED and surfaced (`readErrors`), and the scan
+ *  continues rather than either aborting the whole fan-out or dropping the record in silence. A missing key
+ *  (null) is a genuine absence and is skipped normally. Recovery is idempotent: a re-run of the Action re-scans
+ *  and, because the issueId is deterministic and enqueueIssue is additive per (issueId, hash), adds any recipient
+ *  that becomes readable to the SAME issue's pending index. A `list` failure still throws (a scan that cannot
+ *  enumerate at all is a hard failure, not a partial result). */
 async function buildMemberHashMap(kv) {
   const map = new Map();
+  let readErrors = 0;
   let cursor;
   for (let page = 0; page < 100000; page++) {
     const res = await kv.list({ prefix: MAIL_SUBSCRIBER_PREFIX, cursor });
     for (const { name } of res.keys ?? []) {
-      const rec = await kv.get(name, 'json');
+      let rec;
+      try { rec = await kv.get(name, 'json'); } catch { readErrors++; continue; }
       if (rec && rec.source === 'member' && rec.githubId && rec.hash) map.set(String(rec.githubId), String(rec.hash));
     }
     if (res.list_complete) break;
     cursor = res.cursor;
     if (!cursor) break;
   }
-  return map;
+  return { map, readErrors };
 }
 
 /** Resolve the mailable, email-opted-in recipient hashes for one published item. Reads the reverse follower
@@ -128,22 +139,34 @@ async function buildMemberHashMap(kv) {
 async function resolveRecipients(kv, item, { reverse, hashById }) {
   // reverseMembersIndex returns a Map keyed by the LOWERCASED username (scripts/lib/discord-mention.mjs).
   const authorId = reverse.get(String(item.author).toLowerCase());
-  if (!authorId) return { recipients: [], reason: 'author not in members-index (cannot resolve followers)' };
-  const fids = followerIds(await kv.get(FOLLOWERS_KEY(String(authorId)), 'json'));
-  if (!fids.length) return { recipients: [], reason: 'no followers' };
+  if (!authorId) return { recipients: [], reason: 'author not in members-index (cannot resolve followers)', readErrors: 0 };
+  // The followers-index read: an UNREADABLE index means this item's whole audience is unknown, so notify nobody
+  // (fail-closed) and REPORT it, rather than treat an unreadable index as "no followers". A genuine 404 is []
+  // (an author nobody follows), which is a real empty audience, not an error.
+  let fids;
+  try { fids = followerIds(await kv.get(FOLLOWERS_KEY(String(authorId)), 'json')); }
+  catch { return { recipients: [], reason: 'followers index unreadable (read error), notified nobody this run', readErrors: 1 }; }
+  if (!fids.length) return { recipients: [], reason: 'no followers', readErrors: 0 };
 
   const perFollower = [];
+  let readErrors = 0;
   for (const fid of fids) {
     const hash = hashById.get(String(fid));
     if (!hash) continue; // not a mailable member subscriber
-    const follows = normalizeFollows(await kv.get(FOLLOWS_KEY(String(fid)), 'json'));
+    // An unreadable follows/prefs record is FAIL-CLOSED per follower: skip them (never email on an unreadable
+    // preference) and count it. A re-run picks them up once readable (idempotent enqueue).
+    let follows, prefs;
+    try {
+      follows = normalizeFollows(await kv.get(FOLLOWS_KEY(String(fid)), 'json'));
+      prefs = normalizePrefs(await kv.get(PREFS_KEY(String(fid)), 'json'));
+    } catch { readErrors++; continue; }
     const entry = follows.following.find((e) => e.username === item.author);
     const followNotify = entry && entry.notify ? entry.notify : undefined;
-    const globalNotify = normalizePrefs(await kv.get(PREFS_KEY(String(fid)), 'json')).notify;
-    perFollower.push({ githubId: fid, mailHash: hash, followNotify, globalNotify });
+    perFollower.push({ githubId: fid, mailHash: hash, followNotify, globalNotify: prefs.notify });
   }
   const recipients = selectEmailRecipients(perFollower, { event: item.event, authorId });
-  return { recipients, reason: recipients.length ? null : 'no follower has the email channel on' };
+  const reason = recipients.length ? null : (readErrors ? 'no resolvable follower has the email channel on' : 'no follower has the email channel on');
+  return { recipients, reason, readErrors };
 }
 
 export async function main({ argv = process.argv.slice(2), root = ROOT, env = process.env, fetchImpl = globalThis.fetch, deps = {}, now = Date.now } = {}) {
@@ -200,13 +223,15 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
   }
 
   const reverse = reverseMembersIndex(loadMembersIndex(readFile));
-  const hashById = await buildMemberHashMap(kv);
+  const { map: hashById, readErrors: scanReadErrors } = await buildMemberHashMap(kv);
 
   let enqueued = 0;
   let notified = 0;
+  let readErrors = scanReadErrors;
   const items = [];
   for (const c of candidates) {
-    const { recipients, reason } = await resolveRecipients(kv, c, { reverse, hashById });
+    const { recipients, reason, readErrors: itemReadErrors } = await resolveRecipients(kv, c, { reverse, hashById });
+    readErrors += itemReadErrors || 0;
     const issue = buildNotificationIssue({
       type: c.type, author: c.author, slug: c.slug, title: c.title,
       authorName: c.authorName, url: c.url, generatedAt: now(),
@@ -227,9 +252,12 @@ export async function main({ argv = process.argv.slice(2), root = ROOT, env = pr
     items.push({ issueId: issue.issueId, author: c.author, slug: c.slug, type: c.type, recipients: recipients.length });
   }
 
+  // Surface unreadable records LOUDLY rather than let a partial scan read as a clean, complete one (the failure
+  // mode SecurityMaster flagged: a dropped read is a silently-missed recipient). Recoverable on re-run.
+  if (readErrors) console.log(`WARNING: ${readErrors} KV record(s) unreadable this run; those followers were skipped (fail-closed) and are picked up on the next run (idempotent enqueue).`);
   if (!apply) console.log('\nDry-run only. Re-run with --apply to enqueue notification issues to KV.');
   else console.log(`enqueued ${enqueued} send record(s) across ${items.filter((i) => i.recipients).length} issue(s); the drain sends them behind the fail-closed gate.`);
-  return { enqueued, notified, items };
+  return { enqueued, notified, items, readErrors };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
