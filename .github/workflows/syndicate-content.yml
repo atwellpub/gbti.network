@@ -71,3 +71,24 @@ jobs:
           SITE_ORIGIN: "https://gbti.network"
           # Optional JSON { "github_login": "discord_user_id" } for staff/grandfathered members not in Stripe.
           DISCORD_MENTION_OVERRIDES: ${{ secrets.DISCORD_MENTION_OVERRIDES }}
+
+      # SOW-186 phase 4: follow-the-author EMAIL fan-out. Same publish transition (SYNDICATE_BEFORE..AFTER), a
+      # separate concern from syndication, so a separate step. For each just-published post/product/prompt with a
+      # PUBLIC page (leak-gated on publicUrlFor; members-only / Mode A and shares are skipped), it resolves the
+      # followers who turned the email channel on and are mailable, and enqueues one eager notification mail issue
+      # per item into the SAME SIGNUP_KV the Worker drains. It SENDS NOTHING: the drain releases sends behind the
+      # fail-closed send gate + rate budget. Needs NO Stripe and NO MAIL_SUPPRESS_KEY (a recipient's mail hash
+      # comes from their own member subscriber record). continue-on-error so a notification hiccup can NEVER block
+      # content syndication (the step above already ran); the drain and reconcile are the backstops. Fail-closed
+      # and dormant until members opt in and the owner opens the send gate.
+      - name: Enqueue follow-the-author notifications (apply)
+        continue-on-error: true
+        run: node scripts/enqueue-notifications.mjs --apply
+        env:
+          SYNDICATE_ADDED: ${{ github.event.inputs.added }}
+          SYNDICATE_BEFORE: ${{ github.event.before }}
+          SYNDICATE_AFTER: ${{ github.sha }}
+          CF_ACCOUNT_ID: "d42b12e969229c5187ad0f7289536487"
+          CF_KV_NAMESPACE_ID: "49432379e11844ac81b6fdaf22d3937a"
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          SITE_ORIGIN: "https://gbti.network"

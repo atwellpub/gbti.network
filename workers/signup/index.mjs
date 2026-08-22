@@ -96,6 +96,7 @@ import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-16
 import { compileWeeklyIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
 import { renderIssue } from '../../membership/mail-render.mjs'; // SOW-166: the send-ready template (injected into the drain)
+import { renderNotificationEmail } from '../../membership/mail-notify-render.mjs'; // SOW-186 phase 4: the follow-notification template (dispatched by issue.kind at the seam below)
 import { resolveSubscriberEmail } from '../../membership/mail-address.mjs'; // SOW-166: anon decrypt / member-from-Stripe address resolution
 import { createResendClient } from '../../clients/resend.mjs'; // SOW-166: transactional send (injected into the drain)
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
@@ -789,7 +790,16 @@ function mailDrainDeps(env) {
     if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
     return createResendClient({ apiKey: env.RESEND_API_KEY }).sendEmail(message);
   };
-  return { resolveAddress, renderIssue, sendEmail };
+  // SOW-186 phase 4: the ONLY notification-delivery change to the Worker. The mail drain reads a single renderer
+  // through this injected seam and never a kind-specific field, so kind dispatch belongs HERE at the composition
+  // root, not in the drain. A notification-kind issue renders through the lean follow template; every other kind
+  // (the weekly digest) renders through the unchanged renderIssue. drainMail / mail-drain.mjs are untouched, so a
+  // notification issue rides the exact same fail-closed send gate, rate budget, suppression re-check and one-click
+  // unsubscribe as the digest.
+  const renderByKind = (issue, ctx) => (issue && issue.kind === 'notification'
+    ? renderNotificationEmail(issue, ctx)
+    : renderIssue(issue, ctx));
+  return { resolveAddress, renderIssue: renderByKind, sendEmail };
 }
 
 /**
