@@ -100,3 +100,33 @@ test('claimForMember converts anon -> member, drops the ciphertext, writes githu
   assert.equal(claimForMember(anon, { githubId: '' }), anon);
   assert.equal(claimForMember(null, { githubId: '1' }), null);
 });
+
+test('a member record REQUIRES githubId, because erasure finds member records by scanning for it', () => {
+  // Erasure cannot resolve an address through Stripe when the Customer is gone or has no email, so it scans
+  // mail:subscriber:* and matches githubId. A member record carrying only customerId would send mail
+  // perfectly well and be invisible to that scan, so the deletion request would silently not delete.
+  assert.throws(
+    () => buildSubscriber({ hash: 'h', source: 'member', customerId: 'cus_123' }),
+    /requires githubId/,
+    'customerId alone is no longer enough',
+  );
+
+  // The positive half, so this test cannot pass by rejecting everything.
+  const ok = buildSubscriber({ hash: 'h', source: 'member', githubId: '42' }, { now: () => 0 });
+  assert.equal(ok.githubId, '42');
+  assert.equal(ok.emailEnc, null, 'and a member record still never stores the address');
+
+  // customerId stays a legitimate OPTIONAL extra alongside githubId.
+  const both = buildSubscriber({ hash: 'h', source: 'member', githubId: '42', customerId: 'cus_123' }, { now: () => 0 });
+  assert.equal(both.customerId, 'cus_123');
+  assert.equal(both.githubId, '42');
+});
+
+test('the reader stays permissive where the writer is strict, on purpose', () => {
+  // A stored customerId-only member record must remain READABLE. A normalizer that rejected it would make
+  // it invisible to every reader while it went on existing in KV, which hides the problem instead of
+  // preventing it. Prevention is the writer's job and the test above proves the writer does it.
+  const stray = normalizeSubscriber({ hash: 'h', source: 'member', customerId: 'cus_123', createdAt: 1, updatedAt: 1 });
+  assert.ok(stray, 'still readable, so it can still be found and removed');
+  assert.equal(stray.customerId, 'cus_123');
+});

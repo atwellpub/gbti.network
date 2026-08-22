@@ -24,6 +24,14 @@
 //      Set it to the evidence: a delivered message id, a clicked link, a read-back suppression marker.
 //
 // The dry run needs neither gate and is the whole point until the owner is back to provision the key.
+//
+// ONE INVARIANT THIS SCRIPT OWES THE REST OF THE SYSTEM: every `source: 'member'` subscriber record it
+// writes carries `githubId`. Erasure cannot resolve a member's address through Stripe once their Customer is
+// gone or carries no email, so it finds their records by scanning `mail:subscriber:*` and matching that
+// field. A record without it would send mail perfectly well and be invisible to deletion. This is now
+// enforced by buildSubscriber itself rather than by this file remembering to do it, but it is stated here
+// too because THIS is the code that writes at population scale, and a future edit here is the likeliest
+// place for it to be quietly dropped.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

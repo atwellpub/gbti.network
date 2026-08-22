@@ -41,9 +41,22 @@ const num = (v) => {
 
 /**
  * Build a canonical, active subscriber record. PURE. Requires the hash and a resolvable address path: an
- * 'anon' record must carry `emailEnc`; a 'member' record must carry `githubId` (or `customerId`). A record
- * with no way to resolve an address is useless and is rejected. `emailEnc` is opaque ciphertext; passing a raw
- * address in any other field is structurally impossible (there is no such field).
+ * 'anon' record must carry `emailEnc`; a 'member' record must carry `githubId`. A record with no way to
+ * resolve an address is useless and is rejected. `emailEnc` is opaque ciphertext; passing a raw address in
+ * any other field is structurally impossible (there is no such field).
+ *
+ * `githubId` IS REQUIRED ON A MEMBER RECORD, AND IT IS AN ERASURE REQUIREMENT RATHER THAN A SHAPE
+ * PREFERENCE. Erasure cannot resolve a member's address through Stripe when their Customer is gone or
+ * carries no email, so it finds their subscriber records by scanning `mail:subscriber:*` and matching
+ * `githubId`. A member record with only a `customerId` would be INVISIBLE to that scan, and nothing would
+ * ever flag it: the write succeeds, the record sends mail perfectly well, and the gap surfaces only as a
+ * deletion request that silently does not delete, possibly years later.
+ *
+ * This previously accepted `githubId` OR `customerId`. Every caller passed `githubId` anyway, so the
+ * guarantee rested on three call sites happening to agree rather than on the schema, and the next person to
+ * add a fourth had no way to know it was load-bearing. Tightened once it was confirmed that no caller used
+ * the customerId-only branch (found by @QAmaster, routed by @SowMaster, callers re-enumerated at origin
+ * before the change). `customerId` remains an OPTIONAL extra on a member record.
  */
 export function buildSubscriber(input = {}, { now = Date.now } = {}) {
   const hash = trimOrNull(input.hash);
@@ -54,7 +67,7 @@ export function buildSubscriber(input = {}, { now = Date.now } = {}) {
   const githubId = trimOrNull(input.githubId);
 
   if (source === 'anon' && !emailEnc) throw new SubscriberError('an anonymous subscriber requires emailEnc');
-  if (source === 'member' && !githubId && !customerId) throw new SubscriberError('a member subscriber requires githubId or customerId');
+  if (source === 'member' && !githubId) throw new SubscriberError('a member subscriber requires githubId (erasure finds member records by scanning for it)');
   if (source === 'anon' && (githubId || customerId)) {
     // An anonymous record must not also carry a member identity: that is the merge, and it happens through an
     // explicit claim path, never at create time (SecurityMaster condition 1, claim-before-create).
@@ -85,6 +98,13 @@ export function normalizeSubscriber(raw) {
   const customerId = trimOrNull(raw.customerId);
   const githubId = trimOrNull(raw.githubId);
   // A record with no resolvable address is not usable.
+  //
+  // THE READER IS DELIBERATELY LOOSER THAN THE WRITER HERE, AND IT IS NOT AN OVERSIGHT TO TIDY UP.
+  // buildSubscriber REQUIRES githubId on a member record so one without it can never be created. This
+  // reader still accepts a stored customerId-only record on purpose: a normalizer that returned null would
+  // make such a record unreadable while it went on existing in KV, invisible to every reader including any
+  // cleanup that might remove it. Permissive here means a stray record can still be seen and dealt with.
+  // Tightening the WRITER prevents the problem; tightening the READER would only hide it.
   if (source === 'anon' && !emailEnc) return null;
   if (source === 'member' && !githubId && !customerId) return null;
   const createdAt = num(raw.createdAt) ?? 0;
