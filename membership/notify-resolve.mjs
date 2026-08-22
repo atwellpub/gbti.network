@@ -71,3 +71,38 @@ export function resolveNotify({ event = 'author-publish', follow, global } = {})
   }
   return out;
 }
+
+// The content-type event keys the R4 matrix ships with today, which are the feed's kinds (see
+// src/lib/feed-items.ts). The stored shape is GENERIC over the key: normalizeNotify keeps any well-formed
+// event key, so the owner's fifth "skill" row (Q25, not a content type yet) and any future type are carried
+// with NO migration the day they ship. This list is what a UI seeds; it is not an allow-list.
+export const NOTIFY_EVENTS = Object.freeze(['article', 'prompt', 'product', 'share']);
+
+// A stored event key: a slug (a content-type kind, or the special `default` that bagFor reads as an
+// all-events fallback). Bounded so a stored preference cannot smuggle an unexpected key into the UI or a
+// lookup, but NOT restricted to a fixed vocabulary, so new content types need no migration.
+const NOTIFY_EVENT_KEY_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/**
+ * Normalize a stored or incoming notify preference (per-follow OR global) into the canonical EVENT-KEYED
+ * shape `{ [event]: { api?: boolean, email?: boolean } }`, exactly the shape `resolveNotify`/`bagFor` reads.
+ * Keeps any well-formed event key, keeps ONLY boolean channels, and drops everything else, so a hand-edited
+ * or partially-written value can never crash a transform or turn a channel on by accident. Returns
+ * `undefined` when nothing valid remains, so an absent preference falls through to the global default and then
+ * to `SYSTEM_NOTIFY_DEFAULT` (email fail-closed OFF), never to email.
+ */
+export function normalizeNotify(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out = {};
+  for (const [key, val] of Object.entries(raw)) {
+    if (typeof key !== 'string') continue;
+    const k = key.trim().toLowerCase();
+    if (!NOTIFY_EVENT_KEY_RE.test(k)) continue;
+    if (!val || typeof val !== 'object' || Array.isArray(val)) continue;
+    const bag = {};
+    if (typeof val.api === 'boolean') bag.api = val.api;
+    if (typeof val.email === 'boolean') bag.email = val.email;
+    if (Object.keys(bag).length) out[k] = bag;
+  }
+  return Object.keys(out).length ? out : undefined;
+}

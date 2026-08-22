@@ -59,3 +59,35 @@ test('applyPrefs: the categories cap is 200 (raised for the topic picker Select 
   assert.equal(p.categories.length, 200);
   assert.equal(p.categories[0], 'topic-0');
 });
+
+// SOW-186 phase 1: the global notification-defaults matrix (falls back to the system default when absent).
+test('notify: absent by default, so the record shape is unchanged for a member who never set it', () => {
+  assert.deepEqual(normalizePrefs(null), { categories: [], followedChannels: [], publicFavorites: false });
+  assert.ok(!('notify' in normalizePrefs({ categories: ['ai'] })), 'no notify key unless set');
+});
+
+test('notify: normalizePrefs keeps a well-formed matrix and drops garbage', () => {
+  const p = normalizePrefs({ notify: { article: { email: true }, prompt: { api: false }, bad: 'x' } });
+  assert.deepEqual(p.notify, { article: { email: true }, prompt: { api: false } });
+  assert.ok(!('notify' in normalizePrefs({ notify: { article: { email: 'yes' } } })), 'all-garbage -> no notify key');
+});
+
+test('notify: applyPrefs sets, replaces and clears the global matrix without touching other fields', () => {
+  let p = applyPrefs({ categories: ['ai'] }, { notify: { article: { email: true } } });
+  assert.deepEqual(p.notify, { article: { email: true } });
+  assert.deepEqual(p.categories, ['ai'], 'other fields untouched');
+  // replace
+  p = applyPrefs(p, { notify: { share: { api: true, email: true } } });
+  assert.deepEqual(p.notify, { share: { api: true, email: true } });
+  // clear with null, and with {}
+  assert.ok(!('notify' in applyPrefs(p, { notify: null })), 'null clears the matrix');
+  assert.ok(!('notify' in applyPrefs(p, { notify: {} })), 'an empty matrix clears it');
+  // a patch without notify leaves the stored matrix alone
+  assert.deepEqual(applyPrefs(p, { categories: ['x'] }).notify, { share: { api: true, email: true } });
+});
+
+test('notify: applyPrefs rejects a non-object notify patch (array or scalar)', () => {
+  assert.throws(() => applyPrefs({}, { notify: 'nope' }), PrefsError);
+  assert.throws(() => applyPrefs({}, { notify: ['article'] }), PrefsError);
+  assert.throws(() => applyPrefs({}, { notify: 5 }), PrefsError);
+});
