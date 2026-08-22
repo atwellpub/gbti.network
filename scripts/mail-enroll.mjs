@@ -83,6 +83,18 @@ export async function resolveIdentities(members, secret) {
 /** Strip a KV prefix off a listed key. */
 const bare = (key, prefix) => (key.startsWith(prefix) ? key.slice(prefix.length) : key);
 
+/**
+ * The set of bare ids present under a prefix, taken from a listKvByPrefix result's `keys`.
+ *
+ * Exported so the regression test can run the REAL path against a REAL listing rather than restating these
+ * two lines and proving only that they agree with themselves. `keys` is every key the prefix listing
+ * returned; `entries` is the subset whose value could also be fetched and parsed, which is not the question
+ * an existence check is asking.
+ */
+export function idsPresent(listing, prefix) {
+  return new Set((listing?.keys ?? []).map((k) => bare(k, prefix)));
+}
+
 function line(label, n) {
   return `  ${String(n).padStart(5)}  ${label}`;
 }
@@ -122,6 +134,14 @@ export function renderReport({ mailPlan, followPlan, counts, apply, haveKey, uns
   out.push(`  targets: ${HOUSE_FOLLOW_TARGETS.join(', ')}`);
   out.push(line('members needing at least one follow', counts.followWrites));
   out.push(line('already following both', counts.followAlreadyComplete));
+  if (followPlan.unreadable?.length) {
+    out.push(line('SKIPPED, their follows record could not be read', followPlan.unreadable.length));
+    out.push('    Left untouched deliberately. Writing them would have replaced every follow they chose');
+    out.push('    with just the two house accounts. Re-run once KV reads are healthy.');
+    for (const r of followPlan.unreadable) {
+      out.push(`    github_id ${r.githubId}  login ${r.githubLogin ?? '(unknown)'}`);
+    }
+  }
 
   if (followPlan.invalidTargets.length) {
     out.push('');
@@ -261,12 +281,32 @@ async function main() {
     listKvByPrefix({ prefix: MAIL_SUPPRESS_PREFIX, env }),
     listKvByPrefix({ prefix: FOLLOWS_PREFIX, env }),
   ]);
-  const enrolled = new Set((subs.entries ?? []).map((e) => bare(e.key, MAIL_SUBSCRIBER_PREFIX)));
-  const suppressed = new Set((supp.entries ?? []).map((e) => bare(e.key, MAIL_SUPPRESS_PREFIX)));
+  // EXISTENCE QUESTIONS READ `keys`, NOT `entries`, and the difference is a fixed bug rather than a style
+  // choice (sow-166, found by @QAmaster, `listKvByPrefix` extended by @SecurityMaster in 238ea2c3).
+  // `entries` requires a second fetch per key for the VALUE, and silently omits any key whose value read
+  // failed. A suppression marker carries nothing anyone needs: its EXISTENCE is the whole signal. Reading it
+  // through `entries` meant one transient 500 on a value read turned somebody who had unsubscribed into
+  // somebody who appeared never to have unsubscribed, and they would be enrolled. Reading `keys` cannot lose
+  // a key that way, and skips a fetch per marker as a bonus.
+  const enrolled = idsPresent(subs, MAIL_SUBSCRIBER_PREFIX);
+  const suppressed = idsPresent(supp, MAIL_SUPPRESS_PREFIX);
+
+  // The follow backfill genuinely needs VALUES, because it computes what is missing from what is there. So
+  // it reads `entries`, and that makes the same failure DESTRUCTIVE here rather than merely permissive:
+  // a member whose follows value could not be read is absent from this map, normalizeFollows(undefined)
+  // yields an empty graph, and the planner would write a record containing ONLY the two house accounts,
+  // OVERWRITING every follow that member had chosen and any per-follow notify preference with them.
+  //
+  // So the unreadable ones are identified and excluded. `keys` is every follows record that EXISTS; the map
+  // holds the ones we could actually read; the difference is the set we must not touch. Not being able to
+  // read somebody's follows is a reason to leave them alone, never a reason to treat them as having none.
   const followsByGithubId = new Map((follows.entries ?? []).map((e) => [bare(e.key, FOLLOWS_PREFIX), e.value]));
+  const followsUnreadable = new Set(
+    (follows.keys ?? []).map((k) => bare(k, FOLLOWS_PREFIX)).filter((id) => !followsByGithubId.has(id)),
+  );
 
   const mailPlan = planMailEnrollment({ members, identities, suppressed, enrolled });
-  const followPlan = planFollowBackfill({ members, followsByGithubId, now: () => now.getTime() });
+  const followPlan = planFollowBackfill({ members, followsByGithubId, followsUnreadable, now: () => now.getTime() });
   const counts = enrollmentCounts(mailPlan, followPlan);
 
   if (json) {

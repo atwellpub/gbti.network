@@ -128,8 +128,8 @@ export function planMailEnrollment({ members = [], identities = new Map(), suppr
  * A member who already follows a target keeps their existing entry untouched, including any `notify`
  * preference on it, since applyFollow is a no-op for a username already present.
  */
-export function planFollowBackfill({ members = [], followsByGithubId = new Map(), targets = HOUSE_FOLLOW_TARGETS, now = Date.now } = {}) {
-  const plan = { writes: [], alreadyComplete: [], excludedBanned: [], invalidTargets: [] };
+export function planFollowBackfill({ members = [], followsByGithubId = new Map(), followsUnreadable = new Set(), targets = HOUSE_FOLLOW_TARGETS, now = Date.now } = {}) {
+  const plan = { writes: [], alreadyComplete: [], excludedBanned: [], invalidTargets: [], unreadable: [] };
 
   // Validate the targets ONCE, loudly, before touching anybody. A bad target here would be written to every
   // member in the population and yield nothing forever, which is the `gbti-labs` failure at full scale.
@@ -145,6 +145,13 @@ export function planFollowBackfill({ members = [], followsByGithubId = new Map()
     const githubId = idOf(m);
     if (!githubId) continue;
     if (isBanned(m)) { plan.excludedBanned.push(who(m)); continue; }
+
+    // A follows record that EXISTS but could not be READ is left completely alone. Treating it as an empty
+    // graph would make this backfill overwrite every follow the member had chosen, plus any per-follow
+    // notify preference, with just the two house accounts. An unreadable record is a reason to skip
+    // somebody, never a reason to conclude they follow nobody: the two are indistinguishable from the
+    // absence of a value, and only one of them is safe to act on.
+    if (followsUnreadable.has(githubId)) { plan.unreadable.push(who(m)); continue; }
 
     const before = normalizeFollows(followsByGithubId.get(githubId) ?? null);
     const have = new Set(followingUsernames(before));

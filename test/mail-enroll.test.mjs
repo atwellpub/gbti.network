@@ -182,7 +182,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, resolveIdentities, renderReport, enactPlan } from '../scripts/mail-enroll.mjs';
+import { parseArgs, resolveIdentities, renderReport, enactPlan, idsPresent } from '../scripts/mail-enroll.mjs';
+import { listKvByPrefix } from '../scripts/lib/erase-member.mjs';
 import { planMailEnrollment as planM, planFollowBackfill as planF, enrollmentCounts as counts_ } from '../scripts/lib/mail-enroll.mjs';
 
 const execFileP = promisify(execFile);
@@ -378,4 +379,82 @@ test('enactPlan writes NOTHING when the plan is blocked, even with apply set', a
   const r = await enactPlan({ mailPlan, followPlan, apply: true, put });
   assert.equal(r.skipped, true, 'blocked beats apply');
   assert.equal(w.length, 0, 'and in particular the follow writes did not proceed either');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The suppression read. Found by @QAmaster: an existence check built from `entries` loses any key whose
+// VALUE read failed, so one transient 500 turned somebody who had unsubscribed into somebody who appeared
+// never to have. These run the REAL listKvByPrefix against a fetch that fails a value read.
+// ---------------------------------------------------------------------------------------------------
+
+/** A KV REST fake: lists three markers, and fails the value read for whichever key is named. */
+const kvFetchFailingValueFor = (failKey) => async (url) => {
+  const u = String(url);
+  if (u.includes('/keys?')) {
+    return { ok: true, json: async () => ({
+      result: ['mail:suppress:h1', 'mail:suppress:h2', 'mail:suppress:h3'].map((name) => ({ name })),
+      result_info: {},
+    }) };
+  }
+  if (u.includes(encodeURIComponent(failKey))) return { ok: false, status: 500 };
+  return { ok: true, json: async () => ({ suppressed: true }) };
+};
+const CF_ENV = { CF_ACCOUNT_ID: 'a', CF_KV_NAMESPACE_ID: 'n', CF_API_TOKEN: 't' };
+
+test('a suppression marker survives a failed VALUE read, so an unsubscribed member is not re-enrolled', async () => {
+  const listing = await listKvByPrefix({
+    prefix: 'mail:suppress:', env: CF_ENV, fetchImpl: kvFetchFailingValueFor('mail:suppress:h2'),
+  });
+
+  // The instrument itself, asserted first: the listing really did lose one to `entries`. Without this the
+  // test could pass against a fake that never failed anything, proving nothing.
+  assert.equal(listing.keys.length, 3, 'all three keys were listed');
+  assert.equal(listing.entries.length, 2, 'and one really was dropped from entries');
+  assert.equal(listing.unreadable, 1);
+
+  // The fix: the existence set is built from keys, so it still has all three.
+  const suppressed = idsPresent(listing, 'mail:suppress:');
+  assert.deepEqual([...suppressed].sort(), ['h1', 'h2', 'h3']);
+
+  // And the member behind the dropped marker is NOT enrolled, which is the consequence that matters.
+  const members = [member('1', 'paid'), member('2', 'paid'), member('3', 'paid')];
+  const idents = new Map(members.map((m, i) => [m.githubId, { hash: `h${i + 1}`, reason: IDENTITY_REASON.OK }]));
+  const plan = planM({ members, identities: idents, suppressed });
+  assert.deepEqual(plan.enroll, [], 'nobody who unsubscribed is swept back in');
+  assert.deepEqual(ids(plan.suppressedSkips), ['1', '2', '3']);
+
+  // The old behaviour, shown failing, so the regression is pinned by contrast rather than by assertion alone.
+  const fromEntries = new Set(listing.entries.map((e) => e.key.slice('mail:suppress:'.length)));
+  const oldPlan = planM({ members, identities: idents, suppressed: fromEntries });
+  assert.deepEqual(ids(oldPlan.enroll), ['2'], 'reading entries would have enrolled the dropped one');
+});
+
+test('a follows record that exists but cannot be READ is skipped, never overwritten', async () => {
+  // Strictly worse than the suppression bug: that one enrols somebody who opted out, this one would replace
+  // every follow a member chose, and their per-follow notify preferences, with just the two house accounts.
+  const members = [member('1', 'paid'), member('2', 'paid')];
+  const readable = new Map([['1', { following: [{ username: 'someone-else', addedAt: 1 }], updatedAt: 1 }]]);
+  const plan = planF({
+    members, followsByGithubId: readable, followsUnreadable: new Set(['2']), now: NOW,
+  });
+
+  assert.deepEqual(plan.unreadable.map((r) => r.githubId), ['2']);
+  assert.ok(!plan.writes.some((w) => w.githubId === '2'), 'the unreadable member is not written');
+
+  // The readable member is still processed normally, so this is a targeted skip and not a blanket stop.
+  const w1 = plan.writes.find((w) => w.githubId === '1');
+  assert.deepEqual(w1.add, ['atwellpub', 'gbtilabs']);
+  assert.ok(followingUsernames(w1.next).includes('someone-else'), 'and their existing follow is preserved');
+});
+
+test('the report names the members whose follows could not be read', () => {
+  const members = [member('2', 'paid')];
+  const followPlan = planF({ members, followsUnreadable: new Set(['2']), now: NOW });
+  const mailPlan = planM({ members, identities: identities() });
+  const text = renderReport({
+    mailPlan, followPlan, counts: counts_(mailPlan, followPlan), apply: false, haveKey: true, unsubProven: false,
+  });
+  assert.match(text, /could not be read/);
+  assert.match(text, /github_id 2/, 'named, not just counted');
+  assert.match(text, /replaced every follow they chose/, 'and the consequence of not skipping is stated');
 });
