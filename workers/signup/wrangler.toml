@@ -26,6 +26,12 @@ head_sampling_rate = 1
 # checkout return URLs.
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+# SOW-166 envelope From for BOTH the digest send and the double-opt-in confirmation. NOT a secret; it is the
+# address recipients see. It must be on the Resend-verified sending domain (gbti.network, subdomain-envelope
+# setup via send.gbti.network) or Resend rejects the send. mail-drain.mjs falls back to RESEND_FROM if this is
+# unset, but mail-subscribe.mjs does NOT: with MAIL_FROM missing, a subscriber is written as pending and the
+# confirmation email never goes out, so the opt-in silently never completes.
+MAIL_FROM = "GBTI Network <noreply@gbti.network>"
 # SOW-166 digest rate caps (owner ruling 2026-08-22). PLAIN NUMBERS, not secrets: reviewable + tunable here
 # without a code change. mail-drain.mjs ALSO carries bounded code defaults (MAIL_CAP_DEFAULTS) so an unset var can
 # never mean unbounded; these are the tuning knobs, the code default is the correctness floor. Sized under
@@ -196,6 +202,9 @@ crons = ["*/5 * * * *", "0 * * * *", "30 * * * *", "0 14 * * 2"]
 # Worker reads in production must be listed here):
 PUBLIC_BASE_URL = "https://signup.gbti.network"
 SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkout/connect redirects land HERE (the /account page lives on the site, not the Worker)
+# SOW-166 envelope From, digest + confirmation. Must be on the Resend-verified sending domain. mail-subscribe
+# has no fallback for it, so an unset MAIL_FROM strands every opt-in as pending (see the [vars] note above).
+MAIL_FROM = "GBTI Network <noreply@gbti.network>"
 # SOW-166 digest rate caps (owner ruling 2026-08-22). Plain numbers, not secrets; the code carries bounded
 # defaults (MAIL_CAP_DEFAULTS) so an unset var can never mean unbounded. Under Resend free tier with headroom.
 MAIL_DAILY_CAP = "90"
