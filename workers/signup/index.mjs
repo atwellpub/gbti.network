@@ -58,6 +58,7 @@ import { membershipStatus } from './membership-status.mjs';
 import { membershipDecrypt, membershipEncrypt } from './membership-content.mjs';
 import { membershipAdminStatuses } from './membership-admin.mjs';
 import { membershipAdminOps } from './membership-admin-ops.mjs';
+import { membershipAdminMail } from './membership-admin-mail.mjs';
 import { membershipCouponUsage } from './membership-coupons-admin.mjs'; // SOW-119
 import { membershipInviteCreate, membershipInviteList, membershipInviteUpdate } from './membership-invites-admin.mjs'; // sow-231
 import { membershipDiscordChannels } from './membership-discord-channels.mjs'; // SOW-100: channel names for the categories workspace
@@ -1061,6 +1062,23 @@ export default {
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
         if (method === 'POST') {
           const r = await membershipAdminOps(request, env);
+          return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
+        }
+      }
+
+      // sow-166 follow-up: admin-gated MANUAL mail triggers (compile / test-compile / drain / discard). Before this
+      // route, compileWeeklyIssue and drainMail were reachable only from the cron map below, so the first
+      // end-to-end proof of the mail chain could not happen before the next Tuesday 14:00 UTC. It calls the SAME
+      // production functions the cron calls and grants no new send authority: the drain refuses every recipient
+      // outside MAIL_SEND_ALLOWLIST and resolveSendGate still defaults to closed. The drain's IO is composed HERE
+      // (mailDrainDeps) rather than inside the route module, so there is exactly one composition root and a manual
+      // drain cannot drift from the scheduled one. Never cached.
+      if (pathname === '/membership/admin/mail') {
+        if (method === 'OPTIONS') return new Response(null, { status: 204, headers: MEMBERSHIP_CORS });
+        if (method === 'POST') {
+          const r = await membershipAdminMail(request, env, {
+            drain: (e, opts) => drainMail(e, { ...mailDrainDeps(e), ...opts }),
+          });
           return json(r.body, r.status, { ...MEMBERSHIP_CORS, 'Cache-Control': 'no-store', Vary: 'Authorization' });
         }
       }

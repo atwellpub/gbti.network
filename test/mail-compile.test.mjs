@@ -194,6 +194,59 @@ test('compileWeeklyIssue with no kv is a safe no-op', async () => {
   assert.deepEqual(await compileWeeklyIssue({}, { kv: null }), { ok: false, reason: 'no kv' });
 });
 
+// ---------- the issueId override (sow-166 follow-up: the admin rehearsal trigger) ----------
+// The override exists so a manual send rehearsal can be fired on any day WITHOUT stealing the real inaugural
+// issue's content. That property is cross-layer (the id shape decides what listPriorIssueIds counts), so it is
+// proven here against the real compile, not asserted from the route module where the id is merely minted.
+
+test('an explicit issueId overrides the date-derived one; omitting it keeps the weekly id', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const named = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, { ...deps(kv), issueId: 'test-2026-08-23' });
+  assert.equal(named.issueId, 'test-2026-08-23');
+  assert.ok(await getIssue(kv, 'test-2026-08-23'), 'the issue is frozen under the given id');
+  assert.equal(await getIssue(kv, 'weekly-2026-08-25'), null, 'and NOT under the date-derived id');
+
+  const dated = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  assert.equal(dated.issueId, 'weekly-2026-08-25', 'the cron path is unchanged by the new option');
+});
+
+test('a blank or whitespace issueId falls back to the date-derived id rather than minting a blank one', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, { ...deps(kv), issueId: '   ' });
+  assert.equal(r.issueId, 'weekly-2026-08-25');
+});
+
+// THE POINT OF THE WHOLE OVERRIDE. A rehearsal must not become the real issue's prior, because the exclude
+// window would then strip the back catalogue the inaugural issue is supposed to carry. Both halves are
+// asserted: the rehearsal itself composes the launch regime, and the LATER weekly compile still does too.
+test('a test- rehearsal does NOT become a prior of the next weekly issue (the inaugural window survives)', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const rehearsal = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, { ...deps(kv), issueId: 'test-2026-08-23' });
+  assert.equal(rehearsal.firstIssue, true, 'a rehearsal composes exactly what the inaugural issue will compose');
+  const rehearsedTitles = (await getIssue(kv, 'test-2026-08-23')).sections.article.map((a) => a.title);
+  assert.ok(rehearsedTitles.length > 0, 'the rehearsal is non-empty, or this test proves nothing');
+
+  const real = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  assert.equal(real.firstIssue, true, 'the real issue is STILL the launch regime after a rehearsal');
+  assert.equal(real.excluded, null, 'and it excludes nothing, so the back catalogue is intact');
+  assert.deepEqual((await getIssue(kv, 'weekly-2026-08-25')).sections.article.map((a) => a.title), rehearsedTitles);
+});
+
+// The control for the test above: a CANONICAL off-day compile is exactly the trap, and it must be visible as
+// one. If this ever stops excluding, the rehearsal test above is passing for the wrong reason.
+test('control: a canonical off-day compile DOES become a prior and strips the next issue', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['r1']);
+  const early = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, { ...deps(kv), issueId: 'weekly-2026-08-23' });
+  assert.equal(early.firstIssue, true);
+  const later = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  assert.equal(later.firstIssue, false, 'the off-day issue was counted as a prior');
+  assert.ok(Number(later.excluded) > 0, 'and its urls are now excluded from the real issue');
+});
+
 // ---------- resolveWindow: the two composeIssue regimes (SowMaster ruling; `since` OR `exclude`, never both) ----------
 
 const BOOTSTRAP = 90 * 24 * 3600 * 1000; // the first-issue window (owner ruling 2026-08-22, BOOTSTRAP_MS), was 7d

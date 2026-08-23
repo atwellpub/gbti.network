@@ -253,10 +253,14 @@ export async function compileWeeklyIssue(env, {
   perSection,
   maxNews,
   historyDepth, // exclude-window depth in issues; undefined -> resolveWindow's default. Also the floor's coupling depth.
+  // sow-166 follow-up: an explicit id, used ONLY by the admin rehearsal trigger (membership-admin-mail.mjs).
+  // The weekly cron never passes one and keeps the date-derived id. A rehearsal passes a `test-` id, which
+  // listPriorIssueIds cannot count, so rehearsing a send does not consume the real inaugural back catalogue.
+  issueId: issueIdOverride = null,
 } = {}) {
   if (!kv) return { ok: false, reason: 'no kv' };
   const nowMs = Number(now());
-  const issueId = weeklyIssueId(nowMs);
+  const issueId = String(issueIdOverride || '').trim() || weeklyIssueId(nowMs);
 
   // Freeze once: if the issue already exists, reuse it (do NOT recompose); otherwise gather + compose + persist.
   let issue = await getIssue(kv, issueId);
