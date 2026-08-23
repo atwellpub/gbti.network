@@ -25,7 +25,7 @@ platforms:
   - Node.js
 icon: ./images/ryker-icon-128x128.webp
 iconLarge: ./images/ryker-icon-256x256.webp
-featuredImage: members/atwellpub/images/thumbnail-2x.png
+featuredImage: members/gbtilabs/images/thumbnail.jpg
 bannerPreset: green
 gallery:
   - ./images/ryker-shot-1.webp
@@ -51,7 +51,7 @@ links:
   - type: support
     url: https://github.com/gbti-network/ryker/issues
     label: Report a bug
-updatedAt: '2026-08-23T15:27:48.827Z'
+updatedAt: '2026-08-23T16:04:40.796Z'
 type: product
 author: atwellpub
 ---
