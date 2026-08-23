@@ -346,5 +346,5 @@ export async function handleConfirm(request, env, deps = {}) {
 
   return page('Subscribed',
     '<h1>You are subscribed.</h1>'
-    + '<p>You will receive the GBTI Network weekly digest. Every email includes a one-click unsubscribe link.</p>');
+    + '<p>You will receive the GBTI Network weekly digest.</p>');
 }
