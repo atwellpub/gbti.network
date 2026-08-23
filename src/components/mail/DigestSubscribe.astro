@@ -1,0 +1,213 @@
+---
+// sow-166 / sow-202: the PUBLIC digest capture component. The weekly-digest engine had a live subscribe
+// route (`POST /mail/subscribe`) and no front door: nothing in the site, client-ui or the extension pointed
+// at it, so the compile would enqueue 0 recipients forever. This is that front door.
+//
+// DOUBLE OPT-IN, and the copy says so. Submitting writes a PENDING record and sends a confirmation email;
+// it enrols nobody. The owner reaffirmed double opt-in on 2026-08-23 over the earlier 2026-08-16 "single
+// opt-in, add on submit" ruling, because the route had already shipped this way and the confirm click is
+// itself the end-to-end proof that the mail pipeline works. Do not soften this copy to imply the address is
+// subscribed on submit; it is not, until the link in the email is clicked.
+//
+// WORKS WITH NO JAVASCRIPT, on purpose. The Worker content-negotiates: a plain form navigation gets a real
+// HTML page back, a fetch with `Accept: application/json` gets JSON. Turnstile is loaded with IMPLICIT
+// rendering, so it injects its own `cf-turnstile-response` input into this form without any script of ours.
+// The enhancement script below only upgrades the experience: it posts by fetch and reports inline instead of
+// navigating away.
+//
+// ONE INSTANCE PER PAGE. The Turnstile api.js tag below is emitted per render, and Turnstile does not expect
+// to be loaded twice on one document. Every current mount point renders this once (the homepage feed column,
+// and ContentFooter, which itself renders once per content page). If a page ever needs two, hoist the api.js
+// tag into BaseLayout and delete it from here.
+import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../../lib/membership';
+
+interface Props {
+  /** `band` is the standalone homepage block; `inline` sits inside a content page's closing column. */
+  variant?: 'band' | 'inline';
+  heading?: string;
+  blurb?: string;
+}
+const { variant = 'inline', heading, blurb } = Astro.props;
+
+const title = heading ?? 'Get the weekly digest';
+const sub = blurb ?? 'One email a week: new member articles, products and prompts, plus the developer news worth reading. Unsubscribe in one click, any time.';
+---
+
+<section class:list={['dsub', `dsub-${variant}`]} data-digest-subscribe aria-labelledby={`dsub-h-${variant}`}>
+  <div class="dsub-in">
+    <div class="dsub-copy">
+      <h2 class="dsub-h" id={`dsub-h-${variant}`}>{title}</h2>
+      <p class="dsub-sub">{sub}</p>
+    </div>
+
+    <form class="dsub-form" method="post" action={`${SIGNUP_BASE}/mail/subscribe`} data-dsub-form novalidate>
+      <div class="dsub-row">
+        <label class="dsub-lab" for={`dsub-email-${variant}`}>Email address</label>
+        <input
+          class="dsub-input"
+          id={`dsub-email-${variant}`}
+          type="email"
+          name="email"
+          required
+          autocomplete="email"
+          spellcheck="false"
+          placeholder="you@example.com"
+          data-dsub-email
+        />
+        <button class="btn btn-primary dsub-btn" type="submit" data-dsub-go>Subscribe</button>
+      </div>
+
+      <div class="cf-turnstile dsub-ts" data-sitekey={TURNSTILE_SITE_KEY} data-theme="auto" data-size="flexible"></div>
+
+      <p class="dsub-fine">
+        We send a confirmation email first. You are not subscribed until you click the link in it.
+        Read the <a href="/privacy/">privacy policy</a>.
+      </p>
+      <p class="dsub-msg" data-dsub-msg role="status" aria-live="polite" hidden></p>
+    </form>
+  </div>
+</section>
+
+<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+<script>
+  // Progressive enhancement only. Everything here is optional: with scripting off, the form is a plain POST
+  // and the Worker answers with a real HTML page. Querying ALL instances rather than one, because Astro
+  // bundles this script once per page no matter how many times the component renders.
+  document.querySelectorAll('[data-digest-subscribe]').forEach((root) => {
+    const form = root.querySelector('[data-dsub-form]');
+    const email = root.querySelector('[data-dsub-email]');
+    const btn = root.querySelector('[data-dsub-go]');
+    const msg = root.querySelector('[data-dsub-msg]');
+    if (!form || !email || !btn || !msg) return;
+
+    const say = (text, kind) => {
+      msg.textContent = text;
+      msg.dataset.kind = kind;
+      msg.hidden = false;
+    };
+
+    form.addEventListener('submit', async (ev) => {
+      // Let the plain navigation happen if fetch is unavailable for any reason.
+      if (typeof window.fetch !== 'function') return;
+      ev.preventDefault();
+
+      const addr = String(email.value || '').trim();
+      // A deliberately loose shape check. The Worker is the authority and re-validates; this only spares a
+      // round trip on an obvious typo.
+      if (!addr || !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(addr)) {
+        say('Please enter a valid email address.', 'err');
+        email.focus();
+        return;
+      }
+
+      // Turnstile injects this input into the form itself under implicit rendering.
+      const tokenInput = form.querySelector('input[name="cf-turnstile-response"]');
+      const token = tokenInput ? String(tokenInput.value || '') : '';
+      if (!token) {
+        say('Human verification has not finished loading. Wait a moment and try again, or allow challenges.cloudflare.com if you use a content blocker.', 'err');
+        return;
+      }
+
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = 'Sending...';
+
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email: addr, turnstileToken: token }),
+        });
+        let body = null;
+        try { body = await res.json(); } catch { /* a non-JSON body is handled as a failure below */ }
+
+        if (res.ok && body && body.ok) {
+          // The Worker answers identically whether or not this address was already known (anti-enumeration),
+          // so this copy must not claim a NEW subscription was created.
+          form.querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+          say('Check your inbox. If this address is new to the digest, a confirmation email is on its way. You are not subscribed until you click the link in it.', 'ok');
+          return;
+        }
+
+        const code = body && body.error ? String(body.error) : '';
+        say(
+          code === 'rate_limited' ? 'Too many requests from here. Please try again in a few minutes.'
+            : code === 'invalid_email' ? 'That does not look like a valid email address.'
+              : code === 'challenge_failed' ? 'We could not verify that request. Please refresh the page and try again.'
+                : 'Something went wrong. Please try again in a moment.',
+          'err',
+        );
+      } catch {
+        say('We could not reach the network. Please check your connection and try again.', 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+        // Turnstile tokens are single use, so a retry needs a fresh one.
+        if (window.turnstile && typeof window.turnstile.reset === 'function') {
+          try { window.turnstile.reset(); } catch { /* a reset failure must not break the form */ }
+        }
+      }
+    });
+  });
+</script>
+
+<style>
+  .dsub { --dsub-pad: 22px; }
+  .dsub-in { display: grid; gap: 16px; }
+
+  /* The standalone homepage block. */
+  .dsub-band {
+    border: 1px solid var(--line);
+    background: var(--paper);
+    border-radius: var(--r-lg);
+    padding: var(--dsub-pad);
+    margin: 0 0 18px;
+  }
+
+  /* Inside a content page's closing column, under the discussion. */
+  .dsub-inline {
+    border-top: 1px solid var(--line);
+    padding: 26px 0 4px;
+    margin: 26px 0 0;
+  }
+
+  .dsub-h { font-size: 1.15rem; line-height: 1.25; margin: 0 0 4px; font-weight: 700; }
+  .dsub-sub { margin: 0; color: var(--fg-mute); font-size: .94rem; line-height: 1.55; max-width: 62ch; }
+
+  .dsub-form { display: grid; gap: 12px; }
+  .dsub-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .dsub-lab {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .dsub-input {
+    flex: 1 1 260px; min-width: 0;
+    padding: 11px 13px;
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-sm);
+    background: var(--paper-2);
+    color: var(--fg);
+    font: inherit;
+    font-size: .95rem;
+  }
+  .dsub-input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+  /* .btn supplies the shape; only the field-row sizing is overridden, so the button matches the input
+     height instead of the 14px/26px hero padding. */
+  .dsub-btn { flex: 0 0 auto; padding: 12px 22px; font-size: .95rem; }
+  .dsub-ts { min-height: 65px; }
+
+  .dsub-fine { margin: 0; color: var(--fg-mute); font-size: .82rem; line-height: 1.5; }
+  .dsub-fine a { color: inherit; text-decoration: underline; }
+
+  .dsub-msg { margin: 0; font-size: .9rem; line-height: 1.5; font-weight: 600; }
+  .dsub-msg[data-kind='ok'] { color: var(--green-600); }
+  .dsub-msg[data-kind='err'] { color: var(--clay); }
+  /* An explicit display on a flex/grid element beats the user-agent [hidden] rule, so state it outright.
+     Cheap here, and it is the exact failure that has bitten the shadow-DOM components. */
+  .dsub-msg[hidden] { display: none !important; }
+
+  @media (min-width: 720px) {
+    .dsub-band .dsub-in { grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); align-items: center; gap: 24px; }
+  }
+</style>

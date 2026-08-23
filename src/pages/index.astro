@@ -15,6 +15,7 @@ import ProductCard from '../components/products/ProductCard.astro';
 import HomePromptCard from '../components/home/HomePromptCard.astro';
 import PricingAccordion from '../components/home/PricingAccordion.astro';
 import ExtensionBanner from '../components/home/ExtensionBanner.astro';
+import DigestSubscribe from '../components/mail/DigestSubscribe.astro';
 import PersonalizeModal from '../components/home/PersonalizeModal.astro';
 import HomeShareModal from '../components/home/HomeShareModal.astro';
 import { authorItem } from '../lib/avatars';
@@ -165,6 +166,13 @@ const SHOPTALK = {
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
     <main class="feed-page home-feed" data-view="detailed" data-hometabs aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
+      {/* sow-166 / sow-202: the digest capture. The owner's Q6 answer placed this "above the homepage
+          New & Popular band", but sow-192 later moved that band out of the main column and into the
+          sidebar rail, so the original anchor no longer exists as written. This is the nearest honest
+          equivalent: the top of the main content column, above the feed. Flagged in sow-166 rather than
+          silently reinterpreted. */}
+      <DigestSubscribe variant="band" heading="The weekly digest" />
+
       <div class="feed-lab" id="feed"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><a class="more" href="/feeds/">Everything, including member shares</a></div>
 
       <nav class="feed-tabs" aria-label="Feed views">

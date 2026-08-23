@@ -8,6 +8,7 @@ import { getCollection } from 'astro:content';
 import CommunityInvite from './CommunityInvite.astro';
 import Comments from './blog/Comments.astro';
 import AuthorBox from './blog/AuthorBox.astro';
+import DigestSubscribe from './mail/DigestSubscribe.astro';
 import { hasAuthorNote } from '../lib/comments';
 import type { ShareType } from '../lib/share';
 
@@ -32,3 +33,7 @@ const skipAuthorBox = hideAuthor || hasAuthorNote(await getCollection('comment')
 <CommunityInvite author={author} via={viaTag} />
 {!skipAuthorBox && <AuthorBox author={author} publishedAt={publishedAt} />}
 <Comments targetType={type} targetSlug={slug} author={author} wide={wide} aliases={aliases} />
+{/* sow-166 / sow-202: the digest capture, below the discussion. Mounted HERE rather than on each of
+    the three page templates, because this component is already the one shared closing block for
+    articles, products and prompts, so one mount covers all three and cannot drift between them. */}
+<DigestSubscribe variant="inline" />
