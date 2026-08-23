@@ -8,7 +8,7 @@ categories:
   - devops
   - frameworks
   - chrome-extensions
-status: published
+status: draft
 visibility: public
 publicStub: false
 pricing: free
