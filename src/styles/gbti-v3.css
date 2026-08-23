@@ -872,10 +872,13 @@ a.who:hover { color: var(--fg); }
 .feed-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .feed-meta .tmeta { white-space: nowrap; }
 .feed-meta .av { width: 26px; height: 26px; flex: none; font-size: 10px; }
-.feed-title { font-family: var(--f-display); font-weight: 700; font-size: 22px; line-height: 1.22; letter-spacing: -0.01em; }
+/* overflow-wrap:anywhere so a long unbreakable token (a URL, a long compound) WRAPS instead of growing
+   past a narrow card and getting clipped mid-word by the card's overflow:hidden (member-reported: titles
+   and descriptions clipped in the card grid; the failing case is any item carrying such a token). */
+.feed-title { font-family: var(--f-display); font-weight: 700; font-size: 22px; line-height: 1.22; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .feed-title a { color: var(--fg); }
 .feed-item:hover .feed-title a { color: var(--green-700); }
-.feed-ex { font-size: 15px; line-height: 1.55; color: var(--fg-soft); margin-top: 10px;
+.feed-ex { font-size: 15px; line-height: 1.55; color: var(--fg-soft); margin-top: 10px; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .feed-foot { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
 .feed-foot .fsp { flex: 1; }
@@ -983,8 +986,8 @@ a.who:hover { color: var(--fg); }
 
 /* sow-192: on the homepage the feed sits beside the 338px sidebar, so the card grid caps at 3 columns
    (the /feeds/ page is full-width and uses 5). Two classes outrank the .feed-page[data-view] base rule. */
-.feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(3, 1fr); }
-@media (max-width: 1080px) { .feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(2, 1fr); } }
+.feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1080px) { .feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 620px)  { .feed-page.home-feed[data-view="card"] .feed-chunk { grid-template-columns: 1fr; } }
 
 /* sow-192 Phase B: homepage per-type section blocks and the Popular rail card. */
@@ -1216,7 +1219,7 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 /* The branded-thumb fallback cover exists only for the card grid (an imageless tile breaks the
    rhythm); detailed rows hide it, and the compact rule already hides every cover. */
 .feed-cover-fb { display: none; }
-.feed-page[data-view="card"] .feed-chunk { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; }
+.feed-page[data-view="card"] .feed-chunk { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; }
 /* the in-feed join CTA spans the full row in the card grid (its min-content width would otherwise
    stretch whichever column it lands in) */
 .feed-page[data-view="card"] .feed-cta { grid-column: 1 / -1; margin: 4px 0; }
@@ -1233,9 +1236,9 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .feed-page[data-view="card"] .feed-ex { display: none; }
 .feed-page[data-view="card"] .feed-foot { margin-top: auto; padding-top: 10px; }
-@media (max-width: 1080px) { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 900px)  { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 620px)  { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 1080px) { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 900px)  { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 620px)  { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 420px)  { .feed-page[data-view="card"] .feed-chunk { grid-template-columns: 1fr; } }
 
 /* ---------- sow-139 + sow-131 QA: news rows, the member-content toggle, share pages ---------- */
