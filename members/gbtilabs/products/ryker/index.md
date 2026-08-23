@@ -1,8 +1,6 @@
 ---
 title: Ryker
 slug: ryker
-status: draft
-visibility: public
 shortDescription: >-
   Inline editing for HTML and Markdown. Export your corrections as agent-ready instructions a model
   can learn from.
@@ -10,6 +8,11 @@ categories:
   - devops
   - frameworks
   - chrome-extensions
+status: published
+visibility: public
+publicStub: false
+pricing: free
+version: 0.2.1
 tags:
   - chrome-extension
   - html
@@ -20,19 +23,18 @@ tags:
 platforms:
   - Chrome
   - Node.js
-pricing: free
-version: 0.2.1
 icon: ./images/ryker-icon-128x128.webp
 iconLarge: ./images/ryker-icon-256x256.webp
 featuredImage: ./images/ryker-featured.webp
-banner: ./images/ryker-banner.webp
+bannerPreset: green
 gallery:
   - ./images/ryker-shot-1.webp
   - ./images/ryker-shot-2.webp
   - ./images/ryker-shot-3.webp
   - ./images/ryker-shot-4.webp
   - ./images/ryker-shot-5.webp
-video: "o0HQG7Ie5zY"
+sidebarPosition: right
+video: o0HQG7Ie5zY
 links:
   - type: download
     url: https://chromewebstore.google.com/detail/gohpdgonoaihfjfhhjioaejhnhhjmkkp
@@ -49,8 +51,9 @@ links:
   - type: support
     url: https://github.com/gbti-network/ryker/issues
     label: Report a bug
+updatedAt: '2026-08-23T01:36:13.416Z'
 type: product
-author: atwellpub
+author: gbtilabs
 ---
 
 ## Ryker
@@ -96,7 +99,9 @@ npx --yes @gbti/ryker insert ./report.html
 - Export content changes as a machine-readable prompt
 - An outline built from the document's real heading structure
 - Move or delete whole sections from that outline, recorded as moves rather than
+
   as character diffs
+
 - Revision history tracked per document
 - Markdown with nested lists, tables and code fences, returned as the file it came from
 - Save the edited document back over the file you opened, or as a new file beside it
@@ -150,7 +155,10 @@ license and copyright notice must remain intact.
 ## Credits
 
 - Wing icon by [prasong tadoungsorn](https://thenounproject.com/creator/layersky/) from
+
   [Noun Project](https://thenounproject.com/icon/wing-1382909/), licensed
   [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
 - HTML5 icon by Stephen Hutchings from Typicons, licensed
+
   [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
