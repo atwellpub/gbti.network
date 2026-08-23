@@ -2,7 +2,7 @@
 id: intro-ryker
 targetType: product
 targetSlug: ryker
-createdAt: '2026-08-23T14:33:55.477Z'
+createdAt: '2026-08-23T15:27:49.141Z'
 status: published
 visibility: public
 authorNote: true
