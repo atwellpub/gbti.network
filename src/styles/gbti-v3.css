@@ -1232,6 +1232,11 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
 .feed-page[data-view="card"] .feed-meta { margin-bottom: 8px; gap: 7px; }
 .feed-page[data-view="card"] .feed-meta .av { width: 20px; height: 20px; }
 .feed-page[data-view="card"] .feed-meta .tmeta { font-size: 10.5px; }
+/* In the narrow card, a nowrap kind-tag with a long source slug (e.g. a news eyebrow
+   "news · coindesk-bitcoin-ethereum-crypto-news") would grow the pill past the card and force the whole
+   card wider than its grid track, so the card's overflow:hidden then clipped the eyebrow AND the title.
+   Let the eyebrow wrap here (card view only; the detailed/compact rows have room and keep it on one line). */
+.feed-page[data-view="card"] .kind-tag { white-space: normal; overflow-wrap: anywhere; }
 .feed-page[data-view="card"] .feed-title { font-size: 15px; line-height: 1.28;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .feed-page[data-view="card"] .feed-ex { display: none; }
