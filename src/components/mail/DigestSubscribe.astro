@@ -22,8 +22,9 @@
 import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../../lib/membership';
 
 interface Props {
-  /** `band` is the standalone homepage block; `inline` sits inside a content page's closing column. */
-  variant?: 'band' | 'inline';
+  /** `band` is the standalone homepage block; `inline` sits inside a content page's closing column;
+   *  `rail` is the chromeless single-column form the homepage sidebar wraps in a `.card.side-card`. */
+  variant?: 'band' | 'inline' | 'rail';
   heading?: string;
   blurb?: string;
 }
@@ -171,6 +172,14 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
     padding: 26px 0 4px;
     margin: 26px 0 0;
   }
+
+  /* Homepage sidebar rail: the wrapper (a .card.side-card) supplies the chrome and the signed-out gate, so
+     the section itself is chromeless here. Stack the field above a full-width button for the ~256px column. */
+  .dsub-rail { --dsub-pad: 0; }
+  .dsub-rail .dsub-in { gap: 12px; }
+  .dsub-rail .dsub-row { flex-direction: column; align-items: stretch; gap: 9px; }
+  .dsub-rail .dsub-input { flex: 1 1 auto; }
+  .dsub-rail .dsub-btn { width: 100%; }
 
   .dsub-h { font-size: 1.15rem; line-height: 1.25; margin: 0 0 4px; font-weight: 700; }
   .dsub-sub { margin: 0; color: var(--fg-mute); font-size: .94rem; line-height: 1.55; max-width: 62ch; }

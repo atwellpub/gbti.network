@@ -166,13 +166,6 @@ const SHOPTALK = {
   <!-- ============ FEED + SIDEBAR ============ -->
   <div class="feed-layout">
     <main class="feed-page home-feed" data-view="detailed" data-hometabs aria-label="The network feed" data-signup-base={SIGNUP_BASE}>
-      {/* sow-166 / sow-202: the digest capture. The owner's Q6 answer placed this "above the homepage
-          New & Popular band", but sow-192 later moved that band out of the main column and into the
-          sidebar rail, so the original anchor no longer exists as written. This is the nearest honest
-          equivalent: the top of the main content column, above the feed. Flagged in sow-166 rather than
-          silently reinterpreted. */}
-      <DigestSubscribe variant="band" heading="The weekly digest" />
-
       <div class="feed-lab" id="feed"><span class="dot"></span><span class="t">The Feed</span><span class="rule"></span><a class="more" href="/feeds/">Everything, including member shares</a></div>
 
       <nav class="feed-tabs" aria-label="Feed views">
@@ -216,17 +209,12 @@ const SHOPTALK = {
         </div>
       </div>
 
-      <!-- join promo (signed-out; hidden for a signed-in member, who sees Your workbench instead) -->
-      <div class="card side-card join-card" id="join" data-home-joincard>
-        <div class="ttl"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-spark"/></svg> Join the co-op</div>
-        <p class="side-sub" style="margin-top:8px">Publish your work, build with peers, and earn from what you make.</p>
-        <ul class="join-list">
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-pencil"/></svg> Publish articles, products &amp; prompts</li>
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-chat"/></svg> Private Discord &amp; weekly build calls</li>
-          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg> Earn up to {FIRST_TOUCH_PCT} from members your work brings in</li>
-        </ul>
-        <a href="/login/" class="btn btn-primary" style="width:100%;justify-content:center">Create a free account</a>
-        <p class="note">Free to read · no card required</p>
+      <!-- sow-192 / sow-166: the weekly-digest capture leads the rail for a signed-out visitor (the design's
+           top slot; a signed-in member sees "Your workbench" there instead). The wrapper carries the card
+           chrome + the [data-home-joincard] signed-out gate; DigestSubscribe (variant="rail") is chromeless.
+           The Join card now sits at the rail bottom. One digest instance per page (the Turnstile rule). -->
+      <div class="card side-card" data-home-joincard>
+        <DigestSubscribe variant="rail" heading="The weekly digest" />
       </div>
 
       <!-- popular (sow-192: moved from the top New & Popular grid into the rail) -->
@@ -283,6 +271,20 @@ const SHOPTALK = {
           </div>
         </div>
       )}
+
+      <!-- join promo (sow-192: moved to the rail BOTTOM; the weekly digest now leads the rail). Signed-out;
+           hidden for a signed-in member, who sees Your workbench at the top instead. -->
+      <div class="card side-card join-card" id="join" data-home-joincard>
+        <div class="ttl"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-spark"/></svg> Join the co-op</div>
+        <p class="side-sub" style="margin-top:8px">Publish your work, build with peers, and earn from what you make.</p>
+        <ul class="join-list">
+          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-pencil"/></svg> Publish articles, products &amp; prompts</li>
+          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-chat"/></svg> Private Discord &amp; weekly build calls</li>
+          <li><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-coin"/></svg> Earn up to {FIRST_TOUCH_PCT} from members your work brings in</li>
+        </ul>
+        <a href="/login/" class="btn btn-primary" style="width:100%;justify-content:center">Create a free account</a>
+        <p class="note">Free to read · no card required</p>
+      </div>
     </aside>
   </div>
 </div>
