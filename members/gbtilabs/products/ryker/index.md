@@ -1,5 +1,5 @@
 ---
-title: Ryker
+title: Ryker - Inline HTML & Visual Markdown Editing
 slug: ryker
 shortDescription: >-
   Inline editing for HTML and Markdown. Export your corrections as agent-ready instructions a model
@@ -51,7 +51,7 @@ links:
   - type: support
     url: https://github.com/gbti-network/ryker/issues
     label: Report a bug
-updatedAt: '2026-08-23T01:36:13.416Z'
+updatedAt: '2026-08-23T14:29:48.815Z'
 type: product
 author: gbtilabs
 ---
