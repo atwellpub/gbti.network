@@ -90,8 +90,10 @@ test('gatherNewsEntries maps link->url + publishedAt->date and attaches the dist
   kv.m.set(NEWS_OPENS_KEY('g1'), { value: JSON.stringify(opensRecord(['u1', 'u2', 'u3', 'u4', 'u5'])), opts: null });
   kv.m.set(NEWS_OPENS_KEY('g2'), { value: JSON.stringify(opensRecord(['u1', 'u2'])), opts: null });
   const out = await gatherNewsEntries({ SIGNUP_KV: kv, NEWS_KV: {} }, { kv, queryItems: async () => ({ items: NEWS_ITEMS }) });
-  assert.deepEqual(out[0], { title: 'Hot news', url: 'https://n/1', source: 'Src', date: 1000, opens: 5 });
-  assert.deepEqual(out[1], { title: 'Cool news', url: 'https://n/2', source: 'Src2', date: 900, opens: 2 });
+  // + sourceName/digest/summary/image (sow-166, 2026-08-23). The fixture ids are not real sources, so
+  // sourceName resolves to null and the renderer falls back to the id: unchanged behaviour, stated explicitly.
+  assert.deepEqual(out[0], { title: 'Hot news', url: 'https://n/1', source: 'Src', sourceName: null, digest: undefined, summary: undefined, image: undefined, date: 1000, opens: 5 });
+  assert.deepEqual(out[1], { title: 'Cool news', url: 'https://n/2', source: 'Src2', sourceName: null, digest: undefined, summary: undefined, image: undefined, date: 900, opens: 2 });
   // no NEWS_KV binding -> no news (the store is not ready), never a crash
   assert.deepEqual(await gatherNewsEntries({ SIGNUP_KV: kv }, { kv, queryItems: async () => ({ items: NEWS_ITEMS }) }), []);
 });
@@ -448,4 +450,42 @@ test('SEAM (future-dated): a not-yet-due item is withheld then mailed once; a wa
   // re-mailed at 0, 4, 8, 12 (every historyDepth+1); unbounded, the same. Both fail this, so it is discriminating.
   assert.deepEqual(mailedIn.get('/products/future/'), [15],
     'the future-dated item is withheld until due, then mails exactly once, and does NOT re-mail on a historyDepth cycle');
+});
+
+
+// ---------- sow-166 digest v2 (2026-08-23): source display names at gather time ----------
+
+// THE DEFECT THIS CLOSES, tested against the REAL id rather than a stand-in. The first delivered issue showed
+// `object-object` under a Verge headline, because that string is literally the source id in
+// house/news-sources.yml (and in the bundled seed this test resolves against, offline).
+test('gatherNewsEntries resolves the source DISPLAY NAME, including the mangled object-object id', async () => {
+  const kv = makeKV();
+  const items = [
+    { guid: 'v1', title: 'A Verge headline', link: 'https://www.theverge.com/x', source: 'object-object', publishedAt: 10 },
+    { guid: 'u1', title: 'Unlisted', link: 'https://other/y', source: 'not-a-real-source-id', publishedAt: 9 },
+  ];
+  const out = await gatherNewsEntries({ SIGNUP_KV: kv, NEWS_KV: {} }, { kv, queryItems: async () => ({ items }) });
+  assert.equal(out[0].sourceName, 'The Verge', 'the id resolves to the name a reader should see');
+  assert.equal(out[0].source, 'object-object', 'and the stored id is preserved, because it is the key');
+  assert.equal(out[1].sourceName, null, 'an unlisted id resolves to null; the renderer falls back to the id');
+});
+
+test('gatherNewsEntries passes the image and BOTH summary fields through for the normalizer to choose', async () => {
+  const kv = makeKV();
+  const items = [{ guid: 'g', title: 'T', link: 'https://n/1', source: 's', publishedAt: 1,
+    digest: 'AI summary', summary: 'feed summary', image: 'https://i/x.jpg' }];
+  const [out] = await gatherNewsEntries({ SIGNUP_KV: kv, NEWS_KV: {} }, { kv, queryItems: async () => ({ items }) });
+  assert.equal(out.digest, 'AI summary');
+  assert.equal(out.summary, 'feed summary');
+  assert.equal(out.image, 'https://i/x.jpg');
+});
+
+test('a source list that THROWS is fail-soft: every row falls back to its id, news is not lost', async () => {
+  const kv = makeKV();
+  const items = [{ guid: 'g', title: 'T', link: 'https://n/1', source: 'object-object', publishedAt: 1 }];
+  const out = await gatherNewsEntries({ SIGNUP_KV: kv, NEWS_KV: {} }, {
+    kv, queryItems: async () => ({ items }), sourceList: async () => { throw new Error('sources unreachable'); },
+  });
+  assert.equal(out.length, 1, 'the news itself still gathers');
+  assert.equal(out[0].sourceName, null, 'names are a display nicety, never a gate on the item');
 });

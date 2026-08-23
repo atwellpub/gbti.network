@@ -11,7 +11,7 @@ import { isPublicShare, feedTime, decodeEntities } from './home-feed.mjs';
  * any item whose visibility is not 'public' as well, so a leak would have to defeat both.
  *
  * @param {Array<{ data: any }>} entries  the `share` collection entries
- * @returns {Array<{ type:'share', slug, title, author, url, publishedAt, visibility:'public' }>}
+ * @returns {Array<{ type:'share', slug, title, author, description, url, publishedAt, visibility:'public' }>}
  */
 export function buildSharesIndex(entries) {
   const list = Array.isArray(entries) ? entries : [];
@@ -27,6 +27,10 @@ export function buildSharesIndex(entries) {
         // default. decodeEntities unwinds OG-scraped entities (e.g. "A &#8211; B").
         title: decodeEntities(d.title ?? d.shortDescription ?? 'Shared a link'),
         author: d.author,
+        // sow-166: the public one-line blurb the email digest shows under the title. Suppressed when the
+        // share has NO title, because shortDescription is then already serving AS the title above and the
+        // row would print the same sentence twice. Public frontmatter only, never a body.
+        description: d.title ? (decodeEntities(d.shortDescription ?? '') || null) : null,
         url: `/shares/${slug}/`,
         publishedAt: feedTime(d) || null,
         visibility: 'public',

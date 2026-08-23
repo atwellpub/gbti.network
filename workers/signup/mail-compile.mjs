@@ -24,6 +24,7 @@ import { normalizeContent, normalizeNews, weeklyIssueId } from '../../membership
 import { canReceive } from '../../membership/mail-subscriber.mjs';
 import { MAIL_SUBSCRIBER_PREFIX } from '../../membership/mail-suppress.mjs';
 import { queryItems as kvQueryItems } from './news/src/store.mjs';
+import { loadSourceList } from './news/src/sources.mjs';
 import { normalizeNewsOpens, distinctOpenerCount } from '../../membership/news-opens.mjs';
 import { NEWS_OPENS_KEY } from './membership-news-opened.mjs';
 
@@ -176,7 +177,9 @@ export async function gatherContentEntries(env, { fetchImpl = globalThis.fetch, 
  * pure normalizer stays store-agnostic. composeIssue ranks by opens then date and caps the list, so this returns
  * the recent window (default 60), not a pre-ranked slice.
  */
-export async function gatherNewsEntries(env, { kv = env?.SIGNUP_KV, queryItems = kvQueryItems, limit = 60 } = {}) {
+export async function gatherNewsEntries(env, {
+  kv = env?.SIGNUP_KV, queryItems = kvQueryItems, limit = 60, sourceList = loadSourceList,
+} = {}) {
   if (!env?.NEWS_KV) return [];
   let items = [];
   try {
@@ -184,6 +187,19 @@ export async function gatherNewsEntries(env, { kv = env?.SIGNUP_KV, queryItems =
     items = Array.isArray(res?.items) ? res.items : [];
   } catch {
     return [];
+  }
+  // id -> display name, so a row reads "The Verge" rather than the stored id. A stored item carries only
+  // `source: <id>` (feeds.mjs normalize), and the name lives in the sources config, so the join has to happen
+  // somewhere; here is the only place that already has both. Resolving at GATHER time rather than renaming
+  // the ids means no stored item is ever orphaned: `object-object` keeps working as a key and stops being
+  // what a reader sees. A failure to load the list is NOT fatal, the map is simply empty and every row falls
+  // back to its id, which is exactly today's behaviour.
+  let names = new Map();
+  try {
+    const loaded = await sourceList(env);
+    for (const src of loaded?.sources ?? []) if (src?.id) names.set(src.id, src.name || src.id);
+  } catch {
+    names = new Map();
   }
   const opensFor = async (guid) => {
     if (!kv || !guid) return 0;
@@ -198,6 +214,12 @@ export async function gatherNewsEntries(env, { kv = env?.SIGNUP_KV, queryItems =
     title: it?.title,
     url: it?.link,
     source: it?.source,
+    sourceName: names.get(it?.source) ?? null,
+    // The normalizer prefers `digest` (the SOW-046 AI summary) and falls back to `summary` (the raw feed
+    // excerpt); both are passed so that choice stays in the pure, testable core rather than here.
+    digest: it?.digest,
+    summary: it?.summary,
+    image: it?.image,
     date: it?.publishedAt ? new Date(it.publishedAt).valueOf() || 0 : 0,
     opens: await opensFor(it?.guid),
   })));

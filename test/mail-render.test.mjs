@@ -394,3 +394,97 @@ test('empty sections collapse to a single line naming them all; the first issue 
   assert.match(first, /Nothing new in Articles, Products and Prompts in the past week\./);
   assert.match(first, /This is the first issue/);
 });
+
+// ---------- sow-166 digest v2 (2026-08-23): "Latest" headings, news thumbs, source display names ----------
+
+// The frozen-issue shape the renderer consumes. Built by hand so these tests exercise the RENDERER, not
+// composeIssue: a section here is filled or empty exactly as `layout` says.
+const v2Issue = () => ({
+  issueId: 'v2',
+  generatedAt: Date.UTC(2026, 7, 23),
+  layout: [
+    { key: 'article', label: 'Articles', empty: false, items: [
+      { kind: 'article', title: 'An article', url: '/articles/a/', author: 'alice', authorName: 'Alice',
+        blurb: 'The article frontmatter excerpt.', thumb: '/media/a.png', date: 3 },
+      { kind: 'article', title: 'No blurb here', url: '/articles/b/', author: 'bob', blurb: null, thumb: null, date: 2 },
+    ] },
+    { key: 'news', label: 'News', empty: false, items: [
+      { title: 'A Verge headline', url: 'https://www.theverge.com/x', source: 'object-object',
+        sourceName: 'The Verge', blurb: 'A one line news summary.', thumb: 'https://cdn.theverge.com/x.jpg', date: 1 },
+      { title: 'An unlisted source', url: 'https://other/y', source: 'servethehome', sourceName: null, date: 1 },
+    ] },
+    { key: 'product', label: 'Products', empty: true, items: [] },
+  ],
+});
+
+test('v2: every section heading carries the "Latest" prefix', () => {
+  const { html } = renderIssue(v2Issue(), {});
+  assert.match(html, />Latest Articles</, 'the Articles heading');
+  assert.match(html, />Latest News</, 'the News heading');
+});
+
+test('v2: the prefix is on the HEADING ONLY, never the feed link or the empty line', () => {
+  const { html } = renderIssue(v2Issue(), {});
+  assert.match(html, /See all in the Articles feed/, 'the feed link keeps the plain noun');
+  assert.ok(!html.includes('See all in the Latest Articles feed'), 'the feed link must not inherit the prefix');
+  assert.ok(!/Nothing new in Latest/.test(html), 'the collapsed empty line must not inherit the prefix');
+  assert.match(html, /Nothing new in Products/, 'and it still names the empty type plainly');
+});
+
+test('v2: NEWS rows carry a thumbnail (they were excluded before)', () => {
+  const { html } = renderIssue(v2Issue(), {});
+  assert.match(html, /src="https:\/\/cdn\.theverge\.com\/x\.jpg"/, 'the publisher image is rendered');
+  assert.match(html, /width="96"/, 'at the design thumbnail width');
+});
+
+test('v2: a member item thumbnail is made absolute; a missing one renders no img', () => {
+  const { html } = renderIssue(v2Issue(), { siteUrl: 'https://gbti.network' });
+  assert.match(html, /src="https:\/\/gbti\.network\/media\/a\.png"/, 'a site-relative thumb gains the site url');
+  const imgs = html.match(/<img[^>]+width="96"/g) || [];
+  assert.equal(imgs.length, 2, 'exactly the two items that HAVE a thumb render one (one article, one news)');
+});
+
+test('v2: the news source renders as its DISPLAY NAME, and object-object never reaches the reader', () => {
+  const { html, text } = renderIssue(v2Issue(), {});
+  assert.match(html, /The Verge/, 'the display name is shown');
+  assert.ok(!html.includes('object-object'), 'the mangled stored id must not be rendered');
+  assert.ok(!text.includes('object-object'), 'nor in the text alternative');
+});
+
+test('v2: a source with no display name FALLS BACK to its id rather than rendering blank', () => {
+  const { html } = renderIssue(v2Issue(), {});
+  assert.match(html, /servethehome/, 'an unlisted source still identifies itself');
+});
+
+test('v2: blurbs render, and an item without one renders a bare row', () => {
+  const { html } = renderIssue(v2Issue(), {});
+  assert.match(html, /The article frontmatter excerpt\./);
+  assert.match(html, /A one line news summary\./);
+  // The bare row is present and carries no blurb div of its own: its title is followed straight by the meta.
+  assert.match(html, /No blurb here/);
+  const bareRow = html.slice(html.indexOf('No blurb here'), html.indexOf('No blurb here') + 400);
+  assert.ok(!/font-size:12px/.test(bareRow.split('</table>')[0]), 'no blurb block is emitted for an item without one');
+});
+
+test('v2: the TEXT alternative carries the blurb and the source name, and stays in step with the html', () => {
+  const { text } = renderIssue(v2Issue(), { siteUrl: 'https://gbti.network' });
+  assert.match(text, /LATEST ARTICLES \(2\)/);
+  assert.match(text, /LATEST NEWS \(2\)/);
+  assert.match(text, /The article frontmatter excerpt\./, 'a blurb is a fact and belongs in the text part');
+  assert.match(text, /\(The Verge\)/, 'the display name, not the id');
+  assert.ok(!text.includes('cdn.theverge.com/x.jpg'), 'a thumbnail is visual only and does not belong in text');
+});
+
+test('v2 CONTRACT: a hostile thumb or source name is escaped and fails closed, like every other field', () => {
+  const issue = {
+    issueId: 'x', generatedAt: 1,
+    layout: [{ key: 'news', label: 'News', empty: false, items: [
+      { title: 'T', url: 'https://n/1', source: 's', sourceName: '<script>x</script>',
+        blurb: '<img src=x onerror=1>', thumb: 'javascript:alert(1)' },
+    ] }],
+  };
+  const { html } = renderIssue(issue, {});
+  assert.ok(!html.includes('<script>x</script>'), 'the source name is escaped');
+  assert.ok(!html.includes('<img src=x onerror=1>'), 'the blurb is escaped');
+  assert.ok(!html.includes('javascript:alert(1)'), 'an unsafe thumb url fails closed to no image');
+});

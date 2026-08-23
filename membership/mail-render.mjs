@@ -175,10 +175,21 @@ function emptyPhrase(empties, firstIssue) {
   return `Nothing new in ${list} ${firstIssue ? 'in the past week' : 'since the last issue'}.`;
 }
 
+/**
+ * What a reader should see under a news headline. `sourceName` is the display name from the sources config
+ * ("The Verge"); `source` is the stored id, which is a slug and occasionally a mangled one. The first
+ * delivered issue showed `object-object` under a Verge headline, because that string is literally the id in
+ * house/news-sources.yml, and `engadget-technology-news-expert-reviews` under an Engadget one. Prefer the
+ * name; fall back to the id so an unlisted source still identifies itself rather than rendering blank.
+ */
+function sourceLabel(it) {
+  return str(it.sourceName).trim() || str(it.source).trim();
+}
+
 // The meta line under a title: a monospace byline (member) or source (news), with the member author's derived
 // avatar to its left. News has no author, so no avatar.
 function metaLineHtml(sectionKey, it, p) {
-  const meta = sectionKey === 'news' ? escapeHtml(str(it.source).trim()) : escapeHtml(byline(it));
+  const meta = sectionKey === 'news' ? escapeHtml(sourceLabel(it)) : escapeHtml(byline(it));
   if (!meta) return '';
   const metaText = `<span style="font-family:'Courier New',monospace;font-size:10.5px;letter-spacing:.05em;color:${p.meta}">${meta}</span>`;
   const avatar = sectionKey === 'news' ? '' : avatarUrl(it.author);
@@ -205,7 +216,12 @@ function itemHtml(sectionKey, it, p, siteUrl) {
     ? `<div style="padding-top:5px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:${p.inkSoft};mso-line-height-rule:exactly;line-height:17px">${escapeHtml(blurb)}</div>`
     : '';
   const left = `${titleHtml}${blurbHtml}${metaLineHtml(sectionKey, it, p)}`;
-  const thumb = sectionKey === 'news' ? '' : absUrl(it.thumb, siteUrl);
+  // NEWS ROWS CARRY THUMBNAILS TOO (owner, 2026-08-23). This was member-items-only, so the section with the
+  // most rows was the one with no pictures. A news thumb is the publisher's own og:image on their own domain,
+  // so it is an external absolute url; absUrl passes http(s) through untouched and fails anything else closed
+  // to no image. Images are blocked by default in most clients, which is why the title is never inside the
+  // image and the layout does not depend on it loading.
+  const thumb = absUrl(it.thumb, siteUrl);
 
   const inner = thumb
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="width:480px"><tr>`
@@ -225,13 +241,19 @@ function itemHtml(sectionKey, it, p, siteUrl) {
 // "See all" link into that type's public feed. Empty sections never reach here; they collapse (see emptyLineHtml).
 function sectionHtml(section, p, siteUrl) {
   const name = escapeHtml(str(section.label));
+  // "Latest Articles", "Latest News" (owner, 2026-08-23). The prefix is applied HERE, to the heading, and
+  // NOT to SECTION_LABELS, because that same label is also the feed name in the "See all in the Articles
+  // feed" link below and the type list in the collapsed empty line ("Nothing new in Articles, Products").
+  // Prefixing at the source would produce "See all in the Latest Articles feed" and "Nothing new in Latest
+  // Articles", both of which read as a mistake.
+  const heading = escapeHtml(`Latest ${str(section.label)}`);
   const n = Array.isArray(section.items) ? section.items.length : 0;
   const feed = absUrl(SECTION_FEED[section.key] || '/feeds/', siteUrl);
 
   const head = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:44px 28px 0">`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="width:480px"><tr>`
-    + `<td align="left" style="font-family:'Trebuchet MS',Verdana,sans-serif;font-size:14px;font-weight:700;color:${p.ink};mso-line-height-rule:exactly;line-height:18px">${name}</td>`
+    + `<td align="left" style="font-family:'Trebuchet MS',Verdana,sans-serif;font-size:14px;font-weight:700;color:${p.ink};mso-line-height-rule:exactly;line-height:18px">${heading}</td>`
     + `<td align="right" style="font-family:'Courier New',monospace;font-size:10.5px;font-weight:700;letter-spacing:.09em;color:${p.accent};mso-line-height-rule:exactly;line-height:18px">${escapeHtml(`${n} NEW`)}</td>`
     + `</tr></table></td></tr>`
     + `<tr><td width="536" style="width:536px;padding:9px 28px 0"><div style="height:2px;background-color:${p.rule};font-size:0;line-height:0">&nbsp;</div></td></tr></table>`;
@@ -334,15 +356,20 @@ function footerHtml(p, ctx, siteUrl) {
 
 function sectionText(section, siteUrl) {
   const n = Array.isArray(section.items) ? section.items.length : 0;
-  return `${str(section.label).toUpperCase()} (${n})\n${section.items.map((it) => itemText(section.key, it, siteUrl)).join('\n')}`;
+  return `LATEST ${str(section.label).toUpperCase()} (${n})\n${section.items.map((it) => itemText(section.key, it, siteUrl)).join('\n')}`;
 }
 
+// The text alternative carries the same FACTS as the html, minus what only exists visually. The blurb is a
+// fact and belongs here; the thumbnail is not and does not. Keeping the two in step matters because a client
+// showing the text part must not present a thinner issue than the one that was actually composed.
 function itemText(sectionKey, it, siteUrl) {
   const title = str(it.title).trim() || '(untitled)';
   const url = absUrl(it.url, siteUrl);
-  const meta = sectionKey === 'news' ? str(it.source).trim() : byline(it);
+  const meta = sectionKey === 'news' ? sourceLabel(it) : byline(it);
   const suffix = meta ? ` (${meta})` : '';
-  return url ? `- ${title}${suffix}\n  ${url}` : `- ${title}${suffix}`;
+  const blurb = str(it.blurb).trim();
+  const blurbLine = blurb ? `\n  ${blurb}` : '';
+  return url ? `- ${title}${suffix}${blurbLine}\n  ${url}` : `- ${title}${suffix}${blurbLine}`;
 }
 
 /**

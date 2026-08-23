@@ -9,8 +9,10 @@
 //   1. Any member item is EXCLUDED: an item is kept only if visibility === 'public'. Missing/other -> dropped
 //      (fail closed), matching src/lib/home-feed.mjs isPublicShare and the activity-index Mode B stubs.
 //   2. Even a public item is copied field-by-field into a PUBLIC-SAFE projection (kind/title/url/author/
-//      authorName/date only). There is deliberately no body/encryptedBody field, so a caller that wrongly
-//      passes a member body cannot leak it into a compiled issue (the leak-guard test asserts this).
+//      authorName/date, plus blurb/thumb since 2026-08-23). There is deliberately no body/encryptedBody
+//      field, so a caller that wrongly passes a member body cannot leak it into a compiled issue (the
+//      leak-guard test asserts this). `blurb` is public frontmatter ONLY and has NO body fallback; see the
+//      note on publicItem for why the rule, rather than the field name, is the control.
 //
 // THE WINDOW IS PART OF THE SECTION CONTRACT, not an optimization. `since` drops member items older than the
 // previous issue, and WITHOUT it the whole contract is silently hollow: the input artifacts are the site's
@@ -64,11 +66,17 @@ export const SECTION_KINDS = ['article', 'product', 'prompt', 'share'];
 // published in that category, because a visible gap is an invitation to fill it and a missing section is
 // not. The owner chose this over skipping silently, which was the other recommendation on the table.
 //
-// ORDER is "the types that have content first, news especially". SECTION_ORDER is the canonical priority,
-// and `layout` splits on it: filled sections in that order, then empty sections in that SAME order. So the
-// relative order never changes week to week (a reader learns where Prompts sits), and the only thing that
-// moves is the line between what was published and what was not.
-export const SECTION_ORDER = ['news', 'article', 'product', 'prompt', 'share'];
+// ORDER, and it REVERSED on 2026-08-23 after the owner read the first delivered issue. It was "the types
+// that have content first, news especially", which put curated third-party links above everything the
+// members wrote. The owner's ruling is that NEWS GOES LAST, and the member types run in the newsletter
+// design handoff's own order (Articles, Prompts, Products, Shares). That is the design and the owner
+// agreeing, where before they disagreed: `sow-166-assets/SOURCE.md` register item 1 recorded the conflict
+// as unresolved precisely because nobody could tell whether the design predated the earlier ruling.
+//
+// `layout` splits on this order: filled sections in it, then empty sections collapsed into ONE trailing
+// line. So the relative order never changes week to week (a reader learns where Prompts sits), News is last
+// among everything visible, and the only thing that moves is the line between published and not.
+export const SECTION_ORDER = ['article', 'prompt', 'product', 'share', 'news'];
 
 export const SECTION_LABELS = {
   news: 'News',
@@ -166,6 +174,22 @@ function publicItem(it) {
     author: trimOrNull(it.author),
     authorName: trimOrNull(it.authorName),
     date: numOr0(it.date),
+    // TWO NAMES ADDED 2026-08-23, AND THE GUARD IS NOT WIDENED BEYOND THEM.
+    //
+    // `blurb` is the item's PUBLIC FRONTMATTER description and nothing else: post.excerpt,
+    // product.shortDescription, prompt.shortDescription, share.shortDescription. It is author-written, length
+    // capped by the content schema, and already served in the HTML of every item page. It is NOT derived from
+    // a body, and there is deliberately no fallback that could reach one.
+    //
+    // THE FIELD NAME IS NOT THE CONTROL. post.excerpt is OPTIONAL (src/content.config.ts:126), so the day an
+    // article lands without one, the obvious repair is to fall back to the body, and that fallback would leak
+    // a member body into an email the moment a Mode B stub slipped past layer one. The control is the rule
+    // that a MISSING blurb renders NO blurb, pinned by a test where an item carries a body and no excerpt and
+    // the row comes out bare. Read that test before touching this.
+    blurb: trimOrNull(it.blurb),
+    // `thumb` is a URL, not content, and it is already public: activity-index.json has shipped it on every
+    // entry since SOW-039. The renderer fails an unsafe value closed to no image (safeUrl).
+    thumb: trimOrNull(it.thumb),
   };
 }
 
@@ -176,6 +200,15 @@ function newsItem(it) {
     title: trimOrNull(it.title),
     url: trimOrNull(it.url),
     source: trimOrNull(it.source),
+    // The source's DISPLAY name, resolved from the sources config at gather time. `source` stays the id
+    // because it is the stored key (the store's per-source counts are keyed on it); this is the one a reader
+    // sees. The renderer falls back to `source` when no name resolves, so an unlisted source still renders.
+    sourceName: trimOrNull(it.sourceName),
+    // News blurbs and images come from the feed itself, not from anything member-authored, so they cross no
+    // membership boundary. They are projected here rather than passed through so a news gather cannot smuggle
+    // an unexpected field into a frozen issue either.
+    blurb: trimOrNull(it.blurb),
+    thumb: trimOrNull(it.thumb),
     opens: numOr0(it.opens),
     date: numOr0(it.date),
   };

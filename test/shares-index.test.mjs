@@ -16,7 +16,7 @@ test('includes ONLY published+public shares; members-only, draft, and junk are e
   ]);
   assert.equal(entries.length, 1, 'only the one public share survives the guard');
   assert.deepEqual(entries[0], {
-    type: 'share', slug: 'ann/a', title: 'T', author: 'ann', url: '/shares/ann/a/', publishedAt: 3000, visibility: 'public',
+    type: 'share', slug: 'ann/a', title: 'T', author: 'ann', description: null, url: '/shares/ann/a/', publishedAt: 3000, visibility: 'public',
   });
 });
 
@@ -44,4 +44,29 @@ test('non-array input is a safe empty list', () => {
   assert.deepEqual(buildSharesIndex(null), []);
   assert.deepEqual(buildSharesIndex(undefined), []);
   assert.deepEqual(buildSharesIndex([]), []);
+});
+
+
+// ---------- sow-166 digest v2 (2026-08-23): the public one-line description ----------
+
+test('a titled share publishes its shortDescription as the digest blurb', () => {
+  const [e] = buildSharesIndex([share({ id: 'a', title: 'A title', shortDescription: 'Why this is worth reading.' })]);
+  assert.equal(e.title, 'A title');
+  assert.equal(e.description, 'Why this is worth reading.');
+});
+
+// The duplication this prevents is not hypothetical: buildSharesIndex ALREADY falls back to shortDescription
+// for the title when a share has none, so emitting it as the description too would print the same sentence
+// twice in one row, as heading and as blurb.
+test('an UNTITLED share does not repeat its shortDescription as both title and blurb', () => {
+  const [e] = buildSharesIndex([share({ id: 'b', title: undefined, shortDescription: 'The only sentence there is.' })]);
+  assert.equal(e.title, 'The only sentence there is.', 'it is serving as the title');
+  assert.equal(e.description, null, 'so it must not also serve as the blurb');
+});
+
+test('a share with no shortDescription publishes no description, never a body', () => {
+  const [e] = buildSharesIndex([share({ id: 'c', title: 'T', body: 'THE SHARE BODY', note: 'A NOTE' })]);
+  assert.equal(e.description, null, 'absent means absent');
+  assert.ok(!JSON.stringify(e).includes('THE SHARE BODY'));
+  assert.ok(!JSON.stringify(e).includes('A NOTE'));
 });

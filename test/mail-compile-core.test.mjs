@@ -66,11 +66,13 @@ test('VISIBILITY SURVIVES end to end: composeIssue drops the members item the no
 test('normalizeNewsEntry: opens/date default 0, blank source is null, missing title or url drops the item', () => {
   assert.deepEqual(
     normalizeNewsEntry({ title: 'N', url: 'https://n/x', source: 'Src', opens: 9, date: 7 }),
-    { title: 'N', url: 'https://n/x', source: 'Src', opens: 9, date: 7 },
+    // + sourceName/blurb/thumb (sow-166, 2026-08-23). All three default to null, so an entry carrying none of
+    // them normalizes to exactly what it did before, with three absent fields rather than three fabricated ones.
+    { title: 'N', url: 'https://n/x', source: 'Src', sourceName: null, blurb: null, thumb: null, opens: 9, date: 7 },
   );
   assert.deepEqual(
     normalizeNewsEntry({ title: 'N', url: 'https://n/x' }),
-    { title: 'N', url: 'https://n/x', source: null, opens: 0, date: 0 },
+    { title: 'N', url: 'https://n/x', source: null, sourceName: null, blurb: null, thumb: null, opens: 0, date: 0 },
   );
   assert.equal(normalizeNewsEntry({ url: 'https://n/x' }), null, 'no title -> dropped');
   assert.equal(normalizeNewsEntry({ title: 'N' }), null, 'no url -> dropped');
@@ -85,4 +87,136 @@ test('weeklyIssueId is a stable weekly-YYYY-MM-DD in UTC, idempotent same-day, a
   assert.equal(weeklyIssueId(t + 6 * 3600 * 1000), 'weekly-2026-08-25', 'same UTC day -> same id (idempotent re-run)');
   assert.throws(() => weeklyIssueId(NaN), /finite timestamp/);
   assert.throws(() => weeklyIssueId('nope'), /finite timestamp/);
+});
+
+// ---------- sow-166 digest v2 (2026-08-23): descriptions, images, source display names ----------
+
+test('newsBlurb strips tags, unescapes entities and collapses whitespace', async () => {
+  const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
+  assert.equal(newsBlurb('<p>Hello &amp; welcome</p>'), 'Hello & welcome');
+  assert.equal(newsBlurb('a\n\n  b\tc'), 'a b c');
+  assert.equal(newsBlurb('<div><span>nested</span> tags</div>'), 'nested tags');
+});
+
+test('newsBlurb truncates at a WORD boundary and never mid-word', async () => {
+  const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
+  const long = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec';
+  const out = newsBlurb(long, { max: 40 });
+  assert.ok(out.endsWith('...'), 'a truncated blurb is marked as truncated');
+  assert.ok(out.length <= 43, `too long: ${out.length}`);
+  const body = out.slice(0, -3);
+  assert.ok(long.startsWith(body), 'the kept text is a real prefix of the source');
+  assert.ok(!/\S$/.test(body) || long[body.length] === ' ', 'the cut landed on a word boundary');
+});
+
+test('newsBlurb returns NULL for anything that reduces to nothing, so no empty box renders', async () => {
+  const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
+  for (const v of ['', '   ', '<p></p>', '<br/>&nbsp;', null, undefined]) {
+    assert.equal(newsBlurb(v), null, `expected null for ${JSON.stringify(v)}`);
+  }
+});
+
+test('news normalization PREFERS the AI digest over the raw feed summary', () => {
+  const n = normalizeNewsEntry({
+    title: 'T', url: 'https://x/1', source: 'src',
+    digest: 'The written-to-be-read summary.', summary: '<p>The publishers truncated first paragraph</p>',
+  });
+  assert.equal(n.blurb, 'The written-to-be-read summary.');
+});
+
+test('news normalization falls back to the feed summary, and to NO blurb when both are empty', () => {
+  const fallback = normalizeNewsEntry({ title: 'T', url: 'https://x/1', summary: '<p>Feed text</p>' });
+  assert.equal(fallback.blurb, 'Feed text');
+  const none = normalizeNewsEntry({ title: 'T', url: 'https://x/1', digest: '  ', summary: '<p> </p>' });
+  assert.equal(none.blurb, null, 'an unusable summary renders no blurb rather than an empty one');
+});
+
+test('news normalization carries the image and the resolved source name', () => {
+  const n = normalizeNewsEntry({
+    title: 'T', url: 'https://x/1', source: 'object-object', sourceName: 'The Verge',
+    image: 'https://cdn.theverge.com/x.jpg',
+  });
+  assert.equal(n.thumb, 'https://cdn.theverge.com/x.jpg');
+  assert.equal(n.sourceName, 'The Verge');
+  assert.equal(n.source, 'object-object', 'the stored id is preserved as the key');
+  assert.equal(normalizeNewsEntry({ title: 'T', url: 'https://x/1', source: 'x' }).sourceName, null, 'no name -> null, renderer falls back to the id');
+});
+
+test('content normalization carries the artifact description as the blurb, and the thumb', () => {
+  const e = normalizeContentEntry({
+    type: 'post', title: 't', url: '/articles/t/', author: 'a', publishedAt: 5, visibility: 'public',
+    description: 'The frontmatter excerpt.', thumb: '/media/t.png',
+  });
+  assert.equal(e.blurb, 'The frontmatter excerpt.');
+  assert.equal(e.thumb, '/media/t.png');
+});
+
+// The compile-core half of the security control. The projection enforces the allowlist; this proves the
+// normalizer never MANUFACTURES a blurb from an entry that has a body and no description.
+test('SECURITY CONTROL: an artifact entry with a body and no description yields NO blurb', () => {
+  const e = normalizeContentEntry({
+    type: 'post', title: 't', url: '/articles/t/', author: 'a', publishedAt: 5, visibility: 'public',
+    body: 'THE BODY', content: 'THE CONTENT', excerpt: 'NOT READ FROM HERE',
+  });
+  assert.equal(e.blurb, null, 'absent means absent: there is no second source for a blurb');
+  assert.ok(!JSON.stringify(e).includes('THE BODY'));
+  assert.ok(!JSON.stringify(e).includes('THE CONTENT'));
+});
+
+// THE SECOND HALF OF THE SOURCE-LABEL FIX. Replacing the id with the config name closed `object-object`, and
+// opened a different one: the config name is the feed's own <title>, which is a strap line. Measured against
+// the real bundled sources, "Engadget - Technology News & Expert Reviews" and "CoinDesk: Bitcoin, Ethereum,
+// Crypto News and Price Data" both rendered under headlines, the second wrapping onto two lines.
+test('sourceDisplayName reduces an RSS strap line to the brand', async () => {
+  const { sourceDisplayName } = await import('../membership/mail-compile-core.mjs');
+  assert.equal(sourceDisplayName('Engadget - Technology News & Expert Reviews'), 'Engadget');
+  assert.equal(sourceDisplayName('CoinDesk: Bitcoin, Ethereum, Crypto News and Price Data'), 'CoinDesk');
+  assert.equal(sourceDisplayName('Ars Technica - All content'), 'Ars Technica');
+});
+
+test('sourceDisplayName leaves a plain brand name untouched', async () => {
+  const { sourceDisplayName } = await import('../membership/mail-compile-core.mjs');
+  for (const n of ['The Verge', 'ServeTheHome', 'WIRED', 'Hacker News']) {
+    assert.equal(sourceDisplayName(n), n, `${n} must survive intact`);
+  }
+});
+
+// Both guards fail toward showing MORE of the real name, never toward showing nothing. A heuristic run over
+// other people's text has to be safe in the degenerate cases, not just the tidy ones.
+test('sourceDisplayName guards: a too-short head is not taken, and a long name is capped on a word boundary', async () => {
+  const { sourceDisplayName } = await import('../membership/mail-compile-core.mjs');
+  assert.equal(sourceDisplayName('- leading sep'), '- leading sep', 'a head under 3 chars is rejected, the full name is kept');
+  assert.equal(sourceDisplayName('AB: something'), 'AB: something', 'two characters is not a brand');
+  const long = sourceDisplayName('A very long publication name with no separator anywhere in it at all');
+  assert.ok(long.length <= 40, `capped, got ${long.length}`);
+  assert.ok(!long.endsWith(' '), 'and cut cleanly');
+  assert.equal(sourceDisplayName(''), null);
+  assert.equal(sourceDisplayName(null), null);
+});
+
+test('the news normalizer applies the brand trim, so a frozen issue stores what is displayed', () => {
+  const n = normalizeNewsEntry({
+    title: 'T', url: 'https://x/1', source: 'engadget-technology-news-expert-reviews',
+    sourceName: 'Engadget - Technology News & Expert Reviews',
+  });
+  assert.equal(n.sourceName, 'Engadget');
+  assert.equal(n.source, 'engadget-technology-news-expert-reviews', 'the id is still the key');
+});
+
+// Observed in a real delivered row, not hypothesised: "...for mroe efficient compute The post Samsung
+// Evolving...". WordPress appends this tail to every feed excerpt, and it is part of the SOURCE text, so it
+// has to be removed before truncation or truncation just cuts it mid-phrase.
+test('newsBlurb removes the WordPress "The post ... appeared first on ..." feed footer', async () => {
+  const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
+  const raw = 'At Hot Chips 2026, Samsung discussed how it plans to evolve the HBM base die. The post Samsung Evolving HBM Base Die at Hot Chips 2026 appeared first on ServeTheHome.';
+  const out = newsBlurb(raw, { max: 400 });
+  assert.equal(out, 'At Hot Chips 2026, Samsung discussed how it plans to evolve the HBM base die.');
+  assert.ok(!out.includes('The post'));
+  assert.ok(!out.includes('appeared first on'));
+});
+
+test('newsBlurb leaves a sentence that merely BEGINS "The post" alone (both halves are required)', async () => {
+  const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
+  const s = 'The post office is closing early today, the council said.';
+  assert.equal(newsBlurb(s), s, 'the anchor needs "appeared first on" too, or ordinary prose gets eaten');
 });

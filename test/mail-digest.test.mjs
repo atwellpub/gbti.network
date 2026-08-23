@@ -50,7 +50,7 @@ test('LEAK GUARD: a members item is excluded and no body/ciphertext can appear i
   assert.ok(!serialized.includes('PUBLIC BODY TEXT'), 'even a public items body is not copied (projection)');
   assert.ok(!serialized.includes('.enc'));
   // the surviving item has ONLY public-safe fields
-  assert.deepEqual(Object.keys(issue.sections.article[0]).sort(), ['author', 'authorName', 'date', 'kind', 'title', 'url']);
+  assert.deepEqual(Object.keys(issue.sections.article[0]).sort(), ['author', 'authorName', 'blurb', 'date', 'kind', 'thumb', 'title', 'url']); // + blurb/thumb (sow-166, 2026-08-23). Still an EXACT list, so a third field fails right here
 });
 
 test('isPublicItem fails closed on missing/other visibility', () => {
@@ -70,7 +70,7 @@ test('news is ranked by distinct-opener count, then newest, and capped', () => {
   const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { maxNews: 3 });
   assert.deepEqual(issue.topNews.map((n) => n.title), ['high', 'mid-b', 'mid-a']); // opens desc, date breaks ties
   assert.equal(issue.topNews.length, 3); // capped
-  assert.deepEqual(Object.keys(issue.topNews[0]).sort(), ['date', 'opens', 'source', 'title', 'url']);
+  assert.deepEqual(Object.keys(issue.topNews[0]).sort(), ['blurb', 'date', 'opens', 'source', 'sourceName', 'thumb', 'title', 'url']);
 });
 
 test('empty-week policy: skip only when member AND news are both empty; else top-news-only still sends', () => {
@@ -116,9 +116,10 @@ test('layout carries EVERY section every week, filled ones first, in canonical o
   assert.deepEqual(issue.layout.map((s) => s.key).sort(), [...SECTION_ORDER].sort());
   assert.equal(issue.layout.length, SECTION_ORDER.length);
 
-  // filled first (news leads the filled group), then the empty ones
-  assert.deepEqual(issue.layout.map((s) => s.key), ['news', 'prompt', 'share', 'article', 'product']);
-  assert.deepEqual(issue.layout.filter((s) => !s.empty).map((s) => s.key), ['news', 'prompt', 'share']);
+  // filled first, then the empty ones. News TRAILS the filled group (owner ruling 2026-08-23): it used to lead
+  // it, which put curated third-party links above everything the members wrote.
+  assert.deepEqual(issue.layout.map((s) => s.key), ['prompt', 'share', 'news', 'article', 'product']);
+  assert.deepEqual(issue.layout.filter((s) => !s.empty).map((s) => s.key), ['prompt', 'share', 'news']);
 });
 
 test('the relative order inside each group is stable, so a section does not move week to week', () => {
@@ -191,7 +192,7 @@ test('LEAK GUARD holds through layout: a members item reaches no section and no 
   assert.ok(!serialized.includes('secret'), 'a member item title reached the compiled issue');
   for (const section of issue.layout) {
     for (const it of section.items) {
-      assert.deepEqual(Object.keys(it).sort(), ['author', 'authorName', 'date', 'kind', 'title', 'url']);
+      assert.deepEqual(Object.keys(it).sort(), ['author', 'authorName', 'blurb', 'date', 'kind', 'thumb', 'title', 'url']);
     }
   }
 });
@@ -581,4 +582,80 @@ test('FUTURE DATES: an ordinary catalogue still mails each item exactly once acr
   const tally = runWeeklyCompiles(items, { weeks: 20, historyDepth: 3, t0: T0, perSection: 2 });
   assert.deepEqual(Object.keys(tally).sort(), ['p1', 'p2', 'p3', 'p4', 'p5', 'p6']);
   for (const [title, n] of Object.entries(tally)) assert.equal(n, 1, `${title} mailed ${n} times, expected once`);
+});
+
+// ---------- sow-166 digest v2 (2026-08-23): blurb + thumb, and the rule that keeps the guard closed ----------
+
+// THE SECURITY CONTROL FOR THE WIDENED PROJECTION, and it is not the field name.
+//
+// publicItem grew `blurb` so the email can show a line under each title. post.excerpt is OPTIONAL, so the day
+// an article lands without one the obvious repair is "fall back to the body", and for a Mode B stub that puts
+// member-only text into a mailed issue. The projection cannot express that rule; only this test can. It is
+// the reason a bare row is correct rather than a bug, and it is what should go red if anyone adds a fallback.
+test('SECURITY CONTROL: an item with a BODY and no frontmatter blurb renders a BARE row, never a body excerpt', () => {
+  const items = [
+    pub('article', 'no-excerpt', 100, { body: 'THE ARTICLE BODY TEXT', encryptedBody: 'x.enc' }), // no blurb
+    pub('product', 'has-blurb', 90, { blurb: 'A real frontmatter blurb.', body: 'PRODUCT BODY TEXT' }),
+  ];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(999) });
+  const bare = issue.sections.article[0];
+  const withBlurb = issue.sections.product[0];
+
+  assert.equal(bare.blurb, null, 'a missing frontmatter blurb must stay missing');
+  assert.equal(withBlurb.blurb, 'A real frontmatter blurb.', 'a real blurb still arrives, or this proves nothing');
+
+  const serialized = JSON.stringify(issue);
+  assert.ok(!serialized.includes('THE ARTICLE BODY TEXT'), 'no body reached the issue in place of the blurb');
+  assert.ok(!serialized.includes('PRODUCT BODY TEXT'), 'a body is not copied even when a blurb exists');
+});
+
+test('the projection carries blurb + thumb through, and still drops everything else', () => {
+  const items = [pub('article', 'a', 100, {
+    blurb: 'Public frontmatter blurb.', thumb: '/media/a.png',
+    body: 'BODY', encryptedBody: 'e.enc', secretField: 'SHOULD NOT SURVIVE',
+  })];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(999) });
+  const it = issue.sections.article[0];
+  assert.equal(it.blurb, 'Public frontmatter blurb.');
+  assert.equal(it.thumb, '/media/a.png');
+  assert.deepEqual(Object.keys(it).sort(), ['author', 'authorName', 'blurb', 'date', 'kind', 'thumb', 'title', 'url']);
+  assert.ok(!JSON.stringify(issue).includes('SHOULD NOT SURVIVE'), 'the projection is still an allowlist, not a merge');
+});
+
+test('the news projection carries sourceName, blurb and thumb, and stays an allowlist', () => {
+  const news = [{
+    title: 'N', url: 'https://theverge.com/x', source: 'object-object', sourceName: 'The Verge',
+    blurb: 'A one line summary.', thumb: 'https://cdn.theverge.com/x.jpg', opens: 3, date: 10,
+    rawFeedPayload: 'SHOULD NOT SURVIVE',
+  }];
+  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(999) });
+  const n = issue.topNews[0];
+  assert.equal(n.sourceName, 'The Verge');
+  assert.equal(n.source, 'object-object', 'the stored id is kept: it is the key, the name is only for display');
+  assert.equal(n.blurb, 'A one line summary.');
+  assert.equal(n.thumb, 'https://cdn.theverge.com/x.jpg');
+  assert.ok(!JSON.stringify(issue).includes('SHOULD NOT SURVIVE'));
+});
+
+// OWNER RULING 2026-08-23, read back off the real constant rather than restated as a comment.
+test('SECTION ORDER: News is LAST and the member types run in the design order', () => {
+  assert.deepEqual(SECTION_ORDER, ['article', 'prompt', 'product', 'share', 'news']);
+  assert.equal(SECTION_ORDER[SECTION_ORDER.length - 1], 'news', 'news goes last');
+});
+
+test('layout puts News last among FILLED sections, not merely last in the constant', () => {
+  const items = [pub('article', 'a', 100), pub('share', 's', 90)];
+  const news = [{ title: 'N', url: 'https://n/1', source: 'src', opens: 9, date: 95 }];
+  const issue = composeIssue({ issueId: 'i', items, news, now: at(999) });
+  const filled = issue.layout.filter((s) => !s.empty).map((s) => s.key);
+  assert.deepEqual(filled, ['article', 'share', 'news'], 'a filled news section still sorts below the member types');
+  assert.equal(filled[filled.length - 1], 'news');
+});
+
+test('SECTION_LABELS stay the plain nouns: "Latest" is a heading prefix, not the label', () => {
+  // The label also names the "See all in the Articles feed" link and the collapsed empty line ("Nothing new
+  // in Articles, Products"). Baking the prefix in here would corrupt both, so it is applied in the renderer.
+  for (const [key, label] of Object.entries(SECTION_LABELS)) {
+    assert.ok(!/^Latest\b/.test(label), `SECTION_LABELS.${key} must not carry the prefix`);
+  }
 });
