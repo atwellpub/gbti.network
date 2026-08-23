@@ -15,6 +15,7 @@ import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* e
 import { BANNER_PRESETS } from '../../../src/lib/banner-presets.mjs'; // sow-174: the curated banner-color swatches
 import { detectLinkSource } from '../../../src/lib/product-page.mjs'; // sow-175: wordpress.org/github.com URL detection
 import { publicUrlFor } from '../public-url.mjs'; // SOW-265: the shared live-URL scheme (also used by the My Content table)
+import { galleryRowsFromValue, galleryValueFromRows } from '../gallery.mjs'; // sow-268: gallery rows parse/serialize (round-trips a json field that a comma-join used to break)
 
 // SOW-062 P6: inline icons for the edhead toolbar + section headers (the design's sprite is not in the shadow root).
 const _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
@@ -29,6 +30,8 @@ const LOCK = _svg(`<rect x="5" y="11" width="14" height="9" rx="2.2" ${S} stroke
 const INFO = _svg(`<circle cx="12" cy="12" r="8.2" ${S} stroke-width="1.7"/><path d="M12 11v5" ${S} stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="8" r="1.05" fill="currentColor"/>`);
 const X = _svg(`<path d="M6 6l12 12M18 6L6 18" ${S} stroke-width="2" stroke-linecap="round"/>`);
 const CHEV = _svg(`<path d="M6 9l6 6 6-6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+const CHEV_UP = _svg(`<path d="M6 15l6-6 6 6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`); // sow-268: gallery row move up
+const CHEV_DOWN = _svg(`<path d="M6 9l6 6 6-6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`); // sow-268: gallery row move down
 const TAG = _svg(`<path d="M4 11.5V5a1 1 0 0 1 1-1h6.5l8 8-7.5 7.5-8-8z" ${S} stroke-width="1.7" stroke-linejoin="round"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor"/>`);
 const COIN = _svg(`<circle cx="12" cy="12" r="8" ${S} stroke-width="1.8"/><path d="M12 7.5v9M14.5 9.3c-.6-.7-1.5-1-2.5-1-1.4 0-2.5.7-2.5 1.9 0 2.6 5 1.4 5 4 0 1.2-1.1 2-2.5 2-1 0-2-.4-2.6-1.1" ${S} stroke-width="1.6" stroke-linecap="round"/>`);
 const LINK = _svg(`<path d="M10 14a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L11 8" ${S} stroke-width="1.7" stroke-linecap="round"/><path d="M14 10a3.5 3.5 0 0 0-5 0l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 16" ${S} stroke-width="1.7" stroke-linecap="round"/>`);
@@ -527,6 +530,16 @@ class GbtiContentEditor extends GbtiElement {
         .lr-vis button { font:inherit; font-size:10.5px; font-weight:600; padding:5px 9px; border:0; background:transparent; color:var(--s-fg-soft); border-radius:6px; cursor:pointer; }
         .lr-vis button.on { background:var(--s-fg); color:var(--s-canvas); }
         .addrow { font-size:13px; padding:8px 12px; align-self:flex-start; }
+        /* sow-268: gallery rows. Same visual language as .linkrow, plus a thumbnail and up/down reorder. */
+        .galrows { display:flex; flex-direction:column; gap:9px; margin-bottom:8px; }
+        .galrow { display:flex; align-items:flex-start; gap:8px; padding:10px; border:1.5px solid var(--s-line-2); border-radius:8px; background:var(--s-surface-2); }
+        .galrow .gr-thumb { flex:none; width:56px; height:42px; border-radius:6px; overflow:hidden; background:var(--s-surface); border:1.5px solid var(--s-line-2); display:flex; align-items:center; justify-content:center; }
+        .galrow .gr-thumb img { width:100%; height:100%; object-fit:cover; }
+        .galrow .gr-fields { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+        .galrow .gr-fields .inp { padding:7px 9px; font-size:12.5px; }
+        .galrow .gr-ctl { flex:none; display:flex; align-items:center; gap:4px; }
+        .gr-mv { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:1.5px solid var(--s-line-2); border-radius:7px; background:var(--s-surface); color:var(--s-fg-mute); cursor:pointer; }
+        .gr-mv:hover { color:var(--s-fg); border-color:var(--s-fg-mute); } .gr-mv svg { width:15px; height:15px; }
         /* SOW-062 P6 rail-2 + sow-184: the stat tiles, now inside the Activity card (design 3a), 2-up per the mockup. */
         .rail-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
         .rstat { display:flex; flex-direction:column; align-items:center; gap:3px; padding:12px 6px; border:1.5px solid var(--s-line); border-radius:8px; background:var(--s-surface); }
@@ -687,6 +700,7 @@ class GbtiContentEditor extends GbtiElement {
     this._bindHeader(); // SOW-062 P6: the inline title/tagline/slug mirror to their hidden [data-key] inputs
     this._wireRail(); // SOW-062 P6: chips / toggles / visibility switch / status dots
     this._wireLinks(); // SOW-062 P6: the product links[] row editor (serializes into the hidden json input)
+    this._wireGallery(); // sow-268: the product gallery[] row editor (serializes into the hidden json input)
     // SOW-062 P6: prefill the from-the-author note from the existing intro-<slug> comment (existing item).
     const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : '';
     if (introSlug) {
@@ -895,6 +909,13 @@ class GbtiContentEditor extends GbtiElement {
     if (f.kind === 'json' && f.key === 'links') {
       return wrap(this._linksInner(f, value));
     }
+    // sow-268: the product gallery[] editor -> structured rows (was a raw JSON textarea that could not
+    // round-trip: an array value renders comma-joined at line ~773, and coerceValue('json') then JSON.parse'd
+    // that string and threw, so every product with screenshots was unsaveable and Preview was a dead button).
+    // Same shape as links: rows serialize into the SAME hidden [data-key="gallery"] json input gather() reads.
+    if (f.kind === 'json' && f.key === 'gallery') {
+      return wrap(this._galleryInner(f, value));
+    }
     // textarea / json -> .ta
     if (f.kind === 'textarea' || f.kind === 'json') {
       return wrap(`${label}<textarea class="ta" data-key="${f.key}" data-kind="${f.kind}" rows="${f.rows || 3}" placeholder="${esc(f.placeholder || '')}">${esc(v)}</textarea>`);
@@ -997,6 +1018,83 @@ class GbtiContentEditor extends GbtiElement {
       tmp.innerHTML = this._linkRowHtml({}, wrap.children.length);
       const row = tmp.firstElementChild;
       if (row) { wrap.appendChild(row); this._serializeLinks(); row.querySelector('.lk-type')?.focus(); }
+    });
+  }
+
+  // sow-268: the product gallery[] editor. One row per screenshot + an Add button + a hidden json input that
+  // gather() reads (unchanged contract). Mirrors _linksInner: galleryValueFromRows rebuilds the array on every
+  // edit, emitting a bare string for an uncaptioned row so the ten existing products do not churn.
+  _galleryInner(f, value) {
+    const rows = galleryRowsFromValue(value);
+    const rowsHtml = rows.map((r, i) => this._galleryRowHtml(r, i)).join('');
+    return `<label>Gallery <span class="hint">· screenshots on the product page</span></label>
+      <div class="galrows" data-gallery>${rowsHtml}</div>
+      <button class="ebtn addrow" type="button" data-addshot>${PLUS} Add screenshot</button>
+      <input data-key="${f.key}" data-kind="json" type="hidden" value="${esc(JSON.stringify(galleryValueFromRows(rows)))}" />`;
+  }
+
+  _galleryRowHtml(r = {}, i) {
+    const src = String(r.src || '');
+    const caption = String(r.caption || '');
+    const thumb = src ? this.resolveCover(src) : '';
+    return `<div class="galrow" data-gi="${i}">
+      <div class="gr-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" />` : ''}</div>
+      <div class="gr-fields">
+        <input class="inp gr-src" type="text" placeholder="./images/shot.webp" value="${esc(src)}" />
+        <input class="inp gr-cap" type="text" placeholder="Caption (optional)" value="${esc(caption)}" />
+      </div>
+      <div class="gr-ctl">
+        <button class="gr-mv" type="button" data-grup title="Move up" aria-label="Move up">${CHEV_UP}</button>
+        <button class="gr-mv" type="button" data-grdown title="Move down" aria-label="Move down">${CHEV_DOWN}</button>
+        <button class="lr-del" type="button" data-grdel title="Remove">${TRASH}</button>
+      </div>
+    </div>`;
+  }
+
+  _serializeGallery() {
+    const wrap = this.$('[data-gallery]');
+    const hidden = this.$('[data-key="gallery"]');
+    if (!wrap || !hidden) return;
+    const rows = [];
+    wrap.querySelectorAll('.galrow').forEach((row) => {
+      rows.push({
+        src: row.querySelector('.gr-src')?.value || '',
+        caption: row.querySelector('.gr-cap')?.value || '',
+      });
+    });
+    hidden.value = JSON.stringify(galleryValueFromRows(rows));
+  }
+
+  // Repaint a row's thumbnail from its current path (used after an edit or a reorder, so the preview follows
+  // the path). Cheap: resolveCover is a string transform, not a fetch.
+  _refreshGalleryThumb(row) {
+    const src = (row.querySelector('.gr-src')?.value || '').trim();
+    const box = row.querySelector('.gr-thumb');
+    if (box) box.innerHTML = src ? `<img src="${esc(this.resolveCover(src))}" alt="" />` : '';
+  }
+
+  _wireGallery() {
+    const wrap = this.$('[data-gallery]');
+    if (!wrap) return;
+    wrap.addEventListener('input', (e) => {
+      const srcEl = e.target.closest?.('.gr-src');
+      if (srcEl) this._refreshGalleryThumb(srcEl.closest('.galrow'));
+      this._serializeGallery();
+    });
+    wrap.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-grdel]');
+      if (del) { e.preventDefault(); del.closest('.galrow')?.remove(); this._serializeGallery(); return; }
+      const up = e.target.closest('[data-grup]');
+      if (up) { e.preventDefault(); const row = up.closest('.galrow'); const prev = row?.previousElementSibling; if (prev) prev.before(row); this._serializeGallery(); return; }
+      const down = e.target.closest('[data-grdown]');
+      if (down) { e.preventDefault(); const row = down.closest('.galrow'); const next = row?.nextElementSibling; if (next) next.after(row); this._serializeGallery(); }
+    });
+    this.$('[data-addshot]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this._galleryRowHtml({}, wrap.children.length);
+      const row = tmp.firstElementChild;
+      if (row) { wrap.appendChild(row); this._serializeGallery(); row.querySelector('.gr-src')?.focus(); }
     });
   }
 
@@ -1301,7 +1399,17 @@ class GbtiContentEditor extends GbtiElement {
   // ourselves (the security intent of noopener) and paint a same-origin interstitial so the tab is not a stark
   // blank while the draft saves.
   async doPreview() {
-    const slug = String(this.gather()?.input?.slug || '').trim();
+    // sow-268: gather() runs first and can THROW (a field that fails to coerce, historically the gallery json
+    // field). Unlike doDraft/doPublish this call sat outside any try, so a gather error made Preview a dead
+    // button with no message. Catch it and report it the same way the other two actions do.
+    let slug;
+    try {
+      slug = String(this.gather()?.input?.slug || '').trim();
+    } catch (err) {
+      const h = failHint(err);
+      this.out(esc(h.text), 'danger');
+      return;
+    }
     if (!slug) { this.out('Give the item a permalink before previewing it.', 'danger'); return; }
     // sow-194: a repo draft is already committed at its canonical path, so Preview reads it directly (store=repo
     // + path) instead of saving a KV shadow copy first. This keeps it a "Repo draft" in the WorkBench afterward,

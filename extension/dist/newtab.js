@@ -8559,6 +8559,42 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     return `${SITE_ORIGIN}/${base}/${encodeURIComponent(s)}/`;
   }
 
+  // client-ui/src/gallery.mjs
+  function galleryRowsFromValue(value) {
+    let arr = [];
+    if (Array.isArray(value)) arr = value;
+    else if (typeof value === "string" && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) arr = parsed;
+      } catch {
+        arr = [];
+      }
+    }
+    const rows = [];
+    for (const entry of arr) {
+      if (!entry) continue;
+      if (typeof entry === "string") {
+        rows.push({ src: entry, caption: "" });
+        continue;
+      }
+      if (typeof entry === "object" && entry.src) {
+        rows.push({ src: String(entry.src), caption: typeof entry.caption === "string" ? entry.caption : "" });
+      }
+    }
+    return rows;
+  }
+  function galleryValueFromRows(rows) {
+    const out = [];
+    for (const row of rows ?? []) {
+      const src = String(row && row.src || "").trim();
+      if (!src) continue;
+      const caption = String(row && row.caption || "").trim();
+      out.push(caption ? { src, caption } : src);
+    }
+    return out;
+  }
+
   // client-ui/src/elements/gbti-content-editor.mjs
   var _svg = (p) => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
   var DOC = _svg('<path d="M7 3h7l4 4v14H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.2V7.5H18M9 12.5h6M9 16h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>');
@@ -8571,6 +8607,8 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   var INFO = _svg(`<circle cx="12" cy="12" r="8.2" ${S} stroke-width="1.7"/><path d="M12 11v5" ${S} stroke-width="1.9" stroke-linecap="round"/><circle cx="12" cy="8" r="1.05" fill="currentColor"/>`);
   var X = _svg(`<path d="M6 6l12 12M18 6L6 18" ${S} stroke-width="2" stroke-linecap="round"/>`);
   var CHEV = _svg(`<path d="M6 9l6 6 6-6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+  var CHEV_UP = _svg(`<path d="M6 15l6-6 6 6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+  var CHEV_DOWN = _svg(`<path d="M6 9l6 6 6-6" ${S} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`);
   var TAG = _svg(`<path d="M4 11.5V5a1 1 0 0 1 1-1h6.5l8 8-7.5 7.5-8-8z" ${S} stroke-width="1.7" stroke-linejoin="round"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor"/>`);
   var COIN = _svg(`<circle cx="12" cy="12" r="8" ${S} stroke-width="1.8"/><path d="M12 7.5v9M14.5 9.3c-.6-.7-1.5-1-2.5-1-1.4 0-2.5.7-2.5 1.9 0 2.6 5 1.4 5 4 0 1.2-1.1 2-2.5 2-1 0-2-.4-2.6-1.1" ${S} stroke-width="1.6" stroke-linecap="round"/>`);
   var LINK = _svg(`<path d="M10 14a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L11 8" ${S} stroke-width="1.7" stroke-linecap="round"/><path d="M14 10a3.5 3.5 0 0 0-5 0l-2.5 2.5a3.5 3.5 0 0 0 5 5L13 16" ${S} stroke-width="1.7" stroke-linecap="round"/>`);
@@ -9046,6 +9084,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         .lr-vis button { font:inherit; font-size:10.5px; font-weight:600; padding:5px 9px; border:0; background:transparent; color:var(--s-fg-soft); border-radius:6px; cursor:pointer; }
         .lr-vis button.on { background:var(--s-fg); color:var(--s-canvas); }
         .addrow { font-size:13px; padding:8px 12px; align-self:flex-start; }
+        /* sow-268: gallery rows. Same visual language as .linkrow, plus a thumbnail and up/down reorder. */
+        .galrows { display:flex; flex-direction:column; gap:9px; margin-bottom:8px; }
+        .galrow { display:flex; align-items:flex-start; gap:8px; padding:10px; border:1.5px solid var(--s-line-2); border-radius:8px; background:var(--s-surface-2); }
+        .galrow .gr-thumb { flex:none; width:56px; height:42px; border-radius:6px; overflow:hidden; background:var(--s-surface); border:1.5px solid var(--s-line-2); display:flex; align-items:center; justify-content:center; }
+        .galrow .gr-thumb img { width:100%; height:100%; object-fit:cover; }
+        .galrow .gr-fields { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+        .galrow .gr-fields .inp { padding:7px 9px; font-size:12.5px; }
+        .galrow .gr-ctl { flex:none; display:flex; align-items:center; gap:4px; }
+        .gr-mv { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:1.5px solid var(--s-line-2); border-radius:7px; background:var(--s-surface); color:var(--s-fg-mute); cursor:pointer; }
+        .gr-mv:hover { color:var(--s-fg); border-color:var(--s-fg-mute); } .gr-mv svg { width:15px; height:15px; }
         /* SOW-062 P6 rail-2 + sow-184: the stat tiles, now inside the Activity card (design 3a), 2-up per the mockup. */
         .rail-stats { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
         .rstat { display:flex; flex-direction:column; align-items:center; gap:3px; padding:12px 6px; border:1.5px solid var(--s-line); border-radius:8px; background:var(--s-surface); }
@@ -9201,6 +9249,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._bindHeader();
       this._wireRail();
       this._wireLinks();
+      this._wireGallery();
       const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : "";
       if (introSlug) {
         this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
@@ -9354,6 +9403,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       if (f.kind === "json" && f.key === "links") {
         return wrap(this._linksInner(f, value));
       }
+      if (f.kind === "json" && f.key === "gallery") {
+        return wrap(this._galleryInner(f, value));
+      }
       if (f.kind === "textarea" || f.kind === "json") {
         return wrap(`${label}<textarea class="ta" data-key="${f.key}" data-kind="${f.kind}" rows="${f.rows || 3}" placeholder="${esc(f.placeholder || "")}">${esc(v)}</textarea>`);
       }
@@ -9463,6 +9515,100 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
           wrap.appendChild(row);
           this._serializeLinks();
           row.querySelector(".lk-type")?.focus();
+        }
+      });
+    }
+    // sow-268: the product gallery[] editor. One row per screenshot + an Add button + a hidden json input that
+    // gather() reads (unchanged contract). Mirrors _linksInner: galleryValueFromRows rebuilds the array on every
+    // edit, emitting a bare string for an uncaptioned row so the ten existing products do not churn.
+    _galleryInner(f, value) {
+      const rows = galleryRowsFromValue(value);
+      const rowsHtml = rows.map((r, i) => this._galleryRowHtml(r, i)).join("");
+      return `<label>Gallery <span class="hint">· screenshots on the product page</span></label>
+      <div class="galrows" data-gallery>${rowsHtml}</div>
+      <button class="ebtn addrow" type="button" data-addshot>${PLUS} Add screenshot</button>
+      <input data-key="${f.key}" data-kind="json" type="hidden" value="${esc(JSON.stringify(galleryValueFromRows(rows)))}" />`;
+    }
+    _galleryRowHtml(r = {}, i) {
+      const src = String(r.src || "");
+      const caption = String(r.caption || "");
+      const thumb = src ? this.resolveCover(src) : "";
+      return `<div class="galrow" data-gi="${i}">
+      <div class="gr-thumb">${thumb ? `<img src="${esc(thumb)}" alt="" />` : ""}</div>
+      <div class="gr-fields">
+        <input class="inp gr-src" type="text" placeholder="./images/shot.webp" value="${esc(src)}" />
+        <input class="inp gr-cap" type="text" placeholder="Caption (optional)" value="${esc(caption)}" />
+      </div>
+      <div class="gr-ctl">
+        <button class="gr-mv" type="button" data-grup title="Move up" aria-label="Move up">${CHEV_UP}</button>
+        <button class="gr-mv" type="button" data-grdown title="Move down" aria-label="Move down">${CHEV_DOWN}</button>
+        <button class="lr-del" type="button" data-grdel title="Remove">${TRASH}</button>
+      </div>
+    </div>`;
+    }
+    _serializeGallery() {
+      const wrap = this.$("[data-gallery]");
+      const hidden = this.$('[data-key="gallery"]');
+      if (!wrap || !hidden) return;
+      const rows = [];
+      wrap.querySelectorAll(".galrow").forEach((row) => {
+        rows.push({
+          src: row.querySelector(".gr-src")?.value || "",
+          caption: row.querySelector(".gr-cap")?.value || ""
+        });
+      });
+      hidden.value = JSON.stringify(galleryValueFromRows(rows));
+    }
+    // Repaint a row's thumbnail from its current path (used after an edit or a reorder, so the preview follows
+    // the path). Cheap: resolveCover is a string transform, not a fetch.
+    _refreshGalleryThumb(row) {
+      const src = (row.querySelector(".gr-src")?.value || "").trim();
+      const box = row.querySelector(".gr-thumb");
+      if (box) box.innerHTML = src ? `<img src="${esc(this.resolveCover(src))}" alt="" />` : "";
+    }
+    _wireGallery() {
+      const wrap = this.$("[data-gallery]");
+      if (!wrap) return;
+      wrap.addEventListener("input", (e) => {
+        const srcEl = e.target.closest?.(".gr-src");
+        if (srcEl) this._refreshGalleryThumb(srcEl.closest(".galrow"));
+        this._serializeGallery();
+      });
+      wrap.addEventListener("click", (e) => {
+        const del = e.target.closest("[data-grdel]");
+        if (del) {
+          e.preventDefault();
+          del.closest(".galrow")?.remove();
+          this._serializeGallery();
+          return;
+        }
+        const up = e.target.closest("[data-grup]");
+        if (up) {
+          e.preventDefault();
+          const row = up.closest(".galrow");
+          const prev = row?.previousElementSibling;
+          if (prev) prev.before(row);
+          this._serializeGallery();
+          return;
+        }
+        const down = e.target.closest("[data-grdown]");
+        if (down) {
+          e.preventDefault();
+          const row = down.closest(".galrow");
+          const next = row?.nextElementSibling;
+          if (next) next.after(row);
+          this._serializeGallery();
+        }
+      });
+      this.$("[data-addshot]")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        const tmp = document.createElement("div");
+        tmp.innerHTML = this._galleryRowHtml({}, wrap.children.length);
+        const row = tmp.firstElementChild;
+        if (row) {
+          wrap.appendChild(row);
+          this._serializeGallery();
+          row.querySelector(".gr-src")?.focus();
         }
       });
     }
@@ -9785,7 +9931,14 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // ourselves (the security intent of noopener) and paint a same-origin interstitial so the tab is not a stark
     // blank while the draft saves.
     async doPreview() {
-      const slug = String(this.gather()?.input?.slug || "").trim();
+      let slug;
+      try {
+        slug = String(this.gather()?.input?.slug || "").trim();
+      } catch (err) {
+        const h = failHint(err);
+        this.out(esc(h.text), "danger");
+        return;
+      }
       if (!slug) {
         this.out("Give the item a permalink before previewing it.", "danger");
         return;
