@@ -200,13 +200,30 @@ const labelOf = CATEGORY_LABELS;
         return null;
       };
       let draft: any = null;
-      if (store === 'repo' && repoPath) {
-        // sow-194: a committed repo draft. Read its canonical file directly and parse it; for a members body,
-        // decrypt the sibling .enc via the Worker so the MEMBER view shows the full text. Nothing is written; no
-        // KV shadow is created. GET /membership/file (reviewFileContent) requires a signed-in member and accepts
-        // any members/ or house content path -- deliberately NOT own-folder-only, and safe here because the repo
-        // is PUBLIC (this plaintext is world-readable on GitHub), a members body is .enc ciphertext or a stub, and
-        // the plaintext only ever comes back through the PAID-gated /membership/decrypt below.
+      // sow-268 followup: a Save draft ALWAYS writes the KV draft store (workbench-client saveDraft), even for
+      // an item opened as a committed repo draft, and mergeRepoDrafts then treats that KV copy as the newer
+      // editable state. So Preview must prefer a matching KV draft over the committed main file for BOTH
+      // stores; otherwise a saved edit (a removed banner, a changed title) never shows here and the preview
+      // reads as broken -- the author saves, previews, and sees the OLD committed page. Check KV first; only
+      // fall back to reading the committed file at main when there is no pending KV draft (the sow-194 fast
+      // path for a pristine repo draft, which creates no shadow).
+      let fromKv = false;
+      try {
+        const res = await fetch(`${base}/membership/drafts`, { credentials: 'include' });
+        if (res.status === 401 || res.status === 403) { say('Sign in to preview your staged drafts.'); return; }
+        const data = res.ok ? await res.json() : null;
+        const kv = (Array.isArray(data?.drafts) ? data.drafts : []).find((d: any) => d?.slug === slug && (!type || d?.type === type));
+        if (kv) { draft = kv; fromKv = true; }
+      } catch { /* fall through: try the committed file next */ }
+
+      if (!draft && store === 'repo' && repoPath) {
+        // sow-194: a committed repo draft with no pending KV edit. Read its canonical file directly and parse
+        // it; for a members body, decrypt the sibling .enc via the Worker so the MEMBER view shows the full
+        // text. Nothing is written; no KV shadow is created. GET /membership/file (reviewFileContent) requires
+        // a signed-in member and accepts any members/ or house content path -- deliberately NOT own-folder-only,
+        // and safe here because the repo is PUBLIC (this plaintext is world-readable on GitHub), a members body
+        // is .enc ciphertext or a stub, and the plaintext only ever comes back through the PAID-gated
+        // /membership/decrypt below.
         try {
           const res = await fetch(`${base}/membership/file?path=${encodeURIComponent(repoPath)}&ref=main`, { credentials: 'include' });
           if (res.status === 401 || res.status === 403) { say('Sign in to preview this draft.'); return; }
@@ -240,21 +257,16 @@ const labelOf = CATEGORY_LABELS;
             draft = { type, slug, path: repoPath, frontmatter: parsed.frontmatter || {}, body };
           }
         } catch { /* fall through to not-found */ }
-      } else {
-        try {
-          const res = await fetch(`${base}/membership/drafts`, { credentials: 'include' });
-          if (res.status === 401 || res.status === 403) { say('Sign in to preview your staged drafts.'); return; }
-          const data = await res.json();
-          draft = (Array.isArray(data?.drafts) ? data.drafts : []).find((d: any) => d?.slug === slug && (!type || d?.type === type));
-        } catch { /* fall through */ }
       }
       if (!draft) { say('That draft was not found. Save it in the editor, then preview.'); return; }
 
       const fm = draft.frontmatter || {};
       const itemPath = draft.path || '';
-      say(store === 'repo'
-        ? 'This is a preview of a committed draft. It is not published, and live counts and discussion are omitted.'
-        : 'This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.');
+      // A KV-sourced preview is a STAGED (saved-but-not-published) draft; a main-sourced one is the committed draft.
+      const stagedPreview = fromKv || store !== 'repo';
+      say(stagedPreview
+        ? 'This is a preview of a staged draft. It is not published, and live counts and discussion are omitted.'
+        : 'This is a preview of a committed draft. It is not published, and live counts and discussion are omitted.');
       document.title = `Preview: ${fm.title || slug}`;
 
       const setImg = (sel: string, val: string, alt?: string) => {
