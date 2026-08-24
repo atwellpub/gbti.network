@@ -177,15 +177,17 @@ test('the launch span phrase agrees across the digest and the renderer', () => {
 });
 
 test('the WELCOME note thanks the subscriber and explains nothing about the compiler', () => {
-  // OWNER RULING, 2026-08-24. This note used to read "this is your first issue, so it covers the past 90
-  // days", which was a fact about the window dressed as a greeting. Before that it read "this is THE first
-  // issue", which is simply false for anyone joining after the launch. The third version is the one the owner
-  // asked for: thank them for subscribing, and thank them for the work they do.
-  assert.match(WELCOME_NOTE, /thank you for subscribing/i);
-  assert.match(WELCOME_NOTE, /making the internet a better place/i);
-  // Both superseded shapes must stay gone, including the one that was itself a correction.
+  // OWNER RULING, 2026-08-24, twice in one session. This note used to read "this is your first issue, so it
+  // covers the past 90 days", which was a fact about the window dressed as a greeting; before that it read
+  // "this is THE first issue", which is simply false for anyone joining after the launch. The owner's final
+  // wording thanks them for subscribing and then says plainly what they are looking at. It names the span in
+  // words a reader uses ("the past quarter") rather than in the compiler's units.
+  assert.match(WELCOME_NOTE, /thank you for subscribing to the weekly digest/i);
+  assert.match(WELCOME_NOTE, /what you might have missed over the past quarter/i);
+  // All three superseded shapes stay gone, including the two that were themselves corrections.
   assert.doesNotMatch(WELCOME_NOTE, /first issue/i);
-  assert.doesNotMatch(WELCOME_NOTE, /90 days/, 'the span is said by the preheader and the empty line, not here');
+  assert.doesNotMatch(WELCOME_NOTE, /making the internet a better place/i);
+  assert.doesNotMatch(WELCOME_NOTE, /90 days/, 'the exact span is the preheader and the empty line, not here');
   assert.match(WELCOME_GREETING, /welcome/i);
   assert.doesNotMatch(WELCOME_HEADER_LINE, /90 days/);
 });
@@ -211,6 +213,7 @@ test('a composed WELCOME issue renders the welcome note and the 90-day empty-sec
   assert.equal(issue.launchNote, WELCOME_NOTE);
   const { html } = renderIssue(issue, { greeting: WELCOME_GREETING, headerLine: WELCOME_HEADER_LINE });
   assert.match(html, /Thank you for subscribing to the weekly digest/);
+  assert.match(html, /past quarter/);
   assert.doesNotMatch(html, /This is the first issue/, 'the newsletter-wide launch note must not appear on a welcome');
   // The note no longer carries the span, but it still has to switch the WORDING, because the renderer reads
   // firstIssue off the presence of a note. A welcome whose empty sections said "since the last issue" would be

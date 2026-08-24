@@ -158,7 +158,7 @@ export const WELCOME_HEADER_LINE = 'Here is what members have been publishing la
 // the preheader span. Suppressing the note would silently switch a 90-day welcome back to "since the last
 // issue" and "this week", which are the two phrases that cannot be true for somebody's first email.
 export const WELCOME_NOTE =
-  'Thank you for subscribing to the weekly digest, and thank you for the part you play in making the internet a better place.';
+  "Thank you for subscribing to the weekly digest. Here's a quick look at what you might have missed over the past quarter.";
 
 // CORRECTED 2026-08-23: this said "the past week" while the bootstrap window has been NINETY days since the
 // owner widened it on 2026-08-22. The copy was written when the window really was a week and did not travel
