@@ -683,3 +683,49 @@ test('SECTION_LABELS stay the plain nouns: "Latest" is a heading prefix, not the
     assert.ok(!/^Latest\b/.test(label), `SECTION_LABELS.${key} must not carry the prefix`);
   }
 });
+
+// sow-166, 2026-08-24: A GENERIC BANNER IS NOT AN IMAGE, SO IT RENDERS AS NO IMAGE. Owner ruling.
+//
+// An item with no picture of its own gets the per-type banner from src/lib/feature-image.ts. That is right
+// for a link preview, where the alternative is a bare grey box in somebody else's timeline. It is wrong here,
+// where the banners repeat down the page: the issue delivered on 2026-08-24 carried the SAME prompt banner
+// five times in one section, which reads as a rendering fault rather than as branding.
+test('the per-type default banner is dropped, so an item with no image of its own renders bare', () => {
+  const items = [
+    pub('prompt', 'generic', 300, { thumb: '/brand/feature/feature-prompt.png' }),
+    pub('prompt', 'own', 200, { thumb: '/_astro/result.CJ0K4A1W.webp' }),
+    pub('article', 'generic-absolute', 100, { thumb: 'https://gbti.network/brand/feature/feature-article.png' }),
+  ];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(999) }, { perSection: 5 });
+  const thumbOf = (kind, title) => issue.sections[kind].find((x) => x.title === title).thumb;
+  assert.equal(thumbOf('prompt', 'generic'), null, 'a root-relative banner is suppressed');
+  assert.equal(thumbOf('article', 'generic-absolute'), null, 'and so is the same banner as an absolute url');
+  // Not vacuous: the item that HAS its own image keeps it, which is the half a blanket "drop all thumbs"
+  // change would also have satisfied.
+  assert.equal(thumbOf('prompt', 'own'), '/_astro/result.CJ0K4A1W.webp');
+});
+
+test('the banner rule matches the PATH, so a query string or host cannot smuggle one through', () => {
+  const items = [
+    pub('product', 'q', 300, { thumb: '/brand/feature/feature-product.png?v=2' }),
+    pub('product', 'nested', 200, { thumb: '/members/alice/brand/feature/feature-product.png' }),
+    pub('product', 'lookalike', 100, { thumb: '/brand/feature/feature-product-custom.png' }),
+  ];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(999) }, { perSection: 5 });
+  const thumbOf = (t) => issue.sections.product.find((x) => x.title === t).thumb;
+  assert.equal(thumbOf('q'), null, 'a cache-busting query does not make a banner unique');
+  assert.equal(thumbOf('nested'), null, 'the segment is matched anywhere in the path, not only at the root');
+  // A member could name a real image something banner-shaped. The rule is anchored to the exact
+  // feature-<word>.<ext> filename, so a longer name is theirs and is kept.
+  assert.ok(thumbOf('lookalike'), 'a genuinely custom file whose name merely starts the same is kept');
+});
+
+test('NEWS images are never touched by the banner rule', () => {
+  // A news image comes from the publisher's own feed and is never one of ours, so there is nothing here to
+  // match. Pinned because the obvious place to put this rule is "everywhere", and that would strip a
+  // legitimate publisher image the day one of them happens to sit at a similar path.
+  const news = [{ title: 'n', url: 'https://pub.example/a', source: 's', opens: 1, date: 100, thumb: 'https://pub.example/brand/feature/feature-article.png' }];
+  const issue = composeIssue({ issueId: 'i', items: [], news, now: at(1_000_000) }, { perSection: 5, maxNews: 5 });
+  assert.equal(issue.topNews.length, 1, 'anchor: the news item is actually in the issue');
+  assert.equal(issue.topNews[0].thumb, 'https://pub.example/brand/feature/feature-article.png');
+});

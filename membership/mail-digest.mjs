@@ -225,8 +225,34 @@ function publicItem(it) {
     blurb: trimOrNull(it.blurb),
     // `thumb` is a URL, not content, and it is already public: activity-index.json has shipped it on every
     // entry since SOW-039. The renderer fails an unsafe value closed to no image (safeUrl).
-    thumb: trimOrNull(it.thumb),
+    //
+    // OWNER RULING, 2026-08-24: A GENERIC BANNER IS NOT AN IMAGE, SO IT RENDERS AS NO IMAGE.
+    // An item with no picture of its own gets the per-type banner from src/lib/feature-image.ts
+    // (`/brand/feature/feature-<type>.png`). That is right for a link preview, where the alternative is a bare
+    // grey box in somebody else's timeline. It is wrong in the digest, where the banners repeat down the page:
+    // the delivered issue on 2026-08-24 carried the same prompt banner FIVE times in one section, which reads
+    // as a rendering fault rather than as branding. A row with no image is a clean single-column row, which
+    // the template already supports, so dropping it costs nothing and the repetition goes away.
+    // Applied to every content type, not only prompts. It is a no-op for posts and products today (all 40 and
+    // all 11 carry their own image), and it does the right thing the day one of them does not.
+    thumb: isGenericBanner(it.thumb) ? null : trimOrNull(it.thumb),
   };
+}
+
+// The per-type default banners live under exactly this path (src/lib/feature-image.ts builds
+// `/brand/feature/feature-<key>.png`), so the prefix is the whole test and it needs no list of type names to
+// keep in step. Matched on the PATH so it works whether the index ships a root-relative or an absolute URL.
+// News is deliberately not filtered by this: a news image comes from the publisher's own feed and is never one
+// of ours, so there is nothing here to match and nothing to suppress.
+const GENERIC_BANNER_RE = /(^|\/)brand\/feature\/feature-[a-z]+\.(png|jpe?g|webp)$/i;
+function isGenericBanner(url) {
+  const u = trimOrNull(url);
+  if (!u) return false;
+  try {
+    return GENERIC_BANNER_RE.test(new URL(u, 'https://gbti.network').pathname);
+  } catch {
+    return GENERIC_BANNER_RE.test(u);
+  }
 }
 
 
