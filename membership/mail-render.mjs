@@ -165,14 +165,29 @@ function totalItems(counts) {
   return COUNT_ORDER.reduce((n, k) => n + (Number(counts[k]) || 0), 0);
 }
 
+// "in the past 90 days" tracks BOOTSTRAP_MS, the launch/welcome window, and is the ONE copy of that phrase in
+// this module. Both the preheader and the empty-section line read it, so widening the window here cannot move
+// one sentence and leave the other behind, which is exactly how "this week" survived into a 90-day inbox.
+const BOOTSTRAP_PHRASE = 'in the past 90 days';
+
 // The preheader summary, natural language, non-zero sections only: "4 articles, 2 products and 3 news picks".
-function countsSummary(counts) {
+// It names the SPAN, and the span is not always a week: a first or welcome issue reaches back 90 days, so a
+// preheader saying "this week" contradicts the header, the launch note and the date range beside it. This was
+// the THIRD hardcoded copy of the cadence in the template and the last one to be found, by reading a delivered
+// message rather than the source (2026-08-24).
+function countsSummary(counts, firstIssue) {
   const parts = COUNT_ORDER.filter((k) => (Number(counts?.[k]) || 0) > 0).map((k) => plural(Number(counts[k]), k));
-  if (parts.length === 0) return 'Your weekly roundup from the GBTI Network.';
+  if (parts.length === 0) return emptySummary(firstIssue);
   const list = parts.length === 1
     ? parts[0]
     : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-  return `${list} from the network this week.`;
+  return `${list} from the network ${firstIssue ? BOOTSTRAP_PHRASE : 'this week'}.`;
+}
+
+// The no-counts fallback, same cadence split. Kept beside countsSummary rather than inlined at the call site,
+// because a second literal at the call site is how the first two copies of this phrase drifted apart.
+function emptySummary(firstIssue) {
+  return firstIssue ? 'Your first roundup from the GBTI Network.' : 'Your weekly roundup from the GBTI Network.';
 }
 
 // The counts subject "GBTI Digest · 18 items · Aug 15-21", built only when the issue carries both counts and a
@@ -190,12 +205,12 @@ function emptyPhrase(empties, firstIssue) {
   const list = labels.length === 1
     ? labels[0]
     : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-  // "in the past 90 days" tracks BOOTSTRAP_MS, the launch/welcome window. It is a SECOND copy of the phrase in
-  // membership/mail-digest.mjs (FIRST_ISSUE_PHRASE), kept separate on purpose so this template stays free of
-  // digest imports and can be swapped behind the renderIssue seam. That duplication already drifted once: the
-  // window moved from 7 days to 90 on 2026-08-22 and both strings were left saying "week". A cross-module test
-  // now asserts the two agree, so the next move breaks a test instead of a sentence in somebody's inbox.
-  return `Nothing new in ${list} ${firstIssue ? 'in the past 90 days' : 'since the last issue'}.`;
+  // BOOTSTRAP_PHRASE is deliberately a copy of FIRST_ISSUE_PHRASE in membership/mail-digest.mjs rather than an
+  // import, so this template stays free of digest imports and can be swapped behind the renderIssue seam. That
+  // duplication already drifted once: the window moved from 7 days to 90 on 2026-08-22 and both strings were
+  // left saying "week". A cross-module test now asserts the two agree, so the next move breaks a test instead
+  // of a sentence in somebody's inbox.
+  return `Nothing new in ${list} ${firstIssue ? BOOTSTRAP_PHRASE : 'since the last issue'}.`;
 }
 
 /**
@@ -414,7 +429,7 @@ export function renderIssue(issue, ctx = {}) {
   const siteUrl = safeUrl(ctx.siteUrl) || 'https://gbti.network';
   const subject = str(ctx.subject).trim() || computedSubject(counts, range) || 'The GBTI Network weekly digest';
 
-  const preheaderText = escapeHtml(counts ? countsSummary(counts) : 'Your weekly roundup from the GBTI Network.');
+  const preheaderText = escapeHtml(counts ? countsSummary(counts, firstIssue) : emptySummary(firstIssue));
   const preheader = `<span style="display:none;font-size:1px;color:${p.pageBg};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden">${preheaderText}</span>`;
 
   // The membership CTA renders BY DEFAULT and is SUPPRESSIBLE per issue: it shows when the issue has editorial

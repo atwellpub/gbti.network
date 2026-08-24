@@ -197,3 +197,37 @@ test('a composed WELCOME issue renders the welcome note and the 90-day empty-sec
   assert.doesNotMatch(html, /This is the first issue/, 'the newsletter-wide launch note must not appear on a welcome');
   assert.match(html, /in the past 90 days/, 'empty sections use the launch wording, not "since the last issue"');
 });
+
+// sow-166 (2026-08-24): THE PREHEADER WAS A THIRD COPY OF THE CADENCE, AND IT WAS STILL WRONG.
+//
+// The first delivered welcome carried the right header, the right date range and the right launch note, and
+// then opened its preview line with "from the network this week" over 90 days of items. Two copies of the
+// span had already been found and fixed by rendering the email; this one survived BOTH passes because the
+// preheader is display:none and does not appear when you look at the rendered page. It only shows up in the
+// inbox list, which is the first thing a reader sees and the last thing anyone checks.
+//
+// The lesson is not "grep harder for the string". It is that a cadence word anywhere in this template is a
+// copy of the window, and every copy has now been routed through one constant.
+test('the PREHEADER names the span it covers, and does not say "this week" on a first issue', () => {
+  const layout = [
+    { key: 'article', label: 'Articles', empty: false, items: [{ title: 'A', url: 'https://gbti.network/a', author: 'x' }] },
+  ];
+  const counts = { article: 4, product: 2 };
+
+  const first = renderIssue({ launchNote: FIRST_ISSUE_NOTE, layout, counts }, {}).html;
+  assert.match(first, /from the network in the past 90 days\./);
+  assert.doesNotMatch(first, /from the network this week\./, 'a 90-day issue must not preview itself as a week');
+
+  // Not vacuous: the ordinary weekly is unchanged, so this pins the SPLIT rather than the phrase.
+  const weekly = renderIssue({ layout, counts }, {}).html;
+  assert.match(weekly, /from the network this week\./);
+  assert.doesNotMatch(weekly, /in the past 90 days/);
+});
+
+test('the no-counts preheader fallback splits on cadence too', () => {
+  // The fallback used to be a bare literal at the call site, which is how the other copies of this phrase
+  // drifted apart in the first place: it is not reached by any test that renders a normal issue.
+  const layout = [{ key: 'article', label: 'Articles', empty: true, note: 'x', items: [] }];
+  assert.match(renderIssue({ launchNote: WELCOME_NOTE, layout }, {}).html, /Your first roundup from the GBTI Network\./);
+  assert.match(renderIssue({ layout }, {}).html, /Your weekly roundup from the GBTI Network\./);
+});
