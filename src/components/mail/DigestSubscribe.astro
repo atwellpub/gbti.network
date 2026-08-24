@@ -55,10 +55,10 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
           placeholder="you@example.com"
           data-dsub-email
         />
-        <button class="btn btn-primary dsub-btn" type="submit" data-dsub-go>Subscribe</button>
+        <button class="btn btn-primary dsub-btn" type="submit" data-dsub-go>{variant === 'rail' ? 'Get the digest' : 'Subscribe'}</button>
       </div>
 
-      <div class="cf-turnstile dsub-ts" data-sitekey={TURNSTILE_SITE_KEY} data-theme="auto" data-size="flexible"></div>
+      <div class="cf-turnstile dsub-ts" data-sitekey={TURNSTILE_SITE_KEY} data-theme="auto" data-size="flexible" data-appearance={variant === 'rail' ? 'interaction-only' : undefined}></div>
 
       <p class="dsub-fine">
         We send a confirmation email first. You are not subscribed until you click the link in it.
@@ -179,7 +179,13 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
   .dsub-rail .dsub-in { gap: 12px; }
   .dsub-rail .dsub-row { flex-direction: column; align-items: stretch; gap: 9px; }
   .dsub-rail .dsub-input { flex: 1 1 auto; }
-  .dsub-rail .dsub-btn { width: 100%; }
+  /* sow-192 CTA match: the rail button is the design's theme-aware outline (foreground text + a subtle
+     border, no green fill), not the band/inline solid green. Reads correctly in light and dark from the
+     tokens alone. */
+  .dsub-rail .dsub-btn { width: 100%; background: transparent; color: var(--fg); border-color: var(--line-2); box-shadow: none; }
+  .dsub-rail .dsub-btn:hover { background: var(--tint); border-color: var(--fg-mute); transform: none; }
+  /* Turnstile runs interaction-only in the rail (invisible for the normal visitor), so collapse its space. */
+  .dsub-rail .dsub-ts { min-height: 0; }
 
   .dsub-h { font-size: 1.15rem; line-height: 1.25; margin: 0 0 4px; font-weight: 700; }
   .dsub-sub { margin: 0; color: var(--fg-mute); font-size: .94rem; line-height: 1.55; max-width: 62ch; }
