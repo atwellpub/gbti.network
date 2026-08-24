@@ -86,7 +86,10 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
         <div class="art-j-cover"><VideoEmbed video={d.video} title={d.title} /></div>
       ) : d.coverImage ? (
         <>
-          <div class="art-j-cover"><Image src={d.coverImage} alt={d.coverAlt || d.title} width={dims.width} height={dims.height} /></div>
+          {/* sow-278: the article cover is the LCP element on a post and the largest single bucket in the
+              field data, p75 2,244ms, because Astro's <Image> defaults to lazy. It is above the fold by
+              construction, so lazy loading only delays the one request the metric is timing. */}
+          <div class="art-j-cover"><Image src={d.coverImage} alt={d.coverAlt || d.title} width={dims.width} height={dims.height} loading="eager" fetchpriority="high" /></div>
           {d.coverAlt && <p class="art-j-cap">{d.coverAlt}</p>}
         </>
       ) : null}

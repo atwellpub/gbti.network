@@ -69,9 +69,18 @@ const tagsAttr = (it: FeedItem) => (it.tags ?? []).map((t) => String(t).trim().t
               </div>
               {/* A real cover renders in every density; the branded thumb fallback (feed-cover-fb)
                   exists only for the card grid, where an imageless tile would break the rhythm. */}
+              {/* sow-278: THE FIRST CARD'S COVER IS THE LCP ELEMENT and it is the slowest thing the site
+                  measures, p75 2,840ms in Cloudflare RUM, because it was lazy like the other 290 images on
+                  the page. Astro defaults to lazy and nothing had ever overridden it, so a hero inherited a
+                  default meant for thumbnails. Field data across the whole site showed lcpFetchPriority was
+                  only ever `n/a` or `auto`, never `high`.
+                  EXACTLY ONE IMAGE IS PROMOTED, and the narrowness IS the optimisation: telling the browser
+                  that everything matters is identical to telling it that nothing does. Widening this past
+                  the first card would undo it, which is what the guard test in test/feed-lcp-priority.test.mjs
+                  exists to prevent. */}
               {(it.cover || it.thumb) && (it.href
-                ? <a class:list={['feed-cover', !it.cover && 'feed-cover-fb']} href={it.href} target={it.external ? '_blank' : undefined} rel={it.external ? 'noopener nofollow' : undefined} aria-hidden="true" tabindex="-1"><img src={it.cover ?? it.thumb} alt="" loading="lazy" decoding="async" /></a>
-                : <span class:list={['feed-cover', !it.cover && 'feed-cover-fb']}><img src={it.cover ?? it.thumb} alt="" loading="lazy" decoding="async" /></span>)}
+                ? <a class:list={['feed-cover', !it.cover && 'feed-cover-fb']} href={it.href} target={it.external ? '_blank' : undefined} rel={it.external ? 'noopener nofollow' : undefined} aria-hidden="true" tabindex="-1"><img src={it.cover ?? it.thumb} alt="" loading={ci === 0 && ri === 0 ? 'eager' : 'lazy'} fetchpriority={ci === 0 && ri === 0 ? 'high' : undefined} decoding="async" /></a>
+                : <span class:list={['feed-cover', !it.cover && 'feed-cover-fb']}><img src={it.cover ?? it.thumb} alt="" loading={ci === 0 && ri === 0 ? 'eager' : 'lazy'} fetchpriority={ci === 0 && ri === 0 ? 'high' : undefined} decoding="async" /></span>)}
             </article>
             {ci === 0 && ctaAfter !== undefined && ri === ctaAfter && (
               <aside class="feed-cta" aria-label="Join the GBTI Network">
