@@ -84,6 +84,13 @@ export function buildSubscriber(input = {}, { now = Date.now } = {}) {
     githubId: source === 'member' ? githubId : null,
     createdAt: t,
     updatedAt: t,
+    // sow-166: when this subscriber was sent their 90-day WELCOME issue, or null if they never have been.
+    // Null is the trigger, not a flag to tidy: the */5 sweep enqueues every active subscriber whose
+    // welcomedAt is null, which is what makes the welcome fire under EITHER opt-in mode. Under double
+    // opt-in the record is created at confirm; with double opt-in off it is created at submission; the
+    // backfill creates 22 at once. All three produce an active record with welcomedAt null, and none of
+    // them needs to know the welcome exists.
+    welcomedAt: null,
   };
 }
 
@@ -117,6 +124,9 @@ export function normalizeSubscriber(raw) {
     githubId: source === 'member' ? githubId : null,
     createdAt,
     updatedAt: num(raw.updatedAt) ?? createdAt,
+    // Absent reads as null, i.e. NOT yet welcomed. That is the intended migration for every record written
+    // before this field existed: they receive one welcome issue and then join the weekly cadence.
+    welcomedAt: num(raw.welcomedAt) ?? null,
   };
 }
 

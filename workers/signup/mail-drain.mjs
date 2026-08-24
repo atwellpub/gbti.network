@@ -19,8 +19,10 @@ import {
 import { suppressKey } from '../../membership/mail-suppress.mjs';
 import { makeUnsubToken } from '../../membership/mail-unsub-token.mjs';
 import { canReceive } from '../../membership/mail-subscriber.mjs';
+import { isWelcomeIssueId, isWelcomed } from '../../membership/mail-compile-core.mjs';
+import { WELCOME_GREETING, WELCOME_HEADER_LINE } from '../../membership/mail-digest.mjs';
 import {
-  getIssue, getSend, putSend, readPendingIndex, removeFromPending, getSubscriber,
+  getIssue, getSend, putSend, readPendingIndex, removeFromPending, getSubscriber, putSubscriber,
   readBudget, bumpBudget, activeIssueIds,
 } from './mail-store.mjs';
 
@@ -272,7 +274,15 @@ export async function drainMailIssue(env, {
     // line, the intended CAN-SPAM primary-purpose state.
     let message;
     try {
-      message = renderIssue(issue, { recipientHash: hash, subscriber, from, unsubscribeUrl });
+      // sow-166: a welcome issue carries its own two header lines through the ctx seam the renderer already
+      // exposes. Everything else about the render is identical to a weekly, which is the point: one template.
+      message = renderIssue(issue, {
+        recipientHash: hash,
+        subscriber,
+        from,
+        unsubscribeUrl,
+        ...(isWelcomeIssueId(issueId) ? { greeting: WELCOME_GREETING, headerLine: WELCOME_HEADER_LINE } : {}),
+      });
     } catch {
       await retryOrFail(kv, claimed, maxAttempts, now, issueId, () => { failed++; });
       continue;
@@ -288,6 +298,22 @@ export async function drainMailIssue(env, {
     if (!threw && sendSucceeded(res)) {
       await putSend(kv, markSent(claimed, { now }));
       await removeFromPending(kv, issueId, hash);
+      // sow-166: a DELIVERED welcome is what makes somebody welcomed, so stamp it only here, after the send
+      // actually succeeded. Stamping earlier, or on a terminal failure, would mark somebody welcomed who never
+      // received the only 90-day view they are offered, and nothing downstream would ever notice.
+      //
+      // A failure to write this is NON-FATAL and deliberately so: the email has already gone, and the worst
+      // consequence is one duplicate welcome next cycle. Losing the send over a bookkeeping write would be the
+      // worse trade. It is logged rather than swallowed, because a persistent failure here looks exactly like
+      // a working system that quietly mails the same people every week.
+      if (isWelcomeIssueId(issueId) && !isWelcomed(subscriber)) {
+        const stampedAt = Number(now());
+        try {
+          await putSubscriber(kv, { ...subscriber, welcomedAt: stampedAt, updatedAt: stampedAt });
+        } catch (e) {
+          console.warn(`mail-drain: welcomedAt write failed for subscriber ${hash} on ${issueId}: ${e?.message || e}`);
+        }
+      }
       sent++;
       budgetLeft--;
     } else {

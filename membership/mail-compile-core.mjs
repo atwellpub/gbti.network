@@ -157,11 +157,73 @@ export function normalizeNews(entries) {
  * `weekly-NaN` id that would silently fork the issue.
  */
 export function weeklyIssueId(nowMs) {
+  return `weekly-${utcDateStamp(nowMs, 'weeklyIssueId')}`;
+}
+
+/** `YYYY-MM-DD` in UTC, shared by every issue-id minter so the shapes cannot drift apart. */
+function utcDateStamp(nowMs, who) {
   const n = Number(nowMs);
-  if (!Number.isFinite(n)) throw new Error('weeklyIssueId: nowMs must be a finite timestamp');
+  if (!Number.isFinite(n)) throw new Error(`${who}: nowMs must be a finite timestamp`);
   const d = new Date(n);
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
-  return `weekly-${y}-${m}-${day}`;
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * sow-166: the id of the standing WELCOME issue, `welcome-YYYY-MM-DD`.
+ *
+ * A welcome issue is the 90-day back catalogue that every subscriber receives as their FIRST email, whenever
+ * they join. It is recompiled each cycle so it is never more than a week stale.
+ *
+ * THE `welcome-` PREFIX IS LOAD-BEARING, and this is the whole reason the feature is safe. listPriorIssueIds
+ * (workers/signup/mail-compile.mjs) counts only ids starting with `weekly-`, so a welcome issue:
+ *   - never becomes a "prior issue", so it cannot advance the epoch floor;
+ *   - never contributes its 90 days of urls to the exclude set, which would otherwise gut the next weekly by
+ *     marking a quarter of the catalogue as already mailed.
+ * Do not rename this prefix to anything beginning with "weekly", and do not relax that filter. A test pins it.
+ */
+export function welcomeIssueId(nowMs) {
+  return `welcome-${utcDateStamp(nowMs, 'welcomeIssueId')}`;
+}
+
+/**
+ * sow-166: has this subscriber already been sent their welcome issue?
+ *
+ * Null, absent, zero and any non-finite value all read as NOT welcomed, which is the fail-safe direction: the
+ * worst case is one extra welcome, while the opposite error silently denies somebody the only 90-day view
+ * they will ever be offered.
+ */
+/** Is this the id of a welcome issue? Pure, so the drain can ask without importing the compiler. */
+export function isWelcomeIssueId(issueId) {
+  return typeof issueId === 'string' && issueId.startsWith('welcome-');
+}
+
+export function isWelcomed(sub) {
+  const w = Number(sub?.welcomedAt);
+  return Number.isFinite(w) && w > 0;
+}
+
+/**
+ * sow-166: should this subscriber receive the WEEKLY issue being compiled?
+ *
+ * Two exclusions, and they are different things:
+ *
+ *   1. Never welcomed. The welcome sweep owns them; putting them in a weekly would make a thin "this week"
+ *      email somebody's introduction to the network, which is exactly what this feature exists to prevent.
+ *   2. Welcomed during THIS cycle. `previousGeneratedAt` is the newest prior weekly, so it is the moment the
+ *      current cycle began. Somebody welcomed at or after it has already had their email for this cycle, and
+ *      sending the weekly too would put two overlapping issues in their inbox days apart. They join the normal
+ *      cadence at the next one (owner ruling, 2026-08-23).
+ *
+ * With no prior weekly there is no cycle to double up with, so a welcomed subscriber is eligible.
+ */
+export function weeklyEligible(sub, previousGeneratedAt) {
+  if (!isWelcomed(sub)) return false;
+  // `Number(null)` is 0, not NaN, so a bare Number.isFinite check would treat "no prior weekly" as a floor of
+  // zero and exclude everybody. Require a positive timestamp before it can gate anything.
+  const prev = Number(previousGeneratedAt);
+  if (!Number.isFinite(prev) || prev <= 0) return true;
+  return Number(sub.welcomedAt) < prev;
 }

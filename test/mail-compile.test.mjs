@@ -3,7 +3,7 @@
 // weekly issue id, and ALWAYS-SEND (a fully-empty week still composes and enqueues). No network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileWeeklyIssue, gatherContentEntries, gatherNewsEntries, listRecipientHashes, resolveWindow } from '../workers/signup/mail-compile.mjs';
+import { compileWeeklyIssue, compileWelcomeIssue, gatherContentEntries, gatherNewsEntries, listRecipientHashes, resolveWindow } from '../workers/signup/mail-compile.mjs';
 import { getIssue, putIssue, readPendingIndex, getSend } from '../workers/signup/mail-store.mjs';
 import { subscriberKey, MAIL_SUBSCRIBER_PREFIX } from '../membership/mail-suppress.mjs';
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
@@ -62,8 +62,16 @@ function opensRecord(openerIds) {
   return r;
 }
 
-function seedSubscribers(kv, hashes) {
-  for (const h of hashes) kv.m.set(subscriberKey(h), { value: JSON.stringify(buildSubscriber({ hash: h, source: 'anon', emailEnc: `enc:${h}` }, { now: at(0) })), opts: null });
+// sow-166: `welcomedAt` defaults to a long-ago timestamp because every test using this helper is about WEEKLY
+// mechanics (truncation, idempotency, ranking, always-send) and predates the welcome issue. Only a subscriber
+// welcomed in an earlier cycle receives a weekly, so seeding them unwelcomed would silently empty the
+// recipient base and those tests would pass on zero recipients while appearing to test delivery.
+// Pass `{ welcomedAt: null }` to seed somebody who has NOT been welcomed.
+function seedSubscribers(kv, hashes, { welcomedAt = 1 } = {}) {
+  for (const h of hashes) {
+    const rec = { ...buildSubscriber({ hash: h, source: 'anon', emailEnc: `enc:${h}` }, { now: at(0) }), welcomedAt };
+    kv.m.set(subscriberKey(h), { value: JSON.stringify(rec), opts: null });
+  }
 }
 
 function deps(kv) {
@@ -259,7 +267,7 @@ test('resolveWindow (FIRST issue): no prior -> since = now - 90d, exclude null, 
   const nowMs = gen(7, 25);
   assert.deepEqual(
     await resolveWindow(kv, { nowMs, currentIssueId: 'weekly-2026-08-25' }),
-    { firstIssue: true, since: nowMs - BOOTSTRAP, exclude: null },
+    { firstIssue: true, since: nowMs - BOOTSTRAP, exclude: null, previousGeneratedAt: null },
   );
 });
 
@@ -488,4 +496,72 @@ test('a source list that THROWS is fail-soft: every row falls back to its id, ne
   });
   assert.equal(out.length, 1, 'the news itself still gathers');
   assert.equal(out[0].sourceName, null, 'names are a display nicety, never a gate on the item');
+});
+
+// sow-166: THE SPLIT. A weekly and a welcome are compiled from the same content but go to disjoint audiences,
+// and the whole feature is that nobody's FIRST email is a thin weekly. These drive the real functions rather
+// than the predicates, because the predicate being right and the compile not calling it is the failure that
+// would ship silently.
+
+test('WELCOME SPLIT: an unwelcomed subscriber gets the welcome and is absent from the weekly', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['old1', 'old2']);                        // welcomed long ago -> weekly
+  seedSubscribers(kv, ['newbie'], { welcomedAt: null });        // never welcomed -> welcome only
+  const env = { SIGNUP_KV: kv, NEWS_KV: {} };
+
+  const weekly = await compileWeeklyIssue(env, deps(kv));
+  assert.equal(weekly.recipients, 2, 'the weekly goes to the two already-welcomed subscribers');
+  assert.ok(!(await readPendingIndex(kv, weekly.issueId)).includes('newbie'), 'an unwelcomed subscriber must never be in a weekly');
+
+  const welcome = await compileWelcomeIssue(env, deps(kv));
+  assert.equal(welcome.issueId, 'welcome-2026-08-25');
+  assert.equal(welcome.recipients, 1);
+  assert.deepEqual(await readPendingIndex(kv, welcome.issueId), ['newbie']);
+});
+
+test('WELCOME SCOPE: the welcome is composed over the full 90 days even when a weekly is narrow', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['newbie'], { welcomedAt: null });
+  // A prior weekly exists, so the WEEKLY regime is the narrow epoch-floored one.
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: Date.UTC(2026, 7, 18), sections: {}, counts: {} });
+  const welcome = await compileWelcomeIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  const ninetyDays = 90 * 24 * 3600 * 1000;
+  assert.equal(welcome.since, Date.UTC(2026, 7, 25, 13, 0, 0) - ninetyDays, 'the welcome always reaches back 90 days');
+});
+
+test('WELCOME SWEEP is idempotent: a second sweep in the same day enqueues nobody new', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['newbie'], { welcomedAt: null });
+  const env = { SIGNUP_KV: kv, NEWS_KV: {} };
+  const first = await compileWelcomeIssue(env, deps(kv));
+  assert.equal(first.enqueued, 1);
+  const second = await compileWelcomeIssue(env, deps(kv));
+  assert.equal(second.composed, false, 'the frozen welcome is reused, never recomposed');
+  assert.equal(second.enqueued, 0, 'a repeat sweep must not enqueue the same recipient twice');
+});
+
+test('WELCOME SWEEP short-circuits when nobody needs one, writing nothing and fetching nothing', async () => {
+  const kv = makeKV();
+  seedSubscribers(kv, ['old1']); // already welcomed
+  let fetched = 0;
+  const d = deps(kv);
+  const r = await compileWelcomeIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, {
+    ...d,
+    fetchImpl: (...a) => { fetched++; return d.fetchImpl(...a); },
+  });
+  assert.equal(r.skipped, true);
+  assert.equal(r.recipients, 0);
+  assert.equal(fetched, 0, 'the common tick must not fetch the site indexes: this runs every five minutes');
+  assert.equal(await getIssue(kv, 'welcome-2026-08-25'), null, 'and it must not mint a welcome issue nobody needs');
+});
+
+test('a subscriber welcomed DURING this cycle skips this weekly and joins at the next one', async () => {
+  const kv = makeKV();
+  // The previous weekly was compiled at this timestamp; the cycle began then.
+  const prevGen = Date.UTC(2026, 7, 18);
+  await putIssue(kv, { issueId: 'weekly-2026-08-18', generatedAt: prevGen, sections: {}, counts: {} });
+  seedSubscribers(kv, ['midCycle'], { welcomedAt: prevGen + 1000 }); // welcomed after the cycle began
+  seedSubscribers(kv, ['earlier'], { welcomedAt: prevGen - 1000 });  // welcomed before it
+  const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  assert.deepEqual(await readPendingIndex(kv, r.issueId), ['earlier'], 'only the earlier-welcomed subscriber gets this weekly');
 });

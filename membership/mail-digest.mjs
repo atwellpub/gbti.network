@@ -129,11 +129,46 @@ export const EMPTY_SECTION_NOTES = {
 // copy is edited. It is safe to derive because every note contains the phrase verbatim and a test upstream of
 // this one already asserts that for all five; if that invariant ever breaks, the test breaks with it rather
 // than the substitution silently doing nothing.
+// sow-166: the WELCOME issue's own header copy.
+//
+// It lives here with the other member-facing strings, for the same reason they do: the template is
+// design-gated and swaps in behind the renderIssue seam, and the words somebody reads should not move when
+// the visual design does.
+//
+// It is passed through `ctx.greeting` and `ctx.headerLine`, which already existed with defaults and which
+// NOTHING has ever set. That is deliberate reuse rather than a new branch in the template: a welcome issue
+// differs from a weekly only in its window and its two header lines, so it should not need a second render
+// path that can drift from the first.
+//
+// "the past 90 days" is stated plainly because the alternative is a reader wondering why an item from two
+// months ago is in an email they take to be weekly. The launch note already does this job for the first
+// issue; this is the same courtesy for everybody who joins after it.
+export const WELCOME_GREETING = 'Welcome to the GBTI Network';
+export const WELCOME_HEADER_LINE = 'Here is what members have been publishing lately.';
+
+// The welcome's own launch note, replacing the newsletter's.
+//
+// "YOUR first issue", not "THE first issue". For a late joiner the second is simply false, and it was the
+// contradiction that showed up the moment this was rendered rather than read: a header promising 90 days sat
+// directly above a note claiming the issue covered a week.
+//
+// It has to be a NOTE rather than folded into the header line, because the renderer derives `firstIssue` from
+// the presence of a launch note (mail-render.mjs) and uses that to pick the empty-section wording. Suppressing
+// the note would silently switch a 90-day welcome back to "since the last issue", which is the one phrase that
+// cannot be true for somebody's first email.
+export const WELCOME_NOTE =
+  'This is your first issue, so it covers the past 90 days rather than everything published before it.';
+
+// CORRECTED 2026-08-23: this said "the past week" while the bootstrap window has been NINETY days since the
+// owner widened it on 2026-08-22. The copy was written when the window really was a week and did not travel
+// with the constant, so the launch issue that shipped told its readers it covered a week and then listed items
+// from two months earlier. Both spans below are tied to BOOTSTRAP_MS in workers/signup/mail-compile.mjs; if
+// that constant moves again, these two strings move with it.
 export const FIRST_ISSUE_NOTE =
-  'This is the first issue, so it covers the past week rather than everything published before it.';
+  'This is the first issue, so it covers the past 90 days rather than everything published before it.';
 
 const LAST_ISSUE_PHRASE = 'since the last issue';
-const FIRST_ISSUE_PHRASE = 'in the past week';
+const FIRST_ISSUE_PHRASE = 'in the past 90 days';
 
 export const FIRST_ISSUE_SECTION_NOTES = Object.fromEntries(
   Object.entries(EMPTY_SECTION_NOTES).map(([key, note]) => [key, note.replace(LAST_ISSUE_PHRASE, FIRST_ISSUE_PHRASE)]),
@@ -249,7 +284,7 @@ const byDateDesc = (a, b) => (b.date - a.date);
  */
 export function composeIssue(
   { issueId, items = [], news = [], now = Date.now } = {},
-  { perSection = 5, maxNews = 5, maxNewsThin, since, exclude, firstIssue = false } = {},
+  { perSection = 5, maxNews = 5, maxNewsThin, since, exclude, firstIssue = false, launchNote } = {},
 ) {
   const id = trimOrNull(issueId);
   if (!id) throw new DigestError('issueId is required');
@@ -359,7 +394,12 @@ export function composeIssue(
     window: { since: sinceMs, excluded: excluded === null ? null : excluded.size, appliesTo: 'members' },
     // null on every issue but the first, so the template renders the line by its presence and never has to
     // know which issue number it is holding.
-    launchNote: firstIssue ? FIRST_ISSUE_NOTE : null,
+    // sow-166: `launchNote` is an explicit override, and `undefined` (not passed) keeps the original behaviour.
+    // The WELCOME issue passes null: it is the reader's first email but NOT the newsletter's first issue, and
+    // its own header line already states the 90-day span, so the launch note would both contradict the claim
+    // and repeat the span. It still wants firstIssue:true for the empty-section wording, which is why the two
+    // are separable at all.
+    launchNote: launchNote !== undefined ? launchNote : (firstIssue ? FIRST_ISSUE_NOTE : null),
   };
 }
 

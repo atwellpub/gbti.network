@@ -442,7 +442,7 @@ test('LAUNCH ISSUE: nothing below the line says "since the last issue" to somebo
   for (const section of issue.layout) {
     assert.ok(section.note, `${section.key} still carries a note`);
     assert.doesNotMatch(section.note, /last issue/i, `${section.key} must not reference an issue that never existed`);
-    assert.match(section.note, /in the past week/i, `${section.key} names the span it actually covers`);
+    assert.match(section.note, /in the past 90 days/i, `${section.key} names the span it actually covers`);
   }
 });
 
@@ -461,7 +461,7 @@ test('LAUNCH ISSUE: the derived notes cannot drift from the ones they are derive
     assert.doesNotMatch(note, /last issue/i);
     // Only the cadence clause moves. The invitation each note carries is copy the owner reviewed, and a
     // substitution that ate any of it would be a silent rewrite.
-    assert.equal(note, EMPTY_SECTION_NOTES[key].replace('since the last issue', 'in the past week'));
+    assert.equal(note, EMPTY_SECTION_NOTES[key].replace('since the last issue', 'in the past 90 days'));
   }
 });
 
@@ -498,7 +498,7 @@ test('LAUNCH ISSUE: the launch line still says the two things it exists to say',
   // rather than by exact string, so the owner or SowMaster can reword it freely and only lose the test by
   // dropping one of the facts.
   assert.match(FIRST_ISSUE_NOTE, /first issue/i, 'must say it is the first issue');
-  assert.match(FIRST_ISSUE_NOTE, /past week/i, 'must name the span it covers');
+  assert.match(FIRST_ISSUE_NOTE, /past 90 days/i, 'must name the span it covers, which is the bootstrap window');
 });
 
 test('LAUNCH ISSUE: the copy is plain sentences, the same rule the standing notes are held to', () => {

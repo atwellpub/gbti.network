@@ -593,3 +593,59 @@ test('the drain surfaces budgetSkipped and never RESETS a counter that becomes u
   assert.equal(kv.m.get(dayKey).value, '40', 'the daily counter is NOT reset downward (the old `|| 0` wrote 0 + 1 = 1, blowing the ceiling)');
   assert.equal(kv.m.get(budgetMonthKey(monthStr)).value, '41', 'the readable monthly counter still books the send');
 });
+
+// sow-166: the WELCOME half of the drain. Two behaviours, and they fail in opposite directions.
+//
+// Stamping `welcomedAt` too eagerly means somebody is recorded as welcomed without receiving the only 90-day
+// view they are offered, and nothing downstream ever notices. Not stamping it means they are swept again every
+// cycle and receive the welcome repeatedly. So the stamp must land on a DELIVERED welcome, and nowhere else.
+
+test('WELCOME: a delivered welcome stamps welcomedAt, so the sweep never picks them up again', async () => {
+  const kv = makeKV();
+  await seed(kv, 'welcome-2026-08-25', ['h1'], { now: at(1_000_000) });
+  const sender = makeSender();
+  await drainMail({ ...OPEN }, { kv, now: at(1_000_000), perTickCap: 4, ...BIG, ...deps(sender) });
+  assert.deepEqual(sender.sent, ['h1@example.com'], 'exactly one send, to the resolved address');
+  const sub = JSON.parse(await kv.get(subscriberKey('h1')));
+  assert.equal(sub.welcomedAt, 1_000_000, 'a delivered welcome stamps the moment it was sent');
+});
+
+test('WELCOME: a delivered WEEKLY does not stamp welcomedAt', async () => {
+  // Only a welcome makes somebody welcomed. If a weekly stamped it too, a subscriber who somehow received a
+  // weekly first would be permanently denied their 90-day introduction.
+  const kv = makeKV();
+  await seed(kv, 'weekly-2026-08-25', ['h1'], { now: at(1_000_000) });
+  const sender = makeSender();
+  await drainMail({ ...OPEN }, { kv, now: at(1_000_000), perTickCap: 4, ...BIG, ...deps(sender) });
+  assert.equal(sender.sent.length, 1);
+  const sub = JSON.parse(await kv.get(subscriberKey('h1')));
+  assert.equal(sub.welcomedAt, null, 'a weekly must leave welcomedAt untouched');
+});
+
+test('WELCOME: a FAILED welcome does not stamp welcomedAt, so they are retried next cycle', async () => {
+  const kv = makeKV();
+  await seed(kv, 'welcome-2026-08-25', ['h1'], { now: at(1_000_000) });
+  const sender = makeSender({ failFor: new Set(['h1@example.com']) }); // the harness resolves <hash>@example.com
+  await drainMail({ ...OPEN }, { kv, now: at(1_000_000), perTickCap: 4, ...BIG, ...deps(sender) });
+  const sub = JSON.parse(await kv.get(subscriberKey('h1')));
+  assert.equal(sub.welcomedAt, null, 'nobody is marked welcomed by an email that never arrived');
+});
+
+test('WELCOME: the welcome issue renders its own greeting, and a weekly does not', async () => {
+  const kv = makeKV();
+  await seed(kv, 'welcome-2026-08-25', ['h1'], { now: at(1_000_000) });
+  await seed(kv, 'weekly-2026-08-25', ['h2'], { now: at(1_000_000) });
+  const seen = [];
+  const sender = { sent: [], sendEmail: async (m) => { seen.push(m); sender.sent.push(m.to); return { id: 're_x' }; } };
+  const d = { ...deps(sender), renderIssue: realRenderIssue };
+  await drainMail({ ...OPEN }, { kv, now: at(1_000_000), perTickCap: 10, ...BIG, ...d });
+  assert.equal(seen.length, 2);
+  const all = seen.map((m) => m.html).join('\n');
+  assert.match(all, /Welcome to the GBTI Network/, 'the welcome carries its own greeting');
+  assert.match(all, /publishing lately/, 'and its own header line');
+  // The 90-day span rides on the issue's launchNote, which is composed in (see mail-compile.test.mjs), not
+  // injected by the drain. Asserting it here would test the fixture rather than the drain.
+  assert.doesNotMatch(all, /Everything new across the network since the last issue\.[\s\S]{0,200}Welcome to the GBTI/, 'the welcome must not carry the weekly header line');
+  // The weekly keeps the default greeting, so the welcome copy is not leaking into every issue.
+  assert.match(all, /This week on the network/, 'the weekly still uses the standing greeting');
+});

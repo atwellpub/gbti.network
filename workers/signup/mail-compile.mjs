@@ -19,8 +19,8 @@
 // (visibility === 'public', fail closed); this module only moves already-public metadata.
 
 import { getIssue, putIssue, enqueueIssue, getSubscriber } from './mail-store.mjs';
-import { composeIssue, shouldSend } from '../../membership/mail-digest.mjs';
-import { normalizeContent, normalizeNews, weeklyIssueId } from '../../membership/mail-compile-core.mjs';
+import { composeIssue, shouldSend, WELCOME_NOTE } from '../../membership/mail-digest.mjs';
+import { normalizeContent, normalizeNews, weeklyIssueId, welcomeIssueId, weeklyEligible, isWelcomed } from '../../membership/mail-compile-core.mjs';
 import { canReceive } from '../../membership/mail-subscriber.mjs';
 import { MAIL_SUBSCRIBER_PREFIX } from '../../membership/mail-suppress.mjs';
 import { queryItems as kvQueryItems } from './news/src/store.mjs';
@@ -91,7 +91,7 @@ async function listPriorIssueIds(kv, { currentIssueId, pageBudget = 50 } = {}) {
 export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = BOOTSTRAP_MS, historyDepth = 26, pageBudget = 50 } = {}) {
   const priorIds = await listPriorIssueIds(kv, { currentIssueId, pageBudget });
   if (priorIds.length === 0) {
-    return { firstIssue: true, since: Number(nowMs) - bootstrapMs, exclude: null };
+    return { firstIssue: true, since: Number(nowMs) - bootstrapMs, exclude: null, previousGeneratedAt: null };
   }
   const depth = Math.max(1, historyDepth);
   const sorted = priorIds.slice().sort();          // chronological ascending (weekly- sorts as dates)
@@ -100,10 +100,14 @@ export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = B
 
   const exclude = new Set();
   let oldestInWindowGen = null;
+  let previousGen = null;
   for (let i = 0; i < windowIds.length; i++) {
     // eslint-disable-next-line no-await-in-loop -- bounded by historyDepth, and this is the weekly compile, not a tick
     const issue = await getIssue(kv, windowIds[i]);
     if (i === 0) oldestInWindowGen = Number(issue?.generatedAt); // windowIds[0] is the OLDEST issue in the window
+    // sow-166: and the LAST one is the newest prior weekly, i.e. the start of the current cycle. A subscriber
+    // welcomed at or after it was welcomed IN this cycle, so the welcome already stands in for this issue.
+    if (i === windowIds.length - 1) previousGen = Number(issue?.generatedAt);
     const sections = issue?.sections;
     if (!sections) continue;
     for (const key of MEMBER_SECTION_KEYS) {
@@ -129,7 +133,7 @@ export async function resolveWindow(kv, { nowMs, currentIssueId, bootstrapMs = B
   } else {
     since = await resolveEpoch(kv, sorted[0], { nowMs, bootstrapMs });
   }
-  return { firstIssue: false, since, exclude };
+  return { firstIssue: false, since, exclude, previousGeneratedAt: Number.isFinite(previousGen) ? previousGen : null };
 }
 
 /**
@@ -230,7 +234,7 @@ export async function gatherNewsEntries(env, {
  * is not disabled). Returns the recipient hashes. Paginates the KV list so a large base is fully walked; a bound
  * (default 200 pages) is a runaway backstop, and a truncated walk is logged by the caller, never silent.
  */
-export async function listRecipientHashes(kv, { pageBudget = 200 } = {}) {
+export async function listRecipientHashes(kv, { pageBudget = 200, filter = null } = {}) {
   if (!kv?.list) return { hashes: [], truncated: false, readErrors: 0 };
   const hashes = [];
   let cursor;
@@ -253,7 +257,10 @@ export async function listRecipientHashes(kv, { pageBudget = 200 } = {}) {
       // eslint-disable-next-line no-await-in-loop -- bounded page, and the reads pipeline within a page below
       try { sub = await getSubscriber(kv, hash); }
       catch { readErrors++; continue; }
-      if (sub && canReceive(sub)) hashes.push(hash);
+      // sow-166: `filter` narrows the base WITHOUT a second walk. The welcome sweep asks for the unwelcomed,
+      // the weekly asks for those welcomed in an earlier cycle. Duplicating this loop for each would also
+      // duplicate the read-error and truncation handling above, which is the part that must not drift.
+      if (sub && canReceive(sub) && (!filter || filter(sub))) hashes.push(hash);
     }
     if (res?.list_complete || !res?.cursor) { truncated = false; break; }
     cursor = res.cursor;
@@ -287,6 +294,7 @@ export async function compileWeeklyIssue(env, {
   // Freeze once: if the issue already exists, reuse it (do NOT recompose); otherwise gather + compose + persist.
   let issue = await getIssue(kv, issueId);
   let composed = false;
+  let regimeForFilter = null;
   if (!issue) {
     const [contentEntries, newsEntries, regime] = await Promise.all([
       gatherContentEntries(env, { fetchImpl, siteUrl }),
@@ -301,6 +309,7 @@ export async function compileWeeklyIssue(env, {
     // every issue after excludes the already-mailed urls (exclude). The exclude regime CLOSES the Trap Two
     // loss: a held-for-review contribution or a backdated item stays eligible until it has actually been mailed,
     // instead of being dropped by a publishedAt window it predates. resolveWindow returns exactly one regime.
+    regimeForFilter = regime;
     issue = composeIssue({ issueId, items, news, now }, {
       perSection, maxNews, since: regime.since, exclude: regime.exclude, firstIssue: regime.firstIssue,
     });
@@ -310,7 +319,16 @@ export async function compileWeeklyIssue(env, {
     composed = true;
   }
 
-  const { hashes, truncated, readErrors } = await listRecipientHashes(kv);
+  // sow-166: the WEEKLY goes only to subscribers already welcomed in an EARLIER cycle. The unwelcomed are the
+  // welcome sweep's, and somebody welcomed during this cycle has had their email for it already. `regime` is
+  // only set when this call composed the issue; on the idempotent reuse path re-resolve the cycle start so a
+  // re-run filters identically rather than mailing the people the first run correctly skipped.
+  const previousGeneratedAt = regimeForFilter
+    ? regimeForFilter.previousGeneratedAt
+    : (await resolveWindow(kv, { nowMs, currentIssueId: issueId, historyDepth })).previousGeneratedAt;
+  const { hashes, truncated, readErrors } = await listRecipientHashes(kv, {
+    filter: (sub) => weeklyEligible(sub, previousGeneratedAt),
+  });
   const enq = await enqueueIssue(kv, issue, hashes, { now });
 
   return {
@@ -332,5 +350,83 @@ export async function compileWeeklyIssue(env, {
     firstIssue: Boolean(issue?.launchNote),
     since: issue?.window?.since ?? null,
     excluded: issue?.window?.excluded ?? null,
+  };
+}
+
+/**
+ * sow-166: compile (or reuse) the standing WELCOME issue and enqueue every subscriber who has never had one.
+ *
+ * WHY THIS IS A SWEEP OVER STATE RATHER THAN A HOOK ON SIGNUP. The welcome has to fire whenever a subscriber
+ * becomes ACTIVE, and that happens on three different paths today and tomorrow: at confirmation under double
+ * opt-in, at submission if double opt-in is ever switched off (owner, 2026-08-23), and in bulk when the member
+ * backfill runs. A hook would have to be remembered at each one, and the failure mode of forgetting is silent:
+ * the subscriber simply never gets the only 90-day view they will be offered. Sweeping for `welcomedAt == null`
+ * cannot be forgotten by a new creation path, because every path ends at putSubscriber.
+ *
+ * Runs on the same five-minute cron tick as the drain, so a new subscriber waits at most five minutes.
+ *
+ * The issue id is `welcome-YYYY-MM-DD`, which listPriorIssueIds cannot count, so this NEVER advances the
+ * weekly epoch floor and NEVER contributes its 90 days of urls to the weekly exclude set.
+ */
+export async function compileWelcomeIssue(env, {
+  kv = env?.SIGNUP_KV,
+  now = Date.now,
+  fetchImpl = globalThis.fetch,
+  siteUrl,
+  queryItems = kvQueryItems,
+  displayName,
+  perSection,
+  maxNews,
+  bootstrapMs = BOOTSTRAP_MS,
+} = {}) {
+  if (!kv) return { ok: false, reason: 'no kv' };
+  const nowMs = Number(now());
+  const issueId = welcomeIssueId(nowMs);
+
+  // ASK WHO NEEDS ONE BEFORE BUILDING ONE. This runs every five minutes, and on almost every tick the answer
+  // is nobody. Composing first would fetch both site indexes and query the news store 288 times a day, and
+  // would mint a welcome issue in KV for every calendar day whether or not anyone joined. The subscriber walk
+  // is a single prefix list, so the common path is cheap and writes nothing.
+  const { hashes, truncated, readErrors } = await listRecipientHashes(kv, { filter: (sub) => !isWelcomed(sub) });
+  if (hashes.length === 0) {
+    return { ok: true, issueId, composed: false, skipped: true, reason: 'nobody to welcome', recipients: 0, enqueued: 0, pending: 0 };
+  }
+
+  let issue = await getIssue(kv, issueId);
+  let composed = false;
+  if (!issue) {
+    const [contentEntries, newsEntries] = await Promise.all([
+      gatherContentEntries(env, { fetchImpl, siteUrl }),
+      gatherNewsEntries(env, { kv, queryItems }),
+    ]);
+    const items = normalizeContent(contentEntries, { displayName });
+    const news = normalizeNews(newsEntries);
+    // The 90-day launch regime, ALWAYS, whatever the weekly is doing. `firstIssue: true` also swaps the
+    // empty-section notes to their launch wording ("in the past week" rather than "since the last issue"),
+    // which is the correct voice for somebody's first email, and attaches the launch note.
+    issue = composeIssue({ issueId, items, news, now }, {
+      perSection, maxNews, since: nowMs - bootstrapMs, exclude: null, firstIssue: true,
+      // firstIssue for the 90-day empty-section wording, with the welcome's OWN note in place of the
+      // newsletter's: this is the reader's first issue, not the newsletter's.
+      launchNote: WELCOME_NOTE,
+    });
+    if (!shouldSend(issue)) return { ok: true, issueId, composed: false, skipped: true, reason: 'nothing to send' };
+    await putIssue(kv, issue);
+    composed = true;
+  }
+
+  // enqueueIssue is idempotent per (issueId, recipientHash), so re-sweeping the same day cannot double-send.
+  const enq = await enqueueIssue(kv, issue, hashes, { now });
+  return {
+    ok: true,
+    issueId,
+    composed,
+    recipients: hashes.length,
+    enqueued: enq?.enqueued ?? 0,
+    pending: enq?.pending ?? 0,
+    recipientsTruncated: truncated || readErrors > 0,
+    recipientReadErrors: readErrors,
+    counts: issue?.counts ?? null,
+    since: issue?.window?.since ?? null,
   };
 }

@@ -94,7 +94,7 @@ import { membershipAuthor, membershipAuthorTargets } from './membership-author.m
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
-import { compileWeeklyIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
+import { compileWeeklyIssue, compileWelcomeIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
 import { renderMailIssue } from '../../membership/mail-render-dispatch.mjs'; // SOW-166 digest + SOW-186 phase 4 follow template, routed by issue.kind (exported so this exact dispatcher is the line under test)
 import { resolveSubscriberEmail } from '../../membership/mail-address.mjs'; // SOW-166: anon decrypt / member-from-Stripe address resolution
@@ -807,12 +807,24 @@ function mailDrainDeps(env) {
  * allSettled so a failure in one never suppresses the other, and both outcomes are logged by scheduled().
  */
 async function drainFiveMinute(env) {
+  // sow-166: sweep for unwelcomed subscribers BEFORE draining, and sequentially rather than alongside. Running
+  // it in the allSettled pair would race the drain's read of the pending index, so a subscriber enqueued this
+  // tick would usually wait for the next one. Sweeping first means somebody who confirms their subscription is
+  // sent their 90-day welcome on this same tick. It short-circuits to a single KV list when nobody is waiting,
+  // which is almost every tick, and a failure here must never suppress the drain below.
+  let welcome;
+  try {
+    welcome = await compileWelcomeIssue(env);
+  } catch (e) {
+    welcome = { error: String(e?.message ?? e) };
+  }
+
   const [syndication, mail] = await Promise.allSettled([
     drainSyndication(env),
     drainMail(env, mailDrainDeps(env)),
   ]);
   const settle = (r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message ?? r.reason) });
-  return { syndication: settle(syndication), mail: settle(mail) };
+  return { syndication: settle(syndication), mail: settle(mail), welcome };
 }
 
 const CRON_JOBS = new Map([

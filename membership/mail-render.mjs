@@ -190,7 +190,12 @@ function emptyPhrase(empties, firstIssue) {
   const list = labels.length === 1
     ? labels[0]
     : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-  return `Nothing new in ${list} ${firstIssue ? 'in the past week' : 'since the last issue'}.`;
+  // "in the past 90 days" tracks BOOTSTRAP_MS, the launch/welcome window. It is a SECOND copy of the phrase in
+  // membership/mail-digest.mjs (FIRST_ISSUE_PHRASE), kept separate on purpose so this template stays free of
+  // digest imports and can be swapped behind the renderIssue seam. That duplication already drifted once: the
+  // window moved from 7 days to 90 on 2026-08-22 and both strings were left saying "week". A cross-module test
+  // now asserts the two agree, so the next move breaks a test instead of a sentence in somebody's inbox.
+  return `Nothing new in ${list} ${firstIssue ? 'in the past 90 days' : 'since the last issue'}.`;
 }
 
 /**

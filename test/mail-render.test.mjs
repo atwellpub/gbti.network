@@ -426,8 +426,8 @@ test('empty sections collapse to a single line naming them all; the first issue 
   const later = renderIssue({ layout: base }, {}).html;
   assert.match(later, /Nothing new in Articles, Products and Prompts since the last issue\./);
 
-  const first = renderIssue({ launchNote: 'This is the first issue, so it covers the past week rather than everything published before it.', layout: base }, {}).html;
-  assert.match(first, /Nothing new in Articles, Products and Prompts in the past week\./);
+  const first = renderIssue({ launchNote: 'This is the first issue, so it covers the past 90 days rather than everything published before it.', layout: base }, {}).html;
+  assert.match(first, /Nothing new in Articles, Products and Prompts in the past 90 days\./);
   assert.match(first, /This is the first issue/);
 });
 
