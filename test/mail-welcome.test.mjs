@@ -124,11 +124,44 @@ test('weeklyEligible excludes the unwelcomed and anyone welcomed during this cyc
   assert.equal(weeklyEligible(sub('a', { welcomedAt: 2500 }), 2000), false, 'welcomed this cycle');
   assert.equal(weeklyEligible(sub('a', { welcomedAt: 2000 }), 2000), false, 'welcomed exactly at the cusp');
   assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), 2000), true, 'welcomed in an earlier cycle');
-  // Number(null) is 0, not NaN. A bare isFinite check here would read "no prior weekly" as a floor of zero and
-  // silently exclude EVERY subscriber from EVERY weekly. This caught exactly that during implementation.
-  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), null), true, 'no prior weekly: nothing to clash with');
-  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), undefined), true);
+  // Number(null) is 0, not NaN. A bare isFinite check here would read a missing floor as zero and silently
+  // exclude EVERY subscriber from EVERY weekly. This caught exactly that during implementation.
+  // WITH NO SECOND FLOOR SUPPLIED the historical answer is preserved, because both floors absent means a
+  // malformed call rather than a first issue: a frozen issue always carries a window.
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), null, null), true, 'no floor at all: unchanged');
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), undefined, undefined), true);
   assert.equal(weeklyEligible(null, 2000), false);
+});
+
+// THESE TWO TESTS REPLACE A PAIR THAT ASSERTED THE DEFECT. The originals read
+//   weeklyEligible(sub, null) === true, 'no prior weekly: nothing to clash with'
+// and they were not weak, they were WRONG ABOUT THE INTENDED BEHAVIOUR, which is the only condition under
+// which changing a test is the fix rather than the cover-up. On launch day the welcome sweep and the first
+// weekly both fire, so the thing a first weekly clashes with is not a previous ISSUE, it is the
+// subscriber's own WELCOME, sent minutes earlier. It cost a real double send on 2026-08-24: welcomed
+// 13:50:26Z, first weekly 14:05:26Z, both carrying the same 90 days.
+test('weeklyEligible: on the FIRST weekly the floor falls back to the issue own window start', () => {
+  const WINDOW_SINCE = 1000; // a first issue's 90-day bootstrap edge
+  // Welcomed INSIDE the window the first weekly covers: their welcome already carried this content.
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 2500 }), null, WINDOW_SINCE), false, 'welcomed inside the window');
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1000 }), null, WINDOW_SINCE), false, 'welcomed exactly at the edge');
+  // Welcomed BEFORE it: they never saw this span, so they belong in the issue.
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 999 }), null, WINDOW_SINCE), true, 'welcomed before the window');
+  // A prior issue still WINS over the window when one exists; the fallback is only for its absence. Both
+  // cases below are chosen so the two floors DISAGREE, otherwise the assertion proves nothing about which
+  // one was used.
+  //   welcomedAt 1500, prior 2000, window 1000: prior says eligible, window says not. Prior must win.
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 1500 }), 2000, WINDOW_SINCE), true, 'prior issue takes precedence');
+  //   welcomedAt 2000, prior 1000, window 3000: prior says NOT eligible, window says eligible. Prior must win.
+  assert.equal(weeklyEligible(sub('a', { welcomedAt: 2000 }), 1000, 3000), false, 'prior issue takes precedence, other way');
+});
+
+test('weeklyEligible: the real 2026-08-24 shape is now excluded', () => {
+  // Verbatim from the stored records. The subscriber was welcomed 15 minutes before the first weekly, whose
+  // window reached back 90 days. Before the fix this returned true and the email went out.
+  const WELCOMED = 1787579427091;          // 2026-08-24T13:50:27Z
+  const FIRST_WEEKLY_SINCE = 1787579427091 - 90 * 86400000;
+  assert.equal(weeklyEligible(sub('gbtilabs', { welcomedAt: WELCOMED }), null, FIRST_WEEKLY_SINCE), false);
 });
 
 test('isWelcomed fails safe: anything that is not a positive timestamp reads as NOT welcomed', () => {
@@ -147,8 +180,12 @@ test('the recipient filter splits the base: the unwelcomed for the welcome, earl
   } });
   const unwelcomed = await listRecipientHashes(kv, { filter: (s) => !isWelcomed(s) });
   assert.deepEqual(unwelcomed.hashes.sort(), ['fresh']);
-  const weekly = await listRecipientHashes(kv, { filter: (s) => weeklyEligible(s, 2000) });
+  const weekly = await listRecipientHashes(kv, { filter: (s) => weeklyEligible(s, 2000, 1000) });
   assert.deepEqual(weekly.hashes.sort(), ['lastCycle']);
+  // The same base filtered as a FIRST issue, where there is no prior weekly and the window is the floor:
+  // everyone welcomed inside it drops out, which on launch day is the whole welcomed base.
+  const firstWeekly = await listRecipientHashes(kv, { filter: (s) => weeklyEligible(s, null, 1000) });
+  assert.deepEqual(firstWeekly.hashes.sort(), [], 'a first weekly does not re-mail the just-welcomed');
   // No filter is the unchanged behaviour: everybody who canReceive.
   const all = await listRecipientHashes(kv);
   assert.deepEqual(all.hashes.sort(), ['fresh', 'lastCycle', 'thisCycle']);

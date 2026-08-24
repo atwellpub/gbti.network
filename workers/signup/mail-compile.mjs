@@ -323,11 +323,13 @@ export async function compileWeeklyIssue(env, {
   // welcome sweep's, and somebody welcomed during this cycle has had their email for it already. `regime` is
   // only set when this call composed the issue; on the idempotent reuse path re-resolve the cycle start so a
   // re-run filters identically rather than mailing the people the first run correctly skipped.
-  const previousGeneratedAt = regimeForFilter
-    ? regimeForFilter.previousGeneratedAt
-    : (await resolveWindow(kv, { nowMs, currentIssueId: issueId, historyDepth })).previousGeneratedAt;
+  // Carry the WHOLE regime, not just previousGeneratedAt: `since` is the fallback floor for the first issue,
+  // where there is no prior weekly to measure a cycle against. Taking one field and dropping the other is
+  // what produced the 2026-08-24 double send.
+  const filterRegime = regimeForFilter
+    || (await resolveWindow(kv, { nowMs, currentIssueId: issueId, historyDepth }));
   const { hashes, truncated, readErrors } = await listRecipientHashes(kv, {
-    filter: (sub) => weeklyEligible(sub, previousGeneratedAt),
+    filter: (sub) => weeklyEligible(sub, filterRegime?.previousGeneratedAt, filterRegime?.since),
   });
   const enq = await enqueueIssue(kv, issue, hashes, { now });
 

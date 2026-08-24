@@ -172,6 +172,27 @@ test('compileWeeklyIssue: composes ONCE, excludes the members item, ranks news b
   for (const h of ['r1', 'r2', 'r3']) assert.equal((await getSend(kv, 'weekly-2026-08-25', h)).status, 'pending');
 });
 
+// THE COMPILE-LEVEL TEST FOR THE 2026-08-24 DOUBLE SEND. The predicate has its own tests in
+// mail-welcome.test.mjs, and they were NOT enough: the actual defect was in this caller, which took
+// `previousGeneratedAt` off the window regime and dropped `since`. Reverting that one argument left every
+// predicate test green, which is the definition of asserting the layer below the defect. This test is the
+// one that goes red for it, so it earns its place by construction rather than by coverage.
+test('compileWeeklyIssue: a FIRST issue does not re-mail somebody welcomed inside its own window', async () => {
+  const NOW = Date.UTC(2026, 7, 25, 13, 0, 0);
+  const kv = makeKV();
+  // No prior weekly is seeded, so this is the first-issue regime with a 90-day bootstrap window.
+  seedSubscribers(kv, ['earlier'], { welcomedAt: 1 });                    // welcomed long before the window
+  seedSubscribers(kv, ['justNow'], { welcomedAt: NOW - 15 * 60 * 1000 }); // welcomed 15 minutes ago, as gbtilabs was
+
+  const r = await compileWeeklyIssue({ SIGNUP_KV: kv, NEWS_KV: {} }, deps(kv));
+  assert.equal(r.firstIssue, true, 'guard: this must be the first-issue regime or the test proves nothing');
+  assert.equal(r.recipients, 1, 'only the earlier-welcomed subscriber is a recipient');
+
+  const pending = [...(await readPendingIndex(kv, 'weekly-2026-08-25'))].sort();
+  assert.deepEqual(pending, ['earlier'], 'the just-welcomed subscriber has no send record for the weekly');
+  assert.equal(await getSend(kv, 'weekly-2026-08-25', 'justNow'), null, 'and nothing was written for them at all');
+});
+
 test('compileWeeklyIssue is IDEMPOTENT: a re-run does not recompose or re-enqueue', async () => {
   const kv = makeKV();
   seedSubscribers(kv, ['r1', 'r2']);

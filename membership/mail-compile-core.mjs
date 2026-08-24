@@ -217,13 +217,31 @@ export function isWelcomed(sub) {
  *      sending the weekly too would put two overlapping issues in their inbox days apart. They join the normal
  *      cadence at the next one (owner ruling, 2026-08-23).
  *
- * With no prior weekly there is no cycle to double up with, so a welcomed subscriber is eligible.
+ * ON THE FIRST WEEKLY THERE IS NO PRIOR ISSUE, AND THE ORIGINAL VERSION OF THIS FUNCTION LET EVERYBODY
+ * THROUGH. Its reasoning was that with no prior weekly there is no cycle to double up with. That is wrong,
+ * and it is wrong in the one case it was reached: on launch day the welcome sweep and the first weekly both
+ * fire, so the thing to double up with is not the previous ISSUE, it is the subscriber's own WELCOME.
+ * It cost a real double send on 2026-08-24. A subscriber was welcomed at 13:50:26Z and received the first
+ * weekly at 14:05:26Z, fifteen minutes later, both carrying the same 90 days. Confirmed from the stored
+ * `mail:send:` records, not from a log line.
+ * So the floor falls back to the issue's OWN window start. On a first issue that is the 90-day bootstrap
+ * edge, which is exactly the span the welcome covered, so anyone welcomed inside it is correctly excluded.
+ * The first weekly may then have no eligible recipients at all, and that is the right answer rather than a
+ * degenerate one: everybody who would have received it has already been sent the same content.
+ *
+ * @param sub the subscriber record
+ * @param previousGeneratedAt generatedAt of the newest prior weekly, null on the first issue
+ * @param windowSince the current issue's own window start, used as the floor when there is no prior issue
  */
-export function weeklyEligible(sub, previousGeneratedAt) {
+export function weeklyEligible(sub, previousGeneratedAt, windowSince) {
   if (!isWelcomed(sub)) return false;
-  // `Number(null)` is 0, not NaN, so a bare Number.isFinite check would treat "no prior weekly" as a floor of
-  // zero and exclude everybody. Require a positive timestamp before it can gate anything.
+  // `Number(null)` is 0, not NaN, so a bare Number.isFinite check would treat a missing floor as zero and
+  // exclude everybody. Require a positive timestamp before either candidate can gate anything.
   const prev = Number(previousGeneratedAt);
-  if (!Number.isFinite(prev) || prev <= 0) return true;
-  return Number(sub.welcomedAt) < prev;
+  const floor = Number.isFinite(prev) && prev > 0 ? prev : Number(windowSince);
+  // Both absent means a malformed call rather than a first issue, since a frozen issue always carries a
+  // window. Preserve the historical answer instead of silently muting the newsletter, and let the test below
+  // record that this branch is deliberate.
+  if (!Number.isFinite(floor) || floor <= 0) return true;
+  return Number(sub.welcomedAt) < floor;
 }
