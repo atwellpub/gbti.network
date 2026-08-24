@@ -174,12 +174,48 @@ test('the palette is light by default and swaps to dark on ctx.theme', () => {
   assert.doesNotMatch(dark, /#efece7/, 'no light tokens leak into the dark render');
 });
 
-test('the subject carries the item count and week range when the issue provides counts and generatedAt', () => {
+test('an issue with NO recorded window falls back to the 7-day display range', () => {
+  // sow-166: the legacy shape. An issue frozen before `window` was recorded must still re-render as it was
+  // sent, so the fallback is deliberate and not a bug to tidy away.
   const issue = { generatedAt: Date.UTC(2026, 7, 21), counts: { article: 2, product: 0, prompt: 0, share: 9, news: 4 }, layout: [] };
   const { subject } = renderIssue(issue, {});
   assert.match(subject, /^GBTI Digest · 15 items · Aug 15-21$/);
   // ctx.subject still overrides the computed one.
   assert.equal(renderIssue(issue, { subject: 'Custom line' }).subject, 'Custom line');
+});
+
+// sow-166, 2026-08-23. THE HEADER MUST REPORT THE WINDOW THE ISSUE ACTUALLY COVERS.
+//
+// This is a real defect that shipped and was reported by the owner, and the failure mode is why it needs a
+// test rather than a careful reading: the range was `generatedAt` minus six days regardless of the window, so
+// the launch issue (which selects over NINETY days) went out headed "Aug 17-23" while listing prompts from
+// June. Nothing looked broken in the markup. It reads as missing content, not as a wrong label, so the owner
+// reasonably reported the articles as absent when in fact they were correctly selected and mislabelled.
+test('the date range reflects the issue window, not a fixed week', () => {
+  const generatedAt = Date.UTC(2026, 7, 23);
+  const since = generatedAt - 90 * 24 * 3600 * 1000; // the first-issue bootstrap floor
+  const issue = { generatedAt, window: { since }, counts: { article: 1, product: 1, prompt: 5, share: 5, news: 5 }, layout: [] };
+  const { subject, html } = renderIssue(issue, {});
+  assert.match(subject, /May 25 to Aug 23$/, 'the subject names the real span');
+  assert.match(html, /MAY 25 TO AUG 23, 2026/, 'the header date cell names the real span');
+  assert.doesNotMatch(subject, /Aug 17-23/, 'the false one-week range must not survive');
+});
+
+test('a window spanning a year boundary names both years', () => {
+  // "Dec 28-3" is unreadable, and "Dec 28 to Jan 3, 2026" silently attributes December to the wrong year.
+  const generatedAt = Date.UTC(2026, 0, 3);
+  const issue = { generatedAt, window: { since: Date.UTC(2025, 11, 28) }, counts: { article: 1, product: 0, prompt: 0, share: 0, news: 0 }, layout: [] };
+  const { subject } = renderIssue(issue, {});
+  assert.match(subject, /Dec 28, 2025 to Jan 3, 2026$/);
+});
+
+test('a window since that is absent, zero or not before the compile falls back rather than inverting', () => {
+  const generatedAt = Date.UTC(2026, 7, 21);
+  const counts = { article: 1, product: 0, prompt: 0, share: 0, news: 0 };
+  for (const since of [0, null, undefined, NaN, generatedAt, generatedAt + 1000]) {
+    const { subject } = renderIssue({ generatedAt, window: { since }, counts, layout: [] }, {});
+    assert.match(subject, /Aug 15-21$/, `since=${String(since)} must fall back to the 7-day range`);
+  }
 });
 
 test('the hidden preheader carries a natural-language counts summary in non-zero-section order', () => {

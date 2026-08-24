@@ -126,20 +126,38 @@ function plural(n, key) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// The 7-day display range ending at the compile day, formatted in UTC from the FROZEN generatedAt. A plain ASCII
-// hyphen is a range hyphen, not an en dash, so "Aug 15-21" is compliant with the no-dash writing rule.
-function weekRange(generatedAt) {
+// The date line under the wordmark, and the tail of the subject. It reports the range the issue ACTUALLY
+// covers, taken from the frozen `window.since`, not a fixed week.
+//
+// It used to be `generatedAt` minus six days, unconditionally. That was wrong in a way that read as missing
+// content rather than as a wrong label: the launch issue selects over ninety days and every issue after it
+// floors at the newsletter epoch, so an email headed "Aug 17-23" would list prompts from June and products
+// from May. The owner read exactly that and reported the articles as missing. The items were right; the
+// header was lying about them.
+//
+// A plain ASCII hyphen is a range hyphen, not an en dash, so "Aug 15-21" is compliant with the no-dash rule.
+function coverageRange(generatedAt, since) {
   const end = Number(generatedAt);
   if (!Number.isFinite(end)) return null;
-  const s = new Date(end - 6 * DAY_MS);
+  const start = Number(since);
+  // An issue frozen before `window` was recorded carries no `since`. Fall back to the old seven days rather
+  // than inventing a range, so re-rendering an archived issue reproduces what was actually sent.
+  const from = Number.isFinite(start) && start > 0 && start < end ? start : end - 6 * DAY_MS;
+  const s = new Date(from);
   const e = new Date(end);
+  const sY = s.getUTCFullYear();
+  const eY = e.getUTCFullYear();
   const sM = MONTHS[s.getUTCMonth()];
   const eM = MONTHS[e.getUTCMonth()];
   const sD = s.getUTCDate();
   const eD = e.getUTCDate();
-  const y = e.getUTCFullYear();
+  // Spanning a year boundary has to name both years, or "Dec 28-3" is unreadable.
+  if (sY !== eY) {
+    const short = `${sM} ${sD}, ${sY} to ${eM} ${eD}, ${eY}`;
+    return { short, mono: short.toUpperCase() };
+  }
   const short = sM === eM ? `${sM} ${sD}-${eD}` : `${sM} ${sD} to ${eM} ${eD}`;
-  return { short, mono: `${short}, ${y}`.toUpperCase() };
+  return { short, mono: `${short}, ${eY}`.toUpperCase() };
 }
 
 function totalItems(counts) {
@@ -387,7 +405,7 @@ export function renderIssue(issue, ctx = {}) {
   const empties = layout.filter((s) => s.empty);
   const firstIssue = Boolean(issue?.launchNote);
   const counts = issue?.counts || null;
-  const range = weekRange(issue?.generatedAt);
+  const range = coverageRange(issue?.generatedAt, issue?.window?.since);
   const siteUrl = safeUrl(ctx.siteUrl) || 'https://gbti.network';
   const subject = str(ctx.subject).trim() || computedSubject(counts, range) || 'The GBTI Network weekly digest';
 
