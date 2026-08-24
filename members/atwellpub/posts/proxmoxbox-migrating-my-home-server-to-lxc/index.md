@@ -11,36 +11,28 @@ categories: ["devops", "tooling"]
 tags: ["proxmox", "lxc", "tailscale", "self-hosting", "home-server", "wsl"]
 ---
 
-I'm not unfamiliar with a home server. I've been sitting on an ASRock H110 Pro BTC+ since Ethereum
-was POW (Proof of Work). For anyone curious, 4 1060 Zotecs managed to earn quite a bit of coin
-before Ethereum moved to the POS (proof of stake model).
+I've had an ASRock H110 Pro BTC+ in the closest since Ethereum was POW (Proof of Work).
 
-In 2026, however, GPU mining is out, and the home server in my closet has shamefully been running
-Windows 10 with WSL (Windows Subsystem for Linux) managing my node servers.
+In 2026 GPU mining is long-since no more, but the home server has lived on operating Windows 10 with
+WSL (Windows Subsystem for Linux) running a lonely SavePoint radio server, offering a sandbox for
+remote testing.
 
-12gb ram, 100gb SSD, 1TB external HD. i7-7700 CPU. 🤌 Getting the home server job done.
+12gb ram, 100gb SSD, 1TB external HD. i7-7700 CPU. Not much but it has been a reliable second rig.
 
-Times are changing though. Seemed like 40gb of that 100GB SSD goes to the Windows OS.
-Cross-filesystem performance is known to struggle on WSL environments; sizes of volumes grow without
-automated garbage collection and a tall list of inefficiencies all trying to have me admit the WSL
-might never be the right choice for a home server that runs mostly standalone, linux apps.
+Times have changed over the years. Hardware and storage costs seem to be at their highest over
+competition for parts. 100GB might not seem like much, but Windows is a heavy OS (quickly taking up
+to 40gb of hard drive space).
 
-One of those apps being my SavePoint Radio Station that I keep online for a discord community I
-operate.
+Windows users often use WSL because much of modern development tooling is built for Linux, while
+they still want Windows as their main desktop OS. But any WSL user can native Linux can be easier to
+work with than WSL, and also provides performance benefits.
 
-Or Starlight Surveillance, my most recent project aimed at helping me rid another subscription by
-moving my camera footage off Google Cloud Storage and onto the hard drive.
+I wanted to see what was out there and what others were using when it came to the home server space.
+Something native linux, low OS footprint, and with an active developer (and aftermarket) community.
 
-There's also the pressure of creating a Linux container for an OpenClaw instance where I can run a
-consort on affordable DeepSeek powered agents; like my colleagues are doing here on the GBTI
-Network. <br><br>Who knows, maybe there will be a new reason to spin up those retired 1060 GPUs soon
-too.
-
-If that time comes, I want to be free from Windows running sublinux and just go ahead and move to an
-OS that is designed to manage linux resources.
-
-So this month I made the call to change my personal identity, format over Windows and install
-Proxmox to be my new home server OS.
+Along my way to find a replacement I learned about Prox Mox, and its approach to virtual machines
+and sub linux containers. This article will introduce you to what I was able to learn during the
+conversion of my home server from Windows to Proxmox.
 
 ## Proxmox and the ProxMoxBox box
 
