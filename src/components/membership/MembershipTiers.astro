@@ -62,7 +62,7 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
 
   <div class="mt-grid">
     {TIER_DISPLAY.map((t, i) => (
-      <article class:list={['mt-card', t.key === 'creator' && 'mt-card-hl']} data-tier={t.key}>
+      <article class:list={['mt-card', t.key === 'member' && 'mt-card-hl']} data-tier={t.key}>
         <header class="mt-card-head">
           <h3 class="mt-label">{t.label}</h3>
           <p class="mt-tag">{t.tagline}</p>
@@ -102,7 +102,7 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
           ) : (
             <a
               href={`/login/?return_to=${encodeURIComponent(`/membership/?plan=${t.key}`)}`}
-              class:list={['btn', t.key === 'creator' ? 'btn-primary' : 'btn-ghost', 'mt-cta']}
+              class:list={['btn', t.key === 'member' ? 'btn-primary' : 'btn-ghost', 'mt-cta']}
               data-mt-cta
               data-key={t.key}
             >Join as {t.label}</a>
@@ -202,7 +202,7 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
         } else {
           // Signed out: create a free account, then return here pre-selected to finish checkout.
           const ret = encodeURIComponent(`/membership/?plan=${key}`);
-          setCta(cta, `Join as ${label}`, `/login/?return_to=${ret}`, false, key === 'creator');
+          setCta(cta, `Join as ${label}`, `/login/?return_to=${ret}`, false, key === 'member');
         }
       }
     }
