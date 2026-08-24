@@ -66,6 +66,12 @@ jobs:
         env:
           # Opt-in defense in depth: when set, check-build-secrets scans dist for this value. Not required to build.
           MEMBER_CONTENT_KEY: ${{ secrets.MEMBER_CONTENT_KEY }}
+          # SOW-024 analytics beacon. A repo VARIABLE, not a secret: this is Cloudflare's PUBLIC site token and it
+          # ships in the markup of every page, so hiding it would be theatre. CloudflareAnalytics.astro emits
+          # nothing when it is unset, so an unset variable is a clean no-op and this line is inert until the owner
+          # creates it. It was missing entirely until 2026-08-24: the component read the value and the build was
+          # never given it, so setting the variable alone would have changed nothing and looked like a broken beacon.
+          GBTI_CF_ANALYTICS_TOKEN: ${{ vars.GBTI_CF_ANALYTICS_TOKEN }}
       - name: Deploy dist to Cloudflare Pages (production)
         id: deploy
         uses: cloudflare/wrangler-action@v3
