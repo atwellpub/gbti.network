@@ -402,7 +402,7 @@ export async function compileWelcomeIssue(env, {
     const items = normalizeContent(contentEntries, { displayName });
     const news = normalizeNews(newsEntries);
     // The 90-day launch regime, ALWAYS, whatever the weekly is doing. `firstIssue: true` also swaps the
-    // empty-section notes to their launch wording ("in the past week" rather than "since the last issue"),
+    // empty-section notes to their launch wording ("in the past 90 days" rather than "since the last issue"),
     // which is the correct voice for somebody's first email, and attaches the launch note.
     issue = composeIssue({ issueId, items, news, now }, {
       perSection, maxNews, since: nowMs - bootstrapMs, exclude: null, firstIssue: true,
