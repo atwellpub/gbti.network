@@ -7,7 +7,8 @@
 // divider render as the "Members-only" section. In-house, node-free, CSP-safe, shadow-DOM. Phase 5c layers the slash
 // menu + selection toolbar + drag reorder on top of this engine.
 import { GbtiElement, define, esc } from '../base.mjs';
-import { parseBlocks, serializeBlocks, emptyBlock, CALLOUT_VARIANTS, inlineMdToHtml, inlineHtmlToMd, isDangerousUrl } from '../markdown-blocks.mjs';
+import { parseBlocks, serializeBlocks, emptyBlock, CALLOUT_VARIANTS, inlineMdToHtml, inlineHtmlToMd } from '../markdown-blocks.mjs';
+import { createSelectionToolbar } from '../selection-toolbar.mjs'; // sow-235: the toolbar + link manager, shared with the WorkBench Preview
 import { resolveContentAsset } from '../assets.mjs'; // sow-165: repo-relative body images need the item folder to resolve
 import { EDITOR_SURFACE } from '../tokens.mjs'; // SOW-062 P6: the solid --s-* editor palette (decoupled from glass)
 
@@ -152,8 +153,9 @@ const CSS = `
   .add-menu { position:relative; }
   .add-pop { position:absolute; top:calc(100% + 6px); left:0; z-index:5; min-width:268px; background:var(--s-surface); border:1.5px solid var(--s-line);
     border-radius:12px; box-shadow:0 12px 34px rgba(0,0,0,.18); padding:6px; }
-  /* SOW-062 5c-2: the slash menu + the inline selection toolbar (in-shadow popovers) */
-  .slash-pop, .sel-tb { position:absolute; z-index:20; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.2); }
+  /* SOW-062 5c-2: the slash menu (in-shadow popover). sow-235: the selection toolbar + link panel styles
+     moved to selection-toolbar.mjs, which injects them into this shadow root. */
+  .slash-pop { position:absolute; z-index:20; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.2); }
   .slash-pop { min-width:268px; max-height:300px; overflow:auto; padding:5px; }
   /* SOW-062 P6: rich palette rows (icon box + name + description), shared by the add-block + slash menus */
   .mi { display:flex; align-items:center; gap:11px; padding:8px 9px; border-radius:8px; cursor:pointer; }
@@ -164,16 +166,6 @@ const CSS = `
   .mi-tx { display:flex; flex-direction:column; min-width:0; }
   .mi-nm { font-weight:600; font-size:14px; }
   .mi-ds { font-size:11.5px; color:var(--s-fg-mute); margin-top:1px; }
-  .sel-tb { display:none; gap:1px; padding:4px; background:var(--ink); border:0; box-shadow:0 12px 30px rgba(0,0,0,.4); }
-  .sel-tb button { min-width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:7px; background:transparent; color:#e6e4ee; cursor:pointer; font-weight:700; font-size:13px; padding:0 6px; }
-  .sel-tb button:hover { background:rgba(255,255,255,.12); color:#fff; }
-  /* SOW-170: the inline link editor (URL + nofollow + open-in-new-tab) */
-  .link-panel { position:absolute; z-index:21; display:none; flex-direction:column; gap:8px; padding:10px; min-width:260px; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.28); }
-  .link-panel input[type="url"] { font:inherit; color:var(--s-fg); background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:7px; padding:7px 9px; }
-  .link-panel label { display:flex; align-items:center; gap:7px; font-size:13px; color:var(--s-fg-soft); cursor:pointer; }
-  .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
-  .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
-  .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
   /* SOW-169: the editable table block */
   .tbl-card { padding:12px; }
   .tbl-scroll { overflow-x:auto; }
@@ -204,14 +196,31 @@ class GbtiDocEditor extends GbtiElement {
 
   connectedCallback() {
     if (!this._blocks) this._blocks = [];
-    if (!this._onSel) this._onSel = () => this._updateSelToolbar();
-    document.addEventListener('selectionchange', this._onSel);
+    // sow-235: the selection toolbar + link manager live in selection-toolbar.mjs so the WorkBench Preview can
+    // drive the same code. The host is passed as a FUNCTION because _render() replaces this subtree wholesale.
+    this._seltb = this._seltb || createSelectionToolbar({
+      root: this.root,
+      host: () => this.$('.doc-blocks'),
+      editableOf: (node) => {
+        const ce = this._ceOf(node);
+        return ce && ce.dataset && (ce.dataset.edit === 'text' || ce.dataset.edit === 'code') ? ce : null;
+      },
+      allowInline: (ce) => ce.dataset.edit !== 'code', // SOW-062 P6: code blocks stay literal
+      onCommit: (ce, reason) => {
+        const b = this._byId(ce.dataset.id);
+        if (!b) return;
+        b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, '');
+        if (reason === 'link') { this._render(); this._focusBlock(b._id); }
+        this._change();
+      },
+    });
     super.connectedCallback?.();
     this._render();
   }
 
   disconnectedCallback() {
-    if (this._onSel) document.removeEventListener('selectionchange', this._onSel);
+    this._seltb?.destroy();
+    this._seltb = null;
     super.disconnectedCallback?.();
   }
 
@@ -231,7 +240,7 @@ class GbtiDocEditor extends GbtiElement {
       <div class="add-menu"><button class="add-btn" data-addmenu type="button">${svg('plus')} Add block</button><div class="add-pop" data-addpop hidden></div></div>
       ${hasMembers ? '' : `<button class="add-btn" data-addmembers type="button">${svg('lock')} Add members-only section</button>`}
     </div>`;
-    this._slash = null; this._tb = null; // the popovers lived in the old DOM (this.set replaced it)
+    this._slash = null; // the slash popover lived in the old DOM (this.set replaced it); the selection toolbar remounts itself
     this.set(this.css(EDITOR_SURFACE + CSS) + `<div class="doc-blocks">${parts.join('')}${addRow}</div>`);
     this._wire();
   }
@@ -481,17 +490,12 @@ class GbtiDocEditor extends GbtiElement {
     // A single click on a link opens its editor directly, matching what every other WYSIWYG (Docs, Notion)
     // does -- without this, a plain click inside contenteditable neither navigates (Chrome/Firefox both
     // suppress that) nor shows anything: it just silently places a text caret, so a link looked "dead" to
-    // click on. Uses a manually-built Range rather than the real Selection object, so this never touches
-    // document.getSelection() -- avoiding any risk of the selectionchange listener's own small B/I/Link
-    // toolbar (_updateSelToolbar) flashing in behind the link panel this opens instead.
+    // click on. editLink builds its own Range and never touches document.getSelection(); see the note there.
     this.$$('.ce[data-edit="text"] a[href]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
       const ce = this._ceOf(a);
       if (!ce) return;
-      const range = document.createRange();
-      range.selectNodeContents(a);
-      this._hideTb();
-      this._openLinkPanel({ getRangeAt: () => range }, ce);
+      this._seltb?.editLink(ce, a);
     }));
     // Enter at the end of a text block inserts a new paragraph after it.
     this.$$('.ce[data-edit="text"]').forEach((el) => el.addEventListener('keydown', (e) => {
@@ -594,140 +598,13 @@ class GbtiDocEditor extends GbtiElement {
     this._render(); this._focusBlock(this._blocks[idx]._id); this._change();
   }
 
-  // --- SOW-062 5c-2: inline selection toolbar (wraps the selection with literal Markdown tokens; defensive) ---
+  // sow-235: the selection toolbar, the link manager and the inline-tag toggle moved to
+  // client-ui/src/selection-toolbar.mjs, so the WorkBench Preview drives the same implementation.
+  // _ceOf stays here: it resolves one of THIS component's .ce blocks and is used by the link click above.
   _ceOf(node) {
     let n = node;
     while (n && n !== this.root) { if (n.nodeType === 1 && n.classList && n.classList.contains('ce')) return n; n = n.parentNode || n.host; }
     return null;
-  }
-
-  _updateSelToolbar() {
-    if (!this.isConnected) return;
-    let sel; try { sel = this.root?.getSelection?.() ?? document.getSelection(); } catch { return; }
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { this._hideTb(); return; }
-    const ce = this._ceOf(sel.anchorNode);
-    if (!ce || !ce.dataset || (ce.dataset.edit !== 'text' && ce.dataset.edit !== 'code')) { this._hideTb(); return; }
-    try { this._showTb(sel.getRangeAt(0)); } catch { this._hideTb(); }
-  }
-
-  _showTb(range) {
-    const host = this.$('.doc-blocks'); if (!host) return;
-    if (!this._tb) {
-      const tb = document.createElement('div'); tb.className = 'sel-tb';
-      tb.innerHTML = `<button type="button" data-w="bold" title="Bold">B</button>`
-        + `<button type="button" data-w="italic" title="Italic" style="font-style:italic">I</button>`
-        + `<button type="button" data-w="code" title="Inline code" style="font-family:var(--font-mono,monospace)">&lt;&gt;</button>`
-        + `<button type="button" data-w="link" title="Link">Link</button>`;
-      tb.querySelectorAll('button').forEach((b) => b.addEventListener('mousedown', (e) => { e.preventDefault(); this._wrap(b.dataset.w); }));
-      host.appendChild(tb); this._tb = tb;
-    }
-    const hr = host.getBoundingClientRect(); const r = range.getBoundingClientRect();
-    this._tb.style.top = `${r.top - hr.top - 40}px`;
-    this._tb.style.left = `${Math.max(0, r.left - hr.left)}px`;
-    this._tb.style.display = 'flex';
-  }
-
-  _hideTb() { if (this._tb) this._tb.style.display = 'none'; }
-
-  _wrap(w) {
-    let sel; try { sel = this.root?.getSelection?.() ?? document.getSelection(); } catch { return; }
-    if (!sel || sel.isCollapsed) return;
-    const ce = this._ceOf(sel.anchorNode); if (!ce) return;
-    if (ce.dataset.edit === 'code') return; // SOW-062 P6: code blocks stay literal -- no inline formatting
-    // SOW-170: Link opens a small editor (URL + nofollow + open-in-new-tab) instead of a bare prompt; it applies
-    // + reserializes on its own, so return here rather than fall through to the execCommand reserialize below.
-    if (w === 'link') { this._openLinkPanel(sel, ce); return; }
-    if (w === 'code') this._toggleInline(sel, 'code');
-    else if (typeof document !== 'undefined') document.execCommand(w); // 'bold' -> <strong>/<b>; 'italic' -> <em>/<i>
-    const b = this._byId(ce.dataset.id);
-    if (b) { b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, ''); this._change(); }
-    this._hideTb();
-  }
-
-  // SOW-170: the inline LINK editor. Standard Markdown links carry no rel/target, so an attributed link is stored
-  // as sanitized raw <a> HTML (see markdown-blocks.mjs); this panel is where the author sets the URL + nofollow +
-  // open-in-new-tab, on a new selection or an existing link. Fail-safe: a dangerous URL scheme is rejected.
-  _linkAnchorIn(range) {
-    let n = range.commonAncestorContainer;
-    n = n && n.nodeType === 1 ? n : (n && n.parentNode);
-    while (n && n !== this.root && !(n.classList && n.classList.contains('ce'))) {
-      if (n.tagName === 'A') return n;
-      n = n.parentNode;
-    }
-    return null;
-  }
-
-  _openLinkPanel(sel, ce) {
-    const range = sel.getRangeAt(0).cloneRange();
-    const existing = this._linkAnchorIn(range);
-    this._lk = { range, ce, existing };
-    const host = this.$('.doc-blocks'); if (!host) return;
-    if (!this._lp) {
-      const lp = document.createElement('div'); lp.className = 'link-panel';
-      lp.innerHTML = `<input type="url" data-lk-url placeholder="https://..." />`
-        + `<label><input type="checkbox" data-lk-nofollow /> nofollow</label>`
-        + `<label><input type="checkbox" data-lk-blank /> New tab</label>`
-        + `<div class="lp-btns"><button type="button" data-lk-apply>Apply</button>`
-        + `<button type="button" data-lk-remove title="Remove link">Remove</button></div>`;
-      lp.addEventListener('mousedown', (e) => { if (e.target.tagName !== 'INPUT') e.preventDefault(); }); // keep the saved range
-      lp.querySelector('[data-lk-apply]').addEventListener('click', () => this._applyLink());
-      lp.querySelector('[data-lk-remove]').addEventListener('click', () => this._applyLink(true));
-      lp.querySelector('[data-lk-url]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this._applyLink(); } });
-      host.appendChild(lp); this._lp = lp;
-    }
-    const rel = existing ? (existing.getAttribute('rel') || '') : '';
-    this._lp.querySelector('[data-lk-url]').value = existing ? (existing.getAttribute('href') || '') : '';
-    this._lp.querySelector('[data-lk-nofollow]').checked = /\bnofollow\b/i.test(rel);
-    this._lp.querySelector('[data-lk-blank]').checked = (existing && existing.getAttribute('target')) === '_blank';
-    this._lp.querySelector('[data-lk-remove]').style.display = existing ? '' : 'none';
-    const hr = host.getBoundingClientRect(); const r = range.getBoundingClientRect();
-    this._lp.style.top = `${r.bottom - hr.top + 6}px`;
-    this._lp.style.left = `${Math.max(0, r.left - hr.left)}px`;
-    this._lp.style.display = 'flex';
-    this._hideTb();
-    setTimeout(() => this._lp.querySelector('[data-lk-url]').focus(), 0);
-  }
-
-  _hideLinkPanel() { if (this._lp) this._lp.style.display = 'none'; this._lk = null; }
-
-  _applyLink(remove = false) {
-    const lk = this._lk; if (!lk) return;
-    const ce = lk.ce;
-    const url = String(this._lp.querySelector('[data-lk-url]').value || '').trim();
-    const nofollow = this._lp.querySelector('[data-lk-nofollow]').checked;
-    const blank = this._lp.querySelector('[data-lk-blank]').checked;
-    // Reject a dangerous scheme outright (the serializer also neutralizes it, but never put it in the live DOM).
-    if (url && isDangerousUrl(url)) { this._hideLinkPanel(); return; }
-    // Restore the saved selection into the editable so the DOM edit lands where the author selected.
-    try { ce.focus(); const s = this.root?.getSelection?.() ?? document.getSelection(); s.removeAllRanges(); s.addRange(lk.range); } catch { /* selection lost */ }
-    if (remove || !url) {
-      if (lk.existing && lk.existing.parentNode) { const a = lk.existing; while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a); a.remove(); }
-    } else {
-      const rel = [nofollow ? 'nofollow' : null, blank ? 'noopener' : null].filter(Boolean).join(' ');
-      if (lk.existing) {
-        lk.existing.setAttribute('href', url);
-        if (rel) lk.existing.setAttribute('rel', rel); else lk.existing.removeAttribute('rel');
-        if (blank) lk.existing.setAttribute('target', '_blank'); else lk.existing.removeAttribute('target');
-      } else {
-        const a = document.createElement('a'); a.setAttribute('href', url);
-        if (rel) a.setAttribute('rel', rel); if (blank) a.setAttribute('target', '_blank');
-        try { a.appendChild(lk.range.extractContents()); lk.range.insertNode(a); } catch { /* selection spans blocks */ }
-      }
-    }
-    const b = this._byId(ce.dataset.id);
-    if (b) { b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, ''); this._render(); this._focusBlock(b._id); this._change(); }
-    this._hideLinkPanel();
-  }
-
-  // SOW-062 P6: toggle an inline tag around the selection (execCommand has no 'code'); ported from the design.
-  _toggleInline(sel, tag) {
-    if (!sel.rangeCount || sel.isCollapsed) return;
-    const r = sel.getRangeAt(0);
-    const host = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
-    const existing = host && host.closest ? host.closest(tag) : null;
-    if (existing) { const txt = document.createTextNode(existing.textContent); existing.replaceWith(txt); return; }
-    const node = document.createElement(tag);
-    try { node.appendChild(r.extractContents()); r.insertNode(node); } catch { /* selection spans elements */ }
   }
 }
 

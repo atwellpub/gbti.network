@@ -129,6 +129,9 @@ const labelOf = CATEGORY_LABELS;
        outline paints outside the box and takes no space, so it cannot reflow the article. If a rule below
        ever needs to change spacing, the rule is wrong rather than the guarantee. */
     .pv-edit-msg { flex: 0 1 auto; }
+    /* sow-235: the selection toolbar and link panel position absolutely against this element. `relative`
+       establishes the containing block and takes no space, so the no-reflow guarantee above still holds. */
+    [data-pv-body] { position: relative; }
     [data-pv-body].pv-editing [data-blk] { cursor: text; }
     [data-pv-body].pv-editing [data-blk]:hover { outline: 2px dashed var(--ink-3); outline-offset: 4px; }
     [data-pv-body].pv-editing [data-blk][contenteditable="true"] { outline: 2px solid var(--green-700); outline-offset: 4px; }
@@ -600,6 +603,11 @@ const labelOf = CATEGORY_LABELS;
       // Only a committed repo draft is editable: it is the one store this page can read a canonical file
       // from and write back to. A KV or fork draft would need a second write path to the same item, which
       // is how two stores start disagreeing about one draft.
+      // sow-235: the block reader/committer and the shared selection toolbar. Loaded once here because
+      // wireEditing runs synchronously on every re-render and cannot await an import each time.
+      const { readBlockDom, applyBlockEdit, isEditableBlockTag } = await import('../../../client-ui/src/block-commit.mjs');
+      const { createSelectionToolbar } = await import('../../../client-ui/src/selection-toolbar.mjs');
+
       const editCtl = $('[data-pv-editctl]') as HTMLElement | null;
       const editBtn = $('[data-pv-edit-toggle]') as HTMLButtonElement | null;
       const saveBtn = $('[data-pv-save]') as HTMLButtonElement | null;
@@ -614,21 +622,23 @@ const labelOf = CATEGORY_LABELS;
       // Commit one edited block back into the SOURCE, then re-render the whole document. Editing the source
       // rather than the DOM is what keeps footnotes, reference numbering and every other cross-block
       // construct correct, and it is why the range matters more than the element.
+      //
+      // sow-235: the block is rebuilt from its OWN source (applyBlockEdit re-parses the range and replaces only
+      // the text the author touched), so a range of ANY length can be committed. That is what makes a list, a
+      // table, a fence and a wrapped paragraph editable: the earlier version replaced a whole range with one
+      // line, which would have collapsed a list to a single bullet. It also carries through everything the
+      // rendered HTML cannot express, notably a table's alignment row and a fence's language.
       const commitBlock = async (el: HTMLElement) => {
         const n = Number(el.dataset.blk);
         const range = blockRanges[n];
         if (!range) return;
-        const { inlineHtmlToMd } = await import('../../../client-ui/src/markdown-blocks.mjs');
         const lines = String(draft.body || '').replace(/\r\n/g, '\n').split('\n');
-        const before = lines.slice(range.start, range.end + 1).join('\n');
-        // Only the inline run is read back. The block's own markdown prefix (heading hashes, quote marker,
-        // list bullets) is preserved from the source, so a paragraph cannot silently become a heading.
-        const prefix = /^(\s{0,3}(?:#{1,6}\s+|>\s?|[-*]\s+|\d+\.\s+))/.exec(before);
-        // rendererAnchors: this HTML came from renderMarkdownWithBlocks, not from an author, so an anchor wearing
-        // the renderer's own target=_blank rel=noopener reads back as the `[text](url)` it was written as.
-        const edited = (prefix ? prefix[1] : '') + inlineHtmlToMd(el.innerHTML, { rendererAnchors: true }).trim();
-        if (edited === before) return;
-        lines.splice(range.start, range.end - range.start + 1, edited);
+        const before = lines.slice(range.start, range.end + 1);
+        const next = applyBlockEdit(before.join('\n'), readBlockDom(el));
+        // null means the edit could not be applied safely (the source range is not the shape the DOM claims);
+        // committing nothing is the fail-safe, because a wrong write here destroys neighbouring content.
+        if (!next || next.join('\n') === before.join('\n')) return;
+        lines.splice(range.start, range.end - range.start + 1, ...next);
         draft.body = lines.join('\n');
         markDirty();
         await renderFromSource();
@@ -636,20 +646,57 @@ const labelOf = CATEGORY_LABELS;
         wireEditing();
       };
 
+      // sow-235: the shared hover toolbar (bold, italic, inline code, link) and its link manager, the same
+      // module the block editor drives. It only offers itself over a block that is actually contenteditable.
+      let seltb: any = null;
+      const ensureToolbar = () => {
+        if (seltb || !bodyEl) return;
+        seltb = createSelectionToolbar({
+          root: document,
+          host: bodyEl,
+          editableOf: (node: any) => {
+            let cur = node;
+            while (cur && cur !== bodyEl) {
+              if (cur.nodeType === 1 && cur.getAttribute?.('contenteditable') === 'true') return cur as HTMLElement;
+              cur = cur.parentNode;
+            }
+            return null;
+          },
+          allowInline: (el: HTMLElement) => el.tagName !== 'PRE', // a fenced block stays literal
+          onCommit: (el: HTMLElement, reason: string) => {
+            // A link edit closes the panel and has already left the block, so it commits now. Inline formatting
+            // leaves the caret where it is, and re-rendering under the author mid-sentence would be hostile, so
+            // it just marks the document dirty and lets the existing blur commit pick it up.
+            if (reason === 'link') { void commitBlock(el); return; }
+            markDirty();
+          },
+        });
+      };
+
       const wireEditing = () => {
         if (!bodyEl) return;
         bodyEl.classList.toggle('pv-editing', editing);
+        if (editing) ensureToolbar(); else seltb?.hide();
         bodyEl.querySelectorAll('[data-blk]').forEach((raw) => {
           const el = raw as HTMLElement;
           if (!editing) { el.removeAttribute('contenteditable'); return; }
-          // ONLY paragraphs and headings, which is what the toggle's own message promises. commitBlock
-          // replaces a block's whole source range with ONE line, so anything spanning several lines loses
-          // the rest: a two-item list collapses to a single bullet, and a fenced code block is replaced by
-          // its own body with the fences gone. Multi-line editing needs a different commit path, not a
-          // wider selector here.
+          // sow-235: every block the renderer stamped with a source range and that carries editable text.
+          // A range spanning several lines is fine now that commitBlock rebuilds the block from its source.
+          // hr has nothing to edit, and the footnotes section is synthesized and carries a null range.
           const range = blockRanges[Number(el.dataset.blk)];
-          const single = !!range && range.start === range.end;
-          if (!single || !/^(P|H[1-6])$/.test(el.tagName)) return;
+          if (!range || !isEditableBlockTag(el.tagName)) return;
+          // A click on a link inside an editable block opens the link manager rather than placing a caret:
+          // inside contenteditable a link neither navigates nor shows anything, so it otherwise reads as dead.
+          el.querySelectorAll('a[href]').forEach((a) => a.addEventListener('click', (ev) => {
+            if (!editing) return;
+            ev.preventDefault();
+            if (el.getAttribute('contenteditable') !== 'true') {
+              el.setAttribute('contenteditable', 'true');
+              el.dataset.pvSnap = el.innerHTML;
+            }
+            ensureToolbar();
+            seltb?.editLink(el, a as HTMLElement);
+          }));
           el.addEventListener('click', () => {
             if (el.getAttribute('contenteditable') === 'true') return;
             el.setAttribute('contenteditable', 'true');
@@ -659,6 +706,11 @@ const labelOf = CATEGORY_LABELS;
             el.dataset.pvSnap = el.innerHTML;
           }, { once: false });
           el.addEventListener('blur', () => {
+            // The link panel takes focus from the block. Committing now would re-render the document and
+            // destroy the saved range before Apply is ever pressed, so the commit waits for the panel to close
+            // (the toolbar's own onCommit does it). contenteditable and the snapshot are deliberately left in
+            // place here, so the block is still the one being edited when the panel returns.
+            if (seltb?.isPanelOpen()) return;
             // A click-through must commit NOTHING. commitBlock decides "edited" by comparing the read-back to the
             // source line, and the renderer is not a perfect inverse for every construct, so an untouched block
             // could read back different, rewrite draft.body, and re-render the whole document -- destroying the
@@ -676,7 +728,7 @@ const labelOf = CATEGORY_LABELS;
         editing = !editing;
         editBtn.textContent = editing ? 'Done editing' : 'Edit';
         editBtn.classList.toggle('on', editing);
-        setMsg(editing ? 'Click a paragraph or heading to edit it.' : (dirty ? 'Unsaved changes.' : ''));
+        setMsg(editing ? 'Click a block to edit it. Highlight text for formatting and links.' : (dirty ? 'Unsaved changes.' : ''));
         await renderFromSource();
         apply();
         wireEditing();

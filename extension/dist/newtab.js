@@ -7066,6 +7066,300 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   };
   define("gbti-auth", GbtiAuth);
 
+  // client-ui/src/selection-toolbar.mjs
+  var STYLE_ID = "gbti-selection-toolbar-css";
+  var SELECTION_TOOLBAR_CSS = `
+.gbti-stb, .gbti-lp {
+  position: absolute; z-index: 40; display: none;
+  --stb-pop: var(--s-surface, var(--paper, #fff));
+  --stb-pop-2: var(--s-surface-2, var(--paper-2, #f4f3f7));
+  --stb-line: var(--s-line, var(--line, #d9d7e0));
+  --stb-fg: var(--s-fg, var(--fg, #25232b));
+  --stb-fg-soft: var(--s-fg-soft, var(--fg-soft, #55525f));
+  --stb-accent: var(--s-green, var(--green-700, #1f9e5f));
+}
+.gbti-stb { gap: 1px; padding: 4px; border-radius: 10px; background: var(--ink, #25232b); box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+.gbti-stb button {
+  min-width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 7px; background: transparent; color: #e6e4ee; cursor: pointer;
+  font-weight: 700; font-size: 13px; padding: 0 6px; font-family: inherit;
+}
+.gbti-stb button:hover { background: rgba(255,255,255,.12); color: #fff; }
+.gbti-lp {
+  flex-direction: column; gap: 8px; padding: 10px; min-width: 268px;
+  background: var(--stb-pop); border: 1.5px solid var(--stb-line); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.28); color: var(--stb-fg);
+}
+.gbti-lp input[type="text"], .gbti-lp input[type="url"] {
+  font: inherit; font-size: 13px; color: var(--stb-fg); background: var(--stb-pop-2);
+  border: 1px solid var(--stb-line); border-radius: 7px; padding: 7px 9px; min-width: 0;
+}
+.gbti-lp label { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--stb-fg-soft); cursor: pointer; }
+.gbti-lp .lp-btns { display: flex; gap: 8px; margin-top: 2px; }
+.gbti-lp button {
+  font: inherit; font-size: 13px; font-weight: 600; border-radius: 7px; padding: 6px 12px;
+  cursor: pointer; border: 1px solid var(--stb-line); background: var(--stb-pop-2); color: var(--stb-fg);
+}
+.gbti-lp button[data-lk-apply] { border-color: var(--stb-accent); background: var(--stb-accent); color: #fff; }
+`;
+  function ensureStyles(host) {
+    const root = host.getRootNode ? host.getRootNode() : document;
+    const target = root && root.nodeType === 11 ? root : document.head;
+    if (!target || target.querySelector(`#${STYLE_ID}`)) return;
+    const el = document.createElement("style");
+    el.id = STYLE_ID;
+    el.textContent = SELECTION_TOOLBAR_CSS;
+    target.appendChild(el);
+  }
+  function linkRel({ nofollow = false, blank = false } = {}) {
+    return [nofollow ? "nofollow" : null, blank ? "noopener" : null].filter(Boolean).join(" ");
+  }
+  function planLinkEdit({ url = "", text = "", nofollow = false, blank = false, hasExisting = false, existingText = "", remove = false } = {}) {
+    const href = String(url ?? "").trim();
+    if (remove || !href) return hasExisting ? { action: "remove" } : { action: "none" };
+    if (isDangerousUrl(href)) return { action: "reject" };
+    const rel = linkRel({ nofollow, blank });
+    const wanted = String(text ?? "").trim();
+    return {
+      action: hasExisting ? "update" : "create",
+      href,
+      rel: rel || null,
+      target: blank ? "_blank" : null,
+      text: wanted && wanted !== String(existingText ?? "") ? wanted : null
+    };
+  }
+  function createSelectionToolbar({ root, host, editableOf, allowInline = () => true, onCommit = () => {
+  } }) {
+    const hostEl = () => typeof host === "function" ? host() : host;
+    if (!hostEl()) return { destroy() {
+    }, isPanelOpen: () => false, hide() {
+    } };
+    const mount = (node) => {
+      const h = hostEl();
+      if (h && node.parentNode !== h) h.appendChild(node);
+      return node;
+    };
+    let tb = null;
+    let lp = null;
+    let lk = null;
+    const getSel = () => {
+      try {
+        return root?.getSelection?.() ?? document.getSelection();
+      } catch {
+        return null;
+      }
+    };
+    const place = (node, rect, above) => {
+      const h = hostEl();
+      if (!h) return;
+      ensureStyles(h);
+      mount(node);
+      const hr = h.getBoundingClientRect();
+      node.style.top = `${above ? rect.top - hr.top - 40 : rect.bottom - hr.top + 6}px`;
+      node.style.left = `${Math.max(0, rect.left - hr.left)}px`;
+      node.style.display = "flex";
+    };
+    const hideTb = () => {
+      if (tb) tb.style.display = "none";
+    };
+    const hidePanel = () => {
+      if (lp) lp.style.display = "none";
+      lk = null;
+    };
+    function buildTb() {
+      const el = document.createElement("div");
+      el.className = "gbti-stb";
+      el.innerHTML = '<button type="button" data-w="bold" title="Bold">B</button><button type="button" data-w="italic" title="Italic" style="font-style:italic">I</button><button type="button" data-w="code" title="Inline code" style="font-family:var(--f-mono,monospace)">&lt;&gt;</button><button type="button" data-w="link" title="Link">Link</button>';
+      el.querySelectorAll("button").forEach((b) => b.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        wrap(b.dataset.w);
+      }));
+      return el;
+    }
+    function update() {
+      if (lp && lp.style.display !== "none") return;
+      const sel = getSel();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+        hideTb();
+        return;
+      }
+      const el = editableOf(sel.anchorNode);
+      if (!el) {
+        hideTb();
+        return;
+      }
+      try {
+        if (!tb) tb = buildTb();
+        place(tb, sel.getRangeAt(0).getBoundingClientRect(), true);
+      } catch {
+        hideTb();
+      }
+    }
+    function wrap(w) {
+      const sel = getSel();
+      if (!sel || sel.isCollapsed) return;
+      const el = editableOf(sel.anchorNode);
+      if (!el) return;
+      if (!allowInline(el)) return;
+      if (w === "link") {
+        openPanel(sel, el);
+        return;
+      }
+      if (w === "code") toggleInline(sel, "code");
+      else if (typeof document !== "undefined") document.execCommand(w);
+      onCommit(el, "format");
+      hideTb();
+    }
+    function toggleInline(sel, tag) {
+      if (!sel.rangeCount || sel.isCollapsed) return;
+      const r = sel.getRangeAt(0);
+      const at = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
+      const existing = at && at.closest ? at.closest(tag) : null;
+      if (existing) {
+        existing.replaceWith(document.createTextNode(existing.textContent));
+        return;
+      }
+      const node = document.createElement(tag);
+      try {
+        node.appendChild(r.extractContents());
+        r.insertNode(node);
+      } catch {
+      }
+    }
+    function anchorIn(range, stopAt) {
+      let n = range.commonAncestorContainer;
+      n = n && n.nodeType === 1 ? n : n && n.parentNode;
+      while (n && n !== root && n !== stopAt) {
+        if (n.tagName === "A") return n;
+        n = n.parentNode;
+      }
+      return null;
+    }
+    function buildPanel() {
+      const el = document.createElement("div");
+      el.className = "gbti-lp";
+      el.innerHTML = '<input type="text" data-lk-text placeholder="Link text" /><input type="url" data-lk-url placeholder="https://..." /><label><input type="checkbox" data-lk-nofollow /> nofollow</label><label><input type="checkbox" data-lk-blank /> New tab</label><div class="lp-btns"><button type="button" data-lk-apply>Apply</button><button type="button" data-lk-remove title="Remove link">Remove</button></div>';
+      el.addEventListener("mousedown", (e) => {
+        if (e.target.tagName !== "INPUT") e.preventDefault();
+      });
+      el.querySelector("[data-lk-apply]").addEventListener("click", () => apply(false));
+      el.querySelector("[data-lk-remove]").addEventListener("click", () => apply(true));
+      el.querySelectorAll('input[type="text"], input[type="url"]').forEach((i) => i.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          apply(false);
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          hidePanel();
+        }
+      }));
+      return el;
+    }
+    function openPanel(sel, el) {
+      const range = sel.getRangeAt(0).cloneRange();
+      const existing = anchorIn(range, el);
+      lk = { range, el, existing };
+      if (!lp) lp = buildPanel();
+      const rel = existing ? existing.getAttribute("rel") || "" : "";
+      lp.querySelector("[data-lk-text]").value = existing ? existing.textContent || "" : String(range.toString() || "");
+      lp.querySelector("[data-lk-url]").value = existing ? existing.getAttribute("href") || "" : "";
+      lp.querySelector("[data-lk-nofollow]").checked = /\bnofollow\b/i.test(rel);
+      lp.querySelector("[data-lk-blank]").checked = existing ? existing.getAttribute("target") === "_blank" : false;
+      lp.querySelector("[data-lk-remove]").style.display = existing ? "" : "none";
+      place(lp, range.getBoundingClientRect(), false);
+      hideTb();
+      setTimeout(() => lp.querySelector("[data-lk-url]").focus(), 0);
+    }
+    function apply(remove) {
+      if (!lk) return;
+      const el = lk.el;
+      const text = String(lp.querySelector("[data-lk-text]").value || "").trim();
+      const url = String(lp.querySelector("[data-lk-url]").value || "").trim();
+      const nofollow = lp.querySelector("[data-lk-nofollow]").checked;
+      const blank = lp.querySelector("[data-lk-blank]").checked;
+      const plan = planLinkEdit({
+        url,
+        text,
+        nofollow,
+        blank,
+        hasExisting: !!lk.existing,
+        existingText: lk.existing ? lk.existing.textContent || "" : String(lk.range.toString() || ""),
+        remove
+      });
+      if (plan.action === "reject" || plan.action === "none") {
+        hidePanel();
+        return;
+      }
+      try {
+        el.focus();
+        const s = getSel();
+        s.removeAllRanges();
+        s.addRange(lk.range);
+      } catch {
+      }
+      const attrs = (a) => {
+        a.setAttribute("href", plan.href);
+        if (plan.rel) a.setAttribute("rel", plan.rel);
+        else a.removeAttribute("rel");
+        if (plan.target) a.setAttribute("target", plan.target);
+        else a.removeAttribute("target");
+      };
+      if (plan.action === "remove") {
+        const a = lk.existing;
+        if (a && a.parentNode) {
+          while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
+          a.remove();
+        }
+      } else if (plan.action === "update") {
+        const a = lk.existing;
+        attrs(a);
+        if (plan.text !== null) a.textContent = plan.text;
+      } else {
+        const a = document.createElement("a");
+        attrs(a);
+        try {
+          a.appendChild(lk.range.extractContents());
+          if (plan.text !== null) a.textContent = plan.text;
+          lk.range.insertNode(a);
+        } catch {
+        }
+      }
+      hidePanel();
+      onCommit(el, "link");
+    }
+    const onSel = () => update();
+    document.addEventListener("selectionchange", onSel);
+    return {
+      isPanelOpen: () => !!lp && lp.style.display !== "none",
+      hide() {
+        hideTb();
+        hidePanel();
+      },
+      /**
+       * Open the link manager for an existing anchor, without going through the selection. A single click on a link
+       * inside a contenteditable neither navigates (Chrome and Firefox both suppress that) nor shows anything, so
+       * the link reads as dead unless the host wires this. Builds its own Range rather than touching
+       * document.getSelection(), so the selectionchange listener cannot flash the B/I/Link bar in behind the panel.
+       */
+      editLink(el, anchor) {
+        if (!el || !anchor) return;
+        const range = document.createRange();
+        range.selectNodeContents(anchor);
+        hideTb();
+        openPanel({ getRangeAt: () => range }, el);
+      },
+      destroy() {
+        document.removeEventListener("selectionchange", onSel);
+        tb?.remove();
+        lp?.remove();
+        tb = null;
+        lp = null;
+        lk = null;
+      }
+    };
+  }
+
   // client-ui/src/assets.mjs
   var SITE6 = "https://gbti.network";
   var CONTENT_REPO = "gbti-network/gbti.network";
@@ -7231,8 +7525,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .add-menu { position:relative; }
   .add-pop { position:absolute; top:calc(100% + 6px); left:0; z-index:5; min-width:268px; background:var(--s-surface); border:1.5px solid var(--s-line);
     border-radius:12px; box-shadow:0 12px 34px rgba(0,0,0,.18); padding:6px; }
-  /* SOW-062 5c-2: the slash menu + the inline selection toolbar (in-shadow popovers) */
-  .slash-pop, .sel-tb { position:absolute; z-index:20; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.2); }
+  /* SOW-062 5c-2: the slash menu (in-shadow popover). sow-235: the selection toolbar + link panel styles
+     moved to selection-toolbar.mjs, which injects them into this shadow root. */
+  .slash-pop { position:absolute; z-index:20; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.2); }
   .slash-pop { min-width:268px; max-height:300px; overflow:auto; padding:5px; }
   /* SOW-062 P6: rich palette rows (icon box + name + description), shared by the add-block + slash menus */
   .mi { display:flex; align-items:center; gap:11px; padding:8px 9px; border-radius:8px; cursor:pointer; }
@@ -7243,16 +7538,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .mi-tx { display:flex; flex-direction:column; min-width:0; }
   .mi-nm { font-weight:600; font-size:14px; }
   .mi-ds { font-size:11.5px; color:var(--s-fg-mute); margin-top:1px; }
-  .sel-tb { display:none; gap:1px; padding:4px; background:var(--ink); border:0; box-shadow:0 12px 30px rgba(0,0,0,.4); }
-  .sel-tb button { min-width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:7px; background:transparent; color:#e6e4ee; cursor:pointer; font-weight:700; font-size:13px; padding:0 6px; }
-  .sel-tb button:hover { background:rgba(255,255,255,.12); color:#fff; }
-  /* SOW-170: the inline link editor (URL + nofollow + open-in-new-tab) */
-  .link-panel { position:absolute; z-index:21; display:none; flex-direction:column; gap:8px; padding:10px; min-width:260px; background:var(--s-surface); border:1.5px solid var(--s-line); border-radius:10px; box-shadow:0 12px 34px rgba(0,0,0,.28); }
-  .link-panel input[type="url"] { font:inherit; color:var(--s-fg); background:var(--s-surface-2); border:1px solid var(--s-line); border-radius:7px; padding:7px 9px; }
-  .link-panel label { display:flex; align-items:center; gap:7px; font-size:13px; color:var(--s-fg-soft); cursor:pointer; }
-  .link-panel .lp-btns { display:flex; gap:8px; margin-top:2px; }
-  .link-panel button { font:inherit; font-size:13px; font-weight:600; border-radius:7px; padding:6px 12px; cursor:pointer; border:1px solid var(--s-line); background:var(--s-surface-2); color:var(--s-fg); }
-  .link-panel button[data-lk-apply] { border-color:var(--s-green); background:var(--s-green); color:#fff; }
   /* SOW-169: the editable table block */
   .tbl-card { padding:12px; }
   .tbl-scroll { overflow-x:auto; }
@@ -7292,13 +7577,32 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     // serializeBlock ignores the non-serialized _id
     connectedCallback() {
       if (!this._blocks) this._blocks = [];
-      if (!this._onSel) this._onSel = () => this._updateSelToolbar();
-      document.addEventListener("selectionchange", this._onSel);
+      this._seltb = this._seltb || createSelectionToolbar({
+        root: this.root,
+        host: () => this.$(".doc-blocks"),
+        editableOf: (node) => {
+          const ce = this._ceOf(node);
+          return ce && ce.dataset && (ce.dataset.edit === "text" || ce.dataset.edit === "code") ? ce : null;
+        },
+        allowInline: (ce) => ce.dataset.edit !== "code",
+        // SOW-062 P6: code blocks stay literal
+        onCommit: (ce, reason) => {
+          const b = this._byId(ce.dataset.id);
+          if (!b) return;
+          b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, "");
+          if (reason === "link") {
+            this._render();
+            this._focusBlock(b._id);
+          }
+          this._change();
+        }
+      });
       super.connectedCallback?.();
       this._render();
     }
     disconnectedCallback() {
-      if (this._onSel) document.removeEventListener("selectionchange", this._onSel);
+      this._seltb?.destroy();
+      this._seltb = null;
       super.disconnectedCallback?.();
     }
     _byId(id) {
@@ -7326,7 +7630,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       ${hasMembers ? "" : `<button class="add-btn" data-addmembers type="button">${svg("lock")} Add members-only section</button>`}
     </div>`;
       this._slash = null;
-      this._tb = null;
       this.set(this.css(EDITOR_SURFACE + CSS7) + `<div class="doc-blocks">${parts.join("")}${addRow}</div>`);
       this._wire();
     }
@@ -7672,10 +7975,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         e.preventDefault();
         const ce = this._ceOf(a);
         if (!ce) return;
-        const range = document.createRange();
-        range.selectNodeContents(a);
-        this._hideTb();
-        this._openLinkPanel({ getRangeAt: () => range }, ce);
+        this._seltb?.editLink(ce, a);
       }));
       this.$$('.ce[data-edit="text"]').forEach((el) => el.addEventListener("keydown", (e) => {
         if (this._slash && this._slash.el === el) {
@@ -7809,7 +8109,9 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._focusBlock(this._blocks[idx]._id);
       this._change();
     }
-    // --- SOW-062 5c-2: inline selection toolbar (wraps the selection with literal Markdown tokens; defensive) ---
+    // sow-235: the selection toolbar, the link manager and the inline-tag toggle moved to
+    // client-ui/src/selection-toolbar.mjs, so the WorkBench Preview drives the same implementation.
+    // _ceOf stays here: it resolves one of THIS component's .ce blocks and is used by the link click above.
     _ceOf(node) {
       let n = node;
       while (n && n !== this.root) {
@@ -7817,200 +8119,6 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         n = n.parentNode || n.host;
       }
       return null;
-    }
-    _updateSelToolbar() {
-      if (!this.isConnected) return;
-      let sel;
-      try {
-        sel = this.root?.getSelection?.() ?? document.getSelection();
-      } catch {
-        return;
-      }
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-        this._hideTb();
-        return;
-      }
-      const ce = this._ceOf(sel.anchorNode);
-      if (!ce || !ce.dataset || ce.dataset.edit !== "text" && ce.dataset.edit !== "code") {
-        this._hideTb();
-        return;
-      }
-      try {
-        this._showTb(sel.getRangeAt(0));
-      } catch {
-        this._hideTb();
-      }
-    }
-    _showTb(range) {
-      const host = this.$(".doc-blocks");
-      if (!host) return;
-      if (!this._tb) {
-        const tb = document.createElement("div");
-        tb.className = "sel-tb";
-        tb.innerHTML = `<button type="button" data-w="bold" title="Bold">B</button><button type="button" data-w="italic" title="Italic" style="font-style:italic">I</button><button type="button" data-w="code" title="Inline code" style="font-family:var(--font-mono,monospace)">&lt;&gt;</button><button type="button" data-w="link" title="Link">Link</button>`;
-        tb.querySelectorAll("button").forEach((b) => b.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          this._wrap(b.dataset.w);
-        }));
-        host.appendChild(tb);
-        this._tb = tb;
-      }
-      const hr = host.getBoundingClientRect();
-      const r = range.getBoundingClientRect();
-      this._tb.style.top = `${r.top - hr.top - 40}px`;
-      this._tb.style.left = `${Math.max(0, r.left - hr.left)}px`;
-      this._tb.style.display = "flex";
-    }
-    _hideTb() {
-      if (this._tb) this._tb.style.display = "none";
-    }
-    _wrap(w) {
-      let sel;
-      try {
-        sel = this.root?.getSelection?.() ?? document.getSelection();
-      } catch {
-        return;
-      }
-      if (!sel || sel.isCollapsed) return;
-      const ce = this._ceOf(sel.anchorNode);
-      if (!ce) return;
-      if (ce.dataset.edit === "code") return;
-      if (w === "link") {
-        this._openLinkPanel(sel, ce);
-        return;
-      }
-      if (w === "code") this._toggleInline(sel, "code");
-      else if (typeof document !== "undefined") document.execCommand(w);
-      const b = this._byId(ce.dataset.id);
-      if (b) {
-        b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, "");
-        this._change();
-      }
-      this._hideTb();
-    }
-    // SOW-170: the inline LINK editor. Standard Markdown links carry no rel/target, so an attributed link is stored
-    // as sanitized raw <a> HTML (see markdown-blocks.mjs); this panel is where the author sets the URL + nofollow +
-    // open-in-new-tab, on a new selection or an existing link. Fail-safe: a dangerous URL scheme is rejected.
-    _linkAnchorIn(range) {
-      let n = range.commonAncestorContainer;
-      n = n && n.nodeType === 1 ? n : n && n.parentNode;
-      while (n && n !== this.root && !(n.classList && n.classList.contains("ce"))) {
-        if (n.tagName === "A") return n;
-        n = n.parentNode;
-      }
-      return null;
-    }
-    _openLinkPanel(sel, ce) {
-      const range = sel.getRangeAt(0).cloneRange();
-      const existing = this._linkAnchorIn(range);
-      this._lk = { range, ce, existing };
-      const host = this.$(".doc-blocks");
-      if (!host) return;
-      if (!this._lp) {
-        const lp = document.createElement("div");
-        lp.className = "link-panel";
-        lp.innerHTML = `<input type="url" data-lk-url placeholder="https://..." /><label><input type="checkbox" data-lk-nofollow /> nofollow</label><label><input type="checkbox" data-lk-blank /> New tab</label><div class="lp-btns"><button type="button" data-lk-apply>Apply</button><button type="button" data-lk-remove title="Remove link">Remove</button></div>`;
-        lp.addEventListener("mousedown", (e) => {
-          if (e.target.tagName !== "INPUT") e.preventDefault();
-        });
-        lp.querySelector("[data-lk-apply]").addEventListener("click", () => this._applyLink());
-        lp.querySelector("[data-lk-remove]").addEventListener("click", () => this._applyLink(true));
-        lp.querySelector("[data-lk-url]").addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            this._applyLink();
-          }
-        });
-        host.appendChild(lp);
-        this._lp = lp;
-      }
-      const rel = existing ? existing.getAttribute("rel") || "" : "";
-      this._lp.querySelector("[data-lk-url]").value = existing ? existing.getAttribute("href") || "" : "";
-      this._lp.querySelector("[data-lk-nofollow]").checked = /\bnofollow\b/i.test(rel);
-      this._lp.querySelector("[data-lk-blank]").checked = (existing && existing.getAttribute("target")) === "_blank";
-      this._lp.querySelector("[data-lk-remove]").style.display = existing ? "" : "none";
-      const hr = host.getBoundingClientRect();
-      const r = range.getBoundingClientRect();
-      this._lp.style.top = `${r.bottom - hr.top + 6}px`;
-      this._lp.style.left = `${Math.max(0, r.left - hr.left)}px`;
-      this._lp.style.display = "flex";
-      this._hideTb();
-      setTimeout(() => this._lp.querySelector("[data-lk-url]").focus(), 0);
-    }
-    _hideLinkPanel() {
-      if (this._lp) this._lp.style.display = "none";
-      this._lk = null;
-    }
-    _applyLink(remove = false) {
-      const lk = this._lk;
-      if (!lk) return;
-      const ce = lk.ce;
-      const url = String(this._lp.querySelector("[data-lk-url]").value || "").trim();
-      const nofollow = this._lp.querySelector("[data-lk-nofollow]").checked;
-      const blank = this._lp.querySelector("[data-lk-blank]").checked;
-      if (url && isDangerousUrl(url)) {
-        this._hideLinkPanel();
-        return;
-      }
-      try {
-        ce.focus();
-        const s = this.root?.getSelection?.() ?? document.getSelection();
-        s.removeAllRanges();
-        s.addRange(lk.range);
-      } catch {
-      }
-      if (remove || !url) {
-        if (lk.existing && lk.existing.parentNode) {
-          const a = lk.existing;
-          while (a.firstChild) a.parentNode.insertBefore(a.firstChild, a);
-          a.remove();
-        }
-      } else {
-        const rel = [nofollow ? "nofollow" : null, blank ? "noopener" : null].filter(Boolean).join(" ");
-        if (lk.existing) {
-          lk.existing.setAttribute("href", url);
-          if (rel) lk.existing.setAttribute("rel", rel);
-          else lk.existing.removeAttribute("rel");
-          if (blank) lk.existing.setAttribute("target", "_blank");
-          else lk.existing.removeAttribute("target");
-        } else {
-          const a = document.createElement("a");
-          a.setAttribute("href", url);
-          if (rel) a.setAttribute("rel", rel);
-          if (blank) a.setAttribute("target", "_blank");
-          try {
-            a.appendChild(lk.range.extractContents());
-            lk.range.insertNode(a);
-          } catch {
-          }
-        }
-      }
-      const b = this._byId(ce.dataset.id);
-      if (b) {
-        b.text = inlineHtmlToMd(ce.innerHTML).replace(/\n$/, "");
-        this._render();
-        this._focusBlock(b._id);
-        this._change();
-      }
-      this._hideLinkPanel();
-    }
-    // SOW-062 P6: toggle an inline tag around the selection (execCommand has no 'code'); ported from the design.
-    _toggleInline(sel, tag) {
-      if (!sel.rangeCount || sel.isCollapsed) return;
-      const r = sel.getRangeAt(0);
-      const host = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
-      const existing = host && host.closest ? host.closest(tag) : null;
-      if (existing) {
-        const txt = document.createTextNode(existing.textContent);
-        existing.replaceWith(txt);
-        return;
-      }
-      const node = document.createElement(tag);
-      try {
-        node.appendChild(r.extractContents());
-        r.insertNode(node);
-      } catch {
-      }
     }
   };
   define("gbti-doc-editor", GbtiDocEditor);
