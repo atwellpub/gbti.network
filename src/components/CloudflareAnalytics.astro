@@ -6,6 +6,14 @@
 // build time via GBTI_CF_ANALYTICS_TOKEN. When unset, NOTHING is emitted (a clean no-op), so the build is unchanged
 // until the owner enables it. Rendered from BaseLayout's <head>. The CookieConsent banner + the gbti:analytics-
 // consent hook remain for any FUTURE cookie-based analytics, but CF Web Analytics does not use them.
+// DO NOT SET GBTI_CF_ANALYTICS_TOKEN. VERIFIED 2026-08-24: Cloudflare Web Analytics is ALREADY live on
+// gbti.network through Cloudflare's AUTOMATIC setup, which injects beacon.min.js at the edge under its own
+// token, with no build step and no code of ours involved. Setting the variable puts a SECOND beacon under a
+// DIFFERENT token on every page and counts every visit twice. This component stays as the fallback for the
+// day automatic setup is turned off, and only then.
+// A WARNING ABOUT CHECKING THIS, because the obvious check lies. `curl https://gbti.network/ | grep cf-beacon`
+// returns NOTHING even while the beacon is live, because the edge injection is conditional on the request
+// looking like a browser. Pass a real browser User-Agent or the absence is an artefact of the instrument.
 const token = (import.meta.env.GBTI_CF_ANALYTICS_TOKEN || '').trim();
 ---
 {token && (
