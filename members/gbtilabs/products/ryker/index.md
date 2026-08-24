@@ -25,7 +25,7 @@ platforms:
   - Node.js
 icon: ./images/ryker-icon-128x128.webp
 iconLarge: ./images/ryker-icon-256x256.webp
-featuredImage: members/atwellpub/images/thumbnail-2x.png
+featuredImage: ./images/thumbnail.jpg
 bannerPreset: green
 gallery:
   - ./images/ryker-shot-1.webp
