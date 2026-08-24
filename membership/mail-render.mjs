@@ -92,6 +92,43 @@ function absUrl(url, siteUrl) {
   return u.startsWith('/') ? `${siteUrl}${u}` : u;
 }
 
+// sow-273: the inbound campaign tags on a link back to OUR OWN site, so a click that started in the inbox
+// arrives identifiable instead of as direct traffic. utm_source names where the click came from, utm_medium
+// the channel, utm_campaign the ISSUE (so one issue is one row), and utm_content the PLACEMENT, which is the
+// question actually worth answering: an item click and a footer click mean different things and today both
+// arrive as the same undifferentiated visit.
+const UTM_SOURCE = 'digest';
+const UTM_MEDIUM = 'email';
+
+/**
+ * Tag a link that points at our own site. THREE things this deliberately does not do, each of which would be
+ * a defect rather than a nicety:
+ *
+ *   - It never tags an EXTERNAL url. A news row links to the publisher, and stamping our campaign onto their
+ *     url writes our attribution into their analytics while telling us nothing. Same-origin is checked
+ *     against the resolved siteUrl rather than a hardcoded host, so a staging render tags staging links.
+ *   - It is never used for an IMAGE. Thumbnails and the masthead mark keep going through absUrl: an asset
+ *     fetch is not a click, and tagging one would inflate every count by the number of clients that load
+ *     images.
+ *   - It never touches the UNSUBSCRIBE url, which lives on the Worker, not the website, and is an opt-out
+ *     rather than a campaign click.
+ *
+ * Existing query params survive (searchParams.set), and anything that will not parse falls through untagged
+ * rather than throwing, because a broken link is worse than an unmeasured one.
+ */
+function trackUrl(url, links, content) {
+  const abs = absUrl(url, links?.siteUrl ?? '');
+  if (!abs) return '';
+  let u; let site;
+  try { u = new URL(abs); site = new URL(links.siteUrl); } catch { return abs; }
+  if (u.origin !== site.origin) return abs;
+  u.searchParams.set('utm_source', UTM_SOURCE);
+  u.searchParams.set('utm_medium', UTM_MEDIUM);
+  if (links.campaign) u.searchParams.set('utm_campaign', links.campaign);
+  if (content) u.searchParams.set('utm_content', content);
+  return u.toString();
+}
+
 // The PALETTE TOKEN LAYER. Both variants are copied verbatim from the design's Light and Dark blocks, so the
 // owner's choice is one value in ctx and never a template edit. LIGHT is the default and the shipping variant.
 const PALETTES = {
@@ -241,9 +278,9 @@ function metaLineHtml(sectionKey, it, p) {
 
 // A single item: a linked (or plain, fail-closed) title, an OPTIONAL blurb (public frontmatter only, bare when
 // absent), the meta line, and an OPTIONAL thumbnail (member items only). No blurb ever comes from a body.
-function itemHtml(sectionKey, it, p, siteUrl) {
+function itemHtml(sectionKey, it, p, links) {
   const title = escapeHtml(str(it.title).trim() || '(untitled)');
-  const url = absUrl(it.url, siteUrl);
+  const url = trackUrl(it.url, links, 'item');
   const titleStyle = `font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;color:${p.ink};text-decoration:none;mso-line-height-rule:exactly;line-height:19px`;
   const titleHtml = url
     ? `<a href="${escapeHtml(url)}" style="${titleStyle}">${title}</a>`
@@ -258,7 +295,7 @@ function itemHtml(sectionKey, it, p, siteUrl) {
   // so it is an external absolute url; absUrl passes http(s) through untouched and fails anything else closed
   // to no image. Images are blocked by default in most clients, which is why the title is never inside the
   // image and the layout does not depend on it loading.
-  const thumb = absUrl(it.thumb, siteUrl);
+  const thumb = absUrl(it.thumb, links.siteUrl); // an image src, never tracked (see trackUrl)
 
   const inner = thumb
     ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="width:480px"><tr>`
@@ -276,7 +313,7 @@ function itemHtml(sectionKey, it, p, siteUrl) {
 
 // One FILLED section: a header row (name + monospace count label), a 2px brand rule, the item rows, and a
 // "See all" link into that type's public feed. Empty sections never reach here; they collapse (see emptyLineHtml).
-function sectionHtml(section, p, siteUrl) {
+function sectionHtml(section, p, links) {
   const name = escapeHtml(str(section.label));
   // "Latest Articles", "Latest News" (owner, 2026-08-23). The prefix is applied HERE, to the heading, and
   // NOT to SECTION_LABELS, because that same label is also the feed name in the "See all in the Articles
@@ -285,7 +322,7 @@ function sectionHtml(section, p, siteUrl) {
   // Articles", both of which read as a mistake.
   const heading = escapeHtml(`Latest ${str(section.label)}`);
   const n = Array.isArray(section.items) ? section.items.length : 0;
-  const feed = absUrl(SECTION_FEED[section.key] || '/feeds/', siteUrl);
+  const feed = trackUrl(SECTION_FEED[section.key] || '/feeds/', links, 'section-feed');
 
   const head = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:44px 28px 0">`
@@ -295,7 +332,7 @@ function sectionHtml(section, p, siteUrl) {
     + `</tr></table></td></tr>`
     + `<tr><td width="536" style="width:536px;padding:9px 28px 0"><div style="height:2px;background-color:${p.rule};font-size:0;line-height:0">&nbsp;</div></td></tr></table>`;
 
-  const items = section.items.map((it) => itemHtml(section.key, it, p, siteUrl)).join('');
+  const items = section.items.map((it) => itemHtml(section.key, it, p, links)).join('');
   const seeAll = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:14px 28px 0">`
     + `<a href="${escapeHtml(feed)}" style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};text-decoration:underline">See all in the ${name} feed</a>`
@@ -306,13 +343,13 @@ function sectionHtml(section, p, siteUrl) {
   return `<div><!--editorial:${escapeHtml(section.key)}-->${head}${items}${seeAll}</div>`;
 }
 
-function emptyLineHtml(empties, p, firstIssue, siteUrl) {
+function emptyLineHtml(empties, p, firstIssue, links) {
   if (!empties.length) return '';
   const phrase = escapeHtml(emptyPhrase(empties, firstIssue));
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:34px 28px 0">`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px">`
-    + `${phrase} <a href="${escapeHtml(absUrl('/feeds/', siteUrl))}" style="color:${p.footerLink};text-decoration:underline">Browse the archive</a></div>`
+    + `${phrase} <a href="${escapeHtml(trackUrl('/feeds/', links, 'archive'))}" style="color:${p.footerLink};text-decoration:underline">Browse the archive</a></div>`
     + `</td></tr></table>`;
 }
 
@@ -332,8 +369,8 @@ function emptyLineHtml(empties, p, firstIssue, siteUrl) {
 // "saved collections", which SOW-077 gives a FREE signed-in member (the /membership/activity route authorizes
 // with authorizeMemberCheap, not authorizePaid). That accuracy is pinned by a guard, because the mockup keeps
 // the false collections claim in two places and a future re-derivation would reintroduce it.
-function membershipCtaHtml(p, siteUrl) {
-  const href = escapeHtml(absUrl('/membership/', siteUrl));
+function membershipCtaHtml(p, links) {
+  const href = escapeHtml(trackUrl('/membership/', links, 'membership-cta'));
   return `<!--membership-cta-->`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:30px 28px 0">`
@@ -359,22 +396,22 @@ function membershipCtaHtml(p, siteUrl) {
 // replacement for the wordmark's job. With images blocked the reader still sees the week, the alt text and
 // the greeting; nothing that identifies the sender depends on a fetch succeeding.
 const LOGO_PX = 30;
-function logoCellHtml(logoUrl, siteUrl) {
+function logoCellHtml(logoUrl, links) {
   if (!logoUrl) return '';
   const img = `<img src="${escapeHtml(logoUrl)}" width="${LOGO_PX}" height="${LOGO_PX}" alt="GBTI Network"`
     + ` style="display:block;border:0;outline:none;text-decoration:none;width:${LOGO_PX}px;height:${LOGO_PX}px">`;
   return `<td width="${LOGO_PX}" style="width:${LOGO_PX}px;padding-left:12px;line-height:0">`
-    + `<a href="${escapeHtml(siteUrl)}" style="text-decoration:none">${img}</a>`
+    + `<a href="${escapeHtml(trackUrl('/', links, 'masthead'))}" style="text-decoration:none">${img}</a>`
     + `</td>`;
 }
 
-function headerHtml(p, ctx, range, launchNote, logoUrl, siteUrl) {
+function headerHtml(p, ctx, range, launchNote, logoUrl, links) {
   const greeting = escapeHtml(str(ctx.greeting).trim() || 'This week on the network');
   const headerLine = escapeHtml(str(ctx.headerLine).trim() || 'Everything new across the network since the last issue.');
   const weekCell = range
     ? `<td align="right" style="font-family:'Courier New',monospace;font-size:10.5px;letter-spacing:.1em;color:${p.meta};mso-line-height-rule:exactly;line-height:${LOGO_PX}px">${escapeHtml(range.mono)}</td>`
     : '';
-  const logoCell = logoCellHtml(logoUrl, siteUrl);
+  const logoCell = logoCellHtml(logoUrl, links);
   // A right-aligned nested table rather than one cell with an inline image: Outlook does not honour
   // vertical-align on an inline img, and the week has to sit on the mark's centre line.
   const mastheadRow = weekCell || logoCell
@@ -397,16 +434,17 @@ function headerHtml(p, ctx, range, launchNote, logoUrl, siteUrl) {
     + `</td></tr></table>`;
 }
 
-function footerHtml(p, ctx, siteUrl) {
+function footerHtml(p, ctx, links) {
+  // The unsubscribe url is NOT tracked: it is an opt-out on the Worker, not a campaign click on the website.
   const unsub = safeUrl(ctx.unsubscribeUrl);
-  const feedAbs = `${siteUrl}/feeds/`;
+  const feedAbs = trackUrl('/feeds/', links, 'footer-feed');
   // A real url renders a one-click Unsubscribe link; without one a managed-subscription line with NO link. That
   // fallback is NOT permission to send without an opt-out (the drain must refuse such a recipient); in a real
   // send this branch is unreachable, and it exists for the web archive and as a no-dead-link fail-safe.
   const unsubLink = unsub
     ? `<a href="${escapeHtml(unsub)}" style="color:${p.footerLink};text-decoration:underline">Unsubscribe</a>`
-    : `manage your subscription from <a href="${escapeHtml(siteUrl)}" style="color:${p.footerLink};text-decoration:underline">gbti.network</a>`;
-  const links = `<a href="${escapeHtml(feedAbs)}" style="color:${p.footerLink};text-decoration:underline">Open the feed</a> &middot; ${unsubLink}`;
+    : `manage your subscription from <a href="${escapeHtml(trackUrl('/', links, 'footer-home'))}" style="color:${p.footerLink};text-decoration:underline">gbti.network</a>`;
+  const footerLinks = `<a href="${escapeHtml(feedAbs)}" style="color:${p.footerLink};text-decoration:underline">Open the feed</a> &middot; ${unsubLink}`;
   // The CAN-SPAM postal slot. Rendered ONLY when the drain supplies ctx.postalAddress (from the MAIL_POSTAL_ADDRESS
   // secret); absent means no address line. The value is never defaulted or hardcoded here (see the header note).
   const postal = str(ctx.postalAddress).trim();
@@ -417,22 +455,22 @@ function footerHtml(p, ctx, siteUrl) {
     + `<tr><td width="536" style="width:536px;padding:28px 28px 24px">`
     + `<div style="height:1px;background-color:${p.hairline};font-size:0;line-height:0">&nbsp;</div>`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:14px">You get this digest every week because you are on the GBTI Network list.</div>`
-    + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:9px">${links}</div>`
+    + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:9px">${footerLinks}</div>`
     + postalLine
     + `</td></tr></table>`;
 }
 
-function sectionText(section, siteUrl) {
+function sectionText(section, links) {
   const n = Array.isArray(section.items) ? section.items.length : 0;
-  return `LATEST ${str(section.label).toUpperCase()} (${n})\n${section.items.map((it) => itemText(section.key, it, siteUrl)).join('\n')}`;
+  return `LATEST ${str(section.label).toUpperCase()} (${n})\n${section.items.map((it) => itemText(section.key, it, links)).join('\n')}`;
 }
 
 // The text alternative carries the same FACTS as the html, minus what only exists visually. The blurb is a
 // fact and belongs here; the thumbnail is not and does not. Keeping the two in step matters because a client
 // showing the text part must not present a thinner issue than the one that was actually composed.
-function itemText(sectionKey, it, siteUrl) {
+function itemText(sectionKey, it, links) {
   const title = str(it.title).trim() || '(untitled)';
-  const url = absUrl(it.url, siteUrl);
+  const url = trackUrl(it.url, links, 'item');
   const meta = sectionKey === 'news' ? sourceLabel(it) : byline(it);
   const suffix = meta ? ` (${meta})` : '';
   const blurb = str(it.blurb).trim();
@@ -460,6 +498,10 @@ export function renderIssue(issue, ctx = {}) {
   // The themed mark, absolute because an email has no page to be relative to. 96px source for a 30px
   // slot, so it stays sharp on a retina client without shipping the 512px brand asset to every inbox.
   const logoUrl = `${siteUrl}/brand/logo/mark-${ctx.theme === 'dark' ? 'white' : 'ink'}-96.png`;
+  // The campaign is the ISSUE ID (weekly-YYYY-MM-DD, welcome-YYYY-MM-DD, test-...), so one issue reads as one
+  // row and the welcome is separable from the weekly without a second scheme. Absent on a bare fixture, and an
+  // absent campaign simply omits that one param rather than inventing a name.
+  const links = { siteUrl, campaign: str(issue?.issueId).trim() };
   const subject = str(ctx.subject).trim() || computedSubject(counts, range) || 'The GBTI Network weekly digest';
 
   const preheaderText = escapeHtml(counts ? countsSummary(counts, firstIssue) : emptySummary(firstIssue));
@@ -471,9 +513,9 @@ export function renderIssue(issue, ctx = {}) {
   // given issue. An all-editorial-empty issue never carries it either (a solicitation with no editorial reads
   // as primarily promotional). See the CTA note.
   const showCta = filled.length > 0 && ctx.membershipCta !== false;
-  const body = filled.map((s) => sectionHtml(s, p, siteUrl)).join('')
-    + emptyLineHtml(empties, p, firstIssue, siteUrl)
-    + (showCta ? membershipCtaHtml(p, siteUrl) : '');
+  const body = filled.map((s) => sectionHtml(s, p, links)).join('')
+    + emptyLineHtml(empties, p, firstIssue, links)
+    + (showCta ? membershipCtaHtml(p, links) : '');
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
@@ -484,9 +526,9 @@ export function renderIssue(issue, ctx = {}) {
     + `<tr><td width="600" align="center" style="width:600px;padding:24px 0 40px">`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px;background-color:${p.cardBg};border:1px solid ${p.cardBorder}">`
     + `<tr><td width="536" style="width:536px;padding:0">`
-    + headerHtml(p, ctx, range, issue?.launchNote, logoUrl, siteUrl)
+    + headerHtml(p, ctx, range, issue?.launchNote, logoUrl, links)
     + body
-    + footerHtml(p, ctx, siteUrl)
+    + footerHtml(p, ctx, links)
     + `</td></tr></table>`
     + `</td></tr></table>`
     + `</body></html>`;
@@ -500,17 +542,17 @@ export function renderIssue(issue, ctx = {}) {
   const greetingText = str(ctx.greeting).trim() || 'This week on the network';
   const headerLineText = str(ctx.headerLine).trim() || 'Everything new across the network since the last issue.';
   const launchText = issue?.launchNote ? `${str(issue.launchNote)}\n` : '';
-  const filledText = filled.map((s) => sectionText(s, siteUrl)).join('\n\n');
+  const filledText = filled.map((s) => sectionText(s, links)).join('\n\n');
   const emptyText = empties.length ? `\n\n${emptyPhrase(empties, firstIssue)}` : '';
   // The text-side CTA mirrors the html: one modest line, after all editorial, only when the html renders it.
   const ctaText = showCta
-    ? `\n\nMembership adds comments on any item and the members Discord. Publishing your own prompts, skills and products is part of the Content Creator plan. Compare plans: ${siteUrl}/membership/`
+    ? `\n\nMembership adds comments on any item and the members Discord. Publishing your own prompts, skills and products is part of the Content Creator plan. Compare plans: ${trackUrl('/membership/', links, 'membership-cta')}`
     : '';
 
   const text = `GBTI DIGEST${range ? ` (${range.short})` : ''}\n`
     + `${greetingText}\n${headerLineText}\n${launchText}\n`
     + `${filledText}${emptyText}${ctaText}\n\n`
-    + `----\n${siteUrl}\n${unsubText}${postalText}\n`;
+    + `----\n${trackUrl('/', links, 'footer-home')}\n${unsubText}${postalText}\n`;
 
   return { subject, html, text };
 }

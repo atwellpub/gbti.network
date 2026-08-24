@@ -63,7 +63,10 @@ test('renders filled sections IN ORDER with links; empty sections collapse to on
   // filled: titles are links
   assert.match(html, /<a href="https:\/\/news\.example\/edge"[^>]*>Edge AI roundup<\/a>/);
   assert.match(html, /<a href="https:\/\/news\.example\/kv"[^>]*>KV at scale<\/a>/);
-  assert.match(html, /<a href="https:\/\/gbti\.network\/blog\/worker-cron\/"[^>]*>Shipping a Worker cron<\/a>/, 'site-relative item links are absolutized for email');
+  // sow-273: a site-relative item link is absolutized AND campaign-tagged. Pinned in full rather than loosened
+  // to a prefix, because the params are the behaviour under test elsewhere and a prefix match would keep
+  // passing if they silently disappeared.
+  assert.match(html, /<a href="https:\/\/gbti\.network\/blog\/worker-cron\/\?utm_source=digest&amp;utm_medium=email&amp;utm_campaign=2026-08-25&amp;utm_content=item"[^>]*>Shipping a Worker cron<\/a>/, 'site-relative item links are absolutized and tagged for email');
   // news shows source, member item shows byline
   assert.match(html, /The Register/);
   assert.match(html, /by Dika Fei/);
@@ -298,7 +301,7 @@ test('site-relative links are absolutized against ctx.siteUrl (external links pa
     { kind: 'article', title: 'T', url: '/blog/x/', authorName: 'A', date: 1, thumb: '/media/y.webp' },
   ] }] };
   const { html } = renderIssue(issue, { siteUrl: 'https://staging.example' });
-  assert.match(html, /<a href="https:\/\/staging\.example\/blog\/x\/"/, 'the item link uses the provided base');
+  assert.match(html, /<a href="https:\/\/staging\.example\/blog\/x\/\?utm_source=digest/, 'the item link uses the provided base');
   assert.match(html, /<img src="https:\/\/staging\.example\/media\/y\.webp"/, 'the thumb uses the provided base');
   // an external item link is untouched
   const ext = renderIssue({ layout: [{ key: 'news', label: 'News', empty: false, items: [
@@ -571,5 +574,108 @@ test('the mark is themed, because a solid silhouette has no contrast of its own'
 test('the mark links to the site and honours a custom siteUrl', () => {
   const issue = { generatedAt: Date.UTC(2026, 7, 24), counts: { article: 1 }, layout: [] };
   const { html } = renderIssue(issue, { siteUrl: 'https://staging.gbti.network' });
-  assert.match(html, /<a href="https:\/\/staging\.gbti\.network" style="text-decoration:none"><img src="https:\/\/staging\.gbti\.network\/brand\/logo\//);
+  assert.match(html, /<a href="https:\/\/staging\.gbti\.network\/\?utm_source=digest&amp;utm_medium=email&amp;utm_content=masthead" style="text-decoration:none"><img src="https:\/\/staging\.gbti\.network\/brand\/logo\//);
+});
+
+// ---- sow-273: CAMPAIGN TAGS ON OUR OWN LINKS ----
+// The email is the one surface where a click arrives with no referrer worth reading, so a link back to the
+// site is indistinguishable from direct traffic unless it is tagged at render time. These guards exist because
+// the failure mode is silent in BOTH directions: an untagged link measures as nothing, and an over-tagged one
+// (an external url, an image, the unsubscribe) corrupts either their numbers or ours with no visible symptom.
+
+// Every clickable href, unescaped, so a test reads the same string a mail client follows.
+const hrefs = (html) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+const imgSrcs = (html) => [...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+
+// One issue carrying all three link classes at once: our own content, an external news url with its OWN query
+// string, and (via ctx) the Worker-hosted unsubscribe. Tagging is decided per link, so they have to be
+// rendered together for the decision to be under test at all.
+function mixedIssue() {
+  return {
+    issueId: 'weekly-2026-08-24',
+    layout: [
+      { key: 'article', label: 'Articles', empty: false, items: [
+        { kind: 'article', title: 'Ours', url: '/articles/ours/', author: 'hudson', thumb: '/media/t.png', date: 3 } ] },
+      { key: 'news', label: 'News', empty: false, items: [
+        { title: 'Theirs', url: 'https://www.theregister.com/a/?sponsored=1', source: 'The Register', date: 2 } ] },
+      { key: 'product', label: 'Products', empty: true, note: 'None.', items: [] },
+    ],
+  };
+}
+const UNSUB = 'https://signup.gbti.network/mail/unsubscribe?h=abc&t=tok';
+
+test('sow-273: every link back to our own site carries source, medium and the issue as the campaign', () => {
+  const { html } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const ours = hrefs(html).filter((h) => h.startsWith('https://gbti.network/'));
+  assert.ok(ours.length >= 5, `expected several site links, got ${ours.length}`);
+  for (const h of ours) {
+    const u = new URL(h);
+    assert.equal(u.searchParams.get('utm_source'), 'digest', h);
+    assert.equal(u.searchParams.get('utm_medium'), 'email', h);
+    assert.equal(u.searchParams.get('utm_campaign'), 'weekly-2026-08-24', h);
+  }
+});
+
+test('sow-273: an EXTERNAL link is never tagged, and its own query string survives untouched', () => {
+  // Stamping our campaign onto a publisher's url writes our attribution into their analytics and tells us
+  // nothing, so this is the guard that keeps the feature from leaking outward.
+  const { html, text } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const ext = hrefs(html).filter((h) => h.startsWith('https://www.theregister.com/'));
+  assert.equal(ext.length, 1);
+  assert.equal(ext[0], 'https://www.theregister.com/a/?sponsored=1');
+  assert.ok(text.includes('https://www.theregister.com/a/?sponsored=1'), 'the text part leaves it alone too');
+  assert.doesNotMatch(html.split('theregister.com')[1].slice(0, 120), /utm_/);
+});
+
+test('sow-273: the unsubscribe url is never tagged (an opt-out is not a campaign click)', () => {
+  const { html, text } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const unsub = hrefs(html).filter((h) => h.startsWith('https://signup.gbti.network/'));
+  assert.deepEqual(unsub, [UNSUB]);
+  assert.ok(text.includes(UNSUB));
+});
+
+test('sow-273: no IMAGE src is ever tagged, because an image load is not a click', () => {
+  // A tagged thumbnail would inflate every count by the number of clients that display images, which reads as
+  // engagement and is not. Covers the masthead mark, the derived avatar and the item thumb in one pass.
+  const { html } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const srcs = imgSrcs(html);
+  assert.ok(srcs.some((s) => s.includes('/brand/logo/')), 'the mark is present to be checked');
+  assert.ok(srcs.some((s) => s.includes('/media/t.png')), 'the thumb is present to be checked');
+  for (const s of srcs) assert.doesNotMatch(s, /utm_/, s);
+});
+
+test('sow-273: utm_content names the PLACEMENT, so an item click is separable from a footer click', () => {
+  const { html } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const seen = new Set(hrefs(html)
+    .filter((h) => h.startsWith('https://gbti.network/'))
+    .map((h) => new URL(h).searchParams.get('utm_content')));
+  for (const placement of ['masthead', 'item', 'section-feed', 'archive', 'membership-cta', 'footer-feed']) {
+    assert.ok(seen.has(placement), `no link tagged ${placement}; saw ${[...seen].join(', ')}`);
+  }
+});
+
+test('sow-273: an issue with no id OMITS utm_campaign rather than emitting an empty one', () => {
+  // An empty utm_campaign= is worse than none: it creates a real, permanently unnamed campaign row.
+  const { html } = renderIssue({ layout: [{ key: 'article', label: 'Articles', empty: false, items: [
+    { kind: 'article', title: 'T', url: '/articles/t/', author: 'h', date: 1 } ] }] }, {});
+  const item = hrefs(html).find((h) => h.includes('/articles/t/'));
+  const u = new URL(item);
+  assert.equal(u.searchParams.get('utm_source'), 'digest');
+  assert.equal(u.searchParams.has('utm_campaign'), false, item);
+});
+
+test('sow-273: same-origin is judged against ctx.siteUrl, not a hardcoded host', () => {
+  // A staging render must tag staging links; a hardcoded gbti.network check would silently stop tagging
+  // anything the moment the base changed, and the symptom would be an empty report rather than an error.
+  const { html } = renderIssue(mixedIssue(), { siteUrl: 'https://staging.example', unsubscribeUrl: UNSUB });
+  const item = hrefs(html).find((h) => h.includes('/articles/ours/'));
+  assert.match(item, /^https:\/\/staging\.example\/articles\/ours\/\?utm_source=digest/);
+});
+
+test('sow-273: the text alternative is tagged the same way, so a text-client click is not lost as direct', () => {
+  const { text } = renderIssue(mixedIssue(), { unsubscribeUrl: UNSUB });
+  const item = text.match(/https:\/\/gbti\.network\/articles\/ours\/\S*/)[0];
+  const u = new URL(item);
+  assert.equal(u.searchParams.get('utm_campaign'), 'weekly-2026-08-24');
+  assert.equal(u.searchParams.get('utm_content'), 'item');
 });
