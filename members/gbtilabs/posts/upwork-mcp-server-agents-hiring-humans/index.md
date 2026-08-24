@@ -3,6 +3,7 @@ title: "A Deeper Look: Upwork's move to offer MCP access to its platform"
 slug: upwork-mcp-server-agents-hiring-humans
 status: published
 visibility: public
+publishedAt: 2026-08-12
 publicStub: false
 excerpt: >-
   Upwork shipped a Model Context Protocol server, so an agent can post a job, shortlist freelancers

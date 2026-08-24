@@ -3,6 +3,7 @@ title: App Clips let someone use part of your iOS app without installing it
 slug: ios-app-clips-what-they-are-and-who-uses-them
 status: published
 visibility: public
+publishedAt: 2026-08-10
 publicStub: false
 excerpt: >-
   An App Clip runs part of an iOS app with no install, launched from a link, a QR code, or an NFC

@@ -33,6 +33,30 @@ test('composeIssue groups public items by kind, newest-first, capped per section
   assert.ok(SECTION_KINDS.every((k) => Array.isArray(issue.sections[k])));
 });
 
+// sow-166, 2026-08-23. THE UNDATED-ITEM TRAP, pinned so it cannot quietly come back.
+//
+// `publishedAt` was optional in every content schema, so an item could publish without one. A missing date
+// normalizes to 0, and 0 is below EVERY time floor, so the item is silently unmailable forever rather than
+// merely late. It also sorts dead last in `buildActivityIndex`, which caps at 40 per type, so once a type has
+// more than 40 items an undated one is cut from the public index entirely while its page stays live.
+//
+// Live consequences, both reported by the owner: the Ryker product (11 products, under the cap) sat in the
+// index with date 0 and could never be mailed; three published articles (50 posts, over the cap) were absent
+// from the index, the extension feed and the digest altogether.
+//
+// The real repair is upstream: scripts/validate-content.mjs now REJECTS a published post/product/prompt with
+// no publishedAt, so this state cannot be authored. This test pins the downstream behaviour that makes that
+// rule load-bearing. If someone ever relaxes the validator, this is the explanation of what it costs.
+test('an item with no date is excluded by any floor (why publishedAt is required at authoring time)', () => {
+  const floor = 1_000;
+  const items = [pub('product', 'dated', floor + 500), { ...pub('product', 'undated', 0), date: 0 }];
+  const issue = composeIssue({ issueId: 'i', items, news: [], now: at(floor + 900) }, { perSection: 5, since: floor });
+  assert.deepEqual(issue.sections.product.map((x) => x.title), ['dated']);
+  // And it is not the floor alone: no floor a live compile can pick is at or below 0.
+  const noFloor = composeIssue({ issueId: 'i', items, news: [], now: at(floor + 900) }, { perSection: 5 });
+  assert.ok(noFloor.sections.product.some((x) => x.title === 'undated'), 'with NO floor it would have been included, so the floor is what drops it');
+});
+
 test('LEAK GUARD: a members item is excluded and no body/ciphertext can appear in a compiled issue', () => {
   const items = [
     pub('article', 'public-one', 100, { body: 'PUBLIC BODY TEXT', encryptedBody: 'x.enc' }),

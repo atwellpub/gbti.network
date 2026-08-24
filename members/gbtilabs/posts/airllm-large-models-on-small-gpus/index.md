@@ -3,6 +3,7 @@ title: AirLLM runs a 70B model on a 4GB GPU by refusing to load it all at once
 slug: airllm-large-models-on-small-gpus
 status: published
 visibility: public
+publishedAt: 2026-08-08
 publicStub: false
 excerpt: >-
   AirLLM streams a model layer by layer instead of resident in VRAM, so hardware decides speed

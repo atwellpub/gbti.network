@@ -156,6 +156,26 @@ function checkContent(file, owner, type) {
   if (status && !['draft', 'published'].includes(status)) errors.push(`${rel}: invalid status "${status}"`);
   const vis = field(txt, 'visibility');
   if (vis && !['public', 'members'].includes(vis)) errors.push(`${rel}: invalid visibility "${vis}"`);
+  // sow-166: A PUBLISHED item MUST carry publishedAt, and this is a correctness rule, not tidiness.
+  //
+  // The schema has always had it `.optional()`, so an item could publish without one and nothing complained
+  // anywhere. The date is not merely cosmetic: `buildActivityIndex` sorts on `publishedAt ?? 0` and caps at 40
+  // PER TYPE, and the weekly digest drops anything below a time floor. So a missing date does not read as
+  // "undated", it reads as THE FIRST OF JANUARY 1970, and that produces two different silent failures depending
+  // on how much content of that type exists:
+  //
+  //   - over the cap (posts, 50 of them): the item sorts dead last and is CUT from the index entirely. It has a
+  //     live public page the whole time, so nothing looks broken. Three published articles were missing from
+  //     the index, the extension feed and the digest this way, found 2026-08-23.
+  //   - under the cap (products, 11): the item survives into the index but keeps date 0, which is below every
+  //     possible digest floor, so it can never be mailed in any issue, ever. That was Ryker.
+  //
+  // Both were invisible: the page renders, the build passes, the guards pass, and the item is simply absent
+  // downstream. Rejecting at authoring time is the only layer that fails LOUDLY, which is why it is here and
+  // not a fallback in the index. A fallback would keep the item working while hiding the omission.
+  if (status === 'published' && ['post', 'product', 'prompt'].includes(type) && !field(txt, 'publishedAt')) {
+    errors.push(`${rel}: a published ${type} must set publishedAt (e.g. publishedAt: 2026-08-22). Without it the item sorts as epoch 0, so it is cut from activity-index.json by the 40-per-type cap and can never appear in the weekly digest. See sow-166.`);
+  }
   const slug = field(txt, 'slug');
   if (slug && slugs[type]) {
     if (slugs[type].has(slug)) errors.push(`${rel}: duplicate ${type} slug "${slug}" (already used by ${slugs[type].get(slug)})`);

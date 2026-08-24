@@ -10,6 +10,7 @@ categories:
   - chrome-extensions
 status: published
 visibility: public
+publishedAt: 2026-08-22
 publicStub: false
 pricing: free
 version: 0.2.1
