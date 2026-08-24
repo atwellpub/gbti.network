@@ -44,6 +44,8 @@
 // (a permalink issue is not a mailed message and needs no opt-out), and as a fail-safe that shows no dead link.
 // It sets NO email headers: List-Unsubscribe and the multipart assembly are the sendEmail wrapper's job.
 
+import { SECTION_FEED, clickSlot, clickPath, taggedTarget } from './mail-click.mjs';
+
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
 /** Escape for HTML text nodes and double-quoted attributes. Layout items are public content, so this is the
@@ -119,14 +121,22 @@ const UTM_MEDIUM = 'email';
 function trackUrl(url, links, content) {
   const abs = absUrl(url, links?.siteUrl ?? '');
   if (!abs) return '';
-  let u; let site;
-  try { u = new URL(abs); site = new URL(links.siteUrl); } catch { return abs; }
-  if (u.origin !== site.origin) return abs;
-  u.searchParams.set('utm_source', UTM_SOURCE);
-  u.searchParams.set('utm_medium', UTM_MEDIUM);
-  if (links.campaign) u.searchParams.set('utm_campaign', links.campaign);
-  if (content) u.searchParams.set('utm_content', content);
-  return u.toString();
+
+  // sow-273 follow-up: WHEN A CLICK BASE IS CONFIGURED, THE LINK GOES THROUGH THE COUNTER. This is the only
+  // way the digest is measurable at all, because Cloudflare Web Analytics has no query-string field and
+  // discards the utm tags below before storage (verified against its GraphQL schema, 2026-08-24).
+  // The counter link carries an issue id, a placement and a hash of the destination, NEVER the destination,
+  // so the route cannot be turned into an open redirect (see mail-click.mjs). This is the ONE place an
+  // external url is rewritten, and it is deliberate: the owner elected on 2026-08-24 to count news clicks,
+  // because which curated sources actually get read is the most useful thing the digest can tell us.
+  // The utm tags STAY on the underlying url regardless. An email cannot be retagged after it is sent, so a
+  // product that can read them later still gets a complete history from today onward.
+  // The slot hashes the PLAIN absolute url, because that is what the route rebuilds from the frozen issue.
+  if (links?.clickBase && links?.campaign) {
+    const path = clickPath(links.campaign, content, clickSlot(abs));
+    if (path) return `${String(links.clickBase).replace(/\/+$/, '')}${path}`;
+  }
+  return taggedTarget(abs, { siteUrl: links?.siteUrl, campaign: links?.campaign, placement: content });
 }
 
 // The PALETTE TOKEN LAYER. Both variants are copied verbatim from the design's Light and Dark blocks, so the
@@ -146,10 +156,8 @@ const PALETTES = {
 
 // Per-type public feed routes (SOW-131 / SOW-139), the only link targets the renderer invents, each a real
 // public route.
-const SECTION_FEED = {
-  article: '/feeds/articles/', product: '/feeds/products/', prompt: '/feeds/prompts/',
-  share: '/feeds/shares/', news: '/feeds/news/',
-};
+// SECTION_FEED now lives in mail-click.mjs, imported above: the click route must resolve these exact
+// paths, and a second copy here would drift and silently break those links.
 const COUNT_ORDER = ['article', 'prompt', 'product', 'share', 'news'];
 const COUNT_NOUNS = {
   article: ['article', 'articles'], prompt: ['prompt', 'prompts'], product: ['product', 'products'],
@@ -501,7 +509,10 @@ export function renderIssue(issue, ctx = {}) {
   // The campaign is the ISSUE ID (weekly-YYYY-MM-DD, welcome-YYYY-MM-DD, test-...), so one issue reads as one
   // row and the welcome is separable from the weekly without a second scheme. Absent on a bare fixture, and an
   // absent campaign simply omits that one param rather than inventing a name.
-  const links = { siteUrl, campaign: str(issue?.issueId).trim() };
+  // sow-273 follow-up: `clickBase` is the origin of the /c/ click counter, injected by the Worker's composition
+  // root. When it is absent the template renders exactly as it did before, with plain utm-tagged links, so the
+  // counter is an addition to this renderer rather than a dependency of it and a bare fixture stays bare.
+  const links = { siteUrl, campaign: str(issue?.issueId).trim(), clickBase: safeUrl(ctx.clickBase) };
   const subject = str(ctx.subject).trim() || computedSubject(counts, range) || 'The GBTI Network weekly digest';
 
   const preheaderText = escapeHtml(counts ? countsSummary(counts, firstIssue) : emptySummary(firstIssue));

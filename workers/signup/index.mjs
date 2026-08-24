@@ -93,6 +93,8 @@ import { membershipSyncFork } from './membership-sync-fork.mjs'; // SOW-106 Phas
 import { membershipAuthor, membershipAuthorTargets } from './membership-author.mjs'; // SOW-156 spike: hosted authoring (flagged); sow-183: superadmin reassignment targets
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
+import { handleMailClick } from './mail-click-route.mjs'; // sow-273 follow-up: the digest click counter
+import { resolveSiteUrl, resolveClickBase } from '../../membership/mail-click.mjs';
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
 import { compileWeeklyIssue, compileWelcomeIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
@@ -778,7 +780,12 @@ async function handleWebhook(request, env) {
  * fail-closed inside the drain: a null address or a thrown send is treated as "no usable address" / retryable,
  * never a silent success.
  */
-function mailDrainDeps(env) {
+// EXPORTED so a test can exercise THIS wiring rather than rebuilding it by hand. The same argument the SOW-186
+// comment below makes about the kind dispatcher applies to the click counter: the ctx this function assembles is
+// what decides whether a real digest link goes through the counter at all, and a test that reconstructs that ctx
+// itself passes just as happily when this line stops passing it. That was measured, not assumed: with the wiring
+// tested only by a hand-built ctx, deleting `clickBase` from this exact line left the whole suite green.
+export function mailDrainDeps(env) {
   const fetchMemberEmail = async ({ githubId, customerId }) => {
     if (!env.STRIPE_SECRET_KEY) return null;
     const stripe = createStripeClient({ apiKey: env.STRIPE_SECRET_KEY });
@@ -797,7 +804,18 @@ function mailDrainDeps(env) {
   // a notification rides the exact same fail-closed send gate, rate budget, suppression re-check and one-click
   // unsubscribe as the digest. The dispatcher is a SHARED, EXPORTED function so this production line is the one the
   // tests exercise, not a hand-copy that can drift (QAmaster, 2026-08-22).
-  return { resolveAddress, renderIssue: renderMailIssue, sendEmail };
+  // sow-273 follow-up: the click counter is wired HERE, at the composition root, for the same reason kind
+  // dispatch is. The drain is pure over an injected renderer and must not learn about env; the renderer is a
+  // pure template and must not either. This is the one place that holds both.
+  //
+  // BOTH SIDES OF THE ROUND TRIP READ THE SAME EXPRESSION. The renderer hashes a destination here and the /c/
+  // route re-hashes it there, so resolveSiteUrl is called by both rather than each carrying its own default.
+  // clickBase is PUBLIC_BASE_URL, which the drain already refuses to send without, so a message that goes out
+  // always has a working counter, and an unset one means nothing was sent rather than links quietly degrading.
+  const siteUrl = resolveSiteUrl(env);
+  const clickBase = resolveClickBase(env);
+  const renderIssue = (issue, ctx = {}) => renderMailIssue(issue, { siteUrl, clickBase, ...ctx });
+  return { resolveAddress, renderIssue, sendEmail };
 }
 
 /**
@@ -1529,6 +1547,24 @@ export default {
       // capability token in the URL. The handler owns method dispatch, fail-closed verification and the
       // no-referrer/no-store page headers, so the route just delegates. NOT gated behind a flag: auto-enrolment
       // was granted on the rider that the opt-out always works.
+      // sow-273 follow-up: the DIGEST CLICK COUNTER. `/c/<issueId>/<placement>/<slot>` redirects to the link that
+      // slot names inside that frozen issue, counting the click on the way past. It exists because Cloudflare Web
+      // Analytics has no query-string field anywhere in its RUM schema and discards the digest's utm tags before
+      // storage, so this is the only way an issue's performance is knowable, and the only way a NEWS click is
+      // knowable at all.
+      //
+      // ANONYMOUS AND CACHE-BUSTING, both on purpose. It records nothing about who clicked (no hash, no address,
+      // no IP, no user agent), so it cannot answer "did this person click" and never enters that conversation. It
+      // is deliberately NOT rate limited: rate limiting requires keying on the client, and a reader clicking a
+      // link they were sent is not abuse. The only thing an attacker gains by hammering it is an inflated number
+      // in our own analytics, which is not worth acquiring per-IP state over.
+      //
+      // It cannot become an open redirect: the request carries a HASH of the destination, never the destination,
+      // and the candidate set is rebuilt from the frozen issue. See membership/mail-click.mjs.
+      if (pathname.startsWith('/c/')) {
+        if (method === 'GET' || method === 'HEAD') return await handleMailClick(request, env);
+      }
+
       if (pathname === '/mail/unsubscribe') {
         return await handleUnsubscribe(request, env);
       }
