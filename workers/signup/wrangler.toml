@@ -140,15 +140,27 @@ binding = "AI"
 binding = "EXT_ANALYTICS"
 dataset = "gbti_ext_usage"
 
-# SOW-058: the syndication drain cron. The one-hour hold is the deliberate delay, so a 5-minute tick adds at most
-# 5 minutes past the hour and is far cheaper than per-minute. Wrangler does NOT inherit triggers into named envs,
-# so the same crons are repeated under [env.production.triggers].
-[triggers]
-# UnifiedWorker: */5 = syndication drain (SOW-058) + weekly-digest mail drain (SOW-166), composed on one tick;
-# 0 = news ingest; 30 = news og:image backfill; 0 14 * * 2 = the SOW-166 weekly digest compile (Tuesday 14:00
-# UTC). The scheduled() handler in index.mjs dispatches on controller.cron against these exact strings; an
-# unrecognised string runs NOTHING (no catch-all), so a new cron MUST be added to CRON_JOBS too.
-crons = ["*/5 * * * *", "0 * * * *", "30 * * * *", "0 14 * * 2"]
+# THERE ARE DELIBERATELY NO CRONS IN THIS BARE CONFIG. The live crons are under [env.production.triggers].
+#
+# This block used to carry the same four crons as production, and because this bare config also binds the
+# PRODUCTION SIGNUP_KV and NEWS_KV namespace ids (not the preview ones, see the kv_namespaces above), a
+# `wrangler deploy` without `--env production` created a second Worker, `gbti-signup`, that ran all four
+# scheduled jobs against LIVE data on the same schedule as production.
+#
+# It did exactly that, unnoticed, from 2026-07-09 until it was deleted on 2026-08-24. Two consequences, and
+# the second is the serious one:
+#   1. Every scheduled job ran twice. Cloudflare's own invocation counts showed the sandbox Worker firing
+#      10 to 12 times an hour around the clock, and the duplicate KV traffic is what tripped the daily
+#      operations alert.
+#   2. It ran SIX-WEEK-OLD CODE against the live store. Everything landed after 2026-07-09 was absent from
+#      it, including the fail-closed rate-cap floors, the mail-drain suppression defer, and the pending-index
+#      three-state read. Two Workers were sweeping the same mail and syndication queues, one of them with the
+#      old safety behaviour.
+#
+# So: do NOT add crons here. A sandbox Worker that shares production's KV must not also share its schedule.
+# If you need to exercise a scheduled handler locally, use `wrangler dev --test-scheduled` and hit
+# /__scheduled?cron=... , which needs no trigger declared, or add the cron temporarily and REMOVE IT before
+# deploying anything.
 
 # Secrets set out-of-band (wrangler secret put / .dev.vars), listed here for documentation only:
 #   STRIPE_SECRET_KEY            restricted: create-customer + checkout only (least privilege)
