@@ -6,16 +6,16 @@ shortDescription: >-
   Point Claude Code at the GBTI MCP server that ships inside the Chrome extension folder, sign in,
   and publish content without a separate install.
 author: gbtilabs
-status: published
+status: draft
 visibility: public
 categories:
   - devops
   - tooling
 tags:
-  - GBTI Network
-  - MCP
-  - Chrome Extension
-  - Onboarding
+  - gbti-network
+  - mcp
+  - chrome-extension
+  - onboarding
   - claude-code
 targets:
   - Claude Code

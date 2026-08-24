@@ -4,7 +4,7 @@ id: intro-install-gbti-network-from-extension
 author: gbtilabs
 targetType: prompt
 targetSlug: install-gbti-network-from-extension
-status: published
+status: draft
 visibility: public
 authorNote: true
 createdAt: 2026-06-10
