@@ -193,3 +193,47 @@ test('evaluate: the unreadable-expiry check is mustExpire-only, so opted-out cre
   const now = new Date('2026-08-18T00:00:00Z');
   assert.equal(evaluate([{ name: 'T', ok: true, expiresAt: 'not-a-date' }], { now }).healthy, true);
 });
+
+// 2026-08-24: the window has two ends. These pin the one that was never checked.
+test('evaluate: a not-yet-valid credential is a problem even though every other signal reads healthy', () => {
+  // The exact shape Cloudflare returns for a token whose start date is in the future: ok, active, and a
+  // far-future expiry. Before this branch existed the monitor printed OK for precisely this input.
+  const r = { name: 'CF', ok: true, status: 200, detail: 'active', expiresAt: '2027-08-31T23:59:59Z', notBefore: '2027-08-18T00:00:00Z', mustExpire: true };
+  const { problems, healthy } = evaluate([r], { warnDays: 30, now: NOW });
+  assert.equal(healthy, false);
+  assert.equal(problems.length, 1, 'exactly one problem, not also an expiry warning');
+  assert.equal(problems[0].kind, 'not-yet-valid');
+  assert.match(problems[0].message, /NOT YET VALID/);
+  assert.match(problems[0].message, /2027-08-18T00:00:00Z/);
+});
+
+test('evaluate: a not_before in the PAST is normal and flags nothing', () => {
+  const r = { name: 'CF', ok: true, status: 200, expiresAt: '2027-06-09T00:00:00Z', notBefore: '2026-06-01T00:00:00Z', mustExpire: true };
+  assert.deepEqual(evaluate([r], { warnDays: 30, now: NOW }).problems, []);
+});
+
+test('evaluate: an absent or unparseable notBefore is ignored, not treated as future', () => {
+  const base = { name: 'CF', ok: true, status: 200, expiresAt: '2027-06-09T00:00:00Z', mustExpire: true };
+  assert.deepEqual(evaluate([base], { warnDays: 30, now: NOW }).problems, []);
+  assert.deepEqual(evaluate([{ ...base, notBefore: null }], { warnDays: 30, now: NOW }).problems, []);
+  assert.deepEqual(evaluate([{ ...base, notBefore: 'not a date' }], { warnDays: 30, now: NOW }).problems, []);
+});
+
+test('evaluate: a failed probe still reports as failed, not as not-yet-valid', () => {
+  const r = { name: 'CF', ok: false, status: 403, notBefore: '2027-08-18T00:00:00Z' };
+  const { problems } = evaluate([r], { warnDays: 30, now: NOW });
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].kind, 'failed');
+});
+
+test('runProbes: the Cloudflare probes carry not_before through from the API response', async () => {
+  const fetchStub = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ success: true, result: { status: 'active', expires_on: '2027-08-31T23:59:59Z', not_before: '2027-08-18T00:00:00Z' } }),
+  });
+  const out = await runProbes({ env: { CF_KV_READ_TOKEN: 'x', CF_API_TOKEN: 'y' }, fetch: fetchStub });
+  assert.equal(out.length, 2, 'both Cloudflare probes ran');
+  for (const r of out) assert.equal(r.notBefore, '2027-08-18T00:00:00Z', `${r.name} lost not_before`);
+  // End to end: the probe output alone is enough for evaluate to catch it.
+  assert.equal(evaluate(out, { warnDays: 30, now: NOW }).problems.every((p) => p.kind === 'not-yet-valid'), true);
+});

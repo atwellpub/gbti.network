@@ -8,7 +8,8 @@
 //     `github-authentication-token-expiration` reports the token's real expiry, so the date AUTO-TRACKS rotation.
 //   - Stripe read key (STRIPE_SECRET_KEY): list one customer (no expiry; liveness only).
 //   - Discord bot token (DISCORD_BOT_TOKEN): GET /users/@me (no expiry; liveness only).
-//   - Cloudflare token (CF_API_TOKEN): /user/tokens/verify, must be active (no expiry; liveness only).
+//   - Cloudflare token (CF_API_TOKEN): /user/tokens/verify, must be active (no expiry; liveness only),
+//     and must not carry a `not_before` in the future, which reads as active while rejecting every call.
 // REGATE_DISPATCH_TOKEN is Worker-only (not an Actions secret), so it is NOT probed here; its expiry is tracked
 // in .data/ops/secrets-ops/README.md (it expires ~the same time as GH_BOT_TOKEN, so this alert is the reminder).
 //
@@ -37,6 +38,27 @@ export function evaluate(results, { warnDays = 30, now = new Date() } = {}) {
   for (const r of results) {
     if (!r.ok) {
       problems.push({ name: r.name, kind: 'failed', message: `${r.name} FAILED its live check (status ${r.status ?? 'n/a'}${r.detail ? `, ${r.detail}` : ''}). The credential is invalid, revoked, or expired.` });
+      continue;
+    }
+    // 2026-08-24: A TOKEN HAS TWO ENDS AND THIS CHECK ONLY EVER LOOKED AT ONE. Cloudflare tokens carry a
+    // `not_before` as well as an `expires_on`, and a token whose window has not opened yet reports
+    // `success: true` with `status: "active"` from /user/tokens/verify while returning "Authentication
+    // error" on every real call. So the liveness probe passes, the expiry is far away, and the monitor
+    // prints OK for a credential that cannot be used at all.
+    // THIS IS NOT HYPOTHETICAL. It was found by running this exact script against a freshly minted token
+    // whose date had been entered as 2027 rather than 2026, and the output was
+    //   `OK   CF_KV_READ_TOKEN (Cloudflare, KV read for the PR gate)  (expires 2027-08-31T23:59:59Z)`
+    //   `All 1 credentials healthy (none failing, none within 30 days of expiry).`
+    // for a token that answered Authentication error to every request that day. A mistyped year is the
+    // realistic way in, and it survives review because the dashboard also shows the token as active.
+    // It matters most for CF_KV_READ_TOKEN: once sow-213 Phase 3 removes the git fallback, a KV read token
+    // that does not work DENIES EVERY PR, and this monitor would have called it healthy the whole time.
+    // Checked BEFORE the expiry branches on purpose: an unusable credential is not an expiry question, and
+    // reporting it as merely "expiring in 372 days" would be worse than silence.
+    const nb = r.notBefore ? Date.parse(r.notBefore) : NaN;
+    if (Number.isFinite(nb) && nb > now.getTime()) {
+      const days = Math.ceil((nb - now.getTime()) / 86400000);
+      problems.push({ name: r.name, kind: 'not-yet-valid', message: `${r.name} is NOT YET VALID: its start date is ${r.notBefore}, ${days} day(s) away. The provider still reports it as active and it has a far-future expiry, so every other check passes, but it rejects every real call until then. Correct the token's start date.` });
       continue;
     }
     // SecurityMaster 2026-08-11: a credential flagged `mustExpire` that reports NO expiry is itself the
@@ -154,13 +176,14 @@ export async function runProbes({ env = process.env, fetch = globalThis.fetch } 
       status: res.status,
       detail: body?.result?.status,
       expiresAt: body?.result?.expires_on || null,
+      notBefore: body?.result?.not_before || null,
       mustExpire: true,
     };
   }));
   if (env.CF_API_TOKEN) out.push(await probe('CF_API_TOKEN (Cloudflare)', async () => {
     const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } });
     let body = null; try { body = await res.json(); } catch { /* */ }
-    return { ok: res.ok && body?.result?.status === 'active', status: res.status, detail: body?.result?.status };
+    return { ok: res.ok && body?.result?.status === 'active', status: res.status, detail: body?.result?.status, notBefore: body?.result?.not_before || null };
   }));
   return out;
 }
