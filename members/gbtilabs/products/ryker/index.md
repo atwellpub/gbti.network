@@ -10,7 +10,6 @@ categories:
   - chrome-extensions
 status: published
 visibility: public
-publishedAt: 2026-08-22
 publicStub: false
 pricing: free
 version: 0.2.1
@@ -26,7 +25,7 @@ platforms:
   - Node.js
 icon: ./images/ryker-icon-128x128.webp
 iconLarge: ./images/ryker-icon-256x256.webp
-featuredImage: ./images/thumbnail.jpg
+featuredImage: members/atwellpub/images/thumbnail-2x.png
 bannerPreset: green
 gallery:
   - ./images/ryker-shot-1.webp
@@ -52,21 +51,23 @@ links:
   - type: support
     url: https://github.com/gbti-network/ryker/issues
     label: Report a bug
-updatedAt: '2026-08-23T16:04:40.796Z'
+updatedAt: '2026-08-24T17:49:25.622Z'
+publishedAt: 2026-08-22T00:00:00.000Z
 type: product
-author: atwellpub
+author: gbtilabs
 ---
 
 ## Ryker
 
-Ryker is a Chrome extension for editing a document in place and recording every
-change you make as a prompt-ready change request. A model can draft a report in
-seconds. What it cannot do is know that the third section should have come
-first, or that a summary buries its own conclusion. Those corrections are
-structural and they are yours, and the usual place to make them is back in the
-prompt, describing a document you are looking at but cannot touch.
+Ryker is a Chrome extension for inline editing a document and recording every change you make as a prompt-ready change request.
 
-## Why inline
+
+There are two ways to use Ryker. Click the Ryker extension toolbar button on any HTML page to edit the document directly on the page. Or open the Ryker workspace and load a Markdown or HTML file from your own disk into Ryker's visual editor.
+
+
+As you edit, Ryker records each change as a prompt-ready change request that you can copy or download and hand to an agent assistant for implementation.
+
+## Why did we build this?
 
 HTML has become a useful format for delivering rich content when working with
 large language models: complete reports, tables, figures, layouts and styled
@@ -74,10 +75,7 @@ documents, in a form that renders immediately in a browser. Markdown has
 likewise become a common format for structured content.
 
 Both are easy for a model to generate and awkward to edit at the source.
-Markdown means switching between source and preview. HTML source separates the
-author from the rendered document the reader will actually see. Inline editing
-lets you work against the rendered result instead, and Ryker keeps a record of
-what you changed while you do it.
+Markdown means switching between source and preview. HTML source separates the author from the rendered document the reader will actually see. Inline editing lets you work against the rendered result instead, and Ryker keeps a record of what you changed while you do it.
 
 ## Two ways to use it
 
