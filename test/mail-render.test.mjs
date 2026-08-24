@@ -174,47 +174,68 @@ test('the palette is light by default and swaps to dark on ctx.theme', () => {
   assert.doesNotMatch(dark, /#efece7/, 'no light tokens leak into the dark render');
 });
 
-test('an issue with NO recorded window falls back to the 7-day display range', () => {
-  // sow-166: the legacy shape. An issue frozen before `window` was recorded must still re-render as it was
-  // sent, so the fallback is deliberate and not a bug to tidy away.
-  const issue = { generatedAt: Date.UTC(2026, 7, 21), counts: { article: 2, product: 0, prompt: 0, share: 9, news: 4 }, layout: [] };
-  const { subject } = renderIssue(issue, {});
-  assert.match(subject, /^GBTI Digest · 15 items · Aug 15-21$/);
+// sow-166, 2026-08-24. THE HEADER NAMES THE CALENDAR WEEK, NOT A SPAN OF DATES. Owner ruling.
+//
+// The history matters, because the week number is the SECOND fix for one defect and the tests have to keep
+// the first one from coming back. The date cell was originally `generatedAt` minus six days regardless of
+// what the issue selected, so the launch issue, which reaches back ninety days, went out headed "Aug 17-23"
+// while listing prompts from June. That reads as MISSING CONTENT rather than as a wrong label, and the owner
+// reported the articles as absent when they had in fact been selected correctly and mislabelled. The span
+// fix was correct and is now superseded: a week number cannot mislabel coverage, because it does not claim
+// to describe coverage at all. What the issue reaches back to is said in words instead, by the preheader and
+// the empty-section line.
+test('the header and subject name the ISO week the issue went out in', () => {
+  const issue = {
+    generatedAt: Date.UTC(2026, 7, 23), // Sunday, ISO week 34
+    window: { since: Date.UTC(2026, 7, 23) - 90 * 24 * 3600 * 1000 },
+    counts: { article: 1, product: 1, prompt: 5, share: 5, news: 5 },
+    layout: [],
+  };
+  const { subject, html } = renderIssue(issue, {});
+  assert.match(subject, /^GBTI Digest · 17 items · Week 34$/);
+  assert.match(html, /WEEK 34, 2026/, 'the header date cell carries the week');
+  // The superseded shapes must not come back. A 90-day issue labelled as a week of dates is the original
+  // defect; a span is the intermediate fix the owner replaced.
+  assert.doesNotMatch(subject, /Aug 17-23/);
+  assert.doesNotMatch(subject, /May 25 to Aug 23/);
   // ctx.subject still overrides the computed one.
   assert.equal(renderIssue(issue, { subject: 'Custom line' }).subject, 'Custom line');
 });
 
-// sow-166, 2026-08-23. THE HEADER MUST REPORT THE WINDOW THE ISSUE ACTUALLY COVERS.
-//
-// This is a real defect that shipped and was reported by the owner, and the failure mode is why it needs a
-// test rather than a careful reading: the range was `generatedAt` minus six days regardless of the window, so
-// the launch issue (which selects over NINETY days) went out headed "Aug 17-23" while listing prompts from
-// June. Nothing looked broken in the markup. It reads as missing content, not as a wrong label, so the owner
-// reasonably reported the articles as absent when in fact they were correctly selected and mislabelled.
-test('the date range reflects the issue window, not a fixed week', () => {
-  const generatedAt = Date.UTC(2026, 7, 23);
-  const since = generatedAt - 90 * 24 * 3600 * 1000; // the first-issue bootstrap floor
-  const issue = { generatedAt, window: { since }, counts: { article: 1, product: 1, prompt: 5, share: 5, news: 5 }, layout: [] };
-  const { subject, html } = renderIssue(issue, {});
-  assert.match(subject, /May 25 to Aug 23$/, 'the subject names the real span');
-  assert.match(html, /MAY 25 TO AUG 23, 2026/, 'the header date cell names the real span');
-  assert.doesNotMatch(subject, /Aug 17-23/, 'the false one-week range must not survive');
-});
-
-test('a window spanning a year boundary names both years', () => {
-  // "Dec 28-3" is unreadable, and "Dec 28 to Jan 3, 2026" silently attributes December to the wrong year.
-  const generatedAt = Date.UTC(2026, 0, 3);
-  const issue = { generatedAt, window: { since: Date.UTC(2025, 11, 28) }, counts: { article: 1, product: 0, prompt: 0, share: 0, news: 0 }, layout: [] };
-  const { subject } = renderIssue(issue, {});
-  assert.match(subject, /Dec 28, 2025 to Jan 3, 2026$/);
-});
-
-test('a window since that is absent, zero or not before the compile falls back rather than inverting', () => {
-  const generatedAt = Date.UTC(2026, 7, 21);
-  const counts = { article: 1, product: 0, prompt: 0, share: 0, news: 0 };
-  for (const since of [0, null, undefined, NaN, generatedAt, generatedAt + 1000]) {
+test('the week is read from generatedAt alone, so a legacy issue with no window still labels correctly', () => {
+  // An issue frozen before `window` was recorded re-renders exactly as it was sent. Under the old span logic
+  // that needed a deliberate seven-day fallback; under a week number there is nothing to fall back FROM,
+  // which is a real simplification rather than a coincidence, and worth pinning as behaviour.
+  const generatedAt = Date.UTC(2026, 7, 21); // Friday, ISO week 34
+  const counts = { article: 2, product: 0, prompt: 0, share: 9, news: 4 };
+  const bare = renderIssue({ generatedAt, counts, layout: [] }, {}).subject;
+  assert.match(bare, /^GBTI Digest · 15 items · Week 34$/);
+  for (const since of [0, null, undefined, NaN, generatedAt, generatedAt + 1000, generatedAt - 90 * 86400000]) {
     const { subject } = renderIssue({ generatedAt, window: { since }, counts, layout: [] }, {});
-    assert.match(subject, /Aug 15-21$/, `since=${String(since)} must fall back to the 7-day range`);
+    assert.equal(subject, bare, `since=${String(since)} must not move the week label`);
+  }
+});
+
+test('the ISO week-year is used at the turn of the year, not the calendar year', () => {
+  // These disagree for a few days each January, and printing "WEEK 1, 2026" on a date in December 2026 would
+  // be worse than the disagreement it avoids. 2026 starts on a Thursday, so it has 53 ISO weeks and its last
+  // day sits in week 53; 2027-01-04 is a Monday and opens week 1 of 2027.
+  const week = (ms) => renderIssue({ generatedAt: ms, counts: { article: 1 }, layout: [] }, {});
+  assert.match(week(Date.UTC(2026, 0, 1)).html, /WEEK 1, 2026/, 'Jan 1 2026 is a Thursday, so it is week 1');
+  assert.match(week(Date.UTC(2026, 11, 31)).html, /WEEK 53, 2026/, '2026 runs to 53 ISO weeks');
+  assert.match(week(Date.UTC(2027, 0, 4)).html, /WEEK 1, 2027/);
+  // The boundary case the ISO year exists for: a late-December date that belongs to the NEXT year's week 1.
+  // 2024-12-30 is a Monday opening ISO week 1 of 2025.
+  assert.match(week(Date.UTC(2024, 11, 30)).html, /WEEK 1, 2025/, 'not WEEK 1, 2024');
+});
+
+test('an issue with no finite generatedAt carries no week label at all', () => {
+  // Absent is not zero. Falling back to the epoch would head the email "WEEK 1, 1970"; the header cell and
+  // the subject tail are simply omitted instead, which is what the renderer already does for a bare fixture.
+  for (const generatedAt of [undefined, null, NaN, 'soon']) {
+    const { subject, html } = renderIssue({ generatedAt, counts: { article: 1 }, layout: [] }, {});
+    assert.doesNotMatch(html, /WEEK /);
+    assert.equal(subject, 'The GBTI Network weekly digest', 'falls back to the plain default subject');
   }
 });
 
@@ -523,4 +544,32 @@ test('v2 CONTRACT: a hostile thumb or source name is escaped and fails closed, l
   assert.ok(!html.includes('<script>x</script>'), 'the source name is escaped');
   assert.ok(!html.includes('<img src=x onerror=1>'), 'the blurb is escaped');
   assert.ok(!html.includes('javascript:alert(1)'), 'an unsafe thumb url fails closed to no image');
+});
+
+// sow-166, 2026-08-24: THE MASTHEAD IS THE MARK AND THE WEEK, NOT A WORDMARK. Owner ruling.
+test('the header carries the logo beside the week and no "GBTI Digest" wordmark', () => {
+  const issue = { generatedAt: Date.UTC(2026, 7, 24), counts: { article: 1 }, layout: [] };
+  const { html } = renderIssue(issue, {});
+  assert.match(html, /<img src="https:\/\/gbti\.network\/brand\/logo\/mark-ink-96\.png" width="30" height="30" alt="GBTI Network"/);
+  assert.match(html, /WEEK 35, 2026/);
+  // The wordmark is gone from the BODY. It survives in the <title>, which is the subject line and a different
+  // string, so anchor on the styled markup rather than on the words.
+  assert.doesNotMatch(html, /GBTI <span style="color:#187a4b">Digest<\/span>/);
+  // Order matters: the owner asked for the mark to the RIGHT of the week.
+  assert.ok(html.indexOf('WEEK 35, 2026') < html.indexOf('mark-ink-96.png'), 'week first, then the mark');
+});
+
+test('the mark is themed, because a solid silhouette has no contrast of its own', () => {
+  // The ink mark vanishes on the dark card and the white mark vanishes on the light one, so this is a
+  // legibility guard, not a polish one. It is picked from the same theme that picks the palette.
+  const issue = { generatedAt: Date.UTC(2026, 7, 24), counts: { article: 1 }, layout: [] };
+  assert.match(renderIssue(issue, { theme: 'light' }).html, /mark-ink-96\.png/);
+  assert.match(renderIssue(issue, { theme: 'dark' }).html, /mark-white-96\.png/);
+  assert.doesNotMatch(renderIssue(issue, { theme: 'dark' }).html, /mark-ink-96\.png/);
+});
+
+test('the mark links to the site and honours a custom siteUrl', () => {
+  const issue = { generatedAt: Date.UTC(2026, 7, 24), counts: { article: 1 }, layout: [] };
+  const { html } = renderIssue(issue, { siteUrl: 'https://staging.gbti.network' });
+  assert.match(html, /<a href="https:\/\/staging\.gbti\.network" style="text-decoration:none"><img src="https:\/\/staging\.gbti\.network\/brand\/logo\//);
 });

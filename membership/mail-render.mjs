@@ -118,7 +118,6 @@ const COUNT_NOUNS = {
   article: ['article', 'articles'], prompt: ['prompt', 'prompts'], product: ['product', 'products'],
   share: ['member share', 'member shares'], news: ['news pick', 'news picks'],
 };
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAY_MS = 24 * 3600 * 1000;
 
 function plural(n, key) {
@@ -126,38 +125,38 @@ function plural(n, key) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// The date line under the wordmark, and the tail of the subject. It reports the range the issue ACTUALLY
-// covers, taken from the frozen `window.since`, not a fixed week.
+// The date line under the wordmark, and the tail of the subject: the CALENDAR WEEK the issue went out in,
+// "Week 34", not a span of dates.
 //
-// It used to be `generatedAt` minus six days, unconditionally. That was wrong in a way that read as missing
-// content rather than as a wrong label: the launch issue selects over ninety days and every issue after it
-// floors at the newsletter epoch, so an email headed "Aug 17-23" would list prompts from June and products
-// from May. The owner read exactly that and reported the articles as missing. The items were right; the
-// header was lying about them.
+// Owner ruling, 2026-08-24. This replaced a span, which itself replaced a fixed seven days that had been
+// lying: the launch issue selects over ninety days, so an email headed "Aug 17-23" listed prompts from June
+// and products from May, and the owner read it as missing content rather than as a wrong label. A week
+// number cannot make that mistake, because it labels WHEN the issue was sent and claims nothing about what
+// it reaches back to. What the issue covers is said in words instead, by the note under the greeting and by
+// the empty-section line, where a reader can actually act on it.
 //
-// A plain ASCII hyphen is a range hyphen, not an en dash, so "Aug 15-21" is compliant with the no-dash rule.
-function coverageRange(generatedAt, since) {
-  const end = Number(generatedAt);
-  if (!Number.isFinite(end)) return null;
-  const start = Number(since);
-  // An issue frozen before `window` was recorded carries no `since`. Fall back to the old seven days rather
-  // than inventing a range, so re-rendering an archived issue reproduces what was actually sent.
-  const from = Number.isFinite(start) && start > 0 && start < end ? start : end - 6 * DAY_MS;
-  const s = new Date(from);
-  const e = new Date(end);
-  const sY = s.getUTCFullYear();
-  const eY = e.getUTCFullYear();
-  const sM = MONTHS[s.getUTCMonth()];
-  const eM = MONTHS[e.getUTCMonth()];
-  const sD = s.getUTCDate();
-  const eD = e.getUTCDate();
-  // Spanning a year boundary has to name both years, or "Dec 28-3" is unreadable.
-  if (sY !== eY) {
-    const short = `${sM} ${sD}, ${sY} to ${eM} ${eD}, ${eY}`;
-    return { short, mono: short.toUpperCase() };
-  }
-  const short = sM === eM ? `${sM} ${sD}-${eD}` : `${sM} ${sD} to ${eM} ${eD}`;
-  return { short, mono: `${short}, ${eY}`.toUpperCase() };
+// ISO 8601 weeks (Monday start, week 1 is the week holding January 4th), and the ISO WEEK-YEAR rather than
+// the calendar year of the date. Those disagree for a few days each turn of the year: 2026-12-31 sits in
+// week 1 of 2027, and printing "WEEK 1, 2026" there would be worse than the disagreement it avoids.
+function coverageWeek(generatedAt) {
+  const ms = Number(generatedAt);
+  // `> 0` and not merely finite, because Number(null) is 0, not NaN. A null generatedAt would otherwise pass
+  // a bare finite check and head the email "WEEK 1, 1970". The span version this replaced had the same hole
+  // (it rendered "Dec 26, 1969 to Jan 1, 1970") and no test reached it; absent has to stay absent.
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const d = new Date(ms);
+  if (!Number.isFinite(d.getTime())) return null;
+  // Move to the Thursday of this week: the ISO year is whichever year that Thursday falls in.
+  const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const mondayIndex = (thursday.getUTCDay() + 6) % 7; // Monday 0 ... Sunday 6
+  thursday.setUTCDate(thursday.getUTCDate() - mondayIndex + 3);
+  const isoYear = thursday.getUTCFullYear();
+  // January 4th is always in ISO week 1, so the Thursday of ITS week anchors the count.
+  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+  const jan4Index = (jan4.getUTCDay() + 6) % 7;
+  const week1Thursday = new Date(Date.UTC(isoYear, 0, 4 - jan4Index + 3));
+  const week = 1 + Math.round((thursday.getTime() - week1Thursday.getTime()) / (7 * DAY_MS));
+  return { short: `Week ${week}`, mono: `WEEK ${week}, ${isoYear}` };
 }
 
 function totalItems(counts) {
@@ -346,21 +345,52 @@ function membershipCtaHtml(p, siteUrl) {
     + `<!--/membership-cta-->`;
 }
 
-function headerHtml(p, ctx, range, launchNote) {
+// The masthead: the week on the right, the logo to the right of it, and nothing on the left.
+//
+// OWNER RULING, 2026-08-24: the "GBTI Digest" wordmark is gone from the top left and the logo takes the
+// corner. The identity is carried by the mark and by the greeting directly beneath it, so the wordmark was
+// saying the same thing a third time.
+//
+// THE MARK IS THEMED, because it is a solid silhouette with no contrast of its own: the ink mark disappears
+// on the dark card and the white mark disappears on the light one. It is picked from the same `theme` that
+// picks the palette, so the two cannot disagree.
+//
+// IMAGES ARE OFF BY DEFAULT IN MANY INBOXES, which is why the mark is an addition to the week rather than a
+// replacement for the wordmark's job. With images blocked the reader still sees the week, the alt text and
+// the greeting; nothing that identifies the sender depends on a fetch succeeding.
+const LOGO_PX = 30;
+function logoCellHtml(logoUrl, siteUrl) {
+  if (!logoUrl) return '';
+  const img = `<img src="${escapeHtml(logoUrl)}" width="${LOGO_PX}" height="${LOGO_PX}" alt="GBTI Network"`
+    + ` style="display:block;border:0;outline:none;text-decoration:none;width:${LOGO_PX}px;height:${LOGO_PX}px">`;
+  return `<td width="${LOGO_PX}" style="width:${LOGO_PX}px;padding-left:12px;line-height:0">`
+    + `<a href="${escapeHtml(siteUrl)}" style="text-decoration:none">${img}</a>`
+    + `</td>`;
+}
+
+function headerHtml(p, ctx, range, launchNote, logoUrl, siteUrl) {
   const greeting = escapeHtml(str(ctx.greeting).trim() || 'This week on the network');
   const headerLine = escapeHtml(str(ctx.headerLine).trim() || 'Everything new across the network since the last issue.');
-  const dateCell = range
-    ? `<td align="right" style="font-family:'Courier New',monospace;font-size:10.5px;letter-spacing:.1em;color:${p.meta};mso-line-height-rule:exactly;line-height:22px">${escapeHtml(range.mono)}</td>`
+  const weekCell = range
+    ? `<td align="right" style="font-family:'Courier New',monospace;font-size:10.5px;letter-spacing:.1em;color:${p.meta};mso-line-height-rule:exactly;line-height:${LOGO_PX}px">${escapeHtml(range.mono)}</td>`
+    : '';
+  const logoCell = logoCellHtml(logoUrl, siteUrl);
+  // A right-aligned nested table rather than one cell with an inline image: Outlook does not honour
+  // vertical-align on an inline img, and the week has to sit on the mark's centre line.
+  const mastheadRow = weekCell || logoCell
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="width:480px"><tr>`
+      + `<td align="right"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr>`
+      + weekCell
+      + logoCell
+      + `</tr></table></td>`
+      + `</tr></table>`
     : '';
   const launchHtml = launchNote
     ? `<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-style:italic;color:${p.meta};mso-line-height-rule:exactly;line-height:18px;padding-top:9px">${escapeHtml(str(launchNote))}</div>`
     : '';
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px">`
     + `<tr><td width="536" style="width:536px;padding:22px 28px 18px;border-bottom:1px solid ${p.hairline}">`
-    + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="480" style="width:480px"><tr>`
-    + `<td align="left" style="font-family:'Trebuchet MS',Verdana,sans-serif;font-size:18px;font-weight:700;color:${p.ink};mso-line-height-rule:exactly;line-height:22px">GBTI <span style="color:${p.accent}">Digest</span></td>`
-    + dateCell
-    + `</tr></table>`
+    + mastheadRow
     + `<div style="font-family:'Trebuchet MS',Verdana,sans-serif;font-size:14.5px;font-weight:700;color:${p.ink};mso-line-height-rule:exactly;line-height:20px;padding-top:12px">${greeting}</div>`
     + `<div style="font-family:Arial,Helvetica,sans-serif;font-size:12.5px;color:${p.inkSoft};mso-line-height-rule:exactly;line-height:19px;padding-top:5px">${headerLine}</div>`
     + launchHtml
@@ -425,8 +455,11 @@ export function renderIssue(issue, ctx = {}) {
   const empties = layout.filter((s) => s.empty);
   const firstIssue = Boolean(issue?.launchNote);
   const counts = issue?.counts || null;
-  const range = coverageRange(issue?.generatedAt, issue?.window?.since);
+  const range = coverageWeek(issue?.generatedAt);
   const siteUrl = safeUrl(ctx.siteUrl) || 'https://gbti.network';
+  // The themed mark, absolute because an email has no page to be relative to. 96px source for a 30px
+  // slot, so it stays sharp on a retina client without shipping the 512px brand asset to every inbox.
+  const logoUrl = `${siteUrl}/brand/logo/mark-${ctx.theme === 'dark' ? 'white' : 'ink'}-96.png`;
   const subject = str(ctx.subject).trim() || computedSubject(counts, range) || 'The GBTI Network weekly digest';
 
   const preheaderText = escapeHtml(counts ? countsSummary(counts, firstIssue) : emptySummary(firstIssue));
@@ -451,7 +484,7 @@ export function renderIssue(issue, ctx = {}) {
     + `<tr><td width="600" align="center" style="width:600px;padding:24px 0 40px">`
     + `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="536" style="width:536px;background-color:${p.cardBg};border:1px solid ${p.cardBorder}">`
     + `<tr><td width="536" style="width:536px;padding:0">`
-    + headerHtml(p, ctx, range, issue?.launchNote)
+    + headerHtml(p, ctx, range, issue?.launchNote, logoUrl, siteUrl)
     + body
     + footerHtml(p, ctx, siteUrl)
     + `</td></tr></table>`

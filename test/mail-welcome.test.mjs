@@ -176,14 +176,31 @@ test('the launch span phrase agrees across the digest and the renderer', () => {
   assert.match(renderIssue({ layout }, {}).html, /Nothing new in Articles since the last issue\./);
 });
 
-test('the WELCOME note says YOUR first issue, never THE first issue', () => {
-  // For somebody joining in month three, "this is the first issue" is simply false, and it contradicted the
-  // welcome header directly above it. Caught by rendering the email, not by reading the template.
-  assert.match(WELCOME_NOTE, /your first issue/i);
-  assert.doesNotMatch(WELCOME_NOTE, /this is the first issue/i);
-  assert.match(WELCOME_NOTE, /past 90 days/, 'it carries the span, so the header line does not have to');
-  assert.doesNotMatch(WELCOME_HEADER_LINE, /90 days/, 'and the header line does not repeat it');
+test('the WELCOME note thanks the subscriber and explains nothing about the compiler', () => {
+  // OWNER RULING, 2026-08-24. This note used to read "this is your first issue, so it covers the past 90
+  // days", which was a fact about the window dressed as a greeting. Before that it read "this is THE first
+  // issue", which is simply false for anyone joining after the launch. The third version is the one the owner
+  // asked for: thank them for subscribing, and thank them for the work they do.
+  assert.match(WELCOME_NOTE, /thank you for subscribing/i);
+  assert.match(WELCOME_NOTE, /making the internet a better place/i);
+  // Both superseded shapes must stay gone, including the one that was itself a correction.
+  assert.doesNotMatch(WELCOME_NOTE, /first issue/i);
+  assert.doesNotMatch(WELCOME_NOTE, /90 days/, 'the span is said by the preheader and the empty line, not here');
   assert.match(WELCOME_GREETING, /welcome/i);
+  assert.doesNotMatch(WELCOME_HEADER_LINE, /90 days/);
+});
+
+test('dropping the span from the note did NOT drop it from the issue', () => {
+  // The note was the only place a reader was told the welcome reaches back further than a week, so removing
+  // it is only safe because two other lines still say so. If both of those ever go, a subscriber gets three
+  // months of items under a week number with nothing to explain it. This is that guard.
+  const layout = [
+    { key: 'article', label: 'Articles', empty: false, items: [{ title: 'A', url: 'https://gbti.network/a', author: 'x' }] },
+    { key: 'product', label: 'Products', empty: true, note: 'x', items: [] },
+  ];
+  const { html } = renderIssue({ launchNote: WELCOME_NOTE, layout, counts: { article: 4 } }, {});
+  assert.match(html, /from the network in the past 90 days\./, 'the preheader still names the span');
+  assert.match(html, /Nothing new in Products in the past 90 days\./, 'and so does the empty-section line');
 });
 
 test('a composed WELCOME issue renders the welcome note and the 90-day empty-section wording', () => {
@@ -193,9 +210,13 @@ test('a composed WELCOME issue renders the welcome note and the 90-day empty-sec
   );
   assert.equal(issue.launchNote, WELCOME_NOTE);
   const { html } = renderIssue(issue, { greeting: WELCOME_GREETING, headerLine: WELCOME_HEADER_LINE });
-  assert.match(html, /This is your first issue/);
+  assert.match(html, /Thank you for subscribing to the weekly digest/);
   assert.doesNotMatch(html, /This is the first issue/, 'the newsletter-wide launch note must not appear on a welcome');
+  // The note no longer carries the span, but it still has to switch the WORDING, because the renderer reads
+  // firstIssue off the presence of a note. A welcome whose empty sections said "since the last issue" would be
+  // claiming a previous issue that does not exist.
   assert.match(html, /in the past 90 days/, 'empty sections use the launch wording, not "since the last issue"');
+  assert.doesNotMatch(html, /since the last issue/);
 });
 
 // sow-166 (2026-08-24): THE PREHEADER WAS A THIRD COPY OF THE CADENCE, AND IT WAS STILL WRONG.

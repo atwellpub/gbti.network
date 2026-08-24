@@ -140,24 +140,25 @@ export const EMPTY_SECTION_NOTES = {
 // differs from a weekly only in its window and its two header lines, so it should not need a second render
 // path that can drift from the first.
 //
-// "the past 90 days" is stated plainly because the alternative is a reader wondering why an item from two
-// months ago is in an email they take to be weekly. The launch note already does this job for the first
-// issue; this is the same courtesy for everybody who joins after it.
 export const WELCOME_GREETING = 'Welcome to the GBTI Network';
 export const WELCOME_HEADER_LINE = 'Here is what members have been publishing lately.';
 
-// The welcome's own launch note, replacing the newsletter's.
+// The welcome's own note, replacing the newsletter's launch note.
 //
-// "YOUR first issue", not "THE first issue". For a late joiner the second is simply false, and it was the
-// contradiction that showed up the moment this was rendered rather than read: a header promising 90 days sat
-// directly above a note claiming the issue covered a week.
+// OWNER RULING, 2026-08-24: this is a THANK YOU, not an explanation of the window. It used to say "this is
+// your first issue, so it covers the past 90 days", which was a mechanical fact about the compiler dressed as
+// a greeting. The first thing a new subscriber reads should thank them for subscribing and for the work they
+// do, not apologise in advance for the date range.
 //
-// It has to be a NOTE rather than folded into the header line, because the renderer derives `firstIssue` from
-// the presence of a launch note (mail-render.mjs) and uses that to pick the empty-section wording. Suppressing
-// the note would silently switch a 90-day welcome back to "since the last issue", which is the one phrase that
-// cannot be true for somebody's first email.
+// The span is still stated where it earns its place: the preheader and the empty-section line both name the
+// 90 days, so nothing is hidden, it just stops being the opening sentence.
+//
+// It has to remain a NOTE rather than fold into the header line, because the renderer derives `firstIssue`
+// from the presence of a launch note (mail-render.mjs) and uses that to pick the empty-section wording and
+// the preheader span. Suppressing the note would silently switch a 90-day welcome back to "since the last
+// issue" and "this week", which are the two phrases that cannot be true for somebody's first email.
 export const WELCOME_NOTE =
-  'This is your first issue, so it covers the past 90 days rather than everything published before it.';
+  'Thank you for subscribing to the weekly digest, and thank you for the part you play in making the internet a better place.';
 
 // CORRECTED 2026-08-23: this said "the past week" while the bootstrap window has been NINETY days since the
 // owner widened it on 2026-08-22. The copy was written when the window really was a week and did not travel
