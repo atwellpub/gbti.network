@@ -122,3 +122,34 @@ test('a script/handler smuggled into an attributed link inner is stripped; safe 
     '<a href="https://x.com" rel="noopener" target="_blank"><b>t</b></a>', // handler attribute stripped
   );
 });
+
+// The entity decode used to stop at &amp;, so a double quote read back as the literal string "&quot;". Stored in a
+// body that is re-rendered, it became &amp;quot; and the reader saw the entity on the page.
+test('&quot; and &#39; decode to real characters, and &amp;quot; still decodes to &quot;', () => {
+  assert.equal(inlineHtmlToMd('not what &quot;load balancing&quot; describes'), 'not what "load balancing" describes');
+  assert.equal(inlineHtmlToMd('I&#39;ve had it since then'), "I've had it since then");
+  assert.equal(inlineHtmlToMd('I&apos;ve had it since then'), "I've had it since then");
+  assert.equal(inlineHtmlToMd('the entity &amp;quot; written out'), 'the entity &quot; written out');
+});
+
+// rendererAnchors is OPT-IN precisely so this contract is untouched: an author-written target=_blank link is intent
+// to keep a raw anchor, and the doc editor must go on preserving it. Only a caller reading SITE-rendered HTML
+// (the WorkBench Preview) asks for the markdown form back.
+test('a renderer-shaped anchor is preserved by default and only inverts under rendererAnchors', () => {
+  const html = '<a href="https://x.com" target="_blank" rel="noopener">t</a>';
+  assert.equal(inlineHtmlToMd(html), '<a href="https://x.com" rel="noopener" target="_blank">t</a>');
+  assert.equal(inlineHtmlToMd(html, { rendererAnchors: true }), '[t](https://x.com)');
+});
+
+test('rendererAnchors leaves any anchor the site renderer would not have produced alone', () => {
+  // nofollow is not part of the renderer's markdown-link decoration, so this one is the author's and stays raw.
+  assert.equal(
+    inlineHtmlToMd('<a href="https://x.com" rel="nofollow noopener" target="_blank">t</a>', { rendererAnchors: true }),
+    '<a href="https://x.com" rel="nofollow noopener" target="_blank">t</a>',
+  );
+  // A nested mark means the inner is not plain text, so the safe raw form is kept rather than guessed at.
+  assert.equal(
+    inlineHtmlToMd('<a href="https://x.com" target="_blank" rel="noopener"><strong>b</strong></a>', { rendererAnchors: true }),
+    '<a href="https://x.com" rel="noopener" target="_blank"><strong>b</strong></a>',
+  );
+});

@@ -624,7 +624,9 @@ const labelOf = CATEGORY_LABELS;
         // Only the inline run is read back. The block's own markdown prefix (heading hashes, quote marker,
         // list bullets) is preserved from the source, so a paragraph cannot silently become a heading.
         const prefix = /^(\s{0,3}(?:#{1,6}\s+|>\s?|[-*]\s+|\d+\.\s+))/.exec(before);
-        const edited = (prefix ? prefix[1] : '') + inlineHtmlToMd(el.innerHTML).trim();
+        // rendererAnchors: this HTML came from renderMarkdownWithBlocks, not from an author, so an anchor wearing
+        // the renderer's own target=_blank rel=noopener reads back as the `[text](url)` it was written as.
+        const edited = (prefix ? prefix[1] : '') + inlineHtmlToMd(el.innerHTML, { rendererAnchors: true }).trim();
         if (edited === before) return;
         lines.splice(range.start, range.end - range.start + 1, edited);
         draft.body = lines.join('\n');
@@ -652,9 +654,19 @@ const labelOf = CATEGORY_LABELS;
             if (el.getAttribute('contenteditable') === 'true') return;
             el.setAttribute('contenteditable', 'true');
             el.focus();
+            // Baseline for the no-op check on blur, captured AFTER focus so the browser's own contenteditable
+            // normalization sits on both sides of the comparison.
+            el.dataset.pvSnap = el.innerHTML;
           }, { once: false });
           el.addEventListener('blur', () => {
+            // A click-through must commit NOTHING. commitBlock decides "edited" by comparing the read-back to the
+            // source line, and the renderer is not a perfect inverse for every construct, so an untouched block
+            // could read back different, rewrite draft.body, and re-render the whole document -- destroying the
+            // node the author was clicking next. Comparing the DOM against itself cannot have that failure mode.
+            const untouched = el.dataset.pvSnap === el.innerHTML;
             el.removeAttribute('contenteditable');
+            delete el.dataset.pvSnap;
+            if (untouched) return;
             void commitBlock(el);
           });
         });

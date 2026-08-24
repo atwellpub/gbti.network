@@ -555,13 +555,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     h = h.replace(/\n/g, "<br>");
     return h.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
   }
-  function inlineHtmlToMd(html) {
+  function inlineHtmlToMd(html, { rendererAnchors = false } = {}) {
     let s = String(html ?? "");
     const keep = [];
     s = s.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, inner) => {
       const a = parseLinkAttrs(attrs);
       if (!a.href) return inner;
       if (!a.attributed) return `[${inner}](${a.href})`;
+      const rendererShaped = a.blank && a.rel.length === 1 && a.rel[0] === "noopener" && !/</.test(inner);
+      if (rendererAnchors && rendererShaped) return `[${inner}](${a.href})`;
       keep.push(rawAnchor(a.href, a.rel, a.blank, inner));
       return `\0A${keep.length - 1}\0`;
     });
@@ -572,7 +574,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     s = s.replace(/<br\s*\/?>/gi, "\n");
     s = s.replace(/<div>/gi, "\n").replace(/<\/div>/gi, "");
     s = s.replace(/<[^>]+>/g, "");
-    s = s.replace(/&nbsp;/gi, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    s = s.replace(/&nbsp;/gi, " ").replace(/&quot;/gi, '"').replace(/&(?:apos|#0*39);/gi, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
     return s.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? "");
   }
 

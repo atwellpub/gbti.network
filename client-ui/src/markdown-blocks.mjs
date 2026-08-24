@@ -271,7 +271,7 @@ export function inlineMdToHtml(md) {
   h = h.replace(/\n/g, '<br>');
   return h.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? ''); // restore the protected anchors
 }
-export function inlineHtmlToMd(html) {
+export function inlineHtmlToMd(html, { rendererAnchors = false } = {}) {
   let s = String(html ?? '');
   const keep = [];
   // Links: a plain link -> `[text](url)`; an attributed link (rel/target) -> the canonical sanitized raw <a> HTML,
@@ -280,6 +280,13 @@ export function inlineHtmlToMd(html) {
     const a = parseLinkAttrs(attrs);
     if (!a.href) return inner;                       // dangerous/empty href -> drop the link, keep the text
     if (!a.attributed) return `[${inner}](${a.href})`;
+    // rendererAnchors: the caller's HTML came from the SITE renderer, not from an author. client/src/markdown.mjs
+    // decorates every markdown link with exactly target="_blank" rel="noopener", so an anchor wearing precisely
+    // that pair, around plain text, WAS `[text](url)` and must read back as one. Without this the Preview's
+    // edit-in-place rewrites an author's markdown link into raw <a> HTML. Off by default: the doc editor feeds
+    // this its own author-written anchors, where target=_blank is intent to preserve (see test/inline-md.test.mjs).
+    const rendererShaped = a.blank && a.rel.length === 1 && a.rel[0] === 'noopener' && !/</.test(inner);
+    if (rendererAnchors && rendererShaped) return `[${inner}](${a.href})`;
     keep.push(rawAnchor(a.href, a.rel, a.blank, inner));
     return `\u0000A${keep.length - 1}\u0000`;
   });
@@ -290,6 +297,10 @@ export function inlineHtmlToMd(html) {
   s = s.replace(/<br\s*\/?>/gi, '\n');
   s = s.replace(/<div>/gi, '\n').replace(/<\/div>/gi, ''); // contenteditable wraps soft lines in <div>
   s = s.replace(/<[^>]+>/g, ''); // drop any stray markup (paste is hardened; nothing else should appear)
-  s = s.replace(/&nbsp;/gi, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); // decode NON-anchor text
+  // Decode NON-anchor text. &quot; and &#39; were missing, so an edited paragraph containing a double quote stored
+  // the literal string "&quot;", which re-renders to &amp;quot; and shows the entity to the reader. &amp; stays LAST
+  // so an author's own "&amp;quot;" still decodes to "&quot;" rather than collapsing to a quote character.
+  s = s.replace(/&nbsp;/gi, ' ').replace(/&quot;/gi, '"').replace(/&(?:apos|#0*39);/gi, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   return s.replace(/\u0000A(\d+)\u0000/g, (_m, i) => keep[Number(i)] ?? ''); // restore anchors AFTER the decode
 }
