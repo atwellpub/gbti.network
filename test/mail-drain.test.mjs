@@ -649,3 +649,102 @@ test('WELCOME: the welcome issue renders its own greeting, and a weekly does not
   // The weekly keeps the default greeting, so the welcome copy is not leaking into every issue.
   assert.match(all, /This week on the network/, 'the weekly still uses the standing greeting');
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// ONE WELCOME PER PERSON, ACROSS ISSUES. Reproduces a defect measured in production rather than imagined.
+//
+// A welcome issue is composed once per UTC day for everybody with no welcomedAt, and the launch send gate
+// leaves a recipient it refuses PENDING rather than terminal, so they wait for the gate to open for them.
+// Both behaviours are correct on their own and they compose into a duplicate: while the gate is closed an
+// enrolled subscriber accumulates one queued welcome per day, every copy independently sendable the moment
+// the gate opens, because the pending index, the send record and the gate are all per issue.
+//
+// On 2026-08-25, with the gate closed and 18 people enrolled, one member sat in both welcome-2026-08-24 and
+// welcome-2026-08-25. This is that state.
+test('DUPLICATE WELCOME: a subscriber queued in two welcome issues receives exactly one', async () => {
+  const kv = makeKV();
+  const sender = makeSender();
+  const h = 'a'.repeat(64);
+  await seed(kv, 'welcome-2026-08-24', [h]);
+  await seed(kv, 'welcome-2026-08-25', [h]);
+
+  const first = await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-24', now: at(2_000_000), ...BIG, ...deps(sender) });
+  const second = await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-25', now: at(2_000_001), ...BIG, ...deps(sender) });
+
+  assert.equal(sender.sent.length, 1, 'exactly one email, not one per issue');
+  assert.equal(first.sent, 1);
+  assert.equal(second.sent, 0);
+  assert.equal(second.skipped, 1, 'the second copy is SKIPPED, which is neither a failure nor a suppression');
+  assert.equal(second.failed, 0, 'a duplicate copy must never read as breakage');
+  assert.equal(second.suppressed, 0, 'and must never corrupt the counter that means somebody opted out');
+
+  const rec = await getSend(kv, 'welcome-2026-08-25', h);
+  assert.equal(rec.status, 'skipped');
+  assert.ok(rec.skippedAt > 0);
+  const idx = await readPendingIndex(kv, 'welcome-2026-08-25');
+  assert.equal(idx.length, 0, 'and it leaves the pending index, so the issue can finish');
+});
+
+test('DUPLICATE WELCOME: the skip does not depend on which issue drains first', async () => {
+  const kv = makeKV();
+  const sender = makeSender();
+  const h = 'b'.repeat(64);
+  await seed(kv, 'welcome-2026-08-24', [h]);
+  await seed(kv, 'welcome-2026-08-25', [h]);
+  const second = await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-25', now: at(2_000_000), ...BIG, ...deps(sender) });
+  const first = await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-24', now: at(2_000_001), ...BIG, ...deps(sender) });
+  assert.equal(sender.sent.length, 1);
+  assert.equal(second.sent, 1);
+  assert.equal(first.skipped, 1);
+});
+
+// THE COUNTER-TEST, and it is the one that stops the guard from becoming "an already-welcomed subscriber
+// never gets mail again". Without it, deleting `isWelcomeIssueId(issueId)` from the guard would silently
+// terminate every weekly for everybody who has ever been welcomed, which is the entire list.
+//
+// THE FIRST VERSION OF THIS TEST PASSED UNDER EXACTLY THAT MUTATION, and it is recorded because the reason is
+// invisible on the page: `seed()` writes a FRESH subscriber record for every hash it is given, so calling it a
+// second time for the weekly wiped the welcomedAt the first drain had just stamped. The subscriber then looked
+// un-welcomed, the guard could not fire whatever its condition, and the assertion held for a reason that had
+// nothing to do with what it claimed to check. So the weekly is enqueued WITHOUT re-seeding the subscriber,
+// and the welcomed state is asserted before the weekly drains rather than assumed.
+test('a WEEKLY issue is never skipped for an already-welcomed subscriber', async () => {
+  const kv = makeKV();
+  const sender = makeSender();
+  const h = 'c'.repeat(64);
+  await seed(kv, 'welcome-2026-08-25', [h]);
+  await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-25', now: at(2_000_000), ...BIG, ...deps(sender) });
+  assert.equal(sender.sent.length, 1);
+
+  const stamped = JSON.parse((await kv.get(subscriberKey(h))));
+  assert.ok(stamped.welcomedAt > 0, 'precondition: the drain stamped welcomedAt, so the guard CAN fire here');
+
+  // Enqueue only. Re-seeding would rewrite the subscriber and discard the state under test.
+  await enqueueIssue(kv, issueOf('weekly-2026-09-01'), [h], { now: at(2_500_000) });
+  const weekly = await drainMailIssue({ ...OPEN }, { kv, issueId: 'weekly-2026-09-01', now: at(3_000_000), ...BIG, ...deps(sender) });
+  assert.equal(weekly.sent, 1, 'a welcomed subscriber still gets every weekly');
+  assert.equal(weekly.skipped, 0);
+  assert.equal(sender.sent.length, 2);
+});
+
+test('a first welcome is NOT skipped: the guard reads welcomedAt, not the issue kind', async () => {
+  const kv = makeKV();
+  const sender = makeSender();
+  const h = 'd'.repeat(64);
+  await seed(kv, 'welcome-2026-08-25', [h]);
+  const r = await drainMailIssue({ ...OPEN }, { kv, issueId: 'welcome-2026-08-25', now: at(2_000_000), ...BIG, ...deps(sender) });
+  assert.equal(r.sent, 1);
+  assert.equal(r.skipped, 0);
+});
+
+test('drainMail aggregates skipped across issues', async () => {
+  const kv = makeKV();
+  const sender = makeSender();
+  const h = 'e'.repeat(64);
+  await seed(kv, 'welcome-2026-08-24', [h]);
+  await seed(kv, 'welcome-2026-08-25', [h]);
+  const r = await drainMail({ ...OPEN }, { kv, now: at(2_000_000), ...BIG, ...deps(sender) });
+  assert.equal(r.drained, 1);
+  assert.equal(r.skipped, 1);
+  assert.equal(sender.sent.length, 1);
+});

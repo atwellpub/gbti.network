@@ -13,7 +13,8 @@
 // (no network, no Resend, no Stripe). The Worker wiring supplies the real resolver, renderer and Resend send.
 
 import {
-  planDrain, markClaimed, releaseClaim, markSent, markFailed, markSuppressed, canRetry,
+  planDrain, markClaimed, releaseClaim, markSent, markFailed, markSuppressed,
+  markSkipped, canRetry,
   budgetRemaining, DEFAULT_MAX_ATTEMPTS,
 } from '../../membership/mail-queue.mjs';
 import { suppressKey } from '../../membership/mail-suppress.mjs';
@@ -80,7 +81,7 @@ export function resolveSendGate(env = {}) {
 
 /**
  * Drain ONE issue for at most `cap` sends this tick, inside the fail-closed rate budget and behind the
- * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, dropped, refused, deferred,
+ * fail-closed launch send gate. Returns { issueId, sent, failed, suppressed, skipped, dropped, refused, deferred,
  * backlog, gate, reason }, where `refused` counts recipients the send gate did not permit and `deferred`
  * counts recipients whose suppression marker was unreadable this tick; both are left pending with no attempt.
  *
@@ -157,6 +158,7 @@ export async function drainMailIssue(env, {
   let sent = 0;
   let failed = 0;
   let suppressed = 0;
+  let skipped = 0;   // a welcome copy for somebody another welcome issue already welcomed: terminal, not a failure
   let dropped = 0; // a hash in the index whose record is gone: pruned from the index, not a failure
   let refused = 0; // a hash the launch send gate does not permit yet: left PENDING, no attempt burned
   let deferred = 0; // suppression marker unreadable this tick: left PENDING, no attempt burned, retried next tick
@@ -177,7 +179,7 @@ export async function drainMailIssue(env, {
     if (!rec) { await removeFromPending(kv, issueId, hash); dropped++; continue; } // record expired/deleted
 
     // Terminal record lingering in the index (a lost removal): prune it, do not send.
-    if (rec.status === 'sent' || rec.status === 'failed' || rec.status === 'suppressed') {
+    if (rec.status === 'sent' || rec.status === 'failed' || rec.status === 'suppressed' || rec.status === 'skipped') {
       await removeFromPending(kv, issueId, hash);
       continue;
     }
@@ -244,6 +246,30 @@ export async function drainMailIssue(env, {
       await putSend(kv, markFailed(claimed, { now })); // no active subscriber record: terminal, not retried
       await removeFromPending(kv, issueId, hash);
       failed++;
+      continue;
+    }
+
+    // ONE WELCOME PER PERSON, HOWEVER MANY WELCOME ISSUES HOLD THEM.
+    //
+    // A welcome issue is composed once per UTC day for everybody with no welcomedAt, and a recipient the launch
+    // send gate refuses is left PENDING rather than terminalized, deliberately, so they wait for the gate to
+    // open for them. Those two correct behaviours compose into a duplicate: while the gate is closed, an
+    // enrolled subscriber accumulates one queued welcome per day, and nothing else in this loop can see it.
+    // The pending index, the send record and the gate are all PER ISSUE, and welcomedAt is stamped only after a
+    // successful send, so at the moment the gate opens every accumulated copy is independently sendable.
+    //
+    // Measured on 2026-08-25 rather than reasoned about: gate closed, 18 subscribers enrolled, one member
+    // present in BOTH welcome-2026-08-24 and welcome-2026-08-25. Opening the gate would have sent them two
+    // near-identical 90-day issues; a further day of waiting would have made it three.
+    //
+    // Checked HERE, after the claim and the subscriber read, because this is the only point in the drain that
+    // holds the person rather than the record, and it costs no extra KV read. Terminal and never retried: the
+    // person is welcomed, so this copy has nothing left to do. Not 'failed' (nothing broke) and not
+    // 'suppressed' (nobody opted out); see markSkipped.
+    if (isWelcomeIssueId(issueId) && isWelcomed(subscriber)) {
+      await putSend(kv, markSkipped(claimed, { now }));
+      await removeFromPending(kv, issueId, hash);
+      skipped++;
       continue;
     }
     let address = null;
@@ -334,7 +360,7 @@ export async function drainMailIssue(env, {
   let backlog;
   try { backlog = (await readPendingIndex(kv, issueId)).length; }
   catch { backlog = pending.length; }
-  return { issueId, sent, failed, suppressed, dropped, refused, deferred, backlog, budgetSkipped, allowance, gate: sendGate.mode };
+  return { issueId, sent, failed, suppressed, skipped, dropped, refused, deferred, backlog, budgetSkipped, allowance, gate: sendGate.mode };
 }
 
 /** A retryable failure: leave the record pending for the next tick if it still has attempts, else terminalize it
@@ -386,6 +412,7 @@ export async function drainMail(env, {
   let sent = 0;
   let failed = 0;
   let suppressed = 0;
+  let skipped = 0;
   let refused = 0;
   let deferred = 0;
   const issues = [];
@@ -399,11 +426,12 @@ export async function drainMail(env, {
     sent += r.sent;
     failed += r.failed;
     suppressed += r.suppressed;
+    skipped += r.skipped || 0;
     refused += r.refused || 0;
     deferred += r.deferred || 0;
     issues.push(r);
   }
-  return { drained: sent, failed, suppressed, refused, deferred, issues };
+  return { drained: sent, failed, suppressed, skipped, refused, deferred, issues };
 }
 
 // Coerce a wrangler var to a cap number, else null so the caller's `?? DEFAULT` binds. Empty and

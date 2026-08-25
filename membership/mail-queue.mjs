@@ -19,7 +19,7 @@
 // The per-recipient-per-issue KEY is itself the idempotency guarantee: one recipient can hold at most one record
 // per issue, so a re-run of the weekly compile finds the record already present and does not enqueue a second.
 
-export const MAIL_STATUS = new Set(['pending', 'claimed', 'sent', 'failed', 'suppressed']);
+export const MAIL_STATUS = new Set(['pending', 'claimed', 'sent', 'failed', 'suppressed', 'skipped']);
 export const DEFAULT_MAX_ATTEMPTS = 5;
 
 /** Thrown for caller-input problems; the handler maps it to a 400 (never a 500). */
@@ -102,6 +102,7 @@ export function normalizeMailSend(raw) {
     sentAt: num(raw.sentAt),
     failedAt: num(raw.failedAt),
     suppressedAt: num(raw.suppressedAt),
+    skippedAt: num(raw.skippedAt),
   };
 }
 
@@ -163,6 +164,26 @@ export function markFailed(item, { now = Date.now } = {}) {
  *  before the next send even mid-window. */
 export function markSuppressed(item, { now = Date.now } = {}) {
   return { ...item, status: 'suppressed', suppressedAt: Number(now()) };
+}
+
+/** Terminal, and NOT a send, and NOT a failure: this recipient no longer NEEDS this issue. Today that means a
+ *  welcome issue for somebody who has already been welcomed by a different one.
+ *
+ *  IT EXISTS RATHER THAN REUSING 'failed' BECAUSE THE RECORD IS READ MONTHS LATER. A welcome issue is composed
+ *  once per UTC day for everybody who has never been welcomed, and a recipient the launch send gate refuses is
+ *  left PENDING rather than terminalized, by design, so they wait for the gate to open for them. The two
+ *  behaviours compose into a duplicate: a subscriber who cannot yet be sent to accumulates one queued welcome
+ *  per day, and the drain has no per-person view across issues because the pending index, the send record and
+ *  the gate are all per issue, while welcomedAt is stamped only after a successful send.
+ *
+ *  MEASURED, not theorised: on 2026-08-25, with the gate closed and 18 people enrolled, one member sat in both
+ *  welcome-2026-08-24 and welcome-2026-08-25 and would have received two near-identical 90-day issues the
+ *  moment the gate opened. A second day of waiting would have made it three.
+ *
+ *  Calling that 'failed' would have read as breakage in every later metric, and 'suppressed' would have
+ *  corrupted the one counter that means somebody opted out. */
+export function markSkipped(item, { now = Date.now } = {}) {
+  return { ...item, status: 'skipped', skippedAt: Number(now()) };
 }
 
 // ----- Rate budget (a HARD, FAIL-CLOSED ceiling; the drain checks it before every release) -----
