@@ -32,6 +32,11 @@ SITE_BASE_URL = "https://gbti.network"   # the apex website; post-signup/checkou
 # unset, but mail-subscribe.mjs does NOT: with MAIL_FROM missing, a subscriber is written as pending and the
 # confirmation email never goes out, so the opt-in silently never completes.
 MAIL_FROM = "GBTI Network <noreply@gbti.network>"
+# sow-279: COUPON_ALERT_EMAIL is the owner recipient for the coupon-redemption notice, the abuse control for
+# the UNCAPPED free-year codes (owner ruling 2026-08-11). NOT committed with a value, to avoid publishing an
+# address; set it via the dashboard or `wrangler secret put`. UNSET = inert: the notice is fail-soft, so a
+# missing recipient is a no-op and signup is unaffected. Reuses MAIL_FROM (sender) + RESEND_API_KEY.
+# COUPON_ALERT_EMAIL = "alerts@gbti.network"
 # SOW-166 digest rate caps (owner ruling 2026-08-22). PLAIN NUMBERS, not secrets: reviewable + tunable here
 # without a code change. mail-drain.mjs ALSO carries bounded code defaults (MAIL_CAP_DEFAULTS) so an unset var can
 # never mean unbounded; these are the tuning knobs, the code default is the correctness floor. Sized under

@@ -102,6 +102,7 @@ import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on
 import { renderMailIssue } from '../../membership/mail-render-dispatch.mjs'; // SOW-166 digest + SOW-186 phase 4 follow template, routed by issue.kind (exported so this exact dispatcher is the line under test)
 import { resolveSubscriberEmail } from '../../membership/mail-address.mjs'; // SOW-166: anon decrypt / member-from-Stripe address resolution
 import { createResendClient } from '../../clients/resend.mjs'; // SOW-166: transactional send (injected into the drain)
+import { sendCouponRedemptionAlert } from './coupon-alert.mjs'; // sow-279: fail-soft owner notice on a NEW coupon redemption
 import { corsHeaders } from './cors.mjs'; // sow-158 Phase 1b: credentialed reflected-origin CORS for cookie routes
 import { generateCsrfToken, csrfCookieHeader, requireCsrf, requireOrigin } from './csrf.mjs'; // sow-158 Phase 1b: double-submit CSRF (+ Origin-only for form-POST routes)
 
@@ -330,7 +331,7 @@ async function handleStart(request, env) {
   return redirect(location, { 'Set-Cookie': `${OAUTH_NONCE_COOKIE}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`, 'Referrer-Policy': 'no-referrer' });
 }
 
-async function handleGithubCallback(request, env) {
+async function handleGithubCallback(request, env, ctx) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = await unpackState(url.searchParams.get('state'), env);
@@ -417,6 +418,16 @@ async function handleGithubCallback(request, env) {
   // member from a returning one re-running signup, and `couponApplied` says whether the invite actually converted,
   // which until now could only be answered by reading KV after the fact and asking the member.
   funnel('complete', { githubId, created: signup.created, couponApplied: signup.couponApplied });
+
+  // sow-279: a genuinely-new coupon redemption is the owner's abuse-control signal for the uncapped codes
+  // (owner ruling 2026-08-11). Fire it fire-and-forget through waitUntil so the notice never delays the
+  // member's redirect, and fail-soft (sendCouponRedemptionAlert never throws) so it can never break signup.
+  // Only the GitHub leg carries a NEW grant; the deferred Discord leg re-runs redeemCoupon as `already` and
+  // leaves signup.couponRedeemed null, so this fires exactly once per member.
+  if (signup.couponRedeemed) {
+    const alert = sendCouponRedemptionAlert(env, signup.couponRedeemed);
+    if (ctx?.waitUntil) ctx.waitUntil(alert); else await alert;
+  }
 
   const session = await signSession({ githubId, githubLogin }, env.SESSION_SECRET);
   // sow-207: a fresh signup (a trial OR a SOW-119 coupon invitee) lands on the WEBSITE welcome flow (/welcome/).
@@ -986,7 +997,7 @@ export default {
       }
 
       if (method === 'GET' && pathname === '/signup/start') return await handleStart(request, env);
-      if (method === 'GET' && pathname === '/signup/github/callback') return await handleGithubCallback(request, env);
+      if (method === 'GET' && pathname === '/signup/github/callback') return await handleGithubCallback(request, env, ctx); // sow-279: ctx for the fire-and-forget coupon notice
       if (method === 'GET' && pathname === '/signup/discord/callback') return await handleDiscordCallback(request, env);
       if (method === 'GET' && pathname === '/discord/link/init') return await handleDiscordLinkInit(request, env);   // SOW Part C: mint a token-bound link URL (extension)
       if (method === 'GET' && pathname === '/discord/link/start') return await handleDiscordLinkStart(request, env); // SOW Part C: deferred Discord link

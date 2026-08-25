@@ -22,6 +22,7 @@
 import { resolveReferral } from './referral.mjs';
 import { SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1c: validate the bound touch-session shape
 import { redeemCoupon, readCouponGrant } from './coupons.mjs'; // SOW-119 (+ sow-218: read an EXISTING grant)
+import { newRedemptionRecord } from '../../membership/coupon-notify.mjs'; // sow-279: surface a NEW grant for the owner notice
 import { discordRoleTarget, discordCreatorTarget, MANAGED_ACCESS_ROLES } from '../../membership/discord-roles.mjs'; // sow-218
 import { resolveEffectiveTier, grantTier } from '../../membership/tier-gate.mjs'; // sow-185: override-aware paid tier
 import { TIER } from '../../membership/tiers.mjs'; // sow-185 (2026-08-24): a coupon's own tier decides its badge
@@ -376,5 +377,9 @@ export async function runSignup({ identity, stripe, discord, kv, config, refCode
     discordOutcome,
     couponApplied: Boolean(couponGrant), // SOW-119
     couponUntil: couponGrant?.until ?? null,
+    // sow-279: the record to notify the owner on, non-null ONLY for a grant written in THIS run. redeemCoupon
+    // is idempotent (`already: true` on the deferred Discord re-run), so this fires the owner notice exactly
+    // once per member, from the GitHub leg. null for a plain signup, an already-held grant, or a failed redeem.
+    couponRedeemed: newRedemptionRecord(couponGrant, { githubId, login: githubLogin }),
   };
 }
