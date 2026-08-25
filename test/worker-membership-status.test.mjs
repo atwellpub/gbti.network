@@ -149,9 +149,15 @@ test('paidTier: a grandfather grant confers member by default (owner Q15 flip); 
   assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1', tier: 'creator' }] }) }), 'creator'); // the escape hatch: an explicit creator keeps full access
   assert.equal(await tierOf({ mirror: freshMirror({ grandfathered: [{ github_id: '1', tier: 'member' }] }) }), 'member');
 });
-test('paidTier: a fresh TIERLESS coupon grant (legacy) falls back to creator', async () => {
+test('paidTier: a fresh TIERLESS coupon grant confers MEMBER (ruling 2026-08-24)', async () => {
+  // Was 'creator'. The owner ruled coupons offer membership only, and grantTier() now defaults a tierless
+  // record to member, the same default house/coupons.yml and house/grandfathered.yml already carried.
+  //
+  // This is the ORACLE the UI renders from, and the gate above is what the server enforces. They read the
+  // same grantTier() so they cannot drift; a disagreement between them shows a member a perk that is then
+  // denied, which is worse than either answer alone.
   const coupon = { until: new Date(NOW.getTime() + 86_400_000).toISOString() };
-  assert.equal(await tierOf({ coupon, customer: null }), 'creator');
+  assert.equal(await tierOf({ coupon, customer: null }), 'member');
 });
 test('paidTier: a MEMBER-tier coupon grant confers member, not creator (sow-142; LINKEDINCONNECT is member)', async () => {
   const coupon = { until: new Date(NOW.getTime() + 86_400_000).toISOString(), tier: 'member' };

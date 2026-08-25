@@ -24,25 +24,34 @@ import {
 } from '../../lib/membership';
 import { tierDisplay } from '../../lib/tiers';
 
-// sow-185: name the tier this invite confers. A fresh CODEABLEYEAR redemption carries the coupon's explicit
-// `tier: creator` (house/coupons.yml), so it folds into a grandfather grant stamped Content Creator (NOT via
-// grantTier's tierless default, which the owner flipped to member in Q15), and the invite is a full
-// year of Content Creator membership, the network's top tier. Bind the label + the "if you stay" price to the
-// single source of truth (house/membership-tiers.yml via tierDisplay) so this page can never drift from it. This
-// is the TIER_DISPLAY binding src/lib/membership.ts's deprecation note points every new consumer to.
-const creator = tierDisplay('creator');
-const CREATOR_LABEL = creator?.label ?? 'Content Creator';
-const CREATOR_PRICE_LABEL = `$${creator?.priceAnnual ?? 150}`;
+// THIS INVITE CONFERS `member`, NOT `creator`. Corrected 2026-08-24 under the owner's ruling that the
+// coupons "should only offer membership rather than creator".
+//
+// It was already true in the config and false on this page, which is the worst version of the bug because
+// the config looks correct. `house/coupons.yml` names `tier: member` on CODEABLEYEAR, that tier is stamped
+// into the redemption record and written into the grandfather fold rather than re-derived, and this page
+// meanwhile advertised "Content Creator membership, the network's top tier" at $150. A Codeable expert was
+// being promised publishing, syndication and a creator profile, and granted a $50 reading-and-commenting
+// membership. The comment that used to sit here asserted `tier: creator` outright, so it read as evidence.
+//
+// The constants are RENAMED rather than left as `creator`. `const creator = tierDisplay('member')` would
+// work and would be a false name, which is the exact defect class this file just demonstrated. Same
+// treatment as /member-invite/, which was corrected first and is the pattern this follows.
+const memberTier = tierDisplay('member');
+const TIER_LABEL = memberTier?.label ?? 'Network Member';
+const TIER_PRICE_LABEL = `$${memberTier?.priceAnnual ?? 50}`;
 
-
-// Card imagery: Pexels photos (free license, no attribution required), committed as 800x480 (5:3) webp.
-const benefits = [
-  { name: 'Private member community', body: 'A private Discord where professionals share work in progress, ask questions, and build relationships away from public noise.' },
-  { name: 'Joint venture opportunities', body: 'Discover aligned projects and combine skills. One member brings the idea, another the technical depth, another the distribution.' },
-  { name: 'Gated member content', body: 'Create gated articles, products, prompts, and downloads that enrich the network and give new members a reason to join.' },
-  { name: 'Network syndication', body: 'The network distributes and promotes member work across social channels, so useful work travels further than it would alone.' },
-  { name: 'Specialized member tools', body: 'A Chrome extension and other tools that make the gated parts of the network smoother to access and use.' },
-];
+// THE BENEFIT LIST IS RENDERED FROM house/membership-tiers.yml AND IS NOT WRITTEN HERE.
+//
+// The hand-written array that used to sit here is what carried the lie: it promised creating gated content
+// and network syndication, both Creator benefits, and neither one names a tier or a price, so every check
+// that scanned for "Content Creator", "top tier" and "$150" came back clean over them.
+//
+// house/membership-tiers.yml states the rule in its own header: benefit copy is a legal line on a paid page
+// and must never advertise a benefit that does not exist. So the fix is not proofreading, it is removing the
+// ability to type a benefit here at all. If a claim is not a bullet in that file, it cannot reach this page.
+// If this section looks thin, add the benefit to the yml where it is reviewed, or leave it thin.
+const memberBenefits = memberTier?.benefits ?? [];
 
 // THE FAQ ANSWERS THE OFFER, not the network in general. Someone reading this was sent a link by a person;
 // what they need first is what they are getting, whether they will be charged, what happens when the year
@@ -50,25 +59,34 @@ const benefits = [
 // how content is stored and what the editorial team takes, because those bear on whether the offer is worth
 // accepting.
 //
+// EVERY ANSWER THAT SOLD A CREATOR BENEFIT IS GONE rather than reworded, because rewording means
+// hand-writing tier claims again one file away from the thing that just broke. Cut: the editorial-submissions
+// answer, the weekly-shop-talk answer and the "you can publish openly" half of the storage answer, all three
+// Creator. Kept and turned to the READER side: what the network is, and how member-only content works.
+//
 // NO BENEFIT LIST HERE: "what does this give me" points at the cards above rather than restating them.
-// Restating benefits in prose is what put Creator copy on the member lander. Tier name and price come from
+// Restating benefits in prose is what put Creator copy on this page. Tier name and price come from
 // tierDisplay(), so no answer can quote a stale figure.
 //
 // NO REVENUE OR EARNINGS COPY (banned-patterns.md #2).
 const faqs = [
-  ['What does this invite give me?', `A full year at the ${CREATOR_LABEL} tier, with everything listed above, at no cost. It is a normal membership for the year, not a limited preview.`],
+  ['What does this invite give me?', `A full year at the ${TIER_LABEL} tier, with everything listed above, at no cost. It is a normal membership for the year, not a limited preview.`],
   ['Do I need a card to claim it?', 'No. No card is collected at any point during the free year, and nothing bills automatically.'],
-  ['What happens when the free year ends?', `Nothing happens on its own. ${CREATOR_LABEL} is ${CREATOR_PRICE_LABEL} per ${BILLING_PERIOD} if you decide to continue, and you will not be charged unless you choose to.`],
+  ['What happens when the free year ends?', `Nothing happens on its own. ${TIER_LABEL} is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD} if you decide to continue, and you will not be charged unless you choose to.`],
   ['How do I claim it?', 'Sign in with GitHub from this page. Your coupon is already applied, so there is nothing to enter or remember.'],
   ['Can I pass this on to someone else?', 'It is meant for you, but the link works for whoever opens it first, so treat it as personal rather than forwardable.'],
-  ['What is the GBTI Network?', 'A professional publishing network where members publish articles, products, prompts, tools, and gated resources. It combines a private community, weekly shop talk, and distribution support.'],
-  ['What kind of content does the editorial team accept?', 'As a brand, GBTI can support a wide range of ideas and creative work. Our initial content will explore entertainment, education, technology, health, blockchain, developer relations, artificial intelligence, music, gaming, homesteading, and other subjects that interest our members. Members interested in publishing through GBTI can find our participation handbook inside the members area.'],
-  ['How is my content and data stored?', "The public git repository is the database. Every article, product, prompt, and profile lives as a plain file in a public repo, and members publish by opening a pull request, by hand or through their own AI agents. There is no traditional CMS and no separate content database. The static site is the published read-view, and each member's client is their authoring node. Membership status is derived from Stripe rather than a separate user database, and every lookup matches on your immutable GitHub id."],
-  ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
+  ['What is the GBTI Network?', 'A professional publishing network for developers. Members read and discuss the work published across it and take part in a private community. Publishing your own articles, products and prompts is the Content Creator tier.'],
+  // ASKED AND ANSWERED PLAINLY, because the audience makes it the obvious question. Codeable experts are
+  // working professionals, and the page they were sent used to promise publishing. Saying nothing about it
+  // now would read as an omission rather than an answer.
+  ['Can I publish my own work with this invite?', `Not on this invite. Publishing articles, products and prompts is the Content Creator tier, and this covers a year at ${TIER_LABEL}: reading members-only work, commenting anywhere on the network, and full Discord access. You can move up whenever you want to publish.`],
+  ['Is all content public or private?', 'Both. Some work is published openly, and some is network-only. For network-only work, a stub with a short description appears on the public website, while the full content is readable by members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
-  ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
   ['What does GBTI stand for?', 'God Bless The Internet; a phrase that expresses appreciation and goodwill toward the continued growth and enrichment of the internet.'],
-  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. The expertise at Codeable is well known and respected, and we are happy to be an answer to any interest in community that Codeable experts might have. As a Codeable expert your first year at the ${CREATOR_LABEL} tier is on us.`],
+  // The founding story is a FACT about GBTI and stays true whatever tier the invite confers. Kept verbatim,
+  // including the sentence about Codeable, which is the one thing on this page that is genuinely
+  // audience-specific and is sourced rather than invented.
+  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. The expertise at Codeable is well known and respected, and we are happy to be an answer to any interest in community that Codeable experts might have. As a Codeable expert your first year at the ${TIER_LABEL} tier is on us.`],
 ];
 
 
@@ -77,7 +95,7 @@ const year = new Date().getFullYear();
 
 <BaseLayout
   title="Codeable experts: your first year on us"
-  description="A private invitation for Codeable experts: a full year of Content Creator membership, the network's top tier, first year free with your coupon."
+  description="A private invitation for Codeable experts: a full year of Network Member access, first year free with your coupon."
   noindex
   bare
 >
@@ -92,9 +110,7 @@ const year = new Date().getFullYear();
           <span>GBTI</span>
         </a>
         <nav class="ci-links" aria-label="Sections">
-          <a href="#network">The network</a>
-          <a href="#shoptalk">Shop talk</a>
-          <a href="#benefits">Membership</a>
+          <a href="#benefits">What you get</a>
           <a href="#faq">FAQ</a>
         </nav>
         <button type="button" class="ci-theme" data-ci-theme aria-label="Toggle dark mode">
@@ -109,22 +125,24 @@ const year = new Date().getFullYear();
       <div class="ci-hero-in">
         <div>
           <h1>Welcome, Codeable experts!</h1>
-          <p class="lead">GBTI is a professional publishing network for developers. Publish under your own
-            name and build with people who ship. Your Codeable invite covers a full
-            year of Content Creator membership: full network participation, including content creation, no
-            card required.</p>
+          <p class="lead">GBTI is a professional publishing network for developers. Read the work published
+            across it and join the conversation. Your Codeable invite covers a full year at the{' '}{TIER_LABEL}
+            tier, no card required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
-            <a href="#network" class="btn-ghost">How the network works</a>
+            <a href="#benefits" class="btn-ghost">What you get</a>
           </div>
+          <!-- FACTS ABOUT THE OFFER, not benefit claims about the tier, which is why they are allowed to be
+               literal text here while every benefit sentence comes from the yml. The two that used to sit
+               here ("Publish under your own name", "Weekly shop talk") were both Creator benefits. -->
           <div class="ci-ticks">
-            <span>&#10003; &nbsp;Publish under your own name</span>
-            <span>&#10003; &nbsp;Weekly shop talk</span>
+            <span>&#10003; &nbsp;No card required</span>
+            <span>&#10003; &nbsp;Nothing bills automatically</span>
           </div>
         </div>
         <div id="claim" class="ci-claim">
           <div class="ci-price">Year one free</div>
-          <div class="ci-sub">then {CREATOR_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
+          <div class="ci-sub">then {TIER_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
           <div class="ci-rule"></div>
           <div class="ci-coupon-label">Coupon</div>
           <div class="ci-chip" data-coupon-chip>
@@ -143,81 +161,26 @@ const year = new Date().getFullYear();
       </div>
     </div>
 
-    <!-- ================= WHY A NETWORK ================= -->
-    <section id="network" class="ci-sec">
-      <h2 style="max-width:20ch">A home for your work, without a site to run</h2>
-      <p class="sec-lead">Most independent creators want to publish and be found, without standing up a CMS
-        or paying to host and maintain a site. The network handles that, surfaces work to AI assistants, and
-        adds the one thing most publishing collectives leave out.</p>
-      <div class="grid3">
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4z"/><path d="M4 9h16"/></svg></div>
-            <h3>No site to host or maintain</h3>
-            <p>Publish without a CMS, hosting bills, or upkeep. Your work lives on the network and renders on
-              your member profile.</p>
-          </div>
-        </div>
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="3.5"/></svg></div>
-            <h3>Built for AI recommendations</h3>
-            <p>Content is structured so AI assistants can read and recommend it, which lifts how often your
-              work gets surfaced.</p>
-          </div>
-        </div>
-        <div class="card lift bcard">
-          <div class="bod">
-            <div class="ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
-            <h3>Built around the people who ship</h3>
-            <p>A working network of professionals, not an audience. Members read each other, comment, and
-              improve each other's work.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================= SHOP TALK ================= -->
-    <div id="shoptalk" class="ci-band">
-      <div class="ci-band-in">
-        <div>
-          <h2 style="max-width:18ch">Where we meet, and hold ourselves accountable to progress</h2>
-          <p class="sec-lead" style="max-width:52ch">Members gather for a recurring two-hour session to talk
-            through product development, track progress, share knowledge, set goals, and keep each other
-            accountable. It is the rhythm that turns publishing into momentum.</p>
-          <div class="ci-pills">
-            <span>Product development</span><span>Track progress</span><span>Share knowledge</span><span>Set goals</span><span>Accountability</span>
-          </div>
-        </div>
-        <div class="card ci-session bcard">
-          <div class="bod">
-          <div class="ci-live"><span class="dot"></span><span class="lbl">The session</span></div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-            <div><b>Two hours, every week</b><span>A standing time members build their week around</span></div>
-          </div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></div>
-            <div><b>Live on Google Meet</b><span>Face to face with the people building it</span></div>
-          </div>
-          <div class="ci-srow">
-            <div class="ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--ci-green-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
-            <div><b>Coordinated on Discord</b><span>Where the conversation continues between sessions</span></div>
-          </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
+    <!-- THE "A HOME FOR YOUR WORK" AND "SHOP TALK" SECTIONS WERE CUT 2026-08-24, and this note exists so
+         nobody restores them from git thinking they were lost. Both sold Creator benefits on what is a
+         member-tier invite: publishing without a CMS, work rendering on a member profile, content structured
+         for AI recommendation, and the weekly shop talk, which house/membership-tiers.yml lists under
+         creator. They were cut rather than reworded for the same reason the benefit array was deleted, that
+         a hand-written section is where the tier claim escapes review.
+         If the owner reclassifies shop talk as a Network Member benefit, move it in the yml FIRST and this
+         section can come back bound to it. -->
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
-      <h2 style="max-width:20ch">What membership gives you</h2>
-      <p class="sec-lead">Built for professionals who want a place to publish useful work, improve alongside
-        other members, and belong to a network that rewards contribution.</p>
-      <div class="grid3">
-        {benefits.map((b) => (
+      <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
+      <!-- Title and body are both yml fields. The lead sentence that sat here ("a place to publish useful
+           work") was a benefit claim in a paragraph's clothing, and it is gone for the same reason. -->
+      <div class="grid2">
+        {memberBenefits.map((b) => (
           <div class="card lift bcard">
-            <div class="bod"><h3>{b.name}</h3><p>{b.body}</p></div>
+            <div class="bod">
+              <h3>{b.label}</h3>
+              {b.description && <p>{b.description}</p>}
+            </div>
           </div>
         ))}
       </div>
@@ -362,7 +325,6 @@ const year = new Date().getFullYear();
   .ci .eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .16em; color: var(--ci-green); margin: 0 0 14px; }
   .ci .tcenter { text-align: center; }
   .ci h2 { font-family: var(--f-display); font-weight: 700; font-size: clamp(30px, 4.4vw, 40px); line-height: 1.08; letter-spacing: -0.015em; color: var(--ci-fg); margin: 0 0 16px; }
-  .ci .sec-lead { font-size: 17px; line-height: 1.6; color: var(--ci-soft); max-width: 66ch; margin: 0 0 44px; }
 
   .btn-primary { background: #1f9e5f; color: #fff; font-weight: 700; border-radius: 7px; border: 0; cursor: pointer; display: inline-block; font-size: 15px; padding: 15px 26px; box-shadow: 0 6px 20px rgba(31,158,95,.35); transition: transform .12s, box-shadow .2s; }
   .btn-primary:hover:not(:disabled) { color: #fff; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(31,158,95,.45); }
@@ -379,7 +341,7 @@ const year = new Date().getFullYear();
   /* nav */
   .ci-nav { position: sticky; top: 0; z-index: 20; background: var(--ci-surface); border-bottom: 1px solid var(--ci-navline); }
   /* the sticky nav is ~63px tall; without this every anchor jump lands the section under the bar */
-  .ci-sec, .ci-band, .ci-claim { scroll-margin-top: 78px; }
+  .ci-sec, .ci-claim { scroll-margin-top: 78px; }
   .ci-nav-in { max-width: 1160px; margin: 0 auto; display: flex; align-items: center; gap: 28px; padding: 14px 40px; }
   .ci-brand { display: flex; align-items: center; gap: 11px; font-family: var(--f-display); font-weight: 700; font-size: 19px; color: var(--ci-fg) !important; letter-spacing: -0.01em; }
   .ci-links { display: flex; gap: 24px; font-size: 14px; margin-left: 8px; }
@@ -416,9 +378,9 @@ const year = new Date().getFullYear();
   /* sections */
   .ci-sec { max-width: 1160px; margin: 0 auto; padding: 84px 40px 20px; }
   @media (max-width: 760px) { .ci-sec { padding: 56px 24px 12px; } }
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
   .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-  @media (max-width: 960px) { .grid3 { grid-template-columns: 1fr; } .grid4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 960px) { .grid2 { grid-template-columns: 1fr; } .grid4 { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 560px) { .grid4 { grid-template-columns: 1fr; } }
   .card { padding: 26px 24px; }
   .card h3 { font-family: var(--f-display); font-weight: 600; font-size: 19px; color: var(--ci-fg); margin: 0 0 8px; }
@@ -426,7 +388,6 @@ const year = new Date().getFullYear();
   /* benefits cards carry a 5:3 photo above the copy */
   .card.bcard { padding: 0; overflow: hidden; }
   .bcard .bod { padding: 22px 24px 26px; }
-  .ic { width: 40px; height: 40px; border-radius: 7px; background: rgba(31,158,95,.14); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; flex: none; }
 
   .pct { font-family: var(--f-display); font-weight: 700; font-size: 30px; }
   .pct.green { color: var(--ci-green); } .pct.amber { color: var(--ci-amber); } .pct.plain { color: var(--ci-fg); }
@@ -436,20 +397,6 @@ const year = new Date().getFullYear();
   .ci-more a { font-weight: 600; font-size: 15px; }
 
   /* shop talk band */
-  .ci-band { background: var(--ci-surface); border-top: 1px solid var(--ci-navline); border-bottom: 1px solid var(--ci-navline); margin-top: 84px; }
-  .ci-band-in { max-width: 1160px; margin: 0 auto; display: grid; grid-template-columns: 1fr 440px; gap: 56px; padding: 80px 40px; align-items: center; }
-  @media (max-width: 960px) { .ci-band-in { grid-template-columns: 1fr; padding: 56px 24px; } }
-  .ci-pills { display: flex; flex-wrap: wrap; gap: 10px; }
-  .ci-pills span { background: var(--ci-panel); border: 1px solid var(--ci-line); border-radius: 999px; padding: 8px 15px; font-size: 13.5px; color: var(--ci-fg); }
-  .ci-session { padding: 28px; }
-  .ci-live { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; }
-  .ci-live .dot { width: 9px; height: 9px; border-radius: 50%; background: #1f9e5f; box-shadow: 0 0 0 4px rgba(31,158,95,.2); }
-  .ci-live .lbl { font-family: var(--f-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ci-mute); }
-  .ci-srow { display: flex; gap: 13px; align-items: center; margin-top: 16px; }
-  .ci-srow:first-of-type { margin-top: 0; }
-  .ci-srow .ic { width: 36px; height: 36px; margin: 0; }
-  .ci-srow b { display: block; font-weight: 600; font-size: 15px; color: var(--ci-fg); }
-  .ci-srow span { display: block; font-size: 13px; color: var(--ci-mute); }
 
   /* FAQ */
   .ci-faq h2 { margin-bottom: 36px; }

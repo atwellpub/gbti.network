@@ -16,7 +16,7 @@ import { OVERRIDES_KV_KEY, MAX_OVERRIDES_AGE_MS } from './membership-content.mjs
 import { recordUsage } from './analytics.mjs'; // SOW-061: usage analytics seam
 import { readCouponGrant } from './coupons.mjs'; // SOW-119: the coupon fast-path grant
 import { usageBucket, overridesFromMirror } from '../../membership/usage-bucket.mjs'; // SOW-061: effective tier bucket
-import { buildEnvPriceTierMap, resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware paid tier
+import { buildEnvPriceTierMap, resolveEffectiveTier, grantTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware paid tier
 import { TIER, meetsTier, isTier } from '../../membership/tiers.mjs'; // sow-185: the paid-tier axis (none < member < creator)
 
 // SOW-046 C: best-effort read of the caller's NEWS-CURATOR capability from the KV overrides mirror. Used ONLY to
@@ -107,11 +107,15 @@ export async function membershipStatus(request, env, { fetchImpl = globalThis.fe
     const eff = effectiveStatusOf(githubId, derivedStatus, overrides, now); // { status, source }
     const gfGrant = overrides.grandfathers.get(String(githubId));
     paidTier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant: gfGrant });
-    // A fresh coupon grants the tier its campaign confers (sow-230 added member-tier campaigns like
-    // LINKEDINCONNECT), with creator as the fallback for a legacy tierless grant. Guarded exactly as
+    // A fresh coupon grants the tier its campaign confers, and MEMBER for a tierless grant. OWNER RULING
+    // 2026-08-24: "coupons ... should only offer membership rather than creator". Guarded exactly as
     // resolveEffective: only when the pre-coupon effective status is neither paid (nothing to add) nor banned
-    // (a ban outranks a coupon), and never a downgrade (the meetsTier guard keeps a higher existing tier).
-    const couponPaidTier = (couponTier === TIER.member || couponTier === TIER.creator) ? couponTier : TIER.creator;
+    // (a ban outranks a coupon), and never a downgrade (the meetsTier guard keeps a higher existing tier, so a
+    // superadmin or a hand-set creator grandfather is not demoted by holding a member-tier coupon).
+    //
+    // grantTier() rather than a hand-rolled ternary, so this ORACLE and the membership-content GATE read the
+    // same default from one place. They disagreed silently before, and this is the surface the UI renders from.
+    const couponPaidTier = grantTier({ tier: couponTier });
     if (couponUntil && eff.status !== 'paid' && eff.status !== 'banned' && !meetsTier(paidTier, couponPaidTier)) {
       paidTier = couponPaidTier;
     }

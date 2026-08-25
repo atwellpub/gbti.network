@@ -236,10 +236,16 @@ export const LANDER_BY_TIER = Object.freeze({
   creator: '/curator-invite/',
 });
 
-// Per-CAMPAIGN overrides, for a campaign with its own audience-specific page. CODEABLEYEAR is creator tier,
-// so the tier map alone would send it to the generic curator lander; it has a Codeable page whose copy
-// addresses that audience directly. Keyed by campaign because that is what it is: a property of the
-// campaign, not of the tier.
+// Per-CAMPAIGN overrides, for a campaign with its own audience-specific page. CODEABLEYEAR is MEMBER tier
+// (house/coupons.yml), so the tier map alone would already send it to /member-invite/; the override exists
+// because it has a Codeable page whose copy addresses that audience directly. Keyed by campaign because that
+// is what it is: a property of the campaign, not of the tier.
+//
+// Corrected 2026-08-24: this comment said "CODEABLEYEAR is creator tier, so the tier map alone would send it
+// to the generic curator lander". That was false against house/coupons.yml, which has named `tier: member` on
+// this code since 2026-08-12. The routing was right either way, which is exactly why nobody caught it, and
+// the same false belief written one file over is what kept /codeable-invite/ advertising Content Creator at
+// $150 for a $50 member grant.
 export const LANDER_BY_CAMPAIGN = Object.freeze({
   CODEABLEYEAR: '/codeable-invite/',
 });

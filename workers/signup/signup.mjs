@@ -23,7 +23,8 @@ import { resolveReferral } from './referral.mjs';
 import { SESSION_RE } from './membership-touches.mjs'; // SOW-059 P1c: validate the bound touch-session shape
 import { redeemCoupon, readCouponGrant } from './coupons.mjs'; // SOW-119 (+ sow-218: read an EXISTING grant)
 import { discordRoleTarget, discordCreatorTarget, MANAGED_ACCESS_ROLES } from '../../membership/discord-roles.mjs'; // sow-218
-import { resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: override-aware paid tier
+import { resolveEffectiveTier, grantTier } from '../../membership/tier-gate.mjs'; // sow-185: override-aware paid tier
+import { TIER } from '../../membership/tiers.mjs'; // sow-185 (2026-08-24): a coupon's own tier decides its badge
 import { deriveMembershipFromCustomer } from '../../membership/derive-status.mjs';
 import { effectiveStatus } from '../../membership/overrides-core.mjs';
 import { overridesFromMirror } from '../../membership/usage-bucket.mjs';
@@ -68,24 +69,44 @@ export async function resolveSignupRole({ kv, githubId, customer, couponGrant = 
     try { grant = await readCouponGrant(kv, githubId, now); } catch { grant = null; }
   }
   const couponLive = Boolean(grant?.until && new Date(grant.until).getTime() > now.getTime());
+  // OWNER RULING 2026-08-24: "coupons ... should only offer membership rather than creator". The badge now comes
+  // from the COUPON'S OWN tier instead of a hardcoded true, and grantTier defaults a tierless record to member
+  // (the same default house/coupons.yml and house/grandfathered.yml already carry).
+  //
+  // Computed HERE, outside the try, for two reasons that are not style:
+  //   1. `const grant` at the foot of the try SHADOWS the outer `let grant`, so any read of `grant` inside the
+  //      try before that line throws a temporal dead zone ReferenceError, which the catch swallows into
+  //      { access: 'locked' }. That is a SILENT LOCKOUT of every invitee, and it was reproduced by execution.
+  //      The inner binding is renamed to gfGrant below, and this stays out here so the hazard cannot return.
+  //   2. `couponLive` gates the tier read because redeemCoupon returns an EXISTING grant even when it has
+  //      expired (`already: true`). Reading tier without it would leak a badge from a lapsed creator grant.
+  const couponCreator = couponLive && grantTier(grant) === TIER.creator;
   try {
     const { status, tier: stripeTier } = deriveMembershipFromCustomer(customer, { priceTierMap, now });
     const mirror = await kv?.get(OVERRIDES_KV_KEY, 'json');
-    if (!mirror?.generatedAt) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
+    if (!mirror?.generatedAt) return { access: couponLive ? 'member' : 'locked', creator: couponCreator };
     const ageMs = now.getTime() - new Date(mirror.generatedAt).getTime();
-    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MAX_OVERRIDES_AGE_MS) return { access: couponLive ? 'member' : 'locked', creator: couponCreator };
     const overrides = overridesFromMirror(mirror);
-    if (!overrides) return { access: couponLive ? 'member' : 'locked', creator: couponLive };
+    if (!overrides) return { access: couponLive ? 'member' : 'locked', creator: couponCreator };
 
     const eff = effectiveStatus(String(githubId), status, overrides, now);
     // A BAN outranks a coupon, exactly as it does everywhere else. Checked before the coupon is honoured so a
     // banned account cannot buy its way back in with an invite code.
     if (eff.status === 'banned') return { access: 'locked', creator: false };
-    if (couponLive) return { access: 'member', creator: true };
 
-    const grant = overrides.grandfathers.get(String(githubId));
-    const tier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant });
-    return { access: discordRoleTarget(eff.status), creator: discordCreatorTarget(tier) };
+    // The coupon no longer SHORT-CIRCUITS here. It used to `return { access: 'member', creator: true }` before
+    // the grandfather entry was read at all, which is what handed the Creator badge to every redeemer. Resolving
+    // first and combining with `||` makes the badge RAISE and never LOWER: a superadmin (source 'staff' -> creator)
+    // or a hand-set `tier: creator` grandfather entry KEEPS the badge while holding a member-tier coupon. The
+    // naive fix inverted that, and `creator: false` calls removeRole, so a Discord link would have STRIPPED a
+    // badge granted by hand.
+    // NOTE the rename: this is `gfGrant`, not `grant`. See the temporal dead zone comment above.
+    const gfGrant = overrides.grandfathers.get(String(githubId));
+    const tier = resolveEffectiveTier({ source: eff.source, status: eff.status, stripeTier, grant: gfGrant });
+    const creator = couponCreator || discordCreatorTarget(tier);
+    if (couponLive) return { access: 'member', creator };
+    return { access: discordRoleTarget(eff.status), creator };
   } catch {
     return { access: 'locked', creator: false }; // any failure withholds the grant rather than handing one out
   }

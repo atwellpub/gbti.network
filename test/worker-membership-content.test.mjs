@@ -356,13 +356,21 @@ test('authorizeCreator: a MEMBER-tier coupon redeemer is DENIED creator (sow-142
   assert.equal(r.status, 403);
   assert.match(r.body.message, /Content Creator/, 'denied for TIER (creator-gated), not a fail-closed mirror error');
 });
-test('authorizeCreator: a legacy TIERLESS coupon redeemer is admitted as creator (fallback preserved)', async () => {
+test('authorizeCreator: a legacy TIERLESS coupon redeemer is DENIED the creator gate (ruling 2026-08-24)', async () => {
+  // This test asserted the opposite until the owner ruled that "coupons ... should only offer membership
+  // rather than creator". A tierless grant now resolves to member, so the WRITE gate must refuse it.
+  //
+  // The direction matters more than the value. This is the gate that decides whether a caller may encrypt
+  // member-only content, so a wrong answer here is not a cosmetic badge: it is a non-creator being handed a
+  // creator-only capability. That is why the rewrite asserts the denial AND its reason, rather than just
+  // flipping `creator` to `member` and checking the tier field.
   const mirror = freshMirror(); // create once, so generatedAt precedes resolveEffective's captured now (avoids the ageMs<0 fail-closed guard)
   const coupon = { until: new Date(Date.now() + 86_400_000).toISOString() }; // no tier field
   const kv = { get: async (k) => (k === OVERRIDES_KV_KEY ? mirror : coupon) };
   const r = await authorizeCreator(POST('encrypt', 'Bearer g'), ENV({ ...PRICE_ENV, SIGNUP_KV: kv }), deps('7', () => null));
-  assert.equal(r.ok, true);
-  assert.equal(r.tier, 'creator');
+  assert.equal(r.ok, false, 'a tierless coupon confers member, which does not meet the creator gate');
+  assert.equal(r.status, 403);
+  assert.match(r.body.message, /Content Creator/, 'denied for TIER, not fail-closed on a mirror error');
 });
 
 test('authorizeCreator: a non-paid caller gets the paid-required message; a banned caller is not permitted', async () => {

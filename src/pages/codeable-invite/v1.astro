@@ -1,4 +1,22 @@
 ---
+// TIER CORRECTED 2026-08-24, AND THE ARCHIVE BELOW WAS NOT. Read this before lifting anything out of here.
+//
+// The owner ruled that the coupons "should only offer membership rather than creator". CODEABLEYEAR carries
+// `tier: member` in house/coupons.yml and always did, so this page's OFFER surfaces (the tier label, the
+// price, the hero, the claim card, the meta description and the closing FAQ) were advertising Content
+// Creator at $150 while granting Network Member at $50. Those are corrected.
+//
+// THE ARCHIVED SECTIONS BELOW STILL DESCRIBE THE CONTENT CREATOR TIER, deliberately. Preserving the design
+// work is the whole reason this file exists, and gutting it would destroy what it was kept for. So the
+// benefit cards still say publishing and syndication, the network explainer still sells running no CMS, the
+// revenue-model band still splits first and last touch, and the shop-talk band is still here. NONE of those
+// are Network Member benefits.
+//
+// The consequence, stated plainly rather than left for someone to discover: this page is internally
+// inconsistent on purpose. It is noindex, excluded from the sitemap, and nothing links to it. If any of it
+// comes back, re-check every sentence against house/membership-tiers.yml for the tier it is coming back FOR,
+// exactly as the note below already said, and treat the section copy as Creator copy until proven otherwise.
+//
 // ARCHIVE (2026-08-13, owner). This is the FULL Codeable invite landing as it stood before the live page at
 // /codeable-invite/ was cut back to the hero plus the FAQ. Kept, not deleted, because the owner asked for the
 // landing-page work to be stashed rather than thrown away: the network explainer, the revenue-model split,
@@ -41,15 +59,20 @@ import {
 } from '../../lib/membership';
 import { tierDisplay } from '../../lib/tiers';
 
-// sow-185: name the tier this invite confers. A fresh CODEABLEYEAR redemption carries the coupon's explicit
+// sow-185: name the tier this invite confers. CORRECTED 2026-08-24 to `member`, see the header. The comment
+// that stood here asserted `tier: creator` outright and was false against house/coupons.yml, which is why it
+// survived: it read as evidence. The constants are RENAMED rather than left as `creator`, because
+// `const creator = tierDisplay('member')` would work and would be a false name.
+// (Superseded text, kept for the record: "A fresh CODEABLEYEAR redemption carries the coupon's explicit
 // `tier: creator` (house/coupons.yml), so it folds into a grandfather grant stamped Content Creator (NOT via
 // grantTier's tierless default, which the owner flipped to member in Q15), and the invite is a full
-// year of Content Creator membership, the network's top tier. Bind the label + the "if you stay" price to the
+// year of Content Creator membership, the network's top tier.")
+// Bind the label + the "if you stay" price to the
 // single source of truth (house/membership-tiers.yml via tierDisplay) so this page can never drift from it. This
 // is the TIER_DISPLAY binding src/lib/membership.ts's deprecation note points every new consumer to.
-const creator = tierDisplay('creator');
-const CREATOR_LABEL = creator?.label ?? 'Content Creator';
-const CREATOR_PRICE_LABEL = `$${creator?.priceAnnual ?? 150}`;
+const memberTier = tierDisplay('member');
+const TIER_LABEL = memberTier?.label ?? 'Network Member';
+const TIER_PRICE_LABEL = `$${memberTier?.priceAnnual ?? 50}`;
 
 const splits = [
   { pct: FIRST_TOUCH_PCT, cls: 'green', name: 'First touch', img: '/stock/first-touch.webp', alt: 'A person holding a coffee cup and reading on a tablet', body: 'Owner of the first eligible article, product, or prompt the member touched.' },
@@ -78,7 +101,7 @@ const faqs = [
   ['Is all content public or private?', 'Both. You can publish openly, or create network-only private content. For private work, a stub with a short description appears on the public website, while the full content is only accessible to network members inside the login-gated browser extension.'],
   ['Are comments on public-facing content also public?', 'By default, they are not, and can only be read inside the extension by other members. There is, however, the option to make a comment fully public.'],
   ['What happens during weekly shop talk?', 'A recurring two-hour session, live on Google Meet and coordinated on Discord, where members talk product development, track progress, share knowledge, set goals, and hold each other accountable to progress.'],
-  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. The expertise at Codeable is well known and respected, and we are happy to be an answer to any interest in community that Codeable experts might have. As a Codeable expert your invite covers a full year of ${CREATOR_LABEL} membership, the network's top tier, with no card required, and nothing bills automatically. If you choose to stay, ${CREATOR_LABEL} membership is ${CREATOR_PRICE_LABEL} per ${BILLING_PERIOD}.`],
+  ['Why is my first year free?', `The GBTI Network was founded by members of the Codeable network seeking a place to discuss the nuances of product development. The expertise at Codeable is well known and respected, and we are happy to be an answer to any interest in community that Codeable experts might have. As a Codeable expert your invite covers a full year of ${TIER_LABEL} membership, with no card required, and nothing bills automatically. If you choose to stay, ${TIER_LABEL} membership is ${TIER_PRICE_LABEL} per ${BILLING_PERIOD}.`],
 ];
 
 const year = new Date().getFullYear();
@@ -86,7 +109,7 @@ const year = new Date().getFullYear();
 
 <BaseLayout
   title="Codeable experts: your first year on us"
-  description="A private invitation for Codeable experts: a full year of Content Creator membership, the network's top tier, first year free with your coupon."
+  description="A private invitation for Codeable experts: a full year of Network Member access, first year free with your coupon."
   noindex
   bare
 >
@@ -120,24 +143,25 @@ const year = new Date().getFullYear();
         <div>
           <p class="eyebrow">Your Codeable invite</p>
           <h1>Welcome, Codeable experts!</h1>
-          <p class="lead">GBTI is a professional publishing network for developers. Publish under your own
-            name, share in the revenue, and build with people who ship. Your Codeable invite covers a full
-            year of Content Creator membership: full network participation, including content creation, no
-            card required.</p>
+          <p class="lead">GBTI is a professional publishing network for developers. Read the work published
+            across it and join the conversation. Your Codeable invite covers a full year at the{' '}{TIER_LABEL}
+            tier, no card required.</p>
           <div class="ci-cta-row">
             <a href="#claim" class="btn-primary">Claim your free year</a>
             <a href="#network" class="btn-ghost">How the network works</a>
           </div>
+          <!-- Facts about the OFFER, not benefit claims about the tier. The three that stood here
+               (publishing, revenue share, shop talk) were all Creator. -->
           <div class="ci-ticks">
-            <span>&#10003; &nbsp;Publish under your own name</span>
-            <span>&#10003; &nbsp;Revenue share built in</span>
-            <span>&#10003; &nbsp;Weekly shop talk</span>
+            <span>&#10003; &nbsp;No card required</span>
+            <span>&#10003; &nbsp;Nothing bills automatically</span>
+            <span>&#10003; &nbsp;Cancel anytime</span>
           </div>
         </div>
         <div id="claim" class="ci-claim">
-          <p class="eyebrow tcenter" style="margin-bottom:0">{CREATOR_LABEL} membership</p>
+          <p class="eyebrow tcenter" style="margin-bottom:0">{TIER_LABEL} membership</p>
           <div class="ci-price">Year one free</div>
-          <div class="ci-sub">then {CREATOR_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
+          <div class="ci-sub">then {TIER_PRICE_LABEL}/{BILLING_PERIOD} if you choose to stay</div>
           <div class="ci-rule"></div>
           <div class="ci-coupon-label">Coupon</div>
           <div class="ci-chip" data-coupon-chip>

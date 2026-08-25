@@ -15,7 +15,7 @@ import { resolveIdentity } from './identity.mjs'; // sow-158 Phase 1b: bearer-or
 import { deriveMembership } from '../../membership/derive-status.mjs';
 import { effectiveStatus, bansFromParsed, rolesFromParsed, grandfathersFromParsed } from '../../membership/overrides-core.mjs';
 import { TIER, meetsTier } from '../../membership/tiers.mjs'; // sow-185: the paid tier axis
-import { buildEnvPriceTierMap, resolveEffectiveTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware tier
+import { buildEnvPriceTierMap, resolveEffectiveTier, grantTier } from '../../membership/tier-gate.mjs'; // sow-185: price map + override-aware tier
 import { createStripeClient } from '../../clients/stripe.mjs';
 import { decryptAssetText, encryptAsset } from '../../client/src/crypto-assets.mjs';
 import { readCouponGrant } from './coupons.mjs'; // SOW-119: the coupon fast-path grant
@@ -93,13 +93,14 @@ export async function resolveEffective(request, env, { fetchImpl = globalThis.fe
   // neither paid (nothing to add) nor banned (ban outranks everything, including a coupon).
   if (effective.status !== 'paid' && effective.status !== 'banned') {
     const grant = await readCouponGrant(kv, githubId, now);
-    // A coupon grants the tier its campaign confers: the record's tier when present (sow-230 added member-tier
-    // campaigns like LINKEDINCONNECT), with creator as the fallback for a legacy tierless grant (matching the
-    // grandfather default + the coupon-fold carry-through).
-    if (grant) {
-      const couponTier = (grant.tier === TIER.member || grant.tier === TIER.creator) ? grant.tier : TIER.creator;
-      return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon', tier: couponTier };
-    }
+    // A coupon grants the tier its campaign confers: the record's tier when present, and MEMBER for a tierless
+    // grant. OWNER RULING 2026-08-24: "coupons ... should only offer membership rather than creator". The
+    // fallback used to be creator, which handed the top tier to every legacy tierless redemption.
+    //
+    // This is grantTier(), not a hand-rolled ternary, so the default lives in ONE place. The previous copy here
+    // and the copy in membership-status.mjs had to be kept in step by hand, and a tier axis that disagrees
+    // between the gate and the oracle shows the member a perk the server then denies.
+    if (grant) return { ok: true, githubId, login, via: id.via, status: 'paid', source: 'coupon', tier: grantTier(grant) };
   }
 
   return { ok: true, githubId, login, via: id.via, status: effective.status, source: effective.source, tier };
