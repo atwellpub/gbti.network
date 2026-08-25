@@ -5,6 +5,9 @@
 //   node scripts/mail-enroll-legacy.mjs              # dry run (the default), writes NOTHING
 //   node scripts/mail-enroll-legacy.mjs --apply      # enact, behind the same two gates as mail-enroll.mjs
 //
+//   MAIL_ENROLL_EXTRA='login=address,login=address'  # owner-supplied addresses for members the dump cannot
+//                                                    # reach. Allow-set still binds; see applySuppliedAddresses.
+//
 // SCOPE IS THE OWNER DECISION OF 2026-08-24 AND IT IS ENFORCED IN CODE, NOT BY INVOCATION. The dump holds 68
 // accounts. Roughly 50 of them are people who registered on the old site and were never comped, and reaching
 // them was explicitly NOT approved. The allow-set is therefore built from house/grandfathered.yml and passed
@@ -34,7 +37,7 @@ import { mailHash, subscriberKey, MAIL_SUBSCRIBER_PREFIX, MAIL_SUPPRESS_PREFIX }
 import { buildSubscriber } from '../membership/mail-subscriber.mjs';
 import { listKvByPrefix, putKvValue } from './lib/erase-member.mjs';
 import { idsPresent } from './mail-enroll.mjs';
-import { parseLegacyUsers, matchLegacyAddresses } from './lib/legacy-addresses.mjs';
+import { parseLegacyUsers, matchLegacyAddresses, applySuppliedAddresses } from './lib/legacy-addresses.mjs';
 
 const ROOT = path.resolve(fileURLToPath(import.meta.url), '../..');
 const DUMP_DIR = path.join(ROOT, '.data/legacy/db');
@@ -86,13 +89,24 @@ async function main() {
   const users = parseLegacyUsers(fs.readFileSync(dump, 'utf8'));
   const withAddress = users.filter((u) => u.email).length;
   console.log(`  legacy accounts: ${users.length}, of which ${withAddress} carry an address`);
-  const { matched, unmatched } = matchLegacyAddresses(users, allowed);
+  const fromDump = matchLegacyAddresses(users, allowed);
+  const { matched, unmatched, supplied, rejected } = applySuppliedAddresses(
+    fromDump.matched, fromDump.unmatched, allowed, env.MAIL_ENROLL_EXTRA,
+  );
   console.log('');
   console.log(`RESOLVED ${matched.length} of ${allowed.length}`);
   for (const m of matched) console.log(`    ${m.login.padEnd(26)} matched on ${m.matchedOn}`);
+  if (rejected.length) {
+    console.log('');
+    console.log(`MAIL_ENROLL_EXTRA: ${rejected.length} pair(s) REJECTED and NOT enrolled`);
+    for (const r of rejected) console.log(`    ${String(r.pair).padEnd(26)} ${r.reason}`);
+  }
   console.log('');
   console.log(`UNREACHABLE ${unmatched.length} (no legacy account; nothing else in the system has an address for them)`);
   for (const u of unmatched) console.log(`    ${(u.login || '(none)').padEnd(26)} ${u.reason}`);
+  if (supplied.length) {
+    console.log(`    (${supplied.length} of the previously unreachable now resolved from MAIL_ENROLL_EXTRA)`);
+  }
 
   // Identity. The address goes into the HMAC and then out of scope: a member subscriber record stores no
   // address, and the drain resolves one at send time.

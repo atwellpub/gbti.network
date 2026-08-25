@@ -126,3 +126,56 @@ export function matchLegacyAddresses(users = [], allowed = []) {
   }
   return { matched, unmatched };
 }
+
+/**
+ * Fold OWNER-SUPPLIED addresses into the resolution, for grandfathered members the dump cannot reach.
+ *
+ * Five of the twenty grandfathered members have no legacy WordPress account, so no automated source holds an
+ * address for them and the script correctly reported them unreachable. The owner can still know an address by
+ * other means. This is the seam for that, and it is deliberately NARROW in three ways:
+ *
+ *   1. THE ALLOW-SET STILL BINDS. A supplied pair is honoured only when its login is in
+ *      house/grandfathered.yml. The scope decision of 2026-08-24 is enforced in code rather than by
+ *      invocation, and an env var must not be a way around it. A login outside the allow-set is REPORTED as
+ *      rejected rather than dropped, so a typo does not look like a successful enrolment of somebody else.
+ *   2. IT NEVER OVERRIDES THE DUMP. Only currently-unmatched logins are eligible. The dump is the
+ *      corroborated source; a hand-typed address must not silently replace a resolved one.
+ *   3. IT NEVER REACHES A COMMITTED FILE. The pairs arrive in MAIL_ENROLL_EXTRA at run time, the address goes
+ *      into the HMAC and out of scope, and nothing here prints an address, exactly as the rest of the script
+ *      already guarantees.
+ *
+ * Format: `login=address`, separated by commas or whitespace. Returns
+ * { matched, unmatched, supplied, rejected } with the same row shape the dump matcher produces, so every
+ * downstream step is unchanged.
+ */
+export function applySuppliedAddresses(matched, unmatched, allowed, raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { matched, unmatched, supplied: [], rejected: [] };
+
+  const byLogin = new Map(allowed.map((a) => [a.login.toLowerCase(), a]));
+  const stillUnmatched = new Map(unmatched.map((u) => [String(u.login ?? '').toLowerCase(), u]));
+
+  const supplied = [];
+  const rejected = [];
+  const claimed = new Set();
+  for (const pair of text.split(/[\s,]+/).filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    if (eq < 1) { rejected.push({ pair, reason: 'not in login=address form' }); continue; }
+    const login = pair.slice(0, eq).trim().toLowerCase();
+    const email = pair.slice(eq + 1).trim();
+    if (!email.includes('@')) { rejected.push({ pair: login, reason: 'no address' }); continue; }
+    const entry = byLogin.get(login);
+    if (!entry) { rejected.push({ pair: login, reason: 'not in the grandfathered allow-set' }); continue; }
+    if (!stillUnmatched.has(login)) { rejected.push({ pair: login, reason: 'already resolved from the dump; not overridden' }); continue; }
+    if (claimed.has(login)) { rejected.push({ pair: login, reason: 'named twice' }); continue; }
+    claimed.add(login);
+    supplied.push({ githubId: entry.githubId, login: entry.login, email, matchedOn: 'owner-supplied' });
+  }
+
+  return {
+    matched: [...matched, ...supplied],
+    unmatched: unmatched.filter((u) => !claimed.has(String(u.login ?? '').toLowerCase())),
+    supplied,
+    rejected,
+  };
+}

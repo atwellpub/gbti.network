@@ -95,3 +95,88 @@ test('an incomplete allow-set entry resolves nothing rather than matching loosel
   assert.deepEqual(matchLegacyAddresses(users, [{ githubId: '1' }]).matched, []);
   assert.deepEqual(matchLegacyAddresses(users, [{ login: 'bomsn' }]).matched, []);
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// MAIL_ENROLL_EXTRA: owner-supplied addresses for grandfathered members the dump cannot reach.
+//
+// The rules under test are containment rules, not conveniences. Five of the twenty grandfathered members have
+// no legacy account, so the seam exists; what it must never become is a way to mail somebody outside the
+// allow-set the owner approved, or a way to quietly replace a corroborated address with a typed one.
+import { applySuppliedAddresses } from '../scripts/lib/legacy-addresses.mjs';
+
+const ALLOWED = [
+  { githubId: '1', login: 'andrija-naglic' },
+  { githubId: '2', login: 'elsonponte' },
+  { githubId: '3', login: 'rafael-minuesa' },
+];
+const MATCHED = [{ githubId: '1', login: 'andrija-naglic', email: 'andrija@example.com', matchedOn: 'login' }];
+const UNMATCHED = [
+  { githubId: '2', login: 'elsonponte', reason: 'no legacy account with this name' },
+  { githubId: '3', login: 'rafael-minuesa', reason: 'no legacy account with this name' },
+];
+
+test('applySuppliedAddresses resolves an unreachable member from a supplied pair', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonponte=e@example.com');
+  assert.equal(r.matched.length, 2);
+  assert.equal(r.unmatched.length, 1);
+  assert.equal(r.supplied.length, 1);
+  const added = r.matched.find((m) => m.login === 'elsonponte');
+  assert.equal(added.email, 'e@example.com');
+  assert.equal(added.githubId, '2', 'the github id comes from the allow-set, never from the input');
+  assert.equal(added.matchedOn, 'owner-supplied');
+});
+
+test('applySuppliedAddresses takes several pairs, comma or whitespace separated', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonponte=e@example.com, rafael-minuesa=r@example.com');
+  assert.equal(r.supplied.length, 2);
+  assert.equal(r.unmatched.length, 0);
+  const ws = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonponte=e@example.com  rafael-minuesa=r@example.com');
+  assert.equal(ws.supplied.length, 2);
+});
+
+// THE CONTAINMENT TEST. This is the one that matters: the env var must not widen the scope the owner set.
+test('applySuppliedAddresses REJECTS a login outside the grandfathered allow-set', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'stranger=s@example.com');
+  assert.equal(r.supplied.length, 0);
+  assert.equal(r.matched.length, 1, 'nobody outside the allow-set is added');
+  assert.equal(r.rejected.length, 1);
+  assert.match(r.rejected[0].reason, /allow-set/);
+});
+
+test('a rejected pair is REPORTED, not silently dropped', () => {
+  // A typo that vanished quietly would look identical to a successful enrolment of the person meant.
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonpont=e@example.com');
+  assert.equal(r.supplied.length, 0);
+  assert.equal(r.rejected.length, 1);
+  assert.equal(r.rejected[0].pair, 'elsonpont');
+});
+
+test('applySuppliedAddresses never OVERRIDES an address resolved from the dump', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'andrija-naglic=typo@example.com');
+  assert.equal(r.supplied.length, 0);
+  assert.equal(r.matched.find((m) => m.login === 'andrija-naglic').email, 'andrija@example.com');
+  assert.match(r.rejected[0].reason, /not overridden/);
+});
+
+test('applySuppliedAddresses rejects a malformed pair and a pair with no address', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonponte,rafael-minuesa=notanaddress');
+  assert.equal(r.supplied.length, 0);
+  assert.equal(r.rejected.length, 2);
+});
+
+test('applySuppliedAddresses is inert when the variable is unset or empty', () => {
+  for (const raw of [undefined, '', '   ']) {
+    const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, raw);
+    assert.equal(r.matched.length, 1);
+    assert.equal(r.unmatched.length, 2);
+    assert.equal(r.supplied.length, 0);
+    assert.equal(r.rejected.length, 0);
+  }
+});
+
+test('applySuppliedAddresses ignores a login named twice rather than enrolling it twice', () => {
+  const r = applySuppliedAddresses(MATCHED, UNMATCHED, ALLOWED, 'elsonponte=a@example.com,elsonponte=b@example.com');
+  assert.equal(r.supplied.length, 1);
+  assert.equal(r.supplied[0].email, 'a@example.com');
+  assert.equal(r.rejected.length, 1);
+});
