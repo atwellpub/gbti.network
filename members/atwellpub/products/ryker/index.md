@@ -51,19 +51,17 @@ links:
   - type: support
     url: https://github.com/gbti-network/ryker/issues
     label: Report a bug
-updatedAt: '2026-08-24T17:49:25.622Z'
 publishedAt: 2026-08-22T00:00:00.000Z
+updatedAt: '2026-08-25T17:26:56.175Z'
 type: product
-author: gbtilabs
+author: atwellpub
 ---
 
 ## Ryker
 
 Ryker is a Chrome extension for inline editing a document and recording every change you make as a prompt-ready change request.
 
-
 There are two ways to use Ryker. Click the Ryker extension toolbar button on any HTML page to edit the document directly on the page. Or open the Ryker workspace and load a Markdown or HTML file from your own disk into Ryker's visual editor.
-
 
 As you edit, Ryker records each change as a prompt-ready change request that you can copy or download and hand to an agent assistant for implementation.
 
