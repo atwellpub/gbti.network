@@ -1,7 +1,7 @@
 // sow-166 follow-up (2026-08-23): ADMIN-GATED MANUAL MAIL TRIGGERS.
 //
 // WHY THIS EXISTS. compileWeeklyIssue and drainMail were reachable ONLY from the cron map in index.mjs
-// (`0 14 * * 2` and `*/5 * * * *`). A deployed Worker offers no way to fire a scheduled handler by hand, so
+// (`0 12 * * 2` / `0 13 * * 2` and `*/5 * * * *`). A deployed Worker offers no way to fire a scheduled handler by hand, so
 // the first end-to-end proof of the mail chain (compile -> enqueue -> drain -> a real message at a real
 // address) could not happen before the next Tuesday 14:00 UTC, and every subsequent re-proof, post-rotation
 // check or re-send carried the same week-long turnaround. That is a long feedback loop on the ONE path that

@@ -3,7 +3,7 @@
 // just by reading the field back. No hearts (they do not exist as data); news normalizes the wired opens only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeContent, normalizeContentEntry, normalizeNews, normalizeNewsEntry, weeklyIssueId } from '../membership/mail-compile-core.mjs';
+import { normalizeContent, normalizeContentEntry, normalizeNews, normalizeNewsEntry, weeklyIssueId, isCentralDigestHour } from '../membership/mail-compile-core.mjs';
 import { composeIssue } from '../membership/mail-digest.mjs';
 
 const at = (t) => () => t;
@@ -219,4 +219,44 @@ test('newsBlurb leaves a sentence that merely BEGINS "The post" alone (both halv
   const { newsBlurb } = await import('../membership/mail-compile-core.mjs');
   const s = 'The post office is closing early today, the council said.';
   assert.equal(newsBlurb(s), s, 'the anchor needs "appeared first on" too, or ordinary prose gets eaten');
+});
+
+// The owner moved the digest to 7 AM Central on 2026-08-25, every Tuesday, permanently. That hour is not
+// expressible as one UTC cron, so two are declared and this decides which is real. The dates below are the
+// two sides of a real US daylight-saving boundary, chosen so a naive fixed-offset implementation fails.
+test('7 AM Central: 12:00 UTC is the real run in summer, 13:00 UTC is the impostor', () => {
+  const summerTuesday = (utcHour) => Date.UTC(2026, 7, 25, utcHour, 0, 0); // Tue 25 Aug 2026, CDT (UTC-5)
+  assert.equal(isCentralDigestHour(summerTuesday(12)), true, '12:00 UTC is 07:00 Chicago in August');
+  assert.equal(isCentralDigestHour(summerTuesday(13)), false, '13:00 UTC is 08:00 Chicago in August, so it no-ops');
+});
+
+test('7 AM Central: the pair SWAPS across the daylight boundary, which a fixed offset cannot do', () => {
+  const winterTuesday = (utcHour) => Date.UTC(2027, 0, 5, utcHour, 0, 0); // Tue 5 Jan 2027, CST (UTC-6)
+  assert.equal(isCentralDigestHour(winterTuesday(13)), true, '13:00 UTC is 07:00 Chicago in January');
+  assert.equal(isCentralDigestHour(winterTuesday(12)), false, '12:00 UTC is 06:00 Chicago in January');
+  // Stated as the property rather than as two more numbers: on any given Tuesday exactly ONE of the two
+  // declared triggers is the 07:00 hour. If both were ever true the digest would compile an hour early; if
+  // neither were, the week would be skipped silently.
+  for (const [y, m, d] of [[2026, 7, 25], [2026, 10, 3], [2027, 0, 5], [2027, 2, 16]]) {
+    const hits = [12, 13].filter((h) => isCentralDigestHour(Date.UTC(y, m, d, h, 0, 0)));
+    assert.equal(hits.length, 1, `exactly one trigger fires on ${y}-${m + 1}-${d}, got ${JSON.stringify(hits)}`);
+  }
+});
+
+test('7 AM Central: it FAILS OPEN, because a spurious run is idempotent and a missed run is a lost week', () => {
+  // compileWeeklyIssue freezes one issue per UTC day and both triggers share a UTC day, so a wrong `true`
+  // costs nothing while a wrong `false` skips the digest. Every unusable input must therefore return true.
+  // null, '' and [] all coerce to a FINITE 0, which is how the first version of this let them through.
+  for (const bad of [NaN, Infinity, null, undefined, 'noon', {}, '', [], false, 0n]) {
+    assert.equal(isCentralDigestHour(bad), true, `${String(bad)} must fail open, not silently skip a week`);
+  }
+  // And an unresolvable zone must not throw out of the dispatcher either.
+  assert.equal(isCentralDigestHour(Date.UTC(2026, 7, 25, 3, 0, 0), { timeZone: 'Mars/Olympus_Mons' }), true);
+});
+
+test('7 AM Central: the hour is a parameter, so the helper is not secretly hard-coded to one number', () => {
+  const t = Date.UTC(2026, 7, 25, 12, 0, 0); // 07:00 Chicago
+  assert.equal(isCentralDigestHour(t, { hour: 7 }), true);
+  assert.equal(isCentralDigestHour(t, { hour: 8 }), false);
+  assert.equal(isCentralDigestHour(t, { hour: 12, timeZone: 'UTC' }), true, 'the zone is a parameter too');
 });

@@ -160,6 +160,39 @@ export function weeklyIssueId(nowMs) {
   return `weekly-${utcDateStamp(nowMs, 'weeklyIssueId')}`;
 }
 
+/**
+ * True when `nowMs` falls inside the 07:00 hour on the US Central clock, which is what "the digest goes out at
+ * 7 AM Central" means to the person receiving it.
+ *
+ * Cloudflare cron is UTC and has no daylight handling, so 7 AM Central is 12:00 UTC from March to November and
+ * 13:00 UTC from November to March. BOTH are declared as triggers and this is what decides which of them is the
+ * real run on any given Tuesday. One fixed UTC cron cannot do it: it is correct for half the year and an hour
+ * out for the other half, and the hour it is wrong is the hour nobody is watching.
+ *
+ * IT FAILS OPEN ON PURPOSE, and an asymmetry in the caller is what makes that safe rather than sloppy.
+ * compileWeeklyIssue freezes ONE issue per UTC day (see weeklyIssueId), and both candidate triggers fall on the
+ * same UTC day, so letting BOTH through costs nothing: the second call finds the frozen issue and returns
+ * without composing or enqueuing anything. Letting NEITHER through silently skips a week. So if the runtime
+ * cannot resolve the zone, running an hour early is strictly better than not running, and that is the opposite
+ * of the fail-closed rule that governs the membership checks, for a reason that does not apply here: nothing
+ * about this decides who may receive something, only when.
+ */
+export function isCentralDigestHour(nowMs, { hour = 7, timeZone = 'America/Chicago' } = {}) {
+  // typeof FIRST, not Number(): `Number(null)`, `Number('')` and `Number([])` are all a finite 0, so a coercing
+  // check would quietly accept them, resolve the Unix epoch, and return false. That is the one wrong answer
+  // this must never give, because false is the silent one.
+  if (typeof nowMs !== 'number' || !Number.isFinite(nowMs)) return true; // fail open, see above
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hour12: false })
+      .formatToParts(new Date(nowMs));
+    const h = Number(parts.find((part) => part.type === 'hour')?.value);
+    if (!Number.isFinite(h)) return true;
+    return (h % 24) === hour; // some ICU builds render midnight as 24 rather than 0
+  } catch {
+    return true;
+  }
+}
+
 /** `YYYY-MM-DD` in UTC, shared by every issue-id minter so the shapes cannot drift apart. */
 function utcDateStamp(nowMs, who) {
   const n = Number(nowMs);

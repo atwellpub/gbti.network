@@ -95,6 +95,7 @@ import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSou
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
 import { handleMailClick } from './mail-click-route.mjs'; // sow-273 follow-up: the digest click counter
 import { resolveSiteUrl, resolveClickBase } from '../../membership/mail-click.mjs';
+import { isCentralDigestHour } from '../../membership/mail-compile-core.mjs'; // sow-166: which of the two Tuesday triggers is 7 AM Central today
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
 import { compileWeeklyIssue, compileWelcomeIssue } from './mail-compile.mjs'; // SOW-166: weekly compile (freeze one issue + enqueue), sends nothing
 import { drainMail } from './mail-drain.mjs'; // SOW-166: smoothed send drain on the shared 5-minute tick, behind the fail-closed gate
@@ -845,10 +846,25 @@ async function drainFiveMinute(env) {
   return { syndication: settle(syndication), mail: settle(mail), welcome };
 }
 
+// Shared by both Tuesday triggers. The guard is inside `run` rather than in the map so an out-of-hour tick still
+// RESOLVES (the dispatcher treats an unresolved cron as a configuration error and shouts), it simply does no work.
+const WEEKLY_DIGEST_JOB = {
+  run: (env) => (isCentralDigestHour(Date.now())
+    ? compileWeeklyIssue(env)
+    : Promise.resolve({ ok: true, skipped: 'not the 07:00 America/Chicago hour' })),
+  label: 'weekly digest compile',
+};
+
 const CRON_JOBS = new Map([
   ['0 * * * *', { run: ingest, label: 'news ingest' }],                 // fetch sources, dedupe, AI-classify, prune -> NEWS_KV
   ['30 * * * *', { run: backfillImages, label: 'news image backfill' }], // scrape og:images for stored items lacking one (SOW-050)
-  ['0 14 * * 2', { run: (env) => compileWeeklyIssue(env), label: 'weekly digest compile' }], // SOW-166: Tuesday 14:00 UTC (Tue morning US, owner Q8); freeze one issue + enqueue, sends nothing
+  // SOW-166 + owner ruling 2026-08-25: the digest lands at 7 AM Central every Tuesday, year round. Cloudflare
+  // cron is UTC with no daylight handling, so that hour is 12:00 UTC in summer and 13:00 UTC in winter; BOTH are
+  // declared and isCentralDigestHour picks the real one. They share a job, which is why the dispatch test now
+  // pins five schedules onto four distinct jobs rather than a one-to-one map. Freezes one issue + enqueues it,
+  // and sends nothing: the 5-minute drain is what sends.
+  ['0 12 * * 2', WEEKLY_DIGEST_JOB], // 07:00 America/Chicago while daylight time is in effect (Mar-Nov)
+  ['0 13 * * 2', WEEKLY_DIGEST_JOB], // 07:00 America/Chicago while standard time is in effect (Nov-Mar)
   ['*/5 * * * *', { run: drainFiveMinute, label: 'syndication + mail drain' }], // SOW-058 syndication + SOW-166 mail drain
 ]);
 
