@@ -94,6 +94,19 @@ export async function findExistingCustomers(members, stripe) {
   return have;
 }
 
+/**
+ * The Stripe key to use, and WHICH VARIABLE it came from, because the name is what makes a refusal
+ * actionable: "not a LIVE key" is useless if the reader cannot tell which of three variables was read.
+ * Returns { key: '', from: null } when none is set.
+ */
+export function resolveLiveKey(env = process.env) {
+  for (const name of ['STRIPE_PROVISION_KEY_LIVE', 'STRIPE_SECRET_KEY']) {
+    const v = String(env?.[name] ?? '').trim();
+    if (v) return { key: v, from: name };
+  }
+  return { key: '', from: null };
+}
+
 async function main() {
   const apply = process.argv.includes('--apply') && !process.argv.includes('--dry-run');
   const env = process.env;
@@ -110,19 +123,24 @@ async function main() {
     process.exit(1);
   }
 
-  const key = String(env.STRIPE_SECRET_KEY ?? '').trim();
+  // STRIPE_PROVISION_KEY_LIVE FIRST, and by name rather than by convention: creating a Customer IS
+  // provisioning, that variable is the only live key the operator holds, and `STRIPE_SECRET_KEY` in .env is a
+  // test key. Preferring it means nobody has to copy a live key between variables to run this, and copying a
+  // live key by hand is the step most likely to put one somewhere it should not be.
+  const { key, from } = resolveLiveKey(env);
   if (!key) {
-    console.error('STRIPE_SECRET_KEY is not set.');
+    console.error('No Stripe key found. Set STRIPE_PROVISION_KEY_LIVE (preferred) or STRIPE_SECRET_KEY.');
     process.exit(1);
   }
   // A test key here would create the Customers in the WRONG MODE, the run would report success, and the
   // digest would still not reach anybody. That failure is silent and expensive, so it is checked rather than
   // trusted: this whole exercise exists because a member with no LIVE Customer cannot be emailed.
   if (!/^(sk|rk)_live_/.test(key)) {
-    console.error(`STRIPE_SECRET_KEY is not a LIVE key (starts "${key.slice(0, 8)}"). Refusing: a Customer `
-      + 'created in test mode makes nobody reachable and reports success while doing it.');
+    console.error(`${from} is not a LIVE key (starts "${key.slice(0, 8)}"). Refusing: a Customer created in `
+      + 'test mode makes nobody reachable and reports success while doing it.');
     process.exit(1);
   }
+  console.log(`stripe key:      ${from} (live)`);
 
   const stripe = createStripeClient({ apiKey: key });
 

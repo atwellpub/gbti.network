@@ -86,3 +86,16 @@ test('the allow-set row shape survives into the Stripe metadata (the silent one)
   assert.equal(fixed.create[0].githubLogin, 'someone');
   assert.equal(recoveredCustomerMetadata(fixed.create[0]).github_login, 'someone', 'mapped, the metadata is complete');
 });
+
+test('resolveLiveKey: prefers the live provisioning key and NAMES the variable it read', async () => {
+  const { resolveLiveKey } = await import('../scripts/recover-customers.mjs');
+  // Naming the source is what makes the refusal actionable: "not a LIVE key" is useless when three variables
+  // could have supplied it, and this repo holds exactly that, two test keys and one live one.
+  assert.deepEqual(resolveLiveKey({ STRIPE_PROVISION_KEY_LIVE: 'rk_live_x', STRIPE_SECRET_KEY: 'rk_test_y' }),
+    { key: 'rk_live_x', from: 'STRIPE_PROVISION_KEY_LIVE' });
+  assert.deepEqual(resolveLiveKey({ STRIPE_SECRET_KEY: 'rk_test_y' }),
+    { key: 'rk_test_y', from: 'STRIPE_SECRET_KEY' }, 'falls back so the mode check can refuse it BY NAME');
+  assert.deepEqual(resolveLiveKey({}), { key: '', from: null });
+  assert.deepEqual(resolveLiveKey({ STRIPE_PROVISION_KEY_LIVE: '   ' }), { key: '', from: null },
+    'whitespace is not a key');
+});
