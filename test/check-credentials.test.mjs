@@ -146,6 +146,32 @@ test('runProbes: the KV read token probe declares mustExpire and reports the exp
   assert.equal(evaluate(results, { now: new Date('2026-08-18T00:00:00Z') }).healthy, true);
 });
 
+// 2026-08-25: the SAME control, on the production KV WRITE token. It went unmonitored for months while this
+// suite was green, because its probe reported liveness only: no `expiresAt`, no `mustExpire`. That is the
+// silence `mustExpire` exists to break, and the read token having it was not enough, since the write token is
+// the one with account-level Edit. These two tests fail against the probe as it stood before that date.
+test('runProbes: the KV WRITE token probe declares mustExpire and reports the expiry Cloudflare returns', async () => {
+  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active', expires_on: '2027-08-25T00:00:00Z' } }) });
+  const results = await runProbes({ env: { CF_API_TOKEN: 'tok' }, fetch });
+  const r = results.find((x) => x.name.startsWith('CF_API_TOKEN'));
+  assert.ok(r, 'the probe runs when the secret is present');
+  assert.equal(r.ok, true);
+  assert.equal(r.mustExpire, true, 'without this an unexpiring account-wide KV WRITE token reads as healthy forever');
+  assert.equal(r.expiresAt, '2027-08-25T00:00:00Z');
+  assert.equal(evaluate(results, { now: new Date('2026-08-25T00:00:00Z') }).healthy, true);
+});
+
+test('runProbes: a KV WRITE token with NO expiry is reported as a PROBLEM, not as healthy', async () => {
+  // Live and valid, carrying no TTL. This is the exact state the token was in before 2026-08-25, and the
+  // state this monitor previously called healthy.
+  const fetch = async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active' } }) });
+  const results = await runProbes({ env: { CF_API_TOKEN: 'tok' }, fetch });
+  const { problems, healthy } = evaluate(results);
+  assert.equal(healthy, false, 'an unexpiring account-wide KV write credential must not pass');
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].kind, 'no-expiry');
+});
+
 test('runProbes: a KV read token with NO expiry is reported as a PROBLEM, not as healthy', async () => {
   // The exact doubt this probe exists to settle: live and valid, but carrying no TTL, so the control that
   // justified accepting an account-wide token does not exist. Liveness alone would call this green.

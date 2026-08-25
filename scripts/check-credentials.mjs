@@ -8,8 +8,9 @@
 //     `github-authentication-token-expiration` reports the token's real expiry, so the date AUTO-TRACKS rotation.
 //   - Stripe read key (STRIPE_SECRET_KEY): list one customer (no expiry; liveness only).
 //   - Discord bot token (DISCORD_BOT_TOKEN): GET /users/@me (no expiry; liveness only).
-//   - Cloudflare token (CF_API_TOKEN): /user/tokens/verify, must be active (no expiry; liveness only),
-//     and must not carry a `not_before` in the future, which reads as active while rejecting every call.
+//   - Cloudflare token (CF_API_TOKEN): /user/tokens/verify, must be active, must carry an EXPIRY (mustExpire,
+//     since account-level KV write cannot be confined by scope), and must not carry a `not_before` in the
+//     future, which reads as active while rejecting every call.
 // REGATE_DISPATCH_TOKEN is Worker-only (not an Actions secret), so it is NOT probed here; its expiry is tracked
 // in .data/ops/secrets-ops/README.md (it expires ~the same time as GH_BOT_TOKEN, so this alert is the reminder).
 //
@@ -180,10 +181,28 @@ export async function runProbes({ env = process.env, fetch = globalThis.fetch } 
       mustExpire: true,
     };
   }));
-  if (env.CF_API_TOKEN) out.push(await probe('CF_API_TOKEN (Cloudflare)', async () => {
+  // The production KV WRITE credential, and the widest blast radius of anything probed here: Workers KV
+  // permissions are account-level, so this reaches every namespace on the account and scope cannot confine it.
+  // Expiry is the only compensating control left, exactly as for CF_KV_READ_TOKEN above.
+  //
+  // `mustExpire` was missing here until 2026-08-25, and the omission hid itself. The probe reported liveness and
+  // nothing more, so the token carried NO expiry for months while this monitor stayed green: it warns inside 30
+  // days of a date, and a non-expiring token never emits one. A TTL to 2027-08-25 was set that day, and the very
+  // run that confirmed it also exposed the gap, because the output printed an expiry for the read token beside a
+  // bare line for this one. A TTL a monitor cannot read buys nothing, so the control belongs here and not only
+  // on the dashboard. Do not silence a future alarm by dropping mustExpire; read the expiry from the token
+  // DETAIL endpoint instead if `/user/tokens/verify` ever stops returning `expires_on`.
+  if (env.CF_API_TOKEN) out.push(await probe('CF_API_TOKEN (Cloudflare, KV write for the overrides mirror)', async () => {
     const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` } });
     let body = null; try { body = await res.json(); } catch { /* */ }
-    return { ok: res.ok && body?.result?.status === 'active', status: res.status, detail: body?.result?.status, notBefore: body?.result?.not_before || null };
+    return {
+      ok: res.ok && body?.result?.status === 'active',
+      status: res.status,
+      detail: body?.result?.status,
+      notBefore: body?.result?.not_before || null,
+      expiresAt: body?.result?.expires_on || null,
+      mustExpire: true,
+    };
   }));
   return out;
 }
