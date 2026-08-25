@@ -56,3 +56,9 @@ quotes:
   - text: A rolling stone gathers no moss
     author: Traditional Proverb
     enabled: true
+  - text: If you're not willing to be mocked, you're not going to do anything new.
+    author: Jeff Bezos
+    enabled: true
+  - text: He who has a why to live can bear almost any how.
+    author: Friedrich Nietzsche
+    enabled: true
