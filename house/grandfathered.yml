@@ -128,3 +128,12 @@ grandfathered:
     reason: coupon:HUDSINVITE
     until: "2027-08-17T04:12:21.157Z"
     tier: member
+
+  # SOW-035 / sow-228: non-staff test identity. Exists so a paid-member path is exercised by a paid
+  # member rather than by the superadmin E2E_TOKEN, which resolves staff and returns a clean for a
+  # path nobody has driven. Throwaway account, owner-created 2026-08-25. Revoke by deleting this block.
+  - github_id: "321094256"      # github.com/gbti-test-member
+    login: gbti-test-member
+    reason: e2e test account (non-staff paid member)
+    until: null
+    tier: member
