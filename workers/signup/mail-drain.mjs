@@ -69,14 +69,42 @@ const sendSucceeded = (res) => res == null || res.ok !== false;
  *   - MAIL_SEND_UNRESTRICTED === 'true': full send. A deliberate, explicit post-launch flip, never a default.
  * Returns { mode, allows(hash) }.
  */
-export function resolveSendGate(env = {}) {
-  if (String(env?.MAIL_SEND_UNRESTRICTED ?? '').trim() === 'true') return { mode: 'unrestricted', allows: () => true };
-  const raw = String(env?.MAIL_SEND_ALLOWLIST ?? '').trim();
-  if (raw) {
-    const set = new Set(raw.split(/[\s,]+/).filter(Boolean));
-    return { mode: 'allowlist', size: set.size, allows: (h) => set.has(String(h)) };
+// A FULL ISO 8601 instant with an explicit offset, and nothing looser. Date.parse alone is far too generous
+// to gate a mass send on: it reads "0" as the year 2000 and "2026" as that January, both of which are in the
+// past, so the two values an operator is most likely to type meaning OFF would have opened the gate instead.
+// Requiring the offset also removes the local-versus-UTC ambiguity in a bare date-time, which today resolves
+// to UTC only because a Worker happens to run there.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+export function resolveSendGate(env = {}, { now = Date.now } = {}) {
+  const raw = String(env?.MAIL_SEND_UNRESTRICTED ?? '').trim();
+  if (raw === 'true') return { mode: 'unrestricted', allows: () => true };
+
+  // ARMED: an ISO instant means "unrestricted FROM this moment". It exists because the alternative for a timed
+  // launch is a person or an agent session awake at the appointed minute to type `true`, which makes the send
+  // time a property of who happened to be available rather than of the system. Armed ahead of time, the gate
+  // opens itself.
+  //
+  // Every path that is not an explicit open FALLS THROUGH to the allowlist and then to closed, which is what
+  // keeps this fail-closed by construction rather than by care: a future instant, a typo, a half-pasted date
+  // and a stray quote all leave the gate exactly as restrictive as it was before anybody touched it. There is
+  // no value of this variable that opens the gate by accident, and that is the property to preserve if this
+  // ever grows a third form.
+  let armedFor = null;
+  if (raw && ISO_INSTANT.test(raw)) {
+    const at = Date.parse(raw);
+    if (Number.isFinite(at)) {
+      if (Number(now()) >= at) return { mode: 'unrestricted', openedAt: at, allows: () => true };
+      armedFor = at; // not yet: keep whatever restriction is configured today
+    }
   }
-  return { mode: 'closed', allows: () => false };
+
+  const rawList = String(env?.MAIL_SEND_ALLOWLIST ?? '').trim();
+  if (rawList) {
+    const set = new Set(rawList.split(/[\s,]+/).filter(Boolean));
+    return { mode: 'allowlist', size: set.size, armedFor, allows: (h) => set.has(String(h)) };
+  }
+  return { mode: 'closed', armedFor, allows: () => false };
 }
 
 /**

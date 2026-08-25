@@ -748,3 +748,60 @@ test('drainMail aggregates skipped across issues', async () => {
   assert.equal(r.skipped, 1);
   assert.equal(sender.sent.length, 1);
 });
+
+// ARMING THE GATE (2026-08-25). The owner wanted the first send to land at 7 AM Central without anybody being
+// awake to type `true` at that minute. An ISO instant means "unrestricted from this moment", so the launch can
+// be set hours ahead and the gate opens itself. The whole risk of the feature is in one direction: a value
+// that opens the gate when nobody meant it to.
+const AT = (iso) => ({ now: () => Date.parse(iso) });
+
+test('armed gate: a PAST instant opens it, a FUTURE instant leaves it exactly as restricted as before', () => {
+  const armed = { MAIL_SEND_UNRESTRICTED: '2026-08-25T12:00:00Z', MAIL_SEND_ALLOWLIST: 'aaa bbb' };
+
+  const before = resolveSendGate(armed, AT('2026-08-25T11:59:59Z'));
+  assert.equal(before.mode, 'allowlist', 'before the instant it is still the allowlist, not a new open state');
+  assert.equal(before.allows('ccc'), false, 'and it permits nobody new');
+  assert.equal(before.armedFor, Date.parse('2026-08-25T12:00:00Z'), 'it reports what it is waiting for');
+
+  // Exactly on the instant, not a second after it: an off-by-one here delays a launch by five minutes and
+  // looks like the drain being broken.
+  const at = resolveSendGate(armed, AT('2026-08-25T12:00:00Z'));
+  assert.equal(at.mode, 'unrestricted', 'the boundary is inclusive');
+  assert.equal(at.allows('ccc'), true);
+
+  assert.equal(resolveSendGate(armed, AT('2026-08-25T18:00:00Z')).mode, 'unrestricted', 'and it stays open after');
+});
+
+test('armed gate: with NO allowlist an unreached instant is closed, not quietly open', () => {
+  const armed = { MAIL_SEND_UNRESTRICTED: '2026-08-25T12:00:00Z' };
+  const g = resolveSendGate(armed, AT('2026-08-25T06:00:00Z'));
+  assert.equal(g.mode, 'closed');
+  assert.equal(g.allows('anyone'), false);
+  assert.equal(g.armedFor, Date.parse('2026-08-25T12:00:00Z'));
+});
+
+test('armed gate: NO value except "true" or a reached ISO instant can open it, however Date.parse reads it', () => {
+  // This is the assertion the feature exists to survive. Date.parse is far too generous to gate a mass send
+  // on by itself: it reads "0" as the year 2000 and "2026" as that January, both comfortably in the past. Those
+  // are the two values an operator is most likely to type meaning OFF, and a naive implementation opens the
+  // gate on both. A bare date-time with no offset is rejected for a different reason: it resolves against the
+  // runtime's local zone, which is UTC in a Worker only by accident of where it runs.
+  const junk = [
+    '0', '1', '2026', 'false', 'TRUE', 'True', 'yes', 'on', 'null', 'undefined', '-1', '0000',
+    '2026-08-25', '2026-08-25T12:00:00', 'Tue Aug 25 2026', '1756123200', ' ', '\n', '"true"', "'true'",
+  ];
+  for (const v of junk) {
+    const g = resolveSendGate({ MAIL_SEND_UNRESTRICTED: v }, AT('2027-01-01T00:00:00Z'));
+    assert.notEqual(g.mode, 'unrestricted', `${JSON.stringify(v)} must NOT open the gate, even years later`);
+    assert.equal(g.allows('anyone'), false);
+  }
+});
+
+test('armed gate: the plain "true" flag and the bare allowlist are untouched by any of this', () => {
+  assert.equal(resolveSendGate({ MAIL_SEND_UNRESTRICTED: 'true' }, AT('2020-01-01T00:00:00Z')).mode, 'unrestricted',
+    'the existing flag ignores the clock entirely');
+  const g = resolveSendGate({ MAIL_SEND_ALLOWLIST: 'a,b' }, AT('2020-01-01T00:00:00Z'));
+  assert.equal(g.mode, 'allowlist');
+  assert.equal(g.armedFor, null, 'nothing armed, nothing reported');
+  assert.equal(resolveSendGate({}).mode, 'closed', 'and the default with no injected clock still resolves');
+});
