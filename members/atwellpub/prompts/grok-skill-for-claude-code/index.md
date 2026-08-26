@@ -19,7 +19,7 @@ tags:
   - summarization
   - workflow
 publishedAt: '2026-08-26T15:54:50.000Z'
-status: published
+status: draft
 type: prompt
 author: atwellpub
 ---
