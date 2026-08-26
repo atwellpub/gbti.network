@@ -73,7 +73,7 @@ const isMemberAuthored = author !== 'gbti';
         <span style="color:#fff;line-height:1.5">
           <strong>{t.label}</strong> ({t.priceLabel}): {t.lead}{t.prose}.
           {t.revenueHref
-            ? <> {t.revenue} <a href={t.revenueHref} style="color:var(--green-mint);text-decoration:underline">revenue program</a>.</>
+            ? <> {t.revenue}{' '}<a href={t.revenueHref} style="color:var(--green-mint);text-decoration:underline">revenue program</a>.</>
             : <> {t.revenue}</>}
         </span>
       </div>
