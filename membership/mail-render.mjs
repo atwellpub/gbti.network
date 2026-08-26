@@ -528,6 +528,15 @@ export function renderIssue(issue, ctx = {}) {
     + emptyLineHtml(empties, p, firstIssue, links)
     + (showCta ? membershipCtaHtml(p, links) : '');
 
+  // The open pixel. Same origin as the click counter (clickBase = PUBLIC_BASE_URL), issue-scoped so one issue is
+  // one open row, matching the click campaign. Gated on both being present so a bare fixture (and the web archive,
+  // which has no clickBase) renders no pixel: the counter is an ADDITION to this renderer, never a dependency. It
+  // is a 1x1 that loads (not display:none) because a hidden image is not fetched, and the fetch is the signal. It
+  // never touches the text alternative. See workers/signup/mail-open-route.mjs.
+  const openPixel = (links.clickBase && links.campaign)
+    ? `<img src="${escapeHtml(`${links.clickBase}/o/${encodeURIComponent(links.campaign)}`)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;overflow:hidden;line-height:1px" />`
+    : '';
+
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
     + `<title>${escapeHtml(subject)}</title></head>`
@@ -542,6 +551,7 @@ export function renderIssue(issue, ctx = {}) {
     + footerHtml(p, ctx, links)
     + `</td></tr></table>`
     + `</td></tr></table>`
+    + openPixel
     + `</body></html>`;
 
   const unsub = safeUrl(ctx.unsubscribeUrl);

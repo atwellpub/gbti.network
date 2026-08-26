@@ -94,6 +94,7 @@ import { membershipAuthor, membershipAuthorTargets } from './membership-author.m
 import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSourcePool, membershipAdminCouponPool } from './membership-admin-author.mjs'; // sow-161: server-side admin mutations + config pool reads
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
 import { handleMailClick } from './mail-click-route.mjs'; // sow-273 follow-up: the digest click counter
+import { handleMailOpen } from './mail-open-route.mjs'; // the digest open counter (1x1 pixel)
 import { resolveSiteUrl, resolveClickBase } from '../../membership/mail-click.mjs';
 import { isCentralDigestHour } from '../../membership/mail-compile-core.mjs'; // sow-166: which of the two Tuesday triggers is 7 AM Central today
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
@@ -1590,6 +1591,12 @@ export default {
       // and the candidate set is rebuilt from the frozen issue. See membership/mail-click.mjs.
       if (pathname.startsWith('/c/')) {
         if (method === 'GET' || method === 'HEAD') return await handleMailClick(request, env);
+      }
+
+      // The open pixel: GET /o/<issueId> returns a 1x1 gif and counts one open against that issue. Anonymous,
+      // no reader identity, best-effort (the pixel returns even if the count write fails). See mail-open.mjs.
+      if (pathname.startsWith('/o/')) {
+        if (method === 'GET' || method === 'HEAD') return await handleMailOpen(request, env);
       }
 
       if (pathname === '/mail/unsubscribe') {
