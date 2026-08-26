@@ -13,9 +13,12 @@ import { couponRedemptionNotice } from '../../membership/coupon-notify.mjs';
  *                on the Resend-verified domain), RESEND_API_KEY.
  * @param record  a NEW-redemption record from newRedemptionRecord (never null here; the caller gates on it).
  * @param sendEmail  optional injected sender for tests; defaults to the real Resend client.
+ * @param selfTest   marks the email as the scheduled reachability probe rather than a real redemption. The
+ *                   weekly credential-health check calls THIS function, not a copy of it, so the thing proven
+ *                   working every Monday is the same path a redemption takes. See scripts/check-credentials.mjs.
  * @returns `{ sent, reason?, message? }`. Never throws.
  */
-export async function sendCouponRedemptionAlert(env, record, { sendEmail } = {}) {
+export async function sendCouponRedemptionAlert(env, record, { sendEmail, selfTest = false } = {}) {
   try {
     const to = String(env?.COUPON_ALERT_EMAIL || '').trim();
     const from = String(env?.MAIL_FROM || env?.RESEND_FROM || '').trim();
@@ -27,7 +30,7 @@ export async function sendCouponRedemptionAlert(env, record, { sendEmail } = {})
     if (!to || !from) { warnUnconfigured(record, 'no recipient or no sender'); return { sent: false, reason: 'unconfigured' }; }
     const send = sendEmail || (apiKey ? createResendClient({ apiKey }).sendEmail : null);
     if (!send) { warnUnconfigured(record, 'no RESEND_API_KEY and no injected sender'); return { sent: false, reason: 'unconfigured' }; }
-    const { subject, text } = couponRedemptionNotice(record);
+    const { subject, text } = couponRedemptionNotice(record, { selfTest });
     await send({ from, to, subject, text });
     return { sent: true };
   } catch (err) {

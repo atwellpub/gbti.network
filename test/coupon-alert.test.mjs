@@ -107,3 +107,25 @@ test('a record with no code and no github_id still logs a readable line, not "un
   assert.match(lines[0], /\(unknown code\)/);
   assert.doesNotMatch(lines[0], /undefined/);
 });
+
+test('sendCouponRedemptionAlert: selfTest reaches the notice, so the weekly probe exercises the real path', async () => {
+  // The probe calls THIS function rather than a copy, so the flag has to survive the trip. If it did not, the
+  // weekly email would arrive looking like a genuine redemption of a code nobody redeemed.
+  const sent = [];
+  const env = { COUPON_ALERT_EMAIL: 'owner@example.com', MAIL_FROM: 'GBTI <noreply@example.com>' };
+  const record = { code: 'SELF-TEST', login: 'nobody', githubId: '0' };
+  const res = await sendCouponRedemptionAlert(env, record, { sendEmail: async (m) => { sent.push(m); }, selfTest: true });
+  assert.equal(res.sent, true);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].subject, /^\[alarm self-test\]/);
+  assert.match(sent[0].text, /THIS IS NOT A REDEMPTION/);
+});
+
+test('sendCouponRedemptionAlert: without the flag the email is a real redemption notice', async () => {
+  const sent = [];
+  const env = { COUPON_ALERT_EMAIL: 'owner@example.com', MAIL_FROM: 'GBTI <noreply@example.com>' };
+  const record = { code: 'HUDSINVITE', login: 'octocat', githubId: '1' };
+  await sendCouponRedemptionAlert(env, record, { sendEmail: async (m) => { sent.push(m); } });
+  assert.equal(sent[0].subject, 'Coupon redeemed: HUDSINVITE by octocat');
+  assert.doesNotMatch(sent[0].text, /self-test/i);
+});

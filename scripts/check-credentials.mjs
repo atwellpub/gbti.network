@@ -16,10 +16,40 @@
 //
 // Run: node scripts/check-credentials.mjs   (with the secrets in env). Pure helpers are exported for tests.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { createResendClient } from '../clients/resend.mjs';
+import { sendCouponRedemptionAlert } from '../workers/signup/coupon-alert.mjs';
 
 const REPO = process.env.GITHUB_CONTENT_REPO || 'gbti-network/gbti.network';
 const WARN_DAYS = Number(process.env.CRED_WARN_DAYS || 30);
+
+/**
+ * sow-279: read one var out of the Worker's `[env.production.vars]` block. Pure, so it is unit-testable.
+ *
+ * SECTION-SCOPED ON PURPOSE. Wrangler does NOT inherit top-level `[vars]` into a named environment, so a var
+ * sitting only in the base block is committed and still absent from the deployed Worker. Scanning the whole
+ * file would find it there and report a working alarm, which is the exact shape of the mistake this probe is
+ * meant to catch. Reading only the production section makes that misplacement fail the check instead.
+ *
+ * WHAT IT STILL CANNOT SEE: no token we hold can read a deployed Worker's vars, so this reads the REPOSITORY.
+ * It proves the committed recipient receives mail. It cannot prove the Worker was deployed after the var was
+ * committed, and that gap is what left this alarm inert for a day (armed in the repo 2026-08-25, live 08-26).
+ * Verify a deploy with `npx wrangler versions view <id> --env production`, not with a green run here.
+ */
+export function productionVarFromToml(toml, key) {
+  let inSection = false;
+  for (const raw of String(toml || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith('#')) continue;
+    if (line.startsWith('[')) { inSection = line === '[env.production.vars]'; continue; }
+    if (!inSection) continue;
+    const m = new RegExp(`^${key}\\s*=\\s*"([^"]*)"`).exec(line);
+    if (m) return m[1].trim();
+  }
+  return '';
+}
 
 /** Whole days from now until an ISO/parseable date, or null if undated/unparseable. Pure. */
 export function daysUntil(when, now = new Date()) {
@@ -127,7 +157,10 @@ async function probe(name, fn) {
   catch (err) { return { name, ok: false, status: null, detail: String(err?.message || err) }; }
 }
 
-export async function runProbes({ env = process.env, fetch = globalThis.fetch } = {}) {
+// `sendAlert` is injectable for the same reason `fetch` is: the coupon probe below sends a REAL email, and a
+// test that happened to put RESEND_API_KEY in its env would otherwise mail the owner from CI with no way to
+// tell it was a test. Defaulting to the real function keeps production honest; the seam only exists for tests.
+export async function runProbes({ env = process.env, fetch = globalThis.fetch, sendAlert = sendCouponRedemptionAlert } = {}) {
   const out = [];
   const ghTok = env.GITHUB_BOT_TOKEN || env.GH_BOT_TOKEN;
   if (ghTok) out.push(await probe('GH_BOT_TOKEN (GitHub)', async () => {
@@ -204,7 +237,56 @@ export async function runProbes({ env = process.env, fetch = globalThis.fetch } 
       mustExpire: true,
     };
   }));
+
+  // sow-279: THE COUPON ALARM, PROVEN END TO END RATHER THAN ASSUMED.
+  //
+  // The owner ruling of 2026-08-11 replaced a redemption cap with manual moderation on three uncapped,
+  // publicly published free-year codes, and named this notice as the compensating control. A control that is
+  // the ONLY one has to be known working, not believed working: it was written, then sat unarmed, then sat
+  // armed-but-undeployed, and at no point did anything go red. A rotated Resend key or an unverified sender
+  // would put it back in that state just as silently.
+  //
+  // So send one real notice a week through sendCouponRedemptionAlert ITSELF. Not a reimplementation: what is
+  // exercised has to be the code a redemption runs, or a divergence between them is invisible by design. It
+  // reads the recipient and sender from the Worker's own production config for the same reason.
+  //
+  // It costs one email a week, subject-prefixed `[alarm self-test]` so it filters in one rule. If that ever
+  // becomes noise, send it to a subaddress; do not stop probing, because the failure this catches is silence.
+  const wranglerToml = readWorkerConfig();
+  const alarmTo = productionVarFromToml(wranglerToml, 'COUPON_ALERT_EMAIL');
+  const alarmFrom = productionVarFromToml(wranglerToml, 'MAIL_FROM');
+  if (env.RESEND_API_KEY && alarmTo) out.push(await probe('COUPON_ALERT_EMAIL (coupon-redemption alarm, end to end)', async () => {
+    const res = await sendAlert(
+      { COUPON_ALERT_EMAIL: alarmTo, MAIL_FROM: alarmFrom || env.RESEND_FROM || 'noreply@gbti.network', RESEND_API_KEY: env.RESEND_API_KEY },
+      SELF_TEST_RECORD,
+      { selfTest: true },
+    );
+    // sendCouponRedemptionAlert is fail-soft by contract and never throws, so `sent` is the only signal there
+    // is. Anything other than a true send is a failed probe: an unconfigured alarm and a broken one are the
+    // same outcome for the owner, which is nobody being told a code was redeemed.
+    return { ok: res?.sent === true, status: null, detail: res?.sent ? `sent to ${alarmTo}` : `${res?.reason || 'not sent'}${res?.message ? `: ${res.message}` : ''}` };
+  }));
   return out;
+}
+
+// Synthetic, and obviously so in the email. Carries no real code, member or grant, and touches no KV: the
+// probe proves REACHABILITY, so it must not resemble a redemption closely enough to be mistaken for one.
+const SELF_TEST_RECORD = {
+  code: 'SELF-TEST',
+  campaign: 'alarm self-test',
+  tier: 'member',
+  until: '(not a real grant)',
+  redeemedAt: '',
+  login: 'nobody',
+  githubId: '0',
+  redemptionCount: 0,
+};
+
+// Read from disk rather than importing, so a malformed or missing config degrades to "probe skipped" instead of
+// crashing the whole credential check and taking the other probes down with it.
+function readWorkerConfig() {
+  try { return readFileSync(join(dirname(dirname(fileURLToPath(import.meta.url))), 'workers', 'signup', 'wrangler.toml'), 'utf8'); }
+  catch { return ''; }
 }
 
 async function main() {

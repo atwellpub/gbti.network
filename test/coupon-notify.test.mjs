@@ -73,3 +73,85 @@ test('couponRedemptionNotice: no em/en dashes in the owner-facing copy (writing 
   const { subject, text } = couponRedemptionNotice(newRedemptionRecord(NEW_GRANT, { githubId: 1 }));
   assert.ok(!/[–—]/.test(subject + text), 'subject/text must not contain en or em dashes');
 });
+
+// --- sow-279 follow-up (2026-08-26): the running redemption count. ---
+//
+// house/coupons.yml has required it from the start ("code, github_id, timestamp, and the running redemption
+// count"), and it was the one item in that list the notice never carried. redeemCoupon already reads the
+// per-code counter to enforce maxRedemptions, so the number is in hand at the moment the grant is returned
+// and no extra KV read was needed. These tests pin BOTH directions: present when supplied, and OMITTED rather
+// than guessed when not, because a wrong number in an abuse report would be read as fact.
+
+test('the record carries the running count when redeemCoupon supplies it', () => {
+  const rec = newRedemptionRecord(
+    { code: 'CODEABLEYEAR', until: '2027-08-26T00:00:00.000Z', redemptionCount: 7, already: false },
+    { githubId: '12345' },
+  );
+  assert.equal(rec.redemptionCount, 7);
+});
+
+test('the count reaches the email body, aligned with the other fields', () => {
+  const rec = newRedemptionRecord(
+    { code: 'CODEABLEYEAR', until: '2027-08-26T00:00:00.000Z', redemptionCount: 7, already: false },
+    { githubId: '12345' },
+  );
+  const { text } = couponRedemptionNotice(rec);
+  assert.match(text, /^Total: {6}7 redemptions of this code, including this one$/m);
+});
+
+test('OMITTED, not guessed, when the count is absent: an older caller must not print a number', () => {
+  const rec = newRedemptionRecord(
+    { code: 'HUDSINVITE', until: '2027-08-26T00:00:00.000Z', already: false },
+    { githubId: '12345' },
+  );
+  assert.equal(rec.redemptionCount, 0);
+  const { text } = couponRedemptionNotice(rec);
+  assert.doesNotMatch(text, /Total:/);
+  assert.doesNotMatch(text, /redemptions of this code/);
+  assert.match(text, /Code: {7}HUDSINVITE/, 'the rest of the notice is unaffected');
+});
+
+test('a nonsense count is treated as absent rather than printed', () => {
+  for (const bad of [0, -3, NaN, 'lots', null, undefined]) {
+    const rec = newRedemptionRecord(
+      { code: 'X', until: '2027-01-01T00:00:00.000Z', redemptionCount: bad, already: false },
+      { githubId: '1' },
+    );
+    assert.doesNotMatch(couponRedemptionNotice(rec).text, /Total:/, `count ${String(bad)} must not print`);
+  }
+});
+
+// --- sow-279: the self-test variant --------------------------------------------------------------------
+// The weekly credential-health probe sends a real email through this same helper. If that email read like a
+// redemption, the owner would learn to skim the one notice this control exists to make them read, which breaks
+// the alarm more thoroughly than never testing it. These pin the difference.
+
+test('couponRedemptionNotice: the self-test says so in the subject and refuses to look like a redemption', () => {
+  const record = { code: 'SELF-TEST', login: 'nobody', githubId: '0', tier: 'member', until: '(not a real grant)' };
+  const { subject, text } = couponRedemptionNotice(record, { selfTest: true });
+  assert.match(subject, /^\[alarm self-test\]/, 'must be filterable on the subject line alone');
+  assert.doesNotMatch(subject, /^Coupon redeemed:/);
+  assert.match(text, /THIS IS NOT A REDEMPTION/);
+  assert.match(text, /No grant was written and no member was touched/);
+  assert.doesNotMatch(text, /A free-year coupon was just redeemed/);
+});
+
+test('couponRedemptionNotice: the self-test drops the act-on-it instructions a real notice carries', () => {
+  const record = { code: 'SELF-TEST', login: 'nobody', githubId: '0' };
+  const { text } = couponRedemptionNotice(record, { selfTest: true });
+  // Telling the owner to deactivate a code, in an email about nothing, is how a control gets acted on wrongly.
+  assert.doesNotMatch(text, /active: false/);
+  assert.doesNotMatch(text, /standing record of every coupon redemption/);
+  assert.match(text, /ABSENCE is the signal/, 'must say what a missing self-test means');
+});
+
+test('couponRedemptionNotice: the default is a REAL notice, unchanged by the flag existing', () => {
+  const record = { code: 'CODEABLEYEAR', login: 'octocat', githubId: '583231', tier: 'member', until: '2027-08-26', redemptionCount: 3 };
+  const plain = couponRedemptionNotice(record);
+  const explicit = couponRedemptionNotice(record, { selfTest: false });
+  assert.deepEqual(plain, explicit, 'omitting the options must equal passing selfTest: false');
+  assert.equal(plain.subject, 'Coupon redeemed: CODEABLEYEAR by octocat');
+  assert.match(plain.text, /A free-year coupon was just redeemed/);
+  assert.match(plain.text, /3 redemptions of this code/);
+  assert.doesNotMatch(plain.text, /self-test/i);
+});
