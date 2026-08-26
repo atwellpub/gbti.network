@@ -1,0 +1,48 @@
+name: KV usage report
+
+# Weekly (and on-demand) Workers KV usage digest. Pulls KV operations from Cloudflare's GraphQL analytics
+# (by namespace, by day) and emails the admin address, so we can see where KV writes are going and catch a
+# trend early. Scheduled for Wednesday, the day after the Tuesday digest send, which is the heaviest write
+# day. The account moved to Workers Paid on 2026-08-26 after the free 1,000-writes/day cap blocked it; this
+# report is the recurring check-in on that. See .data/ops/cloudflare-ops/kv-worker-ops.md.
+#
+# NEEDS: the CF_ANALYTICS_TOKEN secret (Account Analytics Read). The reconcile CF_API_TOKEN does NOT have
+# analytics scope, so it cannot stand in. Until CF_ANALYTICS_TOKEN is set, this job goes red with a clear
+# message (a backstop signal), and no email is sent.
+
+on:
+  schedule:
+    - cron: '17 13 * * 3'   # Wednesdays 13:17 UTC (off the hour), after the Tuesday send
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Days of history to report'
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kv-usage-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No deps: the script uses node fetch + the dependency-free local Resend client.
+      - name: Pull KV usage and email the admin
+        run: node scripts/kv-usage-report.mjs --email
+        env:
+          CF_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN }}
+          # Non-secret account tag, inlined the way reconcile.yml inlines the Cloudflare identifiers.
+          CF_ACCOUNT_ID: d42b12e969229c5187ad0f7289536487
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ vars.RESEND_FROM }}
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+          KV_REPORT_DAYS: ${{ github.event.inputs.days || '8' }}
