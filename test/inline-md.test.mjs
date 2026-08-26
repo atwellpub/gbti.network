@@ -153,3 +153,23 @@ test('rendererAnchors leaves any anchor the site renderer would not have produce
     '<a href="https://x.com" rel="noopener" target="_blank"><strong>b</strong></a>',
   );
 });
+
+// Italic nested inside bold. The strong rule used to require `[^*]+` between the delimiters, so it stopped
+// dead at the inner star, never matched, and published `**Asking *how* it works**` with its asterisks
+// showing. It reached a live draft that way. Both renderers carry the rule, so both are asserted: this file
+// covers markdown-blocks.mjs and test/markdown-render.test.mjs covers client/src/markdown.mjs.
+test('a strong run admits italic inside it, and the round-trip survives', () => {
+  assert.equal(inlineMdToHtml('**Asking *how* it works**'), '<strong>Asking <em>how</em> it works</strong>');
+  assert.equal(inlineHtmlToMd('<strong>Asking <em>how</em> it works</strong>'), '**Asking *how* it works**');
+  assert.equal(roundtrip('**Asking *how* it works**'), '**Asking *how* it works**');
+});
+
+test('widening the strong run leaves the neighbouring cases alone', () => {
+  // Two runs on one line stay two runs: the inner alternation cannot cross a `**`, so it is not greedy.
+  assert.equal(inlineMdToHtml('**bold** and **more**'), '<strong>bold</strong> and <strong>more</strong>');
+  // A triple keeps the italic-of-bold reading it already had.
+  assert.equal(inlineMdToHtml('***both***'), '<em><strong>both</strong></em>');
+  // Bare stars used as arithmetic or bullets are untouched by the strong rule.
+  assert.equal(inlineMdToHtml('**unclosed bold'), '**unclosed bold');
+  assert.equal(inlineMdToHtml('*outer **inner** outer*'), '<em>outer <strong>inner</strong> outer</em>');
+});

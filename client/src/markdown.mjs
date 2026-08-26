@@ -47,9 +47,12 @@ const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&qu
 // inner text of a raw <a>. Both need it, because the site's remark pipeline parses markdown INSIDE inline
 // HTML (CommonMark requires it), so `<a href="x">**Name**</a>` publishes as a bold link. This renderer draws
 // the preview, so any rule it applies in one place and not the other makes the preview lie about the page.
+// The strong run admits a SINGLE star inside it (`\*(?!\*)`) so italic nested in bold parses; a plain
+// `[^*]+` stopped at the inner star, left the run unmatched, and published the asterisks as literal text.
+// The leading `(?!\*)` keeps `***x***` on the italic-of-bold path it already took.
 function emphasis(t) {
   return String(t)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*\*(?!\*)((?:[^*]|\*(?!\*))+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
 }
 const SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;

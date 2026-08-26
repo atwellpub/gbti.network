@@ -548,7 +548,7 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
     });
     let h = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) => isDangerousUrl(url) ? text : `<a href="${String(url).replace(/"/g, "&quot;").replace(/'/g, "&#39;")}">${text}</a>`);
-    h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    h = h.replace(/\*\*(?!\*)((?:[^*]|\*(?!\*))+)\*\*/g, "<strong>$1</strong>");
     h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     h = h.replace(/~~([^~]+)~~/g, "<s>$1</s>");
     h = h.replace(/`([^`]+)`/g, "<code>$1</code>");

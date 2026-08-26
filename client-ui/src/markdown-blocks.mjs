@@ -264,7 +264,9 @@ export function inlineMdToHtml(md) {
   let h = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text, url) =>
     isDangerousUrl(url) ? text : `<a href="${String(url).replace(/"/g, '&quot;').replace(/'/g, '&#39;')}">${text}</a>`);
-  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Mirrors emphasis() in client/src/markdown.mjs: a single star may sit inside a strong run, so italic
+  // nested in bold parses instead of publishing its asterisks as text. Keep the two in step.
+  h = h.replace(/\*\*(?!\*)((?:[^*]|\*(?!\*))+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
   h = h.replace(/~~([^~]+)~~/g, '<s>$1</s>');
   h = h.replace(/`([^`]+)`/g, '<code>$1</code>');

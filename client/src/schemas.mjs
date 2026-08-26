@@ -12,7 +12,6 @@
 // The authoritative validator is still the gate / `npm run check:content`; this is the pre-flight copy.
 
 import { z } from 'zod';
-import { isImageGenTarget } from './image-models.mjs';
 import { BANNER_PRESET_KEYS } from '../../src/lib/banner-presets.mjs';
 
 export const STATUS = z.enum(['draft', 'published']);
@@ -210,21 +209,13 @@ export const promptSchema = z.object({
   sourceUrl: z.string().url().optional(),
   pricing: z.enum(['free', 'freemium', 'paid']).optional(),
   links: contentLinks,
-  // An optional result image (a repo path string, like coverImage/icon). Only meaningful for image
-  // generators: a prompt may carry an `image` ONLY when one of its `targets` is an image-gen model.
+  // An optional lead image (a repo path string, like coverImage/icon), allowed on ANY prompt. The
+  // image-gen target list no longer gates it, only how prompts/[slug].astro frames it.
   // Recommended ratio 4:3 (e.g. 1200x900); the directory grid card crops the lead to 4:3.
   image: z.string().optional(),
   publishedAt: z.coerce.date().optional(),
   updatedAt: z.coerce.date().optional(),
   redirectFrom: z.array(z.string()).default([]),
-}).superRefine((data, ctx) => {
-  if (data.image && !isImageGenTarget(data.targets)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['image'],
-      message: 'an image is only allowed when a target is an image-gen model (e.g. Nano Banana, MidJourney)',
-    });
-  }
 });
 
 // SOW-024: the SOW-013 favoritesSchema (members/<username>/favorites.yml) is RETIRED. Favorites moved off the

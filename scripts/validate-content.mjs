@@ -8,7 +8,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
-import { isImageGenTarget } from '../client/src/image-models.mjs';
 import { isSanctionedAvatar } from '../client-ui/src/profile-fields.mjs'; // SOW-129: the avatar host allowlist (shared)
 import { membersIndexFromParsed, overrideConsistencyErrors } from '../membership/overrides-core.mjs';
 import { validateNewsChannels } from '../membership/news-channels.mjs'; // SOW-043: the news-category -> Discord channel map
@@ -188,10 +187,6 @@ function checkContent(file, owner, type) {
     checkEncryptedLinks(fm, rel);
     if (type === 'product') checkNewsFeed(fm, rel); // sow-140
     checkMemberGating(fm, rel, bodyOf(txt)); // SOW-016
-    // A prompt result image is reserved for image-gen models: reject an `image` unless a target is one.
-    if (type === 'prompt' && fm.image && !isImageGenTarget(fm.targets)) {
-      errors.push(`${rel}: a prompt "image" is only allowed when one of its targets is an image-gen model (e.g. Nano Banana, MidJourney). See client/src/image-models.mjs.`);
-    }
   } else if (type === 'comment' || type === 'share') {
     // SOW-016: encryptedBody resolves to a real v1 envelope + no members-only marker leaks into the body.
     // SOW-018: a Share is gated the same way (a members Share encrypts its body); author scoping above

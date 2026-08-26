@@ -1,6 +1,5 @@
 import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
-import { isImageGenTarget } from '../client/src/image-models.mjs';
 import { BANNER_PRESET_KEYS } from './lib/banner-presets.mjs';
 
 /**
@@ -282,22 +281,17 @@ const prompt = defineCollection({
     sourceUrl: z.string().url().optional(),
     pricing: z.enum(['free', 'freemium', 'paid']).optional(), // SOW-014; absent => free
     links: contentLinks, // SOW-014: typed, visibility-tagged resources (Resources sidebar card)
-    // Optional result image. Only allowed when a target is an image generator (gated below), so the
-    // image card/detail rendering is reserved for Nano Banana / MidJourney / image-gen prompts.
+    // Optional lead image, allowed on ANY prompt. It used to be reserved for image-gen targets, which
+    // meant a Claude Code prompt could not carry a screenshot at all; the editor hid the field and the
+    // schema rejected it. isImageGenTarget now decides PRESENTATION instead (prompts/[slug].astro frames
+    // an image-gen image as a captioned example result, and any other prompt as a plain lead), not whether
+    // the image may exist.
     // RECOMMENDED RATIO 4:3 (e.g. 1200x900): the directory grid card crops the lead to 4:3, and the
     // detail page shows the image at its native ratio. Other ratios still work; 4:3 just crops cleanest.
     image: image().optional(),
     publishedAt: z.coerce.date().optional(),
     updatedAt: z.coerce.date().optional(),
     redirectFrom: z.array(z.string()).default([]),
-  }).superRefine((data, ctx) => {
-    if (data.image && !isImageGenTarget(data.targets)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['image'],
-        message: 'an image is only allowed when a target is an image-gen model (e.g. Nano Banana, MidJourney)',
-      });
-    }
   }),
 });
 

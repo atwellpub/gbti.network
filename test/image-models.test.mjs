@@ -2,6 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { promptImageFraming } from '../src/lib/prompt-page.mjs';
 
 import { isImageGenModel, isImageGenTarget, IMAGE_GEN_MODELS } from '../client/src/image-models.mjs';
 import { schemaFor } from '../client/src/schemas.mjs';
@@ -30,22 +31,36 @@ test('every canonical display name is recognized by the matcher (self-consistenc
   for (const m of IMAGE_GEN_MODELS) assert.equal(isImageGenModel(m), true, `${m} listed but not matched`);
 });
 
-test('promptSchema rejects an image when no target is an image generator', () => {
+// The image was once reserved for image-gen targets, in the schema, the content validator and the form.
+// A prompt written for Claude Code could therefore not carry a screenshot at all, and because gather()
+// skips hidden fields the editor never even submitted one. The gate is gone; these assert it stays gone.
+test('promptSchema accepts a lead image whatever the targets are', () => {
   const schema = schemaFor('prompt');
   const base = { title: 'T', slug: 'a-slug', shortDescription: 'sd', author: 'naresh', image: 'members/naresh/images/x.webp' };
-  assert.equal(schema.safeParse({ ...base, targets: ['Claude'] }).success, false);
-  assert.equal(schema.safeParse({ ...base, targets: [] }).success, false);
+  assert.equal(schema.safeParse({ ...base, targets: ['Claude Code'] }).success, true);
+  assert.equal(schema.safeParse({ ...base, targets: [] }).success, true);
   assert.equal(schema.safeParse({ ...base, targets: ['Nano Banana'] }).success, true);
-  // No image => valid regardless of targets.
+  // No image => still valid, as it always was.
   assert.equal(schema.safeParse({ title: 'T', slug: 'a-slug', shortDescription: 'sd', author: 'naresh', targets: ['Claude'] }).success, true);
 });
 
-test('the prompt form image field is gated by a serializable showIf carrying the model list', () => {
+test('the prompt form offers the image field unconditionally', () => {
   const img = FIELDS.prompt.find((f) => f.key === 'image');
   assert.ok(img, 'prompt form should offer an image field');
   assert.equal(img.kind, 'image');
-  assert.equal(img.showIf?.field, 'targets');
-  assert.ok(Array.isArray(img.showIf?.includesModel) && img.showIf.includesModel.includes('Nano Banana'));
+  // No showIf: a hidden field is not submitted by gather(), so gating it here silently discarded the image
+  // rather than reporting it. Assert the absence, since that is the whole behaviour change.
+  assert.equal(img.showIf, undefined);
   // form-fields mirrors the schema (drift guard already enforces keys; assert the parity copy too).
   assert.ok(fieldsFor('prompt').some((f) => f.key === 'image'));
+});
+
+test('isImageGenTarget survives as a presentation signal, not a gate', () => {
+  // It now decides only how prompt-page.mjs frames a lead image, and both hosts read that one answer.
+  assert.deepEqual(promptImageFraming({ title: 'Grok', targets: ['Claude Code'] }),
+    { isResult: false, alt: 'Grok', caption: '' });
+  assert.deepEqual(promptImageFraming({ title: 'Art', targets: ['Nano Banana'] }),
+    { isResult: true, alt: 'Art: example result generated with Nano Banana', caption: 'Example result \u00b7 Nano Banana' });
+  // A prompt with no targets at all still gets a usable alt and no caption.
+  assert.deepEqual(promptImageFraming({ title: 'Bare' }), { isResult: false, alt: 'Bare', caption: '' });
 });

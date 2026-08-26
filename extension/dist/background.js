@@ -16902,47 +16902,6 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// client/src/image-models.mjs
-var IMAGE_GEN_MODELS = Object.freeze([
-  "Nano Banana",
-  "MidJourney",
-  "DALL-E",
-  "Stable Diffusion",
-  "Flux",
-  "Imagen",
-  "Ideogram",
-  "Leonardo",
-  "Firefly",
-  "Recraft",
-  "Qwen Image",
-  "Seedream"
-]);
-var MODEL_TOKENS = Object.freeze([
-  "nanobanana",
-  "midjourney",
-  "dalle",
-  "stablediffusion",
-  "flux",
-  "imagen",
-  "ideogram",
-  "leonardo",
-  "firefly",
-  "recraft",
-  "qwenimage",
-  "seedream"
-]);
-function normalize(s) {
-  return String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-function isImageGenModel(target) {
-  const n = normalize(target);
-  if (!n) return false;
-  return MODEL_TOKENS.some((tok) => n.includes(tok));
-}
-function isImageGenTarget(targets) {
-  return Array.isArray(targets) && targets.some(isImageGenModel);
-}
-
 // src/lib/banner-presets.mjs
 var BANNER_PRESETS = [
   { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
@@ -17146,21 +17105,13 @@ var promptSchema = external_exports.object({
   sourceUrl: external_exports.string().url().optional(),
   pricing: external_exports.enum(["free", "freemium", "paid"]).optional(),
   links: contentLinks,
-  // An optional result image (a repo path string, like coverImage/icon). Only meaningful for image
-  // generators: a prompt may carry an `image` ONLY when one of its `targets` is an image-gen model.
+  // An optional lead image (a repo path string, like coverImage/icon), allowed on ANY prompt. The
+  // image-gen target list no longer gates it, only how prompts/[slug].astro frames it.
   // Recommended ratio 4:3 (e.g. 1200x900); the directory grid card crops the lead to 4:3.
   image: external_exports.string().optional(),
   publishedAt: external_exports.coerce.date().optional(),
   updatedAt: external_exports.coerce.date().optional(),
   redirectFrom: external_exports.array(external_exports.string()).default([])
-}).superRefine((data, ctx) => {
-  if (data.image && !isImageGenTarget(data.targets)) {
-    ctx.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      path: ["image"],
-      message: "an image is only allowed when a target is an image-gen model (e.g. Nano Banana, MidJourney)"
-    });
-  }
 });
 var shareSchema = external_exports.object({
   type: external_exports.literal("share").default("share"),
@@ -21148,10 +21099,11 @@ var FIELDS = Object.freeze({
     TAGS,
     f("variables", "Variables", "array"),
     f("exampleOutput", "Example output", "textarea"),
-    // Result image: shown ONLY when a target is an image generator (Nano Banana, MidJourney, etc.). The
-    // `showIf` is serializable data the form renderer evaluates live as the targets field changes; the
-    // schema + content validator enforce the same rule server-side.
-    f("image", "Result image (image-gen models, recommended 4:3)", "image", { placeholder: "1200x900 (4:3) crops cleanest", showIf: { field: "targets", includesModel: IMAGE_GEN_MODELS } }),
+    // Lead image, offered on every prompt. It was once hidden behind a showIf keyed to the image-gen
+    // target list, and because gather() skips fields that are not visible, a Claude Code prompt did not
+    // merely have the image rejected, it never submitted one. The showIf mechanism itself stays available
+    // to other fields; the prompt image simply no longer uses it.
+    f("image", "Lead image (recommended 4:3)", "image", { placeholder: "1200x900 (4:3) crops cleanest" }),
     f("sourceUrl", "Source URL", "text"),
     f("links", "Links (JSON array: {type,url,visibility:public|members,primary,label})", "json"),
     f("publishedAt", "Published at", "date")
@@ -21228,7 +21180,7 @@ var attrOf = (attrs, name) => {
 };
 var escAttr = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function emphasis(t) {
-  return String(t).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  return String(t).replace(/\*\*(?!\*)((?:[^*]|\*(?!\*))+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
 }
 var SAFE_INNER_TAG = /^(?:strong|b|em|i|code|s|del|br)$/i;
 var sanitizeAnchorInner = (html) => String(html ?? "").replace(

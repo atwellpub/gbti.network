@@ -6,7 +6,6 @@
 //   text | textarea | enum | array (comma-separated -> string[]) | boolean | number | date | image | json
 // `json` is for nested objects (e.g. product/profile links) entered as a small JSON blob.
 
-import { IMAGE_GEN_MODELS } from './image-models.mjs';
 import { BANNER_PRESET_KEYS } from '../../src/lib/banner-presets.mjs';
 
 const f = (key, label, kind, extra = {}) => ({ key, label, kind, ...extra });
@@ -78,10 +77,11 @@ export const FIELDS = Object.freeze({
     TAGS,
     f('variables', 'Variables', 'array'),
     f('exampleOutput', 'Example output', 'textarea'),
-    // Result image: shown ONLY when a target is an image generator (Nano Banana, MidJourney, etc.). The
-    // `showIf` is serializable data the form renderer evaluates live as the targets field changes; the
-    // schema + content validator enforce the same rule server-side.
-    f('image', 'Result image (image-gen models, recommended 4:3)', 'image', { placeholder: '1200x900 (4:3) crops cleanest', showIf: { field: 'targets', includesModel: IMAGE_GEN_MODELS } }),
+    // Lead image, offered on every prompt. It was once hidden behind a showIf keyed to the image-gen
+    // target list, and because gather() skips fields that are not visible, a Claude Code prompt did not
+    // merely have the image rejected, it never submitted one. The showIf mechanism itself stays available
+    // to other fields; the prompt image simply no longer uses it.
+    f('image', 'Lead image (recommended 4:3)', 'image', { placeholder: '1200x900 (4:3) crops cleanest' }),
     f('sourceUrl', 'Source URL', 'text'),
     f('links', 'Links (JSON array: {type,url,visibility:public|members,primary,label})', 'json'),
     f('publishedAt', 'Published at', 'date'),

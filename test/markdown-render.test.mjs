@@ -261,3 +261,17 @@ test('reader: a table is escaped like every other block (no author HTML executes
   assert.doesNotMatch(html, /<img/);
   assert.match(html, /&lt;img/);
 });
+
+// The reader's copy of the same emphasis rule. See test/inline-md.test.mjs for the sibling in
+// client-ui/src/markdown-blocks.mjs: a fix landing in one renderer and not the other makes the preview
+// disagree with the published page, which is the failure emphasis() exists in one place to prevent.
+test('italic nested inside bold parses instead of printing its asterisks', () => {
+  assert.match(renderMarkdown('**Asking *how* it works**'), /<strong>Asking <em>how<\/em> it works<\/strong>/);
+  // The neighbours are unchanged: two runs stay two, a triple stays italic-of-bold, an unclosed run stays text.
+  assert.match(renderMarkdown('**bold** and **more**'), /<strong>bold<\/strong> and <strong>more<\/strong>/);
+  assert.match(renderMarkdown('***both***'), /<em><strong>both<\/strong><\/em>/);
+  assert.match(renderMarkdown('**unclosed bold'), /\*\*unclosed bold/);
+  // The rule is shared with the raw-anchor path, so a bold link with italic inside it parses too.
+  assert.match(renderMarkdown('A <a href="https://x.com">**deep *dive* here**</a> link.'),
+    /<strong>deep <em>dive<\/em> here<\/strong>/);
+});

@@ -16959,47 +16959,6 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// client/src/image-models.mjs
-var IMAGE_GEN_MODELS = Object.freeze([
-  "Nano Banana",
-  "MidJourney",
-  "DALL-E",
-  "Stable Diffusion",
-  "Flux",
-  "Imagen",
-  "Ideogram",
-  "Leonardo",
-  "Firefly",
-  "Recraft",
-  "Qwen Image",
-  "Seedream"
-]);
-var MODEL_TOKENS = Object.freeze([
-  "nanobanana",
-  "midjourney",
-  "dalle",
-  "stablediffusion",
-  "flux",
-  "imagen",
-  "ideogram",
-  "leonardo",
-  "firefly",
-  "recraft",
-  "qwenimage",
-  "seedream"
-]);
-function normalize(s) {
-  return String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-function isImageGenModel(target) {
-  const n = normalize(target);
-  if (!n) return false;
-  return MODEL_TOKENS.some((tok) => n.includes(tok));
-}
-function isImageGenTarget(targets) {
-  return Array.isArray(targets) && targets.some(isImageGenModel);
-}
-
 // src/lib/banner-presets.mjs
 var BANNER_PRESETS = [
   { key: "green", label: "Green", from: "#1f9e5f", to: "#25232b" },
@@ -17203,21 +17162,13 @@ var promptSchema = external_exports.object({
   sourceUrl: external_exports.string().url().optional(),
   pricing: external_exports.enum(["free", "freemium", "paid"]).optional(),
   links: contentLinks,
-  // An optional result image (a repo path string, like coverImage/icon). Only meaningful for image
-  // generators: a prompt may carry an `image` ONLY when one of its `targets` is an image-gen model.
+  // An optional lead image (a repo path string, like coverImage/icon), allowed on ANY prompt. The
+  // image-gen target list no longer gates it, only how prompts/[slug].astro frames it.
   // Recommended ratio 4:3 (e.g. 1200x900); the directory grid card crops the lead to 4:3.
   image: external_exports.string().optional(),
   publishedAt: external_exports.coerce.date().optional(),
   updatedAt: external_exports.coerce.date().optional(),
   redirectFrom: external_exports.array(external_exports.string()).default([])
-}).superRefine((data, ctx2) => {
-  if (data.image && !isImageGenTarget(data.targets)) {
-    ctx2.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      path: ["image"],
-      message: "an image is only allowed when a target is an image-gen model (e.g. Nano Banana, MidJourney)"
-    });
-  }
 });
 var shareSchema = external_exports.object({
   type: external_exports.literal("share").default("share"),
