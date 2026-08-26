@@ -48,6 +48,10 @@ MAIL_FROM = "GBTI Network <noreply@gbti.network>"
 MAIL_DAILY_CAP = "90"
 MAIL_MONTHLY_CAP = "2500"
 MAIL_MAX_PER_TICK = "10"
+# Digest double-opt-in toggle. "true" (default; any value but "false") keeps the confirm-email flow; "false"
+# disables it so a subscribe activates immediately with no confirmation. Fail-safe: an unset/typo'd value keeps
+# the stricter confirm flow. Production sets "false" (owner-directed 2026-08-26) in [env.production.vars] below.
+MAIL_DOUBLE_OPTIN = "true"
 # sow-158 Phase 1b: origins allowed to make CREDENTIALED (cookie) calls to the member endpoints (comma-separated,
 # no trailing slash). Shared by the CORS reflect-origin policy AND the CSRF Origin check. A local dev host adds
 # http://localhost:4321 via .dev.vars; keep this tight (never a wildcard, which cannot co-exist with credentials).
@@ -231,6 +235,14 @@ MAIL_FROM = "GBTI Network <noreply@gbti.network>"
 MAIL_DAILY_CAP = "90"
 MAIL_MONTHLY_CAP = "2500"
 MAIL_MAX_PER_TICK = "10"
+# Digest double-opt-in DISABLED in production (owner-directed 2026-08-26): a subscribe activates immediately and
+# sends no confirmation email; the new-subscriber admin notice + the welcome sweep still fire. Set back to "true"
+# (or remove) to restore double opt-in. Tradeoff on the record: this enrolls an address without a confirm click,
+# so proof-of-consent is weaker; the suppression fail-close (an unsubscribed address is not re-added) still holds.
+MAIL_DOUBLE_OPTIN = "false"
+# ADMIN_ALERT_EMAIL (optional): recipient for the new-subscriber notice and the weekly post-send stats email. Left
+# UNSET so both fall back to COUPON_ALERT_EMAIL below (opportunities@gbti.network, owner-chosen 2026-08-26). Set a
+# distinct address here to split admin notices off the coupon inbox.
 # sow-279 ARMED 2026-08-26 (owner-chosen recipient). The coupon-redemption abuse alarm for the three
 # uncapped free-year codes. Plain var, not a secret: the address is already public and this way it can be read
 # back and proven to point somewhere. Fail-soft, so a bad value degrades to no alert rather than a failed signup.

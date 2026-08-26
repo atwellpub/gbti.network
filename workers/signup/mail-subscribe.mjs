@@ -26,13 +26,24 @@
 // count as fresh consent and lift the suppression (via a confirm click) is the owner's decision; until it is
 // made, the strict default stands, because silently re-contacting someone who unsubscribed is the worse error.
 //
-// INJECTABLE (kv, the abuse checks, the mail sender, now) so the whole thing is unit-tested with a fake KV and no
-// network. Everything is best-effort + fail-closed: an unprovisioned or erroring dependency yields the neutral
-// response and enrolls nobody, never a 500 that leaks internals.
+// SETTINGS TOGGLE: MAIL_DOUBLE_OPTIN. Defaults ON (the double-opt-in flow above). Set to the exact string
+// "false" to DISABLE it: subscribe then writes the ACTIVE subscriber at submit (no pending record, no
+// confirmation email) and notifies the admin. The welcome sweep still greets the new subscriber (welcomedAt ==
+// null), so nothing downstream changes. Fail-safe: any value other than "false" keeps the confirm flow, so an
+// unset or mistyped var never silently enrolls addresses. This weakens proof-of-consent (an address typed by a
+// third party is enrolled directly), an owner-directed tradeoff; the suppression fail-close still holds.
+//
+// ADMIN NOTICE: on a genuinely new subscriber (direct-mode submit, or a confirm), the Worker fires a fail-soft
+// new-subscriber notice to the owner (subscriber-alert.mjs). It never fires on an idempotent re-subscribe.
+//
+// INJECTABLE (kv, the abuse checks, the mail sender, the admin-alert sender, now) so the whole thing is
+// unit-tested with a fake KV and no network. Everything is best-effort + fail-closed: an unprovisioned or
+// erroring dependency yields the neutral response and enrolls nobody, never a 500 that leaks internals.
 
 import { mailHash, suppressKey } from '../../membership/mail-suppress.mjs';
-import { encryptEmail } from '../../membership/mail-address.mjs';
+import { encryptEmail, decryptEmail } from '../../membership/mail-address.mjs';
 import { buildSubscriber } from '../../membership/mail-subscriber.mjs';
+import { sendNewSubscriberAlert } from './subscriber-alert.mjs';
 import { timingSafeEqual } from '../../membership/mail-unsub-token.mjs';
 import {
   isValidEmailShape, optinKey, buildPendingOptIn, normalizePendingOptIn, OPTIN_TTL_SECONDS,
@@ -118,13 +129,21 @@ async function readSubscribeInput(request) {
   }
 }
 
-/** The single neutral subscribe outcome (JSON for a fetch, an HTML page for a no-JS form navigation). */
-function neutralResult(request) {
+/** The single neutral subscribe outcome (JSON for a fetch, an HTML page for a no-JS form navigation). The copy
+ *  differs by MODE (confirm vs direct), but within a mode it is byte-identical for a new, already-active, or
+ *  suppressed address, so the anti-enumeration property holds. `direct` is set when MAIL_DOUBLE_OPTIN is off, in
+ *  which case a submit activates immediately and there is no confirmation email to check for. */
+function neutralResult(request, { direct = false } = {}) {
   if (wantsJson(request)) {
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS },
     });
+  }
+  if (direct) {
+    return page('Subscribed',
+      '<h1>You are subscribed.</h1>'
+      + '<p>You will receive the GBTI Network weekly digest. You can unsubscribe from any issue.</p>');
   }
   return page('Almost done',
     '<h1>Almost done. Please check your inbox.</h1>'
@@ -197,7 +216,8 @@ export async function handleSubscribe(request, env, deps = {}) {
     kv = env?.SIGNUP_KV,
     verifyTurnstileFn = verifyTurnstile,
     rateLimitFn = rateLimit,
-    send, // injectable Resend sender for tests
+    send, // injectable Resend sender for tests (the confirmation email)
+    sendAdminAlert, // injectable admin-notice sender for tests (the new-subscriber notice)
     now = Date.now,
   } = deps;
 
@@ -226,8 +246,16 @@ export async function handleSubscribe(request, env, deps = {}) {
     if (!ok) return errorResult(request, 'challenge_failed', 403);
   }
 
-  // From here every path returns the SAME neutral response (anti-enumeration).
-  const neutral = neutralResult(request);
+  // MAIL_DOUBLE_OPTIN is the settings-level toggle for the confirm step. It defaults to ON (double opt-in): only
+  // the exact string "false" disables it. When OFF, a submit activates the subscriber immediately and sends no
+  // confirmation email; the welcome sweep still greets them (welcomedAt == null). Fail-safe: an unset or typo'd
+  // value keeps the stricter confirm flow rather than silently enrolling addresses.
+  const doubleOptIn = str(env?.MAIL_DOUBLE_OPTIN).trim().toLowerCase() !== 'false';
+
+  // From here every path returns the SAME neutral response WITHIN A MODE (anti-enumeration). The copy differs
+  // between the confirm and direct modes, which is not an enumeration signal: it depends only on configuration,
+  // not on whether this particular address exists.
+  const neutral = neutralResult(request, { direct: !doubleOptIn });
 
   const suppressSecret = str(env?.MAIL_SUPPRESS_KEY).trim();
   const emailKey = str(env?.MAIL_EMAIL_KEY).trim();
@@ -248,10 +276,34 @@ export async function handleSubscribe(request, env, deps = {}) {
     if (existing && existing.status === 'active') return neutral;
   } catch { /* a read error must not block a genuine new subscribe */ }
 
-  // Encrypt the address (bound to the hash) and write a fresh pending opt-in. Re-subscribing before confirming
-  // overwrites the prior pending record with a new nonce + TTL, so the newest link is the one that works.
+  // Encrypt the address (bound to the hash). The same opaque envelope feeds either the pending opt-in (confirm
+  // mode) or the active subscriber record (direct mode); a raw '@' never lands in KV on either path.
   const envelope = await encryptEmail({ key: emailKey, hash, email: addr });
   if (!envelope) return neutral;
+
+  // DIRECT MODE (MAIL_DOUBLE_OPTIN off): promote to an active subscriber now, skip the confirmation email, and
+  // notify the admin of the new subscriber. buildSubscriber + putSubscriber are the exact two calls the confirm
+  // path uses, so a direct enrollment is indistinguishable downstream from a confirmed one (welcomedAt == null,
+  // greeted by the welcome sweep). The existing-active short-circuit above already made this fire only for a
+  // genuinely new subscriber.
+  if (!doubleOptIn) {
+    let stored = null;
+    try {
+      const rec = buildSubscriber({ hash, source: 'anon', emailEnc: JSON.stringify(envelope) }, { now });
+      stored = await putSubscriber(kv, rec);
+    } catch (e) {
+      console.warn(`mail-subscribe: direct subscriber write failed for ${hash}: ${e?.message || e}`);
+      return neutral;
+    }
+    if (!stored) return neutral;
+    // Fail-soft admin notice. Awaited (like the confirmation send it replaces) but never throws, so it cannot
+    // break the neutral response; only fires on this genuinely new activation.
+    await sendNewSubscriberAlert(env, { email: addr, source: 'anon', at: new Date(now()).toISOString() }, { sendEmail: sendAdminAlert });
+    return neutral;
+  }
+
+  // CONFIRM MODE (default): write a fresh pending opt-in and send the confirmation email. Re-subscribing before
+  // confirming overwrites the prior pending record with a new nonce + TTL, so the newest link is the one that works.
   const nonce = randomNonce();
   let pending;
   try {
@@ -286,7 +338,7 @@ export async function handleSubscribe(request, env, deps = {}) {
  * pending record. Fail-closed on a malformed hash, an absent/expired opt-in, or a nonce mismatch.
  */
 export async function handleConfirm(request, env, deps = {}) {
-  const { kv = env?.SIGNUP_KV, now = Date.now } = deps;
+  const { kv = env?.SIGNUP_KV, now = Date.now, sendAdminAlert } = deps;
 
   const method = str(request.method || 'GET').toUpperCase();
   if (method === 'OPTIONS') return new Response(null, { status: 204, headers: PAGE_HEADERS });
@@ -343,6 +395,15 @@ export async function handleConfirm(request, env, deps = {}) {
   if (!stored) return notCompleted();
 
   await deleteOptin(kv, hash); // best-effort: the subscriber is active; a stray opt-in expires on its TTL
+
+  // Notify the admin of the new subscriber (fail-soft). Best-effort decrypt of the stored envelope for the notice;
+  // a decrypt failure just omits the address. Only fires here on a genuinely new confirmation.
+  let email = '';
+  try {
+    const envelope = JSON.parse(pending.emailEnc);
+    email = (await decryptEmail({ key: str(env?.MAIL_EMAIL_KEY).trim(), hash, envelope })) || '';
+  } catch { /* leave email blank; the notice still sends */ }
+  await sendNewSubscriberAlert(env, { email, source: 'anon', at: new Date(now()).toISOString() }, { sendEmail: sendAdminAlert });
 
   return page('Subscribed',
     '<h1>You are subscribed.</h1>'

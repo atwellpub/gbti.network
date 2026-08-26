@@ -267,3 +267,95 @@ test('SEAM end-to-end: subscribe -> confirm POST -> the drain resolver recovers 
   const recovered = await resolveSubscriberEmail(stored, { key: EMAIL_KEY });
   assert.equal(recovered, EMAIL, 'the emailEnc survived subscribe->pending->confirm->subscriber and decrypts back');
 });
+
+// ---------- MAIL_DOUBLE_OPTIN off (direct enrollment) + the new-subscriber admin notice ----------
+
+// A recording admin-alert sender, injected so no network is touched and the fire-once behaviour is observable.
+function alertSink() {
+  const alerts = [];
+  return { alerts, sendAlert: async (m) => { alerts.push(m); return { id: 'a' }; } };
+}
+// Direct mode needs a recipient for the admin notice to actually send (else it is a fail-soft no-op).
+const DIRECT_ENV = { ...ENV, MAIL_DOUBLE_OPTIN: 'false', ADMIN_ALERT_EMAIL: 'owner@example.com' };
+
+test('subscribe (opt-in OFF): a new address is ACTIVE immediately, sends NO confirmation, notifies the admin once', async () => {
+  const kv = makeKV();
+  const { sent, send } = sink();
+  const { alerts, sendAlert } = alertSink();
+  const res = await handleSubscribe(jsonReq({ email: 'Reader@Example.com' }),
+    { ...DIRECT_ENV, SIGNUP_KV: kv }, { send, sendAdminAlert: sendAlert, rateLimitFn: allow });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const hash = await mailHash(SUPPRESS_KEY, 'Reader@Example.com');
+  // active subscriber written straight away; NO pending opt-in
+  const stored = JSON.parse(kv.m.get(subscriberKey(hash)).value);
+  assert.equal(stored.status, 'active', 'subscriber is active at submit');
+  assert.equal(stored.source, 'anon');
+  assert.equal(stored.welcomedAt, null, 'welcomedAt null so the welcome sweep still greets them');
+  assert.equal(kv.m.get(optinKey(hash)), undefined, 'no pending opt-in in direct mode');
+  assert.ok(!kv.m.get(subscriberKey(hash)).value.includes('Reader@Example.com'), 'no raw address in the stored record');
+
+  assert.equal(sent.length, 0, 'no confirmation email is sent in direct mode');
+  assert.equal(alerts.length, 1, 'the admin is notified exactly once');
+  assert.equal(alerts[0].to, 'owner@example.com');
+  assert.ok(alerts[0].subject.includes('Reader@Example.com'), 'the notice names the new subscriber');
+  // the seam still holds: the directly-stored emailEnc decrypts back to the original address
+  assert.equal(await resolveSubscriberEmail(stored, { key: EMAIL_KEY }), 'Reader@Example.com');
+});
+
+test('subscribe (opt-in OFF): an already-active address is neutral and does NOT re-notify the admin', async () => {
+  const kv = makeKV();
+  const { sent, send } = sink();
+  const { alerts, sendAlert } = alertSink();
+  const hash = await mailHash(SUPPRESS_KEY, 'member@example.com');
+  await kv.put(subscriberKey(hash), JSON.stringify({ hash, source: 'anon', status: 'active', emailEnc: '{"ct":"x"}', createdAt: 1, updatedAt: 1 }));
+  const res = await handleSubscribe(jsonReq({ email: 'member@example.com' }),
+    { ...DIRECT_ENV, SIGNUP_KV: kv }, { send, sendAdminAlert: sendAlert, rateLimitFn: allow });
+  assert.equal(res.status, 200);
+  assert.equal(sent.length, 0);
+  assert.equal(alerts.length, 0, 'a re-subscribe of an active address fires no new-subscriber notice');
+});
+
+test('subscribe (opt-in OFF): a SUPPRESSED address is still refused, no subscriber, no notice', async () => {
+  const kv = makeKV();
+  const { sent, send } = sink();
+  const { alerts, sendAlert } = alertSink();
+  const hash = await mailHash(SUPPRESS_KEY, 'gone@example.com');
+  await kv.put(suppressKey(hash), SUPPRESS_VALUE);
+  const res = await handleSubscribe(jsonReq({ email: 'gone@example.com' }),
+    { ...DIRECT_ENV, SIGNUP_KV: kv }, { send, sendAdminAlert: sendAlert, rateLimitFn: allow });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true }, 'same neutral response, no enumeration signal');
+  assert.equal(kv.m.get(subscriberKey(hash)), undefined, 'suppression fail-close holds in direct mode');
+  assert.equal(alerts.length, 0);
+});
+
+test('subscribe (opt-in OFF): the no-JS neutral page says "subscribed", not "check your inbox"', async () => {
+  const kv = makeKV();
+  const { send } = sink();
+  const { sendAlert } = alertSink();
+  const formReq = new Request('https://signup.gbti.network/mail/subscribe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'email=reader@example.com',
+  });
+  const res = await handleSubscribe(formReq, { ...DIRECT_ENV, SIGNUP_KV: kv }, { send, sendAdminAlert: sendAlert, rateLimitFn: allow });
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /You are subscribed/i);
+  assert.doesNotMatch(html, /check your inbox/i);
+});
+
+test('confirm POST (opt-in ON): notifies the admin once with the decrypted address', async () => {
+  const kv = makeKV();
+  const { alerts, sendAlert } = alertSink();
+  const url = await subscribeAndGetConfirmUrl(kv, 'Confirmed.Reader@Example.com');
+  const res = await handleConfirm(new Request(url, { method: 'POST' }),
+    { ...ENV, ADMIN_ALERT_EMAIL: 'owner@example.com', SIGNUP_KV: kv }, { sendAdminAlert: sendAlert });
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /You are subscribed/i);
+  assert.equal(alerts.length, 1, 'the admin is notified once on a confirm');
+  assert.equal(alerts[0].to, 'owner@example.com');
+  assert.ok(alerts[0].subject.includes('Confirmed.Reader@Example.com'), 'the notice carries the decrypted address');
+});
