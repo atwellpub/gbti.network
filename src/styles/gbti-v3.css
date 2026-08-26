@@ -1887,3 +1887,54 @@ a.tag:hover { border-color: var(--fg); color: var(--fg); }
    --------------------------------------------------------------------------- */
 .band.band-app { padding-top: 40px; }
 @media (max-width: 760px) { .band.band-app { padding-top: 26px; } }
+
+/* ---------------------------------------------------------------------------
+   PROMPT DETAIL SHELL
+   The prompt page's own chrome, moved here from the scoped <style> in
+   src/pages/prompts/[slug].astro so the workbench preview can render the same page.
+   It could not before: an Astro page <style> is scoped to that page, so the preview
+   emitted the right markup with none of the rules that make it look like anything.
+   The class names are the contract in src/lib/prompt-page.mjs, and
+   test/prompt-page.test.mjs fails if the page stops using them.
+   The `:global(...)` wrappers the scoped copy needed are plain descendants here.
+   --------------------------------------------------------------------------- */
+/* Lead image: a full figure above the prompt block, stretched to the column width.
+   height:auto so the whole image shows and is never cropped. */
+.prompt-result { margin: 0 0 22px; }
+.prompt-result img { width: 100%; height: auto; border-radius: var(--r-lg); border: 1.5px solid var(--line); display: block; background: var(--tint); }
+.prompt-result figcaption { margin-top: 8px; font-family: var(--f-mono); font-size: 12px; color: var(--fg-mute); }
+
+/* sow-016 Mode B: the public teaser above a locked prompt block. Ordinary prose, deliberately NOT inside
+   .prompt-block, whose children are forced to monospace. */
+.prompt-teaser { margin: 0 0 26px; }
+
+/* The prompt itself, enclosed like a code/markdown block (header bar + tinted body) so it reads as a
+   copyable artifact, not blog prose. The Copy button lives in the bar, so it never overlaps the image.
+   The well sits lighter than the tinted page band (so it reads as a distinct surface) but not as light as
+   the white header/sidebar cards: --paper-2 is the off-white intermediate. */
+.prompt-block { border: 1.5px solid var(--line-2); border-radius: var(--r-lg); overflow: hidden; background: var(--paper-2); }
+.prompt-block-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 12px 9px 16px; background: var(--paper); border-bottom: 1.5px solid var(--line); }
+.prompt-block-label { display: inline-flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--fg-soft); }
+.prompt-block-label svg { color: var(--green-700); }
+.prompt-actions { display: flex; align-items: center; gap: 10px; }
+/* Visual <-> Markdown view switch for the prompt body. */
+.prompt-modes { display: inline-flex; border: 1.5px solid var(--line-2); border-radius: var(--r); overflow: hidden; background: var(--paper); }
+.prompt-modes button { font-family: var(--f-mono); font-size: 12px; padding: 6px 11px; border: 0; background: transparent; color: var(--fg-mute); cursor: pointer; transition: background .15s, color .15s; }
+.prompt-modes button:hover { color: var(--ink); }
+.prompt-modes button.on { background: var(--ink); color: var(--paper); }
+.prompt-copy { padding: 7px 16px; font-size: 13px; }
+/* The prompt reads as a copyable artifact, so render it monospace in BOTH views (the raw markdown view
+   already is; this applies the same to the rendered Visual view). */
+.prompt-body { padding: 22px 24px; font-family: var(--f-mono); }
+.prompt-body p, .prompt-body li, .prompt-body h1,
+.prompt-body h2, .prompt-body h3, .prompt-body strong { font-family: var(--f-mono); }
+.prompt-view[data-view="visual"] { font-size: 13.5px; line-height: 1.7; }
+/* Raw markdown view: preformatted but wrapping, so long prompt lines never force horizontal scroll. */
+.prompt-raw { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--f-mono); font-size: 13px; line-height: 1.65; color: var(--fg); background: transparent; }
+.prompt-view[hidden] { display: none; }
+
+.detail-aside .chip { text-decoration: none; }
+.detail-aside a.chip { transition: border-color .15s ease, color .15s ease; }
+.detail-aside a.chip:hover { border-color: var(--green); color: var(--green-700); }
+/* On mobile the meta reads better above the long prompt body. */
+@media (max-width: 600px) { .detail-aside { order: -1; } }

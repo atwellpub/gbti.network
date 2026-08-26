@@ -163,6 +163,7 @@ const labelOf = CATEGORY_LABELS;
       normalizeGallery, hasCaptions, resolveGalleryStyle, buildToc,
       repoUrl as findRepo, resolvePrimaryCta, railLinks, linkLabel, isLockedLink, resolveHeroForType, iconForUrl,
     } from '../../lib/product-page.mjs';
+    import { applyPreviewShell } from '../../lib/preview-shells.mjs';
 
     (async () => {
       const root = document.querySelector('[data-preview-root]');
@@ -176,8 +177,6 @@ const labelOf = CATEGORY_LABELS;
       const say = (m: string) => { if (note) note.textContent = m; };
       const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
-
-      const { ARTICLE_SHELL, articleShell, buildArticleLeadHtml, ARTICLE_LAYOUTS } = await import('../../lib/article-page.mjs');
 
       const CDN = 'https://cdn.jsdelivr.net/gh/gbti-network/gbti.network@main';
       // Mirrors resolveContentAsset (client-ui/src/assets.mjs): a repo-relative path resolves against the
@@ -300,60 +299,10 @@ const labelOf = CATEGORY_LABELS;
       const cats = Array.isArray(fm.categories) ? fm.categories : [];
       const catPath = cats.map((c: string) => labels[c] || c).join(' › ');
 
-      // sow-214: an ARTICLE is not a product, and until now the preview rendered it as one. The published
-      // page picks ArticleJournal / ArticleEditorial / ArticleCard from `layout`; this preview rendered every
-      // type through the product Doc Shell, so an article preview was a different page from the article and
-      // the editor's layout picker changed nothing on screen.
-      //
-      // Reshaped rather than rebuilt: the rail, the body injection, the contents scroll-spy and the
-      // as-a-member toggle are already wired to these elements, so replacing the document would break
-      // working behaviour to share markup that is not where the drift hurt. What made the two look like
-      // different pages was the LEAD (a full-bleed hero with the title over it, versus a heading followed by
-      // an inset cover and caption) and the grid geometry. Both now come from the shared contract in
-      // article-page.mjs, which ArticleJournal.astro is held to by the drift test in test/article-page.test.mjs.
-      if (type === 'post') {
-        const layout = ARTICLE_LAYOUTS.includes(fm.layout) ? fm.layout : 'journal';
-        const shell = articleShell(layout);
-        // The product chrome has no article equivalent: no hero band, no sticky spec bar.
-        (document.querySelector('.pd-hero') as HTMLElement | null)?.setAttribute('hidden', '');
-        (document.querySelector('.pd-bar') as HTMLElement | null)?.setAttribute('hidden', '');
-        // Adopt the real article geometry. These classes already ship on this page: .art-* lives in
-        // gbti-v3.css, which global.css imports and BaseLayout loads, so this needs no new CSS.
-        const grid = document.querySelector('.pd-grid');
-        const rail = document.querySelector('.pd-rail') as HTMLElement | null;
-        const col = document.querySelector('.pd-col');
-        if (grid) grid.className = shell.grid;
-        if (col) (col as HTMLElement).className = shell.column;
-        // Card has no contents rail on the published page, so the preview must not invent one. Hiding rather
-        // than removing keeps the element for the toc wiring below, which queries it unconditionally.
-        if (rail) {
-          if (shell.rail) { rail.className = shell.rail; rail.hidden = false; }
-          else { rail.hidden = true; }
-        }
-        // sow-214 stage two: Editorial's grid is THREE columns (a narrow actions strip, the reading column,
-        // then the aside) and grid children take columns in source order. The preview has only two of those
-        // three, so without this the aside would land in the ~60px actions strip and the column would sit
-        // where the aside belongs. Emit the missing strip empty (the published page fills it with the
-        // save/share controls, which a draft preview deliberately omits) and move the rail to last.
-        if (grid && shell.spacer && !grid.querySelector(`.${shell.spacer}`)) {
-          const strip = document.createElement('div');
-          strip.className = shell.spacer;
-          grid.insertBefore(strip, grid.firstChild);
-        }
-        if (grid && rail && shell.railLast) grid.appendChild(rail);
-        // The lead, built from the shared helper so its shape cannot diverge from the published layout.
-        // Card carries its classes on the <img> itself; the other two wrap it, hence shell.cover here.
-        const coverCls = layout === 'card' ? ` class="${shell.cover}"` : '';
-        const coverHtml = hero.image ? `<img${coverCls} src="${esc(asset(hero.image, itemPath))}" alt="${esc(hero.alt || fm.title || '')}" />` : '';
-        const lead = buildArticleLeadHtml({
-          layout, title: fm.title || slug, coverHtml, caption: hero.alt || '', eyebrow: catPath,
-        });
-        // Editorial hoists its lead ABOVE the grid as a full-bleed hero, a sibling of it exactly as the
-        // published section has it; the other two open the reading column with it. `leadIn` is the contract's
-        // own record of which, so the two hosts cannot disagree about it.
-        const anchor = shell.leadIn === 'section' ? grid : document.getElementById('pd-overview');
-        if (anchor && lead) anchor.insertAdjacentHTML('beforebegin', lead);
-      }
+      // Reshape the product Doc Shell into the page this type actually publishes as. Articles and prompts
+      // each have their own document on the site, and rendering both through the product shell made the
+      // preview lie about the page. See src/lib/preview-shells.mjs for what each branch does and why.
+      applyPreviewShell(document, { type, fm, slug, cats, labels, catPath, hero, esc, asset, itemPath });
       setImg('[data-pv-mark]', fm.iconLarge || fm.icon);
       setImg('[data-pv-barmark]', fm.icon);
 

@@ -243,8 +243,13 @@ test('DRIFT: art-e-grid is still three columns, which is what the spacer exists 
 });
 
 test('DRIFT: the preview reads the layout from the contract rather than hard-coding one', () => {
-  const src = fs.readFileSync(new URL('../src/pages/workbench/preview.astro', import.meta.url), 'utf8');
+  // The reshape moved out of preview.astro into src/lib/preview-shells.mjs when the prompt branch joined it
+  // and the page hit its line cap. Assert the branch in its new home, AND the one call that runs it, so the
+  // reshape cannot be orphaned: this guard already caught the move once, which is the point of it.
+  const src = fs.readFileSync(new URL('../src/lib/preview-shells.mjs', import.meta.url), 'utf8');
   for (const token of ['articleShell', 'buildArticleLeadHtml', 'shell.spacer', 'shell.railLast', 'shell.leadIn', 'shell.rail']) {
-    assert.ok(src.includes(token), `preview.astro stopped reading ${token}, so a layout can drift again`);
+    assert.ok(src.includes(token), `preview-shells.mjs stopped reading ${token}, so a layout can drift again`);
   }
+  const preview = fs.readFileSync(new URL('../src/pages/workbench/preview.astro', import.meta.url), 'utf8');
+  assert.match(preview, /^\s*applyPreviewShell\(document,/m, 'preview.astro no longer runs the reshape at all');
 });
