@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { findingsInImageBuffer, scanTree, PATTERNS } from '../scripts/check-no-secrets.mjs';
+import { findingsInImageBuffer, findingsInZipBuffer, contextualFindings, scanTree, PATTERNS } from '../scripts/check-no-secrets.mjs';
 
 // Fake, and shaped to match the patterns under test. BOTH are assembled at runtime rather than written as
 // literals, because this file is itself scanned by the guard: the first version spelled the PEM header out
@@ -111,5 +111,179 @@ test('every pattern is anchored enough that a short placeholder does not match',
   const placeholders = ['rk_test_xxx', 'sk_live_short', 'ghp_abc', 're_x', 'whsec_x', 'github_pat_x'];
   for (const s of placeholders) {
     for (const p of PATTERNS) assert.equal(p.re.test(s), false, `${s} must not match ${p.name}`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// THE THREE SURFACES THE WALK USED TO MISS, and one heuristic for the keys that carry no vendor prefix.
+//
+// Each of the first three is a WIRING test against scanTree, deliberately, because that is the assertion
+// that can fail against the old code for a real reason. A test of a newly exported helper can only fail
+// there by not existing, and an import-shaped red is not evidence of anything.
+// ---------------------------------------------------------------------------------------------------------
+
+const FAKE_SLACK = 'xox' + 'b-000000000000-000000000000-' + 'A'.repeat(24);
+
+// Assembled at runtime for the same reason the PEM header above is: this file is scanned by the guard under
+// test, and a credential-shaped name assigned a long high-entropy literal reds the build on its own fixture.
+// Splitting the value keeps the source line from matching while the VALUE under test is unchanged.
+const ENTROPIC = ['aB3xK9pQ7zR2', 'mN5vC8wY1tL4', 'hJ6dF0gS'].join('');
+const ENTROPIC_2 = ['Xk7mP2qR9tW4', 'yZ6bN8vC3jL5', 'hF1dG0sA2eU4iO'].join('');
+const ENTROPIC_3 = ['9wE4rT7yU2iO', '5pA8sD1fG3hJ', '6kL0zX'].join('');
+// Mixed-class, not a placeholder, long enough, and yet REPETITIVE: ten distinct characters over thirty.
+// Nothing but the entropy floor rejects it, which is what makes it the fixture that holds that floor honest.
+const REPETITIVE = 'Abcde12345'.repeat(3);
+
+/** Minimal DEFLATE zip writer, so a test can build a real archive with no external tool and no dependency. */
+function makeZip(entries) {
+  const locals = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, content] of entries) {
+    const nameBuf = Buffer.from(name, 'latin1');
+    const data = Buffer.from(content);
+    const deflated = zlib.deflateRawSync(data);
+    const crc = zlib.crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(8, 8);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(deflated.length, 18); lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    locals.push(lh, nameBuf, deflated);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(8, 10);
+    cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(deflated.length, 20); cd.writeUInt32LE(data.length, 24);
+    cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt32LE(offset, 42);
+    central.push(cd, nameBuf);
+    offset += lh.length + nameBuf.length + deflated.length;
+  }
+  const localBuf = Buffer.concat(locals);
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(localBuf.length, 16);
+  return Buffer.concat([localBuf, cdBuf, eocd]);
+}
+
+test('scanTree descends into a dist directory that .gitignore un-ignores, and still skips the others', () => {
+  // The header claimed the scanner "mirrors .gitignore". It did not: SKIP_DIRS refused every directory named
+  // dist, while .gitignore un-ignores client-ui/dist and extension/dist/*.js, so ten COMMITTED files
+  // including the whole published extension bundle were never once examined.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-secrets-'));
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'dist/\n!client-ui/dist/\n!extension/dist/*.js\n');
+  for (const d of ['client-ui/dist', 'extension/dist', 'src/dist']) {
+    fs.mkdirSync(path.join(dir, d), { recursive: true });
+    fs.writeFileSync(path.join(dir, d, 'bundle.js'), `const t = '${FAKE_SLACK}';\n`);
+  }
+
+  const flagged = scanTree(dir).map((f) => f.rel).sort();
+  assert.deepEqual(flagged, ['client-ui/dist/bundle.js', 'extension/dist/bundle.js'],
+    'the un-ignored dist dirs are scanned; a plain gitignored dist stays skipped');
+});
+
+test('scanTree reads .svg, which is text and was in neither the text nor the image list', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-secrets-'));
+  fs.writeFileSync(path.join(dir, 'icon.svg'), `<svg><!-- ${FAKE_SLACK} --></svg>\n`);
+  const findings = scanTree(dir);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rel, 'icon.svg');
+});
+
+test('scanTree inflates a committed .zip, which the printable-run scan reports clean by construction', () => {
+  // A DEFLATE stream yields no long printable runs, so scanning the raw bytes finds nothing and passes. That
+  // is a guard passing on nothing, which is worse than no guard because it reads as coverage.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-secrets-'));
+  const zip = makeZip([['manifest.json', '{"name":"gbti"}'], ['dist/background.js', `const t='${FAKE_SLACK}';`]]);
+  fs.writeFileSync(path.join(dir, 'bundle.zip'), zip);
+
+  const findings = scanTree(dir);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rel, 'bundle.zip');
+  assert.match(findings[0].name, /inside dist\/background\.js/,
+    'the entry name is reported, so a finding names which of the bundled files to open');
+
+  // And the raw-bytes approach really does miss it, which is why this branch exists at all.
+  assert.deepEqual(findingsInImageBuffer(zip), [], 'the printable-run scan finds nothing in the same archive');
+});
+
+test('a clean zip reports nothing, and an unreadable one is REPORTED rather than swallowed', () => {
+  assert.deepEqual(findingsInZipBuffer(makeZip([['a.js', 'const x = 1;']])), []);
+  const junk = Buffer.from('not a zip at all, just some bytes');
+  const findings = findingsInZipBuffer(junk);
+  assert.equal(findings.length, 1, 'a zip the scanner cannot parse must never pass silently');
+  assert.match(findings[0].name, /unreadable/);
+});
+
+test('the contextual rule catches a prefix-free key, which no pattern can match on shape alone', () => {
+  // A Cloudflare scoped token is 40 characters of [A-Za-z0-9_-] and nothing else, which is also the shape of
+  // a git sha. Matching on shape would either miss it or drown the repo; this matches on CONTEXT instead.
+  const hits = [
+    `const api_key = "${ENTROPIC}";`,
+    `CLOUDFLARE_TOKEN: '${ENTROPIC_2}'`,
+    `"client_secret": "${ENTROPIC_3}",`,
+  ];
+  for (const line of hits) assert.equal(contextualFindings(line).length, 1, line);
+});
+
+test('the contextual rule stays quiet on the shapes that are not credentials', () => {
+  // Every one of these is a real shape from this repo or from ordinary config. The rule is only shippable
+  // because it stays silent on them: a guard that cries wolf gets switched off, which is a slower way of
+  // having no guard at all.
+  const quiet = [
+    'const key = process.env.STRIPE_SECRET_KEY;',
+    'secret: "${{ secrets.CF_API_TOKEN }}"',
+    'api_key: "your-api-key-goes-here-replace-me"',
+    'token: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"',
+    'password: "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+    'secret_key: "membership.tiers.display.helper.name"',
+    'const token = "short"',
+    'apiKey: "CLOUDFLARE_ACCOUNT_IDENTIFIER_VALUE"',
+    `token: "${REPETITIVE}"`,
+  ];
+  for (const line of quiet) assert.deepEqual(contextualFindings(line), [], line);
+});
+
+test('the contextual allowlist suppresses the heuristic ONLY, never a real vendor key', () => {
+  // test/oauth1.test.mjs carries X's published OAuth 1.0a reference vector, which cannot be replaced with
+  // fakes without deleting the only check that the signer is correct. If that suppression ever widened into
+  // "this file is exempt", a pasted Stripe key would ride in behind it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-secrets-'));
+  fs.mkdirSync(path.join(dir, 'test'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'test', 'oauth1.test.mjs'),
+    `const consumerSecret = "${ENTROPIC}";\nconst k = '${FAKE_KEY}';\n`);
+
+  const findings = scanTree(dir);
+  assert.equal(findings.length, 1, 'the heuristic is suppressed, the vendor pattern is not');
+  assert.equal(findings[0].name, 'Stripe secret/restricted key');
+  assert.equal(findings[0].line, 2);
+});
+
+test('the one allowlisted file still exists, so the suppression cannot outlive what it excuses', () => {
+  // A dead allowlist entry is invisible: it suppresses nothing, explains a file nobody can find, and quietly
+  // becomes precedent for adding more.
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  assert.ok(fs.existsSync(path.join(here, 'oauth1.test.mjs')),
+    'test/oauth1.test.mjs is allowlisted in scripts/check-no-secrets.mjs; remove the entry if the file goes');
+});
+
+test('the entropy floor tracks length, so a genuine SHORT key is not silently let through', () => {
+  // This is the assertion the first version of the rule failed. A fixed 4.2-bit floor looks strict and is
+  // strict against long keys, but the median entropy of a random 24-character key is 4.25, so it quietly
+  // missed about half of them. Short keys are precisely the ones with no vendor prefix to match on, so the
+  // rule was weakest exactly where it was the only control.
+  //
+  // Deterministic by construction: a seeded generator, so this either always passes or always fails.
+  let seed = 20260825;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (const len of [24, 32, 40]) {
+    let caught = 0;
+    const N = 300;
+    for (let i = 0; i < N; i++) {
+      let v = '';
+      while (v.length < len) v += A[Math.floor(rnd() * A.length)];
+      if (contextualFindings(`api_key: "${v}"`).length === 1) caught++;
+    }
+    assert.ok(caught / N > 0.95, `only ${caught}/${N} random ${len}-character keys were caught`);
   }
 });
