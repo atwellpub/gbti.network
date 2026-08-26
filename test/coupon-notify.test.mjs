@@ -155,3 +155,88 @@ test('couponRedemptionNotice: the default is a REAL notice, unchanged by the fla
   assert.match(plain.text, /3 redemptions of this code/);
   assert.doesNotMatch(plain.text, /self-test/i);
 });
+
+// --- the html body (2026-08-26) ---------------------------------------------------------------------------
+//
+// The notice used to leave as plain text only, so an operational alarm read like console output pasted into a
+// message. It now also returns `html`, rendered through the shared ops layout. The text body is untouched and
+// stays the fallback, so these tests pin the html WITHOUT relaxing anything above: the two bodies must carry
+// the same facts, and the html must not become the only place a fact appears.
+//
+// Escaping is the load-bearing part. A coupon code comes from house/coupons.yml and a login comes from GitHub,
+// and this email lands in the mailbox of the one person who can deactivate a code, so a broken-out tag would be
+// read by exactly the wrong reader. Mutation check: drop an escapeHtml call in mail-ops.mjs and the escaping
+// test goes red.
+
+test('html: the real notice renders every field the text carries, in the same shape', () => {
+  const record = {
+    code: 'CODEABLEYEAR', campaign: 'CODEABLEYEAR', tier: 'creator',
+    until: '2027-08-25T00:00:00.000Z', redeemedAt: '2026-08-25T00:00:00.000Z',
+    login: 'octocat', githubId: '12345', redemptionCount: 7,
+  };
+  const { html } = couponRedemptionNotice(record);
+  assert.match(html, /^<!doctype html>/);
+  assert.match(html, /Coupon redeemed/);
+  assert.match(html, /A free-year coupon was just redeemed\./);
+  for (const label of ['Code', 'Member', 'Tier', 'Free until', 'Redeemed', 'Total redemptions']) {
+    assert.ok(html.includes(`>${label}</td>`), `the ${label} row must render`);
+  }
+  assert.match(html, /CODEABLEYEAR/);
+  assert.match(html, /octocat \(github_id 12345\)/);
+  assert.match(html, /creator/);
+  assert.match(html, /2027-08-25T00:00:00\.000Z/);
+  assert.match(html, /7, including this one/);
+  // The act-on-it guidance, which is the whole reason the owner reads this notice.
+  assert.match(html, /active: false in house\/coupons\.yml/);
+});
+
+test('html: a campaign identical to the code is omitted, exactly as the text omits it', () => {
+  const same = couponRedemptionNotice({ code: 'HUDSINVITE', campaign: 'HUDSINVITE', login: 'a', githubId: '1' });
+  const other = couponRedemptionNotice({ code: 'HUDSINVITE', campaign: 'summer-drive', login: 'a', githubId: '1' });
+  assert.ok(!same.html.includes('>Campaign</td>'), 'a campaign that repeats the code says nothing');
+  assert.ok(other.html.includes('>Campaign</td>'));
+  assert.match(other.html, /summer-drive/);
+});
+
+test('html: an absent redemption count is omitted rather than guessed at, as in the text', () => {
+  const { html, text } = couponRedemptionNotice({ code: 'X', login: 'a', githubId: '1' });
+  assert.ok(!html.includes('Total redemptions'), 'no count row when no count was supplied');
+  assert.ok(!html.includes('including this one'));
+  assert.doesNotMatch(text, /Total:/, 'and the text still agrees with it');
+});
+
+test('html: every interpolated value is escaped, so an injected value cannot break out', () => {
+  const nasty = '<script>alert("x" & \'y\')</script>';
+  const { html } = couponRedemptionNotice({
+    code: nasty, campaign: `campaign ${nasty}`, tier: nasty, until: nasty,
+    redeemedAt: nasty, login: nasty, githubId: nasty, redemptionCount: 2,
+  });
+  assert.ok(!html.includes('<script>'), 'no live tag may survive into the body');
+  assert.ok(!html.includes('alert("x"'), 'the raw quote must not survive either');
+  assert.ok(html.includes('&lt;script&gt;'), 'it renders as visible, inert text instead');
+  assert.ok(html.includes('&amp;'), 'an ampersand is escaped');
+  assert.ok(html.includes('&quot;'), 'a double quote is escaped');
+});
+
+test('html: the self-test leads with an unmistakable alert band and drops the act-on-it instructions', () => {
+  const record = { code: 'SELF-TEST', login: 'nobody', githubId: '0' };
+  const { html } = couponRedemptionNotice(record, { selfTest: true });
+  assert.match(html, /Coupon redemption alarm self-test/);
+  assert.match(html, /THIS IS NOT A REDEMPTION/);
+  assert.match(html, /No grant was written and no member was touched/);
+  // The warning is an alert band, not a plain lead: the alert kind is the one with a tinted ground and a thick
+  // left edge, so a reader who only glances at the top of the message still cannot mistake it for a redemption.
+  const band = html.indexOf('border-left:4px solid');
+  assert.ok(band > -1, 'the warning must render as an alert band');
+  assert.ok(band < html.indexOf('THIS IS NOT A REDEMPTION') + 400, 'and the warning must be the text inside it');
+  assert.ok(!html.includes('A free-year coupon was just redeemed'));
+  assert.ok(!html.includes('active: false'), 'never tell the owner to deactivate a code in an email about nothing');
+  assert.match(html, /ABSENCE is the signal/);
+});
+
+test('html: no em or en dashes anywhere in either variant (writing convention)', () => {
+  const record = { code: 'C', campaign: 'D', login: 'a', githubId: '1', tier: 'member', until: 'x', redeemedAt: 'y', redemptionCount: 4 };
+  for (const selfTest of [false, true]) {
+    assert.ok(!/[–—]/.test(couponRedemptionNotice(record, { selfTest }).html), `variant selfTest=${selfTest}`);
+  }
+});

@@ -154,3 +154,84 @@ test('sendStatsReport is a fail-soft no-op when the recipient is unconfigured', 
   assert.equal(res.sent, false);
   assert.equal(res.reason, 'unconfigured');
 });
+
+// ---------- the html body, and the call site that must carry it ----------
+//
+// The report's whole problem was presentation: the plain-text body aligns its columns with padding, which lines
+// up only in a monospace font, and mail clients use a proportional one. The html body must therefore be a real
+// table. Two layers are covered separately on purpose: the composer BUILDING an html body proves nothing if the
+// send call never passes it, so the call-site tests below assert on the message that reaches the sender.
+
+test('composeStatsReport returns an html body with a real table, right-aligned numbers, and both caveats', () => {
+  const rows = [
+    issueRow({ issueId: 'weekly-2026-08-18', stats: { sent: 50, failed: 1, suppressed: 2 }, opens: { total: 20 }, clicks: { total: 5 } }),
+    issueRow({ issueId: 'weekly-2026-08-25', stats: { sent: 2, failed: 0, suppressed: 0 }, opens: { total: 0 }, clicks: { total: 7 } }),
+  ];
+  const { html, text } = composeStatsReport(rows, { weeks: 4 });
+  assert.equal(typeof html, 'string');
+  assert.ok(html.includes('<table'), 'a real html table, not a padded text block');
+  // TWO tables: eight columns did not fit an email, so delivery and engagement were split apart. Asserted by
+  // count, because losing one of them is the regression that would otherwise pass every header check below.
+  assert.equal((html.match(/<table role="presentation"[^>]*table-layout:auto/g) || []).length, 2,
+    'the report carries both the delivery table and the engagement table');
+  for (const col of ['Issue', 'Sent', 'Failed', 'Suppressed', 'Opens', 'Open %', 'Clicks', 'Click %']) {
+    assert.ok(html.includes(`>${col}<`), `the table carries a ${col} header cell`);
+  }
+  assert.ok(html.includes('>2026-08-25<') && html.includes('>2026-08-18<'), 'each issue is a row, labelled by date');
+  // EVERY per-issue figure must appear, not merely the headers above them. A table renders its header row even
+  // when it has no rows at all, so a header-only assertion stays green while the numbers vanish entirely.
+  for (const n of ['>50<', '>20<', '>5<', '>2<', '>7<', '>1<']) {
+    assert.ok(html.includes(n), `the per-issue figure ${n} is missing from the html body`);
+  }
+  assert.ok(html.includes('align="left"') && html.includes('align="right"'), 'issue left, numbers right');
+  assert.ok(/Opens are approximate/.test(html), 'the opens caveat travels with the html body');
+  assert.ok(/not unique clickers/.test(html), 'the clicks caveat travels with the html body');
+  // The rollup fields, and the arithmetic untouched: 52 sent, 20 opens, 12 clicks over the two issues.
+  assert.ok(html.includes('>Sent<') && html.includes('>52<'), 'the rollup is a fields block');
+  assert.ok(html.includes('12 (23.1%)'), 'the rollup click rate is unchanged');
+  // A click rate over 100% is CORRECT here (total clicks over a small send) and must render as computed.
+  assert.ok(html.includes('350.0%'), 'a click rate above 100% is presented, not clamped');
+  assert.ok(text.includes('350.0%'), 'and the text body still agrees with it');
+});
+
+test('composeStatsReport escapes an issue id into the html table', () => {
+  // issueDateStamp finds no trailing date here, so the raw id is what reaches the cell. Issue ids are derived
+  // from stored keys, so this is the untrusted-value path through the report.
+  const rows = [issueRow({ issueId: 'weekly-<script>&"x"', stats: { sent: 1 } })];
+  const { html } = composeStatsReport(rows, {});
+  assert.ok(!html.includes('<script>'), 'no raw tag reaches the ops mailbox');
+  assert.ok(html.includes('&lt;script&gt;'), 'the tag is escaped');
+  assert.ok(html.includes('&amp;') && html.includes('&quot;'), 'ampersand and quote are escaped too');
+});
+
+test('composeStatsReport still returns an html body when there are no issues', () => {
+  const { html } = composeStatsReport([], {});
+  assert.equal(typeof html, 'string');
+  assert.ok(html.includes('No issues in the window.'));
+});
+
+test('sendStatsReport passes BOTH the html body and the text fallback to the sender', async () => {
+  const kv = makeKV();
+  seedIssue(kv, 'weekly-2026-08-25', { pending: [] });
+  kv.m.set(statsKey('weekly-2026-08-25'), JSON.stringify({ issueId: 'weekly-2026-08-25', sent: 9 }));
+  const { sent, send } = sink();
+  const res = await sendStatsReport({ ...RECIP, SIGNUP_KV: kv }, { sendEmail: send, throughIssueId: 'weekly-2026-08-25' });
+  assert.equal(res.sent, true);
+  assert.equal(sent.length, 1);
+  const msg = sent[0];
+  assert.equal(typeof msg.html, 'string');
+  assert.ok(msg.html.includes('<table'), 'the html that reaches the sender is the real table');
+  assert.ok(msg.html.includes('>Suppressed<'), 'with the full column set');
+  assert.ok(typeof msg.text === 'string' && msg.text.includes('Rollup:'), 'the plain-text fallback is kept');
+});
+
+test('maybeSendWeeklyReport emails the html body, not only the text one', async () => {
+  const kv = makeKV();
+  seedIssue(kv, 'weekly-2026-08-25', { sent: 10, pending: [], opens: 4, clicks: 2 });
+  const { sent, send } = sink();
+  await maybeSendWeeklyReport({ ...RECIP, SIGNUP_KV: kv }, { sendEmail: send, now: NOW });
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].html && sent[0].html.includes('<table'), 'the scheduled path carries html all the way to the send');
+  assert.ok(sent[0].html.includes('>2026-08-25<'), 'and the issue row is in it');
+  assert.ok(sent[0].text, 'the text fallback survives the same path');
+});

@@ -11,6 +11,15 @@
 // chain runs it twice (the GitHub leg, then the deferred Discord leg), and the second run returns
 // `already: true` against the grant the first wrote. newRedemptionRecord returns a record ONLY for a
 // genuinely new grant, so the caller notifies on the GitHub leg and never on the Discord re-run.
+//
+// THE HTML BODY (2026-08-26) is built from the shared operational layout in membership/mail-ops.mjs rather
+// than hand-rolled here, so this notice looks like every other ops email the owner receives and inherits the
+// escaping and the dark-mode-safe colours from one place. That module is node-free, which is what lets this
+// helper keep running inside the Worker. The PLAIN TEXT body is untouched: it is the fallback, it is already
+// correct, and the two parts must carry the same facts in the same order, because an email whose halves
+// disagree is worse than either half alone.
+
+import { opsEmail } from './mail-ops.mjs';
 
 /**
  * The record to notify on, or null when there is nothing new to announce.
@@ -48,7 +57,7 @@ export function newRedemptionRecord(couponGrant, { githubId, login = null } = {}
  * to make that email UNMISTAKABLE. A weekly notice that reads like a redemption would train the owner to
  * ignore the one line this control exists to make them read, which would break the alarm more thoroughly than
  * leaving it untested. Nothing else branches on it.
- * @returns `{ subject, text }`
+ * @returns `{ subject, text, html }`. The text body is the fallback and stays authoritative on the facts.
  */
 export function couponRedemptionNotice(record, { selfTest = false } = {}) {
   const code = record?.code ? String(record.code) : '(unknown code)';
@@ -86,5 +95,54 @@ export function couponRedemptionNotice(record, { selfTest = false } = {}) {
     !selfTest ? 'If this one looks wrong, set the code to active: false in house/coupons.yml.' : null,
     !selfTest && redemptionCount ? 'The count can lag by one under simultaneous redemptions; the emails are the record, not it.' : null,
   ].filter((line) => line !== null);
-  return { subject, text: lines.join('\n') };
+
+  // The same facts as the text above, in the same order, as a label/value block. A row is OMITTED on exactly
+  // the conditions the text omits it on (a campaign identical to the code says nothing, an absent count must
+  // not be guessed at), so the two bodies never disagree about what is known.
+  const rows = [
+    ['Code', code],
+    campaign && campaign !== code ? ['Campaign', campaign] : null,
+    ['Member', `${login} (github_id ${githubId})`],
+    ['Tier', tier],
+    ['Free until', until],
+    redeemedAt ? ['Redeemed', redeemedAt] : null,
+    redemptionCount ? ['Total redemptions', `${redemptionCount}, including this one`] : null,
+  ].filter((row) => row !== null);
+
+  // The closing guidance. On a real notice it tells the owner what to DO about a redemption that looks wrong.
+  // On the self-test it must not: instructions to deactivate a code, in an email about nothing, are how a
+  // control gets acted on by mistake. This mirrors the same split in the text body.
+  const guidance = selfTest
+    ? 'Receiving this means the alarm can still reach you: the key, the sender domain and the address all work. '
+      + 'Its ABSENCE is the signal, not its arrival, so a silent week is worth checking.'
+    : 'This is your standing record of every coupon redemption, the abuse control for the uncapped codes. '
+      + 'If this one looks wrong, set the code to active: false in house/coupons.yml.'
+      + (redemptionCount ? ' The count can lag by one under simultaneous redemptions; the emails are the record, not it.' : '');
+
+  const { html } = opsEmail({
+    title: selfTest ? 'Coupon redemption alarm self-test' : 'Coupon redeemed',
+    // A real notice opens with a plain lead sentence. The self-test does NOT: its warning is the entire point
+    // of that email, so it goes in as an alert band instead, where a reader who only glances at the top of the
+    // message still cannot mistake it for a redemption. Getting that wrong would train the owner to skim the
+    // one notice this control exists to make them read.
+    lead: selfTest ? '' : 'A free-year coupon was just redeemed.',
+    sections: [
+      ...(selfTest
+        ? [{
+          kind: 'alert',
+          text: 'THIS IS NOT A REDEMPTION. It is the scheduled self-test of the coupon-redemption alarm, and the '
+            + 'values below are synthetic. No grant was written and no member was touched.',
+        }]
+        : []),
+      { kind: 'fields', rows },
+      { kind: 'note', text: guidance },
+    ],
+    // Which sender this came from is the first thing the owner checks when one arrives unexpectedly, and the
+    // two variants genuinely come from different places: the signup Worker, and the weekly credential check.
+    footer: selfTest
+      ? 'Sent by the weekly credential-health check, not by a signup.'
+      : 'Sent by the coupon-redemption alarm on the GBTI Network signup path.',
+  });
+
+  return { subject, text: lines.join('\n'), html };
 }

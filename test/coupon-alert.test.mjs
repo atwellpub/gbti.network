@@ -129,3 +129,37 @@ test('sendCouponRedemptionAlert: without the flag the email is a real redemption
   assert.equal(sent[0].subject, 'Coupon redeemed: HUDSINVITE by octocat');
   assert.doesNotMatch(sent[0].text, /self-test/i);
 });
+
+// --- the html body must reach the SENDER, not merely the builder (2026-08-26) -------------------------------
+//
+// couponRedemptionNotice now returns `html` as well as `text`. The builder and the send call live in different
+// files, which is precisely how this has broken here before: a perfectly good html body gets built and then
+// nobody passes it, the email leaves as plain text, and every test on the builder stays green because it is one
+// layer below the defect. So these assert on the message object that reaches `send`.
+//
+// Mutation check: change the call in coupon-alert.mjs back to `send({ from, to, subject, text })` and the first
+// two go red. A test that only checked `couponRedemptionNotice(...).html` would stay green, which is the point.
+
+import { couponRedemptionNotice } from '../membership/coupon-notify.mjs';
+
+test('CALL SITE: the html body reaches sendEmail, byte for byte as the builder produced it', async () => {
+  const calls = [];
+  await sendCouponRedemptionAlert(ENV, RECORD, { sendEmail: async (m) => { calls.push(m); return { id: 'x' }; } });
+  assert.equal(calls.length, 1);
+  assert.equal(typeof calls[0].html, 'string', 'the send must carry an html part, not just text');
+  assert.ok(calls[0].html.length > 200, 'and a real body, not an empty string');
+  assert.equal(calls[0].html, couponRedemptionNotice(RECORD).html, 'the sent html must be the notice, unmodified');
+  assert.match(calls[0].html, /CODEABLEYEAR/);
+  assert.match(calls[0].html, /octocat/);
+  assert.equal(calls[0].text, couponRedemptionNotice(RECORD).text, 'and the text fallback still goes with it');
+});
+
+test('CALL SITE: the self-test html reaches sendEmail as the self-test variant, not the redemption one', async () => {
+  const sent = [];
+  const record = { code: 'SELF-TEST', login: 'nobody', githubId: '0' };
+  await sendCouponRedemptionAlert(ENV, record, { sendEmail: async (m) => { sent.push(m); }, selfTest: true });
+  assert.equal(typeof sent[0].html, 'string');
+  assert.match(sent[0].html, /THIS IS NOT A REDEMPTION/);
+  assert.ok(!sent[0].html.includes('A free-year coupon was just redeemed'));
+  assert.equal(sent[0].html, couponRedemptionNotice(record, { selfTest: true }).html);
+});

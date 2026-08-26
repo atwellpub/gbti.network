@@ -90,8 +90,13 @@ export async function sendStatsReport(env, { kv = env?.SIGNUP_KV, sendEmail, thr
     const send = sendEmail || (apiKey ? createResendClient({ apiKey }).sendEmail : null);
     if (!send) return { sent: false, reason: 'unconfigured' };
     const rows = await collectWeeklyStats(kv, { throughIssueId, weeks });
-    const { subject, text } = composeStatsReport(rows, { weeks });
-    await send({ from, to, subject, text });
+    // BOTH bodies go out. `text` is the fallback for a client that refuses html; `html` carries the real table,
+    // which is the only form of this report the owner can actually read (the text body's column alignment holds
+    // only in a monospace font). Dropping `html` here would silently undo the whole point of the report's
+    // formatting while every test on the composer stayed green, so a test asserts on the message this call
+    // passes to the sender, not on what the composer returned.
+    const { subject, text, html } = composeStatsReport(rows, { weeks });
+    await send({ from, to, subject, text, html });
     return { sent: true };
   } catch (err) {
     return { sent: false, reason: 'error', message: err?.message ?? String(err) };

@@ -30,8 +30,14 @@ export async function sendCouponRedemptionAlert(env, record, { sendEmail, selfTe
     if (!to || !from) { warnUnconfigured(record, 'no recipient or no sender'); return { sent: false, reason: 'unconfigured' }; }
     const send = sendEmail || (apiKey ? createResendClient({ apiKey }).sendEmail : null);
     if (!send) { warnUnconfigured(record, 'no RESEND_API_KEY and no injected sender'); return { sent: false, reason: 'unconfigured' }; }
-    const { subject, text } = couponRedemptionNotice(record, { selfTest });
-    await send({ from, to, subject, text });
+    // BOTH bodies go to the sender. The html is what the owner actually reads in a modern client, and the text
+    // is the fallback a plain-text client (or a spam filter comparing the parts) gets. Building the html and
+    // then not passing it here is the exact way this has broken before: the builder is in another file, so
+    // nothing about a correct-looking couponRedemptionNotice would reveal that the email left as plain text.
+    // test/coupon-alert.test.mjs asserts on what reaches `send`, not on what the builder returns, for that
+    // reason. The Resend client omits an empty html rather than sending a blank part.
+    const { subject, text, html } = couponRedemptionNotice(record, { selfTest });
+    await send({ from, to, subject, text, html });
     return { sent: true };
   } catch (err) {
     // Swallow: the grant is already written and the member is already signed up. A failed notice is recoverable

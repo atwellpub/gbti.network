@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createResendClient } from '../clients/resend.mjs';
+import { opsEmail } from '../membership/mail-ops.mjs';
 import { sendCouponRedemptionAlert } from '../workers/signup/coupon-alert.mjs';
 
 const REPO = process.env.GITHUB_CONTENT_REPO || 'gbti-network/gbti.network';
@@ -134,21 +135,85 @@ export function evaluate(results, { warnDays = 30, now = new Date() } = {}) {
   return { problems, healthy: problems.length === 0 };
 }
 
-/** Build the alert email body. Pure. */
+// The remediation guidance, kept as the lines the plain-text body prints. The html body joins the SAME lines
+// into one paragraph, so the two bodies cannot tell the owner different things about how to renew a credential.
+const REMEDIATION_LINES = [
+  'How to renew each credential: see .data/ops/secrets-ops/README.md in the repo (the expiry calendar + the',
+  'per-secret "how to obtain" steps). For a GitHub PAT: mint a new fine-grained token (owner gbti-network,',
+  'Contents+PR+Statuses for GH_BOT_TOKEN), then update the GitHub Actions secret / push to the Worker.',
+];
+
+const AUTOMATED_NOTE = 'This is an automated message from the credential-health GitHub Action.';
+
+// The problem kinds where the credential still WORKS: it is approaching an expiry, or the expiry CONTROL is
+// missing or unreadable. Everything else means the credential is unusable at this moment, and is rendered as an
+// emphasised band rather than as another row in a list.
+//
+// Stated as the calm set rather than the loud one ON PURPOSE. A kind added to `evaluate` later then renders as an
+// alert until somebody classifies it here, and that is the right way round: over-emphasis costs the reader one
+// glance, while under-emphasis is how a dead credential reads as routine housekeeping at seven in the morning.
+const WARNING_KINDS = new Set(['expiring', 'no-expiry', 'unreadable-expiry']);
+
+// The kind, shouted, the way the plain-text body prints it. Hyphens become spaces because this is read as words
+// ("NOT YET VALID") rather than as an identifier.
+const kindLabel = (kind) => String(kind || 'problem').toUpperCase().replace(/-/g, ' ');
+
+// The banded line for one unusable credential. `evaluate` already shouts the kind inside the message it writes
+// ("... FAILED its live check", "... is NOT YET VALID"), so prefixing the label again would only stutter. The
+// prefix is added when the message does NOT carry it, which keeps a kind added later, or a message reworded
+// later, from arriving as a bare sentence with no severity on it.
+function alertText(problem) {
+  const label = kindLabel(problem.kind);
+  const message = String(problem.message || '');
+  return message.includes(label) ? message : `${label}: ${message}`;
+}
+
+/**
+ * Build the alert email body. Pure.
+ *
+ * @returns `{ subject, text, html }`. BOTH bodies are returned and BOTH must be sent: the text is the fallback
+ * for a client that refuses html (and for anything comparing the two parts), the html is what the owner actually
+ * reads. The send is in `main()` further down this file; building the html and then not passing it there is the
+ * exact way this has broken before, so the test for it asserts on the request that reaches Resend rather than on
+ * what this function returns.
+ */
 export function buildEmail(problems, { now = new Date() } = {}) {
-  const subject = `GBTI credential alert: ${problems.length} issue${problems.length === 1 ? '' : 's'} need attention`;
+  const list = Array.isArray(problems) ? problems : [];
+  const subject = `GBTI credential alert: ${list.length} issue${list.length === 1 ? '' : 's'} need attention`;
+  const day = now.toISOString().slice(0, 10);
   const lines = [
-    `The weekly GBTI credential health check found ${problems.length} issue(s) on ${now.toISOString().slice(0, 10)}:`,
+    `The weekly GBTI credential health check found ${list.length} issue(s) on ${day}:`,
     '',
-    ...problems.map((p) => `  - [${p.kind.toUpperCase()}] ${p.message}`),
+    ...list.map((p) => `  - [${String(p.kind).toUpperCase()}] ${p.message}`),
     '',
-    'How to renew each credential: see .data/ops/secrets-ops/README.md in the repo (the expiry calendar + the',
-    'per-secret "how to obtain" steps). For a GitHub PAT: mint a new fine-grained token (owner gbti-network,',
-    'Contents+PR+Statuses for GH_BOT_TOKEN), then update the GitHub Actions secret / push to the Worker.',
+    ...REMEDIATION_LINES,
     '',
-    'This is an automated message from the credential-health GitHub Action.',
+    AUTOMATED_NOTE,
   ];
-  return { subject, text: lines.join('\n') };
+
+  // WHY THIS IS NOT ONE THREE-COLUMN TABLE. The obvious shape is Credential / Problem / Detail, but the shared
+  // layout gives the first column 46% and splits the remainder evenly, so on a 640px card the Detail column is
+  // about 150px wide, and every one of these messages is a full sentence of instruction. A label/value block
+  // gives that sentence 66% of the card instead, and it mirrors the plain-text body line for line: the kind is
+  // the label, the message is the value, and every message already begins with the credential name.
+  //
+  // Failures come FIRST and as emphasised bands, because a credential that is dead right now and one that
+  // expires in three weeks call for different actions within the next hour, and a uniform list hides that.
+  const breaking = list.filter((p) => !WARNING_KINDS.has(String(p.kind)));
+  const warnings = list.filter((p) => WARNING_KINDS.has(String(p.kind)));
+  const sections = breaking.map((p) => ({ kind: 'alert', text: alertText(p) }));
+  if (warnings.length) sections.push({ kind: 'fields', rows: warnings.map((p) => [kindLabel(p.kind), p.message]) });
+  sections.push({ kind: 'note', text: REMEDIATION_LINES.join(' ') });
+
+  const { html } = opsEmail({
+    title: 'Credential health alert',
+    lead: `${list.length === 1 ? '1 credential needs' : `${list.length} credentials need`} attention.`
+      + ` The weekly GBTI credential health check ran on ${day}.`,
+    sections,
+    footer: AUTOMATED_NOTE,
+  });
+
+  return { subject, text: lines.join('\n'), html };
 }
 
 // ---- live probes (IO; fetch injected for tests) ----
@@ -306,8 +371,11 @@ async function main() {
   const from = env.RESEND_FROM || 'noreply@gbti.network';
   if (env.RESEND_API_KEY && to) {
     try {
-      const { subject, text } = buildEmail(problems, { now: new Date() });
-      await createResendClient({ apiKey: env.RESEND_API_KEY }).sendEmail({ from, to, subject, text });
+      // Both bodies go out: `html` is what the owner reads under stress, `text` is the fallback. Dropping the
+      // html here is invisible from the builder's side, so test/check-credentials.test.mjs runs this script and
+      // asserts on the request that reaches Resend.
+      const { subject, text, html } = buildEmail(problems, { now: new Date() });
+      await createResendClient({ apiKey: env.RESEND_API_KEY }).sendEmail({ from, to, subject, text, html });
       console.error(`\nAlert emailed to ${to}.`);
     } catch (err) { console.error(`\nResend email FAILED: ${err?.message || err} (the red Action is still your signal).`); }
   } else {
