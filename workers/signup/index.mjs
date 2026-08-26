@@ -95,6 +95,7 @@ import { membershipAdminAuthor, membershipAdminQuotePool, membershipAdminNewsSou
 import { handleUnsubscribe } from './membership-unsubscribe.mjs'; // SOW-166: one-click digest unsubscribe (RFC 8058)
 import { handleMailClick } from './mail-click-route.mjs'; // sow-273 follow-up: the digest click counter
 import { handleMailOpen } from './mail-open-route.mjs'; // the digest open counter (1x1 pixel)
+import { maybeSendWeeklyReport } from './mail-stats-report.mjs'; // after-send admin stats email (4-week rollup)
 import { resolveSiteUrl, resolveClickBase } from '../../membership/mail-click.mjs';
 import { isCentralDigestHour } from '../../membership/mail-compile-core.mjs'; // sow-166: which of the two Tuesday triggers is 7 AM Central today
 import { handleSubscribe, handleConfirm } from './mail-subscribe.mjs'; // SOW-166: anonymous double-opt-in digest subscribe + confirm
@@ -855,7 +856,15 @@ async function drainFiveMinute(env) {
     drainMail(env, mailDrainDeps(env)),
   ]);
   const settle = (r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message ?? r.reason) });
-  return { syndication: settle(syndication), mail: settle(mail), welcome };
+
+  // AFTER the drain: if a weekly issue just finished sending, email the owner the 4-week performance report
+  // (once per issue). Runs after drainMail so this tick's terminal send records are counted. Fail-soft, so it
+  // never suppresses the drain result above.
+  let report;
+  try { report = await maybeSendWeeklyReport(env); }
+  catch (e) { report = { error: String(e?.message ?? e) }; }
+
+  return { syndication: settle(syndication), mail: settle(mail), welcome, report };
 }
 
 // Shared by both Tuesday triggers. The guard is inside `run` rather than in the map so an out-of-hour tick still
