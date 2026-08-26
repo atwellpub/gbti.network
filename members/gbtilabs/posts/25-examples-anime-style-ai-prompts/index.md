@@ -24,7 +24,7 @@ For all anime-style image examples in this article, we’ve used the **ChatGPT o
 
 [![Learn more about BugHerd](./images/bugherd-banner.webp)](https://gbti.network/outbound/bugherd)
 
-Open this link in a new tab to learn about **BugHerd**, our sponsor for this article.
+Open this link in a new tab to learn about **BugHerd**. It is an affiliate link, so GBTI Network earns a commission if you subscribe through it.
 
 ## Illustrative Styles
 
@@ -185,4 +185,4 @@ Thanks for paying attention! We’ll add more unique anime styles as we find the
 
 [![Learn more about BugHerd](./images/bugherd-banner.webp)](https://gbti.network/outbound/bugherd)
 
-Open this link in a new tab to learn about **BugHerd**, our sponsor for this article.
+Open this link in a new tab to learn about **BugHerd**. It is an affiliate link, so GBTI Network earns a commission if you subscribe through it.

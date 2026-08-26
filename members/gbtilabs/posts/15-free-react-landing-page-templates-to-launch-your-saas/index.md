@@ -18,7 +18,7 @@ In this article we will be sharing a break down of over over 15 completely free 
 
 [![Learn more about BugHerd](./images/bugherd-banner.webp)](https://gbti.network/outbound/bugherd)
 
-Open this link in a new tab to learn about **BugHerd**, our sponsor for this article.
+Open this link in a new tab to learn about **BugHerd**. It is an affiliate link, so GBTI Network earns a commission if you subscribe through it.
 
 ## #1 Shadcn Landing Page (by leoMirandaa)
 
@@ -172,7 +172,7 @@ BizFlow is a sleek, responsive business landing page built with React, Tailwind 
 
 [![Learn more about BugHerd](./images/bugherd-banner.webp)](https://gbti.network/outbound/bugherd)
 
-Open this link in a new tab to learn about **BugHerd**, our sponsor for this article.
+Open this link in a new tab to learn about **BugHerd**. It is an affiliate link, so GBTI Network earns a commission if you subscribe through it.
 
 ## Follow the GBTI Network for more content like this![](https://github.com/gbti-network#stay-connected)
 
