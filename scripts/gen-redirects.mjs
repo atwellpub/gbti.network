@@ -118,13 +118,24 @@ const EXTRA = [
   ['/outbound/codeable', 'https://codeable.io/?ref=MzT91'],
   ['/outbound/codeable/wordpress-services', 'https://app.codeable.io/tasks/new?ref=MzT91'],
   ['/codeable/naresh-devineni', 'https://www.codeable.io/developers/naresh-devineni/?ref=MzT91'],
-  // BugHerd carries four "Learn more about BugHerd" banner links across two published posts. Its legacy
-  // target, https://partners.bugherd.com/gbti-network, is DEAD AT THE VENDOR: that URL 404s and so does the
-  // bare partners.bugherd.com root, so the whole partner subdomain is gone rather than just our page.
-  // Restoring it would relocate a 404 rather than fix one. Pointed at the product so the banners work; the
-  // referral credit is not lost by this, because a dead destination was already earning nothing. Replacing
-  // this with a current partner link needs the owner's BugHerd account and is raised with them.
-  ['/outbound/bugherd', 'https://bugherd.com/'],
+  // BugHerd carries four "Learn more about BugHerd" banner links across two published posts, all pointing at
+  // this one path, so every click funnels through here.
+  //
+  // THE COMMENT THAT STOOD HERE UNTIL 2026-08-25 WAS WRONG, AND IT COST REAL REFERRALS. It said the legacy
+  // target https://partners.bugherd.com/gbti-network "is DEAD AT THE VENDOR: that URL 404s and so does the
+  // bare partners.bugherd.com root", and on that basis the path was pointed at the bare product page, which
+  // credits nobody. Measured 2026-08-25: that URL answers **302** into PartnerStack carrying our partner key
+  // (ps_partner_key / gspk), and only the bare SUBDOMAIN ROOT 404s, which is ordinary for a PartnerStack
+  // subdomain with no index page. Checking the root and generalising from it to the path is what produced
+  // the false conclusion. The claim also parked sow-257 in staging as blocked on a dead vendor.
+  //
+  // It was not a dormant link either, which is why this was worth correcting rather than deleting. Zone
+  // analytics for the seven days to 2026-08-25 record 59 requests to /outbound/bugherd, against 952 to the
+  // anime-prompts post and 152 to the react-templates post. A third to a half of those 59 carry an
+  // identifiable browser (Chrome and Chrome Mobile from ID, US and IN); the rest report an unknown agent and
+  // are likelier to be crawlers. So on the order of 20 to 30 human clicks a month were reaching BugHerd
+  // uncredited for as long as the destination was wrong.
+  ['/outbound/bugherd', 'https://partners.bugherd.com/gbti-network'],
   ['/codeable', 'https://codeable.io/?ref=MzT91'],
   ['/outsourcing/codeable', 'https://codeable.io/?ref=MzT91'],
   ['/outsource/codeable/wp-cli', 'https://www.codeable.io/developers/wp-cli/?ref=MzT91'],
