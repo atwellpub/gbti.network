@@ -324,3 +324,151 @@ test('runProbes: no Resend key means the coupon probe is skipped, not silently p
   const out = await runProbes({ env: { CF_API_TOKEN: 'tok' }, fetch: async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active', expires_on: '2027-01-01T00:00:00Z' } }) }), sendAlert });
   assert.equal(out.some((r) => /COUPON_ALERT_EMAIL/.test(r.name)), false);
 });
+// ---------------------------------------------------------------------------------------------------
+// The html body. This alert fires when a credential has already failed or is about to, so it is the one
+// email where legibility under stress matters most, and a wall of console text is the worst way to deliver it.
+// ---------------------------------------------------------------------------------------------------
+
+// The markup of the cell a given string was rendered into. Used to prove that a failure and an expiry warning
+// are rendered DIFFERENTLY, without hard-coding the layout module's palette, which is free to change.
+function cellAround(html, needle) {
+  const at = html.indexOf(needle);
+  assert.notEqual(at, -1, `the html body is missing: ${needle}`);
+  return html.slice(html.lastIndexOf('<td', at), html.indexOf('</td>', at));
+}
+
+test('buildEmail: the html body carries the same facts as the text body', () => {
+  const problems = [
+    { name: 'GH', kind: 'failed', message: 'GH FAILED its live check (status 401).' },
+    { name: 'CF', kind: 'expiring', message: 'CF expires in 5 day(s).' },
+  ];
+  const { text, html } = buildEmail(problems, { now: NOW });
+  assert.match(html, /^<!doctype html>/, 'a full document, not a fragment');
+  assert.match(html, /Credential health alert/);
+  assert.match(html, /2 credentials need attention/, 'the lead says how many credentials need attention');
+  assert.match(html, /2026-06-20/, 'the run date travels with it, as in the text body');
+  for (const p of problems) assert.ok(html.includes(p.message), `${p.name}: the html dropped a message the text body carries`);
+  assert.match(html, /EXPIRING/, 'the kind is labelled, the way the text body prints [EXPIRING]');
+  assert.match(html, /secrets-ops\/README\.md/, 'the remediation guidance is in both bodies');
+  assert.match(html, /credential-health GitHub Action/, 'the automated-message footer is in both bodies');
+  // The plain text body stays the fallback and keeps its own shape.
+  assert.match(text, /\[FAILED\] GH FAILED its live check/);
+});
+
+test('buildEmail: a hard failure is visually distinct from an expiry warning', () => {
+  // Same message, two kinds. A credential that is dead right now and one that expires in three weeks call for
+  // different actions in the next hour, and a uniform list hides that.
+  const message = 'TOKEN is in trouble.';
+  const failed = buildEmail([{ name: 'T', kind: 'failed', message }], { now: NOW }).html;
+  const expiring = buildEmail([{ name: 'T', kind: 'expiring', message }], { now: NOW }).html;
+  assert.match(cellAround(failed, message), /border-left/, 'an outright failure must get the emphasised band');
+  assert.doesNotMatch(cellAround(expiring, message), /border-left/, 'an expiry warning must not shout like a failure');
+});
+
+test('buildEmail: an unrecognised kind is treated as a failure, not quietly listed as a warning', () => {
+  // The classification names the CALM kinds, so anything added to evaluate() later lands on the loud side until
+  // somebody classifies it. Over-emphasis costs one glance; under-emphasis is how an outage reads as routine.
+  const message = 'SOMETHING new went wrong.';
+  const html = buildEmail([{ name: 'T', kind: 'some-future-kind', message }], { now: NOW }).html;
+  assert.match(cellAround(html, message), /border-left/);
+  assert.match(html, /SOME FUTURE KIND/, 'the kind is shouted as words, hyphens and all');
+});
+
+test('buildEmail: every interpolated value is escaped', () => {
+  // A credential name and a probe detail both reach this body from outside (a provider response, a config value),
+  // and an ops mailbox is exactly where broken-out markup would be read by someone with privilege.
+  const nasty = '<script>alert("x" & \'y\')</script>';
+  const { html } = buildEmail([
+    { name: nasty, kind: 'failed', message: `${nasty} FAILED its live check.` },
+    { name: nasty, kind: 'expiring', message: `${nasty} expires soon.` },
+  ], { now: NOW });
+  assert.ok(!html.includes('<script>'), 'a raw script tag reached the html body');
+  assert.ok(html.includes('&lt;script&gt;'), 'the tag should be present, escaped');
+  assert.ok(html.includes('&amp;'), 'the ampersand should be escaped');
+  assert.ok(html.includes('&quot;') || html.includes('&#34;'), 'the double quote should be escaped');
+});
+
+test('buildEmail: an empty or missing problem list still builds both bodies', () => {
+  // main() only emails when there ARE problems, but a builder that throws on the empty case is a trap for any
+  // later caller, and a throw here means no notice arrives at all.
+  for (const input of [[], undefined, null]) {
+    const { subject, text, html } = buildEmail(input, { now: NOW });
+    assert.match(subject, /0 issues/);
+    assert.ok(text.length > 0);
+    assert.match(html, /^<!doctype html>/);
+    assert.match(html, /0 credentials need attention/);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------
+// THE CALL SITE, not the builder. A perfect html body that no caller passes to sendEmail is the failure this
+// project keeps repeating: the builder and the send live in different places, so `buildEmail` returning html
+// proves nothing about what leaves the machine. This runs the script for real, with fetch replaced before it
+// loads, and asserts on the request that reaches Resend. Delete the `html` from the sendEmail call in main()
+// and this test goes red; a test on buildEmail alone stays green.
+// ---------------------------------------------------------------------------------------------------
+
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const CRED_SCRIPT = path.resolve(fileURLToPath(import.meta.url), '../../scripts/check-credentials.mjs');
+
+// Preloaded with --import so it replaces fetch BEFORE the script under test runs. It records every request and
+// answers Resend with a success; every other url is a credential probe and is failed, so the run has a problem
+// to report and therefore reaches the email. Nothing here touches the network.
+const FETCH_STUB = `
+import { appendFileSync } from 'node:fs';
+const capture = process.env.CRED_HEALTH_CAPTURE;
+globalThis.fetch = async (url, init = {}) => {
+  const entry = { url: String(url), method: (init && init.method) || 'GET', body: init && init.body ? String(init.body) : null };
+  appendFileSync(capture, JSON.stringify(entry) + '\\n');
+  if (entry.url.startsWith('https://api.resend.com/')) {
+    return { ok: true, status: 200, text: async () => '{"id":"stub"}', headers: { get: () => null } };
+  }
+  return { ok: false, status: 401, text: async () => '', json: async () => ({}), headers: { get: () => null } };
+};
+`;
+
+test('the script SENDS the html body, not only the text one', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cred-health-'));
+  const capture = path.join(dir, 'requests.jsonl');
+  const stub = path.join(dir, 'fetch-stub.mjs');
+  writeFileSync(capture, '');
+  writeFileSync(stub, FETCH_STUB);
+
+  // A MINIMAL env on purpose: inheriting process.env would let a real STRIPE_SECRET_KEY or CF_API_TOKEN on the
+  // developer's machine turn this into live probes of production credentials.
+  const run = spawnSync(process.execPath, ['--import', pathToFileURL(stub).href, CRED_SCRIPT], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CRED_HEALTH_CAPTURE: capture,
+      GITHUB_BOT_TOKEN: 'ghp_stub',
+      RESEND_API_KEY: 're_stub',
+      ALERT_EMAIL: 'ops@example.test',
+      RESEND_FROM: 'noreply@example.test',
+    },
+  });
+
+  assert.equal(run.status, 1, `the run should exit non-zero on a problem. stderr: ${run.stderr}`);
+  assert.match(run.stderr, /Alert emailed to ops@example\.test/, `main() did not reach the send. stderr: ${run.stderr}`);
+
+  const sends = readFileSync(capture, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    .filter((r) => r.url.startsWith('https://api.resend.com/emails') && r.body)
+    .map((r) => JSON.parse(r.body))
+    .filter((b) => /credential alert/i.test(String(b.subject)));
+  assert.equal(sends.length, 1, 'exactly one credential alert should have been sent');
+
+  const sent = sends[0];
+  assert.equal(sent.to, 'ops@example.test');
+  assert.ok(typeof sent.html === 'string' && sent.html.length > 0,
+    'the html body never reached sendEmail: main() must pass html, not only text');
+  assert.match(sent.html, /^<!doctype html>/);
+  assert.match(sent.html, /GH_BOT_TOKEN/, 'the alert should name the credential that failed');
+  assert.ok(typeof sent.text === 'string' && sent.text.length > 0, 'the plain-text fallback must still be sent');
+});
