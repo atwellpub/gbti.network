@@ -9362,11 +9362,16 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
       this._wireGallery();
       const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : "";
       if (introSlug) {
-        this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
-          const ta = this.$("#authornote");
-          if (ta && !ta.value && c?.body) ta.value = c.body;
-        }).catch(() => {
-        });
+        const staged = typeof this.preset?.authorNote === "string" ? this.preset.authorNote : null;
+        const ta0 = this.$("#authornote");
+        if (ta0 && !ta0.value && staged) ta0.value = staged;
+        if (staged == null) {
+          this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
+            const ta = this.$("#authornote");
+            if (ta && !ta.value && c?.body) ta.value = c.body;
+          }).catch(() => {
+          });
+        }
       }
       if (showStats) {
         const setStat = (key, n) => {
@@ -10097,7 +10102,15 @@ ul.list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
         const { type, input, body } = this.gather();
         if (this.fields.some((f) => f.key === "status")) input.status = "draft";
         if (["post", "product", "prompt"].includes(type)) input.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-        const res = await this.client.saveDraft({ type, input, body, path: this.itemPath || void 0 });
+        const authorNote = this.$("#authornote")?.value ?? void 0;
+        const res = await this.client.saveDraft({
+          type,
+          input,
+          body,
+          path: this.itemPath || void 0,
+          // SOW-112 v2: a changed permalink stages on the item's own branch
+          ...typeof authorNote === "string" ? { authorNote } : {}
+        });
         this._setChip(`${CHECK2} Draft saved`, "ok");
         if (res?.renamed) this._banner(`Draft saved with the pending permalink change: <b>${esc(res.renamed.from)}</b> becomes <b>${esc(res.renamed.to)}</b> when you publish. The old link will redirect.`);
         this.out(res?.renamed ? `<span class="tag ok">saved</span> Draft staged on your fork with the pending permalink change (${esc(res.renamed.from)} to ${esc(res.renamed.to)}); the rename happens when you publish.` : '<span class="tag ok">saved</span> Draft staged on your fork. Open <b>Drafts</b> to review or publish it.');

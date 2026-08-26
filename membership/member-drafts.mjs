@@ -38,16 +38,27 @@ export function applyDraftPut(state, draft, { now = () => new Date().toISOString
   if (!SLUG_RE.test(slug)) throw new DraftError('a valid draft slug is required');
   const pendingSlug = d.pendingSlug != null ? String(d.pendingSlug) : null;
   if (pendingSlug != null && !SLUG_RE.test(pendingSlug)) throw new DraftError('the pending slug is invalid');
+  const next = normalizeDrafts(state);
+  const key = draftKeyOf(type, slug);
+  const prev = next.items[key];
+  // SOW-014: the from-the-author note travels WITH the draft. It used to exist only as a publish-time
+  // argument, so a note typed in the editor was lost the moment the draft was saved, and publishing from a
+  // draft wrote no note at all (which then fails content validation for a product or prompt).
+  //
+  // An ABSENT authorNote preserves whatever is stored rather than clearing it, so a caller that does not know
+  // about the field cannot destroy a note. Clearing is explicit: send an empty string.
+  const authorNote = typeof d.authorNote === 'string'
+    ? d.authorNote
+    : (typeof prev?.authorNote === 'string' ? prev.authorNote : null);
   const record = {
     type, slug, pendingSlug,
     path: typeof d.path === 'string' ? d.path : null,
     frontmatter: d.frontmatter && typeof d.frontmatter === 'object' ? d.frontmatter : {},
     body: typeof d.body === 'string' ? d.body : '',
+    ...(authorNote != null ? { authorNote } : {}),
     updatedAt: now(),
   };
   if (utf8Bytes(JSON.stringify(record)) > DRAFT_MAX_BYTES) throw new DraftError(`a draft may not exceed ${DRAFT_MAX_BYTES} bytes`);
-  const next = normalizeDrafts(state);
-  const key = draftKeyOf(type, slug);
   const isNew = !(key in next.items);
   if (isNew && Object.keys(next.items).length >= DRAFTS_MAX_ITEMS) throw new DraftError(`draft limit reached (${DRAFTS_MAX_ITEMS}); discard one first`);
   next.items[key] = record;

@@ -102,7 +102,7 @@ const labelOf = CATEGORY_LABELS;
           </article>
           <div data-pv-cta hidden></div>
           <div id="pd-screenshots" class="pd-gallery pd-anchor" data-pv-gallery hidden></div>
-          <div data-pv-note style="margin-top:48px" hidden></div>
+          <div data-pv-note-card style="margin-top:48px" hidden></div>
           <p class="pv-inert" style="margin-top:36px" data-pv-inert-foot>The author box and discussion render here on the published page.</p>
         </div>
       </div>
@@ -468,16 +468,26 @@ const labelOf = CATEGORY_LABELS;
       // document in pieces. Rendering in pieces loses footnote references, since [^1] only resolves against a
       // document that also carries its definition.
       let editing = false;
-      let blockRanges: Array<{ start: number; end: number } | null> = [];
+      // sow-235 + the note: one commit path, two documents. `attr` differs so the note's block indices can
+      // never collide with the body's, and each doc owns its own source getter/setter.
+      type PvDoc = {
+        attr: 'blk' | 'nblk';
+        ranges: Array<{ start: number; end: number } | null>;
+        get: () => string;
+        set: (v: string) => void;
+      };
+      const bodyDoc: PvDoc = { attr: 'blk', ranges: [], get: () => String(draft.body || ''), set: (v) => { draft.body = v; } };
+      const noteDoc: PvDoc = { attr: 'nblk', ranges: [], get: () => String(draft.authorNote || ''), set: (v) => { draft.authorNote = v; } };
+      let noteMeta: any = null;
       const renderFromSource = async () => {
         const { renderMarkdownWithBlocks, renderMarkdown } = await import('../../../client/src/markdown.mjs');
         const src = String(draft.body || '');
         if (editing) {
           const r = renderMarkdownWithBlocks(src);
-          blockRanges = r.blocks;
+          bodyDoc.ranges = r.blocks;
           draft.__html = r.html;
         } else {
-          blockRanges = [];
+          bodyDoc.ranges = [];
           draft.__html = renderMarkdown(src);
         }
         draft.__html = String(draft.__html).replace(/src="(\.\/[^"]+)"/g, (_m: string, q: string) => `src="${asset(q, itemPath)}"`);
@@ -539,44 +549,52 @@ const labelOf = CATEGORY_LABELS;
         ctaBox.hidden = false;
       };
 
-      // sow-219 Phase 2: the from-the-author note. The published page pins it above the discussion and then
-      // DROPS the author box, because the note carries the byline (ContentFooter's skipAuthorBox), so the
-      // preview mirrors both halves of that. Only a committed repo draft can have one: it lives in a sibling
-      // comment file that reaches the repo in the same PR, and the same GET /membership/file this page already
-      // uses can read it. A fork-staged draft goes through /membership/drafts, which does not carry the
-      // comment, so it keeps showing the inert line rather than growing a second data path.
-      (async () => {
-        const noteBox = $('[data-pv-note]');
+      // sow-219 Phase 2 + the editable note: the from-the-author note. The published page pins it above the
+      // discussion and then DROPS the author box, because the note carries the byline (ContentFooter's
+      // skipAuthorBox), so the preview mirrors both halves of that.
+      //
+      // The source is resolved once, in priority order: the DRAFT record carries it now (so a staged edit is
+      // what you see), falling back to the committed sibling comment file that reaches the repo in the same PR.
+      // This is defined as a function rather than a fire-and-forget IIFE and awaited at the END of setup: it
+      // calls renderNoteCard, which is declared with the editing machinery below, and an IIFE could reach it
+      // before that declaration had run.
+      const loadNote = async () => {
+        const noteBox = $('[data-pv-note-card]');
         const foot = $('[data-pv-inert-foot]');
-        if (!noteBox || store !== 'repo' || !repoPath) return;
+        if (!noteBox) return;
         try {
-          const { introPathFor, buildAuthorNoteHtml } = await import('../../lib/author-note.mjs');
-          const notePath = introPathFor(repoPath, slug);
-          if (!notePath) return;
-          const res = await fetch(`${base}/membership/file?path=${encodeURIComponent(notePath)}&ref=main`, { credentials: 'include' });
-          const text = res.ok ? (await res.json())?.text : null;
-          if (typeof text !== 'string' || !text) return; // no note: the published page shows the author box
-          const { parseContentFile } = await import('../../../client/src/content-ops.mjs');
-          const parsed: any = parseContentFile(text);
-          // Match the published selection exactly: only a PUBLIC, authorNote-flagged, published comment pins.
-          const nfm = parsed.frontmatter || {};
-          if (nfm.authorNote !== true || nfm.visibility !== 'public' || (nfm.status && nfm.status !== 'published')) return;
-          const author = String(nfm.author || fm.author || '');
+          const author = String(fm.author || '');
           const { authorDisplay, authorHref } = await import('../../lib/authors.ts');
-          const { renderMarkdown } = await import('../../../client/src/markdown.mjs');
           let avatarUrl = '';
           try {
             const idx = await fetch('/members-index.json').then((r) => (r.ok ? r.json() : null));
             avatarUrl = (idx?.members || []).find((m: any) => m?.username === author)?.avatar || '';
           } catch { /* the letter disc is the documented fallback */ }
-          noteBox.innerHTML = buildAuthorNoteHtml({
-            name: authorDisplay(author), href: authorHref(author), avatarUrl,
-            bodyHtml: renderMarkdown(String(parsed.body || '')),
-          });
-          noteBox.hidden = false;
-          if (foot) foot.textContent = 'The discussion renders here on the published page. The author box is replaced by the note above.';
+          noteMeta = { name: authorDisplay(author), href: authorHref(author), avatarUrl };
+
+          // The draft already carries the note once it has been edited here or in the editor. Only go to the
+          // committed file when it does not, so a staged edit is never masked by the older committed copy.
+          if (typeof draft.authorNote !== 'string' && store === 'repo' && repoPath) {
+            const { introPathFor } = await import('../../lib/author-note.mjs');
+            const notePath = introPathFor(repoPath, slug);
+            if (notePath) {
+              const res = await fetch(`${base}/membership/file?path=${encodeURIComponent(notePath)}&ref=main`, { credentials: 'include' });
+              const text = res.ok ? (await res.json())?.text : null;
+              if (typeof text === 'string' && text) {
+                const { parseContentFile } = await import('../../../client/src/content-ops.mjs');
+                const parsed: any = parseContentFile(text);
+                // Match the published selection exactly: only a PUBLIC, authorNote-flagged, published comment pins.
+                const nfm = parsed.frontmatter || {};
+                if (nfm.authorNote === true && nfm.visibility === 'public' && (!nfm.status || nfm.status === 'published')) {
+                  draft.authorNote = String(parsed.body || '').trim();
+                }
+              }
+            }
+          }
+          renderNoteCard();
+          if (foot && noteDoc.get().trim()) foot.textContent = 'The discussion renders here on the published page. The author box is replaced by the note above.';
         } catch { /* a preview never fails on its optional trimmings */ }
-      })();
+      };
 
       let asMemberNow = false;
       let stopToc: (() => void) | undefined;
@@ -607,6 +625,8 @@ const labelOf = CATEGORY_LABELS;
       // wireEditing runs synchronously on every re-render and cannot await an import each time.
       const { readBlockDom, applyBlockEdit, isEditableBlockTag } = await import('../../../client-ui/src/block-commit.mjs');
       const { createSelectionToolbar } = await import('../../../client-ui/src/selection-toolbar.mjs');
+      const { renderMarkdownWithBlocks: mdBlocks, renderMarkdown: mdPlain } = await import('../../../client/src/markdown.mjs');
+      const { buildAuthorNoteHtml } = await import('../../lib/author-note.mjs');
 
       const editCtl = $('[data-pv-editctl]') as HTMLElement | null;
       const editBtn = $('[data-pv-edit-toggle]') as HTMLButtonElement | null;
@@ -628,23 +648,25 @@ const labelOf = CATEGORY_LABELS;
       // table, a fence and a wrapped paragraph editable: the earlier version replaced a whole range with one
       // line, which would have collapsed a list to a single bullet. It also carries through everything the
       // rendered HTML cannot express, notably a table's alignment row and a fence's language.
-      const commitBlock = async (el: HTMLElement) => {
-        const n = Number(el.dataset.blk);
-        const range = blockRanges[n];
+      const commitIn = async (doc: PvDoc, el: HTMLElement) => {
+        const range = doc.ranges[Number(el.dataset[doc.attr])];
         if (!range) return;
-        const lines = String(draft.body || '').replace(/\r\n/g, '\n').split('\n');
+        const lines = doc.get().replace(/\r\n/g, '\n').split('\n');
         const before = lines.slice(range.start, range.end + 1);
         const next = applyBlockEdit(before.join('\n'), readBlockDom(el));
         // null means the edit could not be applied safely (the source range is not the shape the DOM claims);
         // committing nothing is the fail-safe, because a wrong write here destroys neighbouring content.
         if (!next || next.join('\n') === before.join('\n')) return;
         lines.splice(range.start, range.end - range.start + 1, ...next);
-        draft.body = lines.join('\n');
+        doc.set(lines.join('\n'));
         markDirty();
+        if (doc === noteDoc) { renderNoteCard(); wireEditing(); return; }
         await renderFromSource();
         apply();
         wireEditing();
       };
+      // The body keeps its own name because the selection toolbar's onCommit closes over it.
+      const commitBlock = (el: HTMLElement) => commitIn(bodyDoc, el);
 
       // sow-235: the shared hover toolbar (bold, italic, inline code, link) and its link manager, the same
       // module the block editor drives. It only offers itself over a block that is actually contenteditable.
@@ -673,17 +695,18 @@ const labelOf = CATEGORY_LABELS;
         });
       };
 
-      const wireEditing = () => {
-        if (!bodyEl) return;
-        bodyEl.classList.toggle('pv-editing', editing);
-        if (editing) ensureToolbar(); else seltb?.hide();
-        bodyEl.querySelectorAll('[data-blk]').forEach((raw) => {
+      // One wiring routine for both documents. The note is the same kind of thing as the body (stamped blocks
+      // over a markdown source), so it gets the same click-to-edit, link manager and commit-on-blur behaviour
+      // rather than a parallel implementation that would drift.
+      const wireBlocks = (container: HTMLElement, doc: PvDoc) => {
+        container.classList.toggle('pv-editing', editing);
+        container.querySelectorAll(`[data-${doc.attr}]`).forEach((raw) => {
           const el = raw as HTMLElement;
           if (!editing) { el.removeAttribute('contenteditable'); return; }
           // sow-235: every block the renderer stamped with a source range and that carries editable text.
           // A range spanning several lines is fine now that commitBlock rebuilds the block from its source.
           // hr has nothing to edit, and the footnotes section is synthesized and carries a null range.
-          const range = blockRanges[Number(el.dataset.blk)];
+          const range = doc.ranges[Number(el.dataset[doc.attr])];
           if (!range || !isEditableBlockTag(el.tagName)) return;
           // A click on a link inside an editable block opens the link manager rather than placing a caret:
           // inside contenteditable a link neither navigates nor shows anything, so it otherwise reads as dead.
@@ -719,10 +742,41 @@ const labelOf = CATEGORY_LABELS;
             el.removeAttribute('contenteditable');
             delete el.dataset.pvSnap;
             if (untouched) return;
-            void commitBlock(el);
+            void commitIn(doc, el);
           });
         });
       };
+
+      const wireEditing = () => {
+        if (editing) ensureToolbar(); else seltb?.hide();
+        if (bodyEl) wireBlocks(bodyEl, bodyDoc);
+        const card = $('[data-pv-note-card]');
+        if (card) wireBlocks(card, noteDoc);
+      };
+
+      // The note card, rebuilt from its own source the same way the body is. Two details matter. The renderer
+      // stamps `data-blk`, which would collide with the body's indices, so the note's stamps are rewritten to
+      // `data-nblk` and wireBlocks looks for that. And while editing, an item with no note yet still renders
+      // the card with an empty paragraph, so a note can be ADDED here rather than only edited.
+      const renderNoteCard = () => {
+        const card = $('[data-pv-note-card]');
+        if (!card || !noteMeta) return;
+        const src = noteDoc.get();
+        if (!src.trim() && !editing) { card.hidden = true; return; }
+        let bodyHtml: string;
+        if (editing) {
+          const r = mdBlocks(src.trim() ? src : 'Add a note for readers.');
+          noteDoc.ranges = r.blocks;
+          bodyHtml = String(r.html).replace(/ data-blk="/g, ' data-nblk="');
+        } else {
+          noteDoc.ranges = [];
+          bodyHtml = mdPlain(src);
+        }
+        card.innerHTML = buildAuthorNoteHtml({ ...noteMeta, bodyHtml });
+        card.hidden = false;
+      };
+
+      await loadNote();
 
       editBtn?.addEventListener('click', async () => {
         editing = !editing;
@@ -731,6 +785,7 @@ const labelOf = CATEGORY_LABELS;
         setMsg(editing ? 'Click a block to edit it. Highlight text for formatting and links.' : (dirty ? 'Unsaved changes.' : ''));
         await renderFromSource();
         apply();
+        renderNoteCard();
         wireEditing();
       });
 
@@ -752,7 +807,10 @@ const labelOf = CATEGORY_LABELS;
             login: String(who.login),
             githubId: who.githubId != null ? String(who.githubId) : null,
           });
-          await client.saveDraft({ type, input: fm, body: String(draft.body || ''), path: itemPath });
+          await client.saveDraft({
+            type, input: fm, body: String(draft.body || ''), path: itemPath,
+            ...(typeof draft.authorNote === 'string' ? { authorNote: draft.authorNote } : {}),
+          });
           dirty = false;
           saveBtn.hidden = true;
           setMsg('Saved.');
