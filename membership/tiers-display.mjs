@@ -97,3 +97,41 @@ export function validateTierDisplay(raw) {
   try { parseTierDisplay(raw); return { ok: true, error: null }; }
   catch (e) { return { ok: false, error: e instanceof TierDisplayError ? e.message : String(e?.message || e) }; }
 }
+
+/**
+ * Proper nouns a benefit label may legitimately start with. `leadLower` leaves these alone, because
+ * "discord access" and "gitHub" are wrong in a way a reader notices immediately.
+ */
+const PROPER_LEAD = /^(Discord|GitHub|Stripe|Shares|AI|MCP)\b/;
+
+/**
+ * Lower the first character so a label reads inside a sentence: "Full Discord access" -> "full Discord access".
+ * Only when the label starts capital-then-lowercase and does not open with a proper noun, so an acronym
+ * ("AI review") and a brand ("Discord access") both survive untouched.
+ */
+function leadLower(s) {
+  if (PROPER_LEAD.test(s)) return s;
+  return /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
+}
+
+/**
+ * One tier's benefit LABELS as a clause for a sentence, e.g.
+ *   "post comments across the network; full Discord access; and see the member-only Shares stream"
+ *
+ * WHY THIS IS HERE AND NOT IN THE PAGE THAT SHOWS IT. Exactly the reason the `description` field above gives,
+ * one field over. The membership FAQ hand-wrote this sentence, and it went on selling "Curate your feed" as a
+ * Network Member benefit for eight days after the owner ruled it out (2026-08-18), on a page whose other two
+ * answers tell the reader the personalized feed is free. A page that TYPES a benefit sentence is a page that
+ * can contradict this file; a page that composes one from here cannot. sow-201 / sow-185 section 7.
+ *
+ * The separator is a SEMICOLON, not a comma: benefit labels carry their own internal commas ("Publish
+ * articles, products, and prompts"), so a comma-joined list reads as one long undifferentiated run.
+ */
+export function benefitProse(tier) {
+  const items = (tier?.benefits || [])
+    .map((b) => leadLower(String(b?.label ?? '').trim()))
+    .filter(Boolean);
+  if (items.length === 0) return '';
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`;
+}

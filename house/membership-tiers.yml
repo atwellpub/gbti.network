@@ -15,6 +15,20 @@
 # founding badge, and "sell products / sponsorships" (mockup-only, not built). The Creator "connect a news
 # source" privilege is held until its governed workflow (sow-185 phase 2b) ships. "by application" on Creator is
 # mockup-only and NOT in sow-185; it is an OPEN owner question and is intentionally not encoded here.
+#
+# REMOVED 2026-08-26, applying the owner ruling of 2026-08-18 (sow-201, Option A: FIX THE COPY, DO NOT GATE):
+#   - Member "Curate your feed" -> "See the member-only Shares stream". Feed curation is a FREE-tier capability
+#     (the free tier advertises the personalized feed and the new-tab extension, and the endpoints behind it
+#     admit any signed-in account), so selling it at $5 breached this header's own rule. Making the copy true
+#     by ENFORCEMENT was on the table and was DECLINED: clawing back something free accounts already have, in
+#     order to justify a sales line, is the worse of the two repairs. The replacement is genuinely gated
+#     (workers/signup/membership-shares.mjs: READ_MEMBERS is paid + trialing, so a free account is filtered to
+#     public shares). Recorded honestly: that is 7 members-only shares out of 50 today, a real benefit and a
+#     thin headline, and the owner chose it knowing the number.
+#   - Creator "Weekly product-development shop talk" -> removed entirely. It is POSITIONING, not software, and
+#     section 7 requires a named owner and a cadence before such a thing appears in PRICING copy. It already
+#     lives in general community copy (src/components/JoinOffers.astro, "Weekly Shop Talk calls"), so nothing
+#     was written to replace it and no new commitment was invented.
 tiers:
   - key: none
     label: Free
@@ -50,8 +64,8 @@ tiers:
         description: The members' Discord, where the day-to-day conversation and help actually happens.
       - label: Read members-only content and comment bodies
         description: Read the posts and comment bodies that are hidden from logged-out visitors.
-      - label: Curate your feed
-        description: Compact, detailed, and card views, plus source selection so you follow what you care about.
+      - label: See the member-only Shares stream
+        description: Read the members-only side of the Shares stream, not just the public links every visitor sees.
     revenue: Earn 10% for life on the paid revenue of members you invite.
 
   - key: creator
@@ -67,5 +81,4 @@ tiers:
       - Post to the member Shares stream
       - Your creator profile and unified portfolio
       - Reshare and syndicate your work
-      - Weekly product-development shop talk
     revenue: Content Creators participate in the greater [revenue program](/revenue-model/).

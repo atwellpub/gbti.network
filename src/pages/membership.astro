@@ -3,6 +3,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import MembershipTiers from '../components/membership/MembershipTiers.astro';
 import { REF_COOKIE, REF_VIA_COOKIE, REF_COOKIE_DAYS } from '../lib/referral';
 import { FIRST_TOUCH_PCT, LAST_TOUCH_PCT, COLLAB_POOL_PCT, INVITE_PCT, HOLD_DAYS } from '../lib/membership';
+import { tierDisplay, benefitProse } from '../lib/tiers';
+
+// sow-201 (2026-08-26): the tier-difference answer is COMPOSED from house/membership-tiers.yml, never typed.
+// It used to be hand-written prose, and it went on selling "Curate your feed" as a Network Member benefit for
+// eight days after the owner ruled it out, two answers below one that tells the reader the personalized feed
+// is FREE. The header note below already claimed every benefit bullet comes from the yml; this is what makes
+// that true of the FAQ as well. Fail CLOSED at build rather than render half a sentence.
+const memberTier = tierDisplay('member');
+const creatorTier = tierDisplay('creator');
+if (!memberTier || !creatorTier) throw new Error('membership.astro: house/membership-tiers.yml is missing the member or creator tier');
 
 // sow-201: the membership page is the plans + the FAQ, nothing else (owner, 2026-08-10). The three tiers ARE
 // the hero. Every price, label, tagline, and benefit bullet still comes from house/membership-tiers.yml via
@@ -15,7 +25,7 @@ const faqs = [
   },
   {
     q: 'What is the difference between a Network Member and a Content Creator?',
-    a: 'A Network Member joins the conversation: comment across the network, full Discord access, read members-only content, and curate your feed. A Content Creator does all of that and publishes to the network: articles, products, and prompts, a public creator profile, and a share of the revenue. See the plans above for pricing.',
+    a: `A ${memberTier.label} joins the conversation: ${benefitProse(memberTier)}. A ${creatorTier.label} does all of that and more: ${benefitProse(creatorTier)}. See the plans above for pricing, and the revenue answer below for how earning works on each.`,
   },
   {
     q: 'What can I do with a free account?',

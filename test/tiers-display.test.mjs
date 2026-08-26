@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import yaml from 'js-yaml';
-import { parseTierDisplay, validateTierDisplay, TierDisplayError, TIER_ORDER } from '../membership/tiers-display.mjs';
+import { parseTierDisplay, validateTierDisplay, TierDisplayError, TIER_ORDER, benefitProse } from '../membership/tiers-display.mjs';
 import { TIER } from '../membership/tiers.mjs';
 
 // A minimal valid file used across the shape tests.
@@ -119,5 +119,65 @@ test('the committed house/membership-tiers.yml is well-formed and carries all th
   // Every paid tier names its price env vars so the phase-3b checkout allowlist has ids to bind.
   for (const t of [member, creator]) {
     assert.ok(t.priceEnv.monthly && t.priceEnv.annual, `${t.key} must name monthly + annual price env vars`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// sow-201 (2026-08-26): benefitProse + the membership FAQ binding.
+//
+// THE DEFECT THESE EXIST FOR. The owner ruled on 2026-08-18 that "Curate your feed" comes out of the Network
+// Member benefits, because feed curation is a FREE-tier capability and gating it to justify a sales line was
+// the repair they declined. The bullet stayed. So did a second copy of the same claim that the audit never
+// named: src/pages/membership.astro hand-wrote the difference between the tiers in prose, on a page whose
+// other two answers tell the reader the personalized feed is free. The page contradicted itself and its own
+// header comment, which already claimed every benefit bullet comes from house/membership-tiers.yml.
+//
+// The registry assertions below were run against the UNCHANGED yml first and failed there on the live string.
+
+test('benefitProse: labels join with semicolons and the last takes "and"', () => {
+  const tier = { benefits: [{ label: 'Publish articles, products, and prompts' }, { label: 'Reshare your work' }, { label: 'Your creator profile' }] };
+  // Semicolons, not commas: the first label carries its own commas, so a comma-joined list reads as one run.
+  assert.equal(benefitProse(tier), 'publish articles, products, and prompts; reshare your work; and your creator profile');
+});
+
+test('benefitProse: the leading character lowers, except on a proper noun or an acronym', () => {
+  assert.equal(benefitProse({ benefits: [{ label: 'Full Discord access' }] }), 'full Discord access');
+  // A label that OPENS with a brand or an acronym is left alone; "discord access" and "aI review" are wrong
+  // in a way a reader notices, and a future bullet may well start with one.
+  assert.equal(benefitProse({ benefits: [{ label: 'Discord access, in full' }] }), 'Discord access, in full');
+  assert.equal(benefitProse({ benefits: [{ label: 'AI editorial review' }] }), 'AI editorial review');
+});
+
+test('benefitProse: degenerate inputs yield a usable string, never a stray separator', () => {
+  assert.equal(benefitProse({ benefits: [{ label: 'Only one' }] }), 'only one');
+  assert.equal(benefitProse({ benefits: [] }), '');
+  assert.equal(benefitProse(undefined), '');
+  // A blank label is dropped rather than producing "; and".
+  assert.equal(benefitProse({ benefits: [{ label: 'Kept' }, { label: '   ' }] }), 'kept');
+});
+
+test('the committed registry no longer sells feed curation or shop talk as tier benefits', () => {
+  const tiers = parseTierDisplay(yaml.load(fs.readFileSync(new URL('../house/membership-tiers.yml', import.meta.url), 'utf8')));
+  const labels = (key) => tiers.find((t) => t.key === key).benefits.map((b) => `${b.label} ${b.description}`.toLowerCase());
+  // Curation is a FREE capability (the free tier advertises the personalized feed), so selling it at $5 is
+  // the breach of this registry's own header rule, not a wording preference.
+  assert.ok(!labels('member').some((l) => l.includes('curate your feed')), 'Network Member still sells "Curate your feed"');
+  // Shop talk is positioning, not software. The offerings register requires a named owner and a cadence
+  // before it appears in PRICING copy; it lives in general community copy (src/components/JoinOffers.astro).
+  assert.ok(!labels('creator').some((l) => l.includes('shop talk')), 'Content Creator still sells shop talk');
+});
+
+test('the membership FAQ composes the tier difference from the registry instead of typing it', () => {
+  const page = fs.readFileSync(new URL('../src/pages/membership.astro', import.meta.url), 'utf8');
+  // Half of this is structural and half would be worthless alone. A "does the page contain a forbidden
+  // string" check passes while a page is wrong, which is the failure test/invite-lander-parity.test.mjs
+  // documents at length. Paired with the import assertion it holds: the page cannot state a benefit that is
+  // absent from the registry, because it does not state benefits at all.
+  assert.match(page, /benefitProse/, 'membership.astro must compose the FAQ answer from the registry');
+  const tiers = parseTierDisplay(yaml.load(fs.readFileSync(new URL('../house/membership-tiers.yml', import.meta.url), 'utf8')));
+  for (const key of ['member', 'creator']) {
+    for (const b of tiers.find((t) => t.key === key).benefits) {
+      assert.ok(!page.includes(b.label), `membership.astro hand-writes the benefit "${b.label}"`);
+    }
   }
 });

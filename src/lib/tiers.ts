@@ -9,6 +9,10 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { parseTierDisplay } from '../../membership/tiers-display.mjs';
 
+// sow-201: benefit copy composed into a SENTENCE, for prose surfaces (the membership FAQ) that would otherwise
+// hand-write it and drift from the registry. Re-exported here so a page gets display data and prose in one import.
+export { benefitProse } from '../../membership/tiers-display.mjs';
+
 // Re-export the AXIS (bind, do NOT rebuild): TIER identity, ranking, and the fail-closed membership test.
 export { TIER, tierRank, meetsTier, isTier } from '../../membership/tiers.mjs';
 
