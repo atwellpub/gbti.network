@@ -4,10 +4,7 @@
  */
 
 const DEBUG = {
-    /**
-     * Initialize the debug module
-     * @param {Object} config - The configuration object
-     */
+    // Reads config.debug.{enabled,logLevel}; absent config leaves the module disabled at 'info'.
     init: function(config) {
         this.enabled = config && config.debug && config.debug.enabled;
         this.logLevel = (config && config.debug && config.debug.logLevel) || 'info';
@@ -23,23 +20,14 @@ const DEBUG = {
         this.info('Debug module initialized', { enabled: this.enabled, logLevel: this.logLevel });
     },
     
-    /**
-     * Get caller information (file and line number)
-     * @returns {string} - Formatted caller information
-     */
+    // Returns "[file:line]" for whoever called the log method, or '' if the stack cannot be read.
+    // Frame 3 is that caller: 0 is the Error line, 1 is here, 2 is the log method. Adding a wrapper
+    // layer between a caller and a log method shifts this and silently misattributes every line.
     _getCallerInfo: function() {
         try {
-            // Create an Error to get the stack trace
             const err = new Error();
-            
-            // Parse the stack trace to extract file and line information
             const stackLines = err.stack.split('\n');
-            
-            // Skip the first few lines that reference this function and the calling log function
-            // Usually need to skip 3 lines to get to the actual caller
             let callerLine = stackLines[3] || '';
-            
-            // Extract file path and line number using regex
             const fileMatch = callerLine.match(/at\s+(?:.*\s+\()?(?:.*\/)?([^\/]*):(\d+)(?::(\d+))?\)?$/);
             
             if (fileMatch) {
@@ -54,11 +42,8 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log an error message
-     * @param {string} message - The message to log
-     * @param {Object} data - Additional data to log
-     */
+    // Every method below takes (message, data) and no-ops unless `enabled` and the call's level is at
+    // or under `logLevel`. Only the deviations from that shape are commented.
     error: function(message, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.error) {
             const callerInfo = this._getCallerInfo();
@@ -66,11 +51,6 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log a warning message
-     * @param {string} message - The message to log
-     * @param {Object} data - Additional data to log
-     */
     warn: function(message, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.warn) {
             const callerInfo = this._getCallerInfo();
@@ -78,11 +58,6 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log an info message
-     * @param {string} message - The message to log
-     * @param {Object} data - Additional data to log
-     */
     info: function(message, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.info) {
             const callerInfo = this._getCallerInfo();
@@ -90,11 +65,6 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log a debug message
-     * @param {string} message - The message to log
-     * @param {Object} data - Additional data to log
-     */
     debug: function(message, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.debug) {
             const callerInfo = this._getCallerInfo();
@@ -102,11 +72,6 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log a trace message with stack trace
-     * @param {string} message - The message to log
-     * @param {Object} data - Additional data to log
-     */
     trace: function(message, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.trace) {
             const callerInfo = this._getCallerInfo();
@@ -116,11 +81,7 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log a group of messages
-     * @param {string} groupName - The name of the group
-     * @param {Function} callback - The callback function to execute within the group
-     */
+    // Runs `callback` inside a collapsed console group. Gated on `enabled` only, not on logLevel.
     group: function(groupName, callback) {
         if (this.enabled) {
             const callerInfo = this._getCallerInfo();
@@ -130,11 +91,7 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log the value of a variable
-     * @param {string} name - The name of the variable
-     * @param {*} value - The value of the variable
-     */
+    // Logged at debug level, not info, despite going out through console.info.
     variable: function(name, value) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.debug) {
             const callerInfo = this._getCallerInfo();
@@ -142,12 +99,8 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Log the timing of a function
-     * @param {string} name - The name of the function
-     * @param {Function} fn - The function to time
-     * @returns {*} - The result of the function
-     */
+    // Times `fn` and returns its result. Calls `fn` either way, so wrapping a call in this is never
+    // what stops it running when debug is off.
     time: function(name, fn) {
         if (!this.enabled) {
             return fn();
@@ -160,12 +113,7 @@ const DEBUG = {
         return result;
     },
     
-    /**
-     * Log a color-related message with color preview
-     * @param {string} message - The message to log
-     * @param {string} color - The color to preview
-     * @param {Object} data - Additional data to log
-     */
+    // Prints `message` followed by a swatch of `color`. Logged at debug level.
     color: function(message, color, data) {
         if (this.enabled && this.logLevels[this.logLevel] >= this.logLevels.debug) {
             const callerInfo = this._getCallerInfo();
@@ -179,10 +127,8 @@ const DEBUG = {
         }
     },
     
-    /**
-     * Toggle debug mode to visualize clickable areas
-     * Press Ctrl+Shift+D to toggle
-     */
+    // Ctrl+Shift+D toggles the `debug-mode` class on <body>, which the stylesheet uses to outline
+    // clickable areas. Bound on load, below, so the shortcut is live without any caller opting in.
     initDebugModeToggle: function() {
         document.addEventListener('keydown', function(event) {
             // Check if Ctrl+Shift+D was pressed

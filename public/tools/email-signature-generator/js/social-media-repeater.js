@@ -228,12 +228,7 @@ class SocialMediaRepeater {
         }
     }
 
-    /**
-     * Add a new social icon
-     * @param {string} platform - Social media platform
-     * @param {string} link - URL for the social media link
-     * @returns {HTMLElement} - Created social media item
-     */
+    /** @returns {HTMLElement|null} the created row, or null when the row could not be built. */
     addSocialIcon(platform = '', link = '') {
         try {
             const itemElement = this.createSocialIcon(platform, link);
@@ -261,10 +256,6 @@ class SocialMediaRepeater {
         }
     }
 
-    /**
-     * Remove a social icon
-     * @param {HTMLElement} itemElement - Social media item element to remove
-     */
     removeSocialIcon(itemElement) {
         try {
             // Get platform before removing from DOM
@@ -481,10 +472,7 @@ class SocialMediaRepeater {
         }
     }
     
-    /**
-     * Get the current icons
-     * @returns {Array} - Array of icon objects with platform and url properties
-     */
+    /** @returns {Array<{platform: string, url: string}>} */
     getIcons() {
         try {
             // If we have icons already loaded, return them

@@ -394,9 +394,6 @@ const CONFIG = {
         }
     },
 
-    /**
-     * Dark Mode Settings
-     */
     darkMode: {
         toggleId: "dark-mode-toggle",
         storageKey: "signature-dark-mode",
@@ -494,10 +491,7 @@ if (typeof DEBUG !== 'undefined' && typeof DEBUG.init === 'function') {
 window.EmailSignatureApp = {
     templates: [],
     
-    /**
-     * Register a template with the application
-     * @param {Object} template - Template object with name, displayName, description, htmlPath, cssPath
-     */
+    /** @param {Object} template - { name, displayName, description, htmlPath, cssPath } */
     registerTemplate: function(template) {
         DEBUG.info(`Registering template: ${template.name}`);
         
@@ -519,19 +513,11 @@ window.EmailSignatureApp = {
         this.templates.push(template);
     },
     
-    /**
-     * Get all registered templates
-     * @returns {Array} - Array of template objects
-     */
     getTemplates: function() {
         return this.templates;
     },
     
-    /**
-     * Get a specific template by name
-     * @param {string} name - Template name
-     * @returns {Object|null} - Template object or null if not found
-     */
+    /** @returns {Object|null} the registered template, or null when `name` is unknown. */
     getTemplate: function(name) {
         const template = this.templates.find(t => t.name === name);
         if (!template) {
@@ -541,9 +527,9 @@ window.EmailSignatureApp = {
     },
     
     /**
-     * Fix asset paths in template configuration
-     * @param {Object} paths The template paths configuration
-     * @returns {Object} The fixed paths configuration
+     * Prefix relative html/css/asset paths with the WordPress templates root. MUTATES `paths` in place and
+     * also returns it. Outside WordPress (no EmailSignatureGeneratorConfig.isWordPress) it is a no-op, so a
+     * caller cannot use the return value to tell whether anything was rewritten.
      */
     fixAssetPaths: function(paths) {
         // Check if we're running in WordPress environment
@@ -717,9 +703,9 @@ window.EmailSignatureApp = {
     },
     
     /**
-     * Load data from localStorage
-     * @param {string} key - Key to load data from
-     * @returns {string} - Loaded data
+     * Read and JSON.parse a stored value. Returns the PARSED value, not the raw string, and null both when
+     * the key is absent and when the stored text fails to parse, so a corrupt entry is indistinguishable
+     * from a missing one.
      */
     loadFromLocalStorage: function(key) {
         try {
@@ -735,9 +721,8 @@ window.EmailSignatureApp = {
     },
     
     /**
-     * Save data to localStorage
-     * @param {string} key - Key to save data to
-     * @param {Object} data - Data to save
+     * JSON.stringify a value into localStorage. Returns nothing and swallows a failed write (a quota
+     * error is logged, not thrown), so a caller never learns the save did not happen.
      */
     saveToLocalStorage: function(key, data) {
         try {

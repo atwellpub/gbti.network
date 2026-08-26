@@ -18622,282 +18622,6 @@ function buildContext(store) {
   };
 }
 
-// client/src/publish.mjs
-function branchName(type, slug, scope = "member") {
-  if (type === "profile") return "gbti/profile";
-  const prefix = scope === "house" ? "gbti/house-" : "gbti/";
-  return `${prefix}${type}-${slug}`;
-}
-function defaultMessage(change) {
-  return change.type === "profile" ? "Update profile" : `${change.slug ? "Update" : "Add"} ${change.type}: ${change.slug ?? ""}`.trim();
-}
-function defaultTitle(change) {
-  return change.type === "profile" ? `Update ${change.username}'s profile` : `${change.type}: ${change.slug}`;
-}
-async function commitToBranchOnFork({ repo, branch, files, message, resetStale = false, clobberOpenPull = false }) {
-  if (!branch) throw new Error("commitToBranchOnFork: a branch name is required");
-  if (!Array.isArray(files) || files.length === 0) throw new Error("commitToBranchOnFork: at least one file change is required");
-  const fork = await repo.ensureFork();
-  const base2 = await repo.getDefaultBranch(repo.upstream);
-  const baseSha = await repo.getBranchSha(fork.full_name, base2);
-  if (resetStale && repo.findOpenPull && repo.forceBranch) {
-    let tip = null;
-    try {
-      tip = await repo.getBranchSha(fork.full_name, branch);
-    } catch {
-      tip = null;
-    }
-    if (tip && tip !== baseSha) {
-      const open = clobberOpenPull ? null : await repo.findOpenPull({ head: `${fork.owner}:${branch}` });
-      if (!open) await repo.forceBranch(fork.full_name, branch, baseSha);
-    }
-  }
-  await repo.ensureBranch(fork.full_name, branch, baseSha);
-  for (const f of files) {
-    const existingSha = await repo.getFileSha(fork.full_name, f.path, branch);
-    if (f.content === null) {
-      if (existingSha) await repo.deleteFile(fork.full_name, f.path, { message: message ?? `Remove ${f.path}`, branch, sha: existingSha });
-    } else {
-      await repo.putFile(fork.full_name, f.path, {
-        message: message ?? `Update ${f.path}`,
-        contentBase64: toBase64(f.content),
-        branch,
-        sha: existingSha ?? void 0
-      });
-    }
-  }
-  return { fork: fork.full_name, owner: fork.owner, branch, base: base2 };
-}
-async function publishContent({ repo, change, message, title, body }) {
-  if (!change?.path || !change?.markdown) throw new Error("publishContent: a built content change is required");
-  const branch = branchName(change.type, change.slug, change.scope);
-  const { fork, owner, base: base2 } = await commitToBranchOnFork({
-    repo,
-    branch,
-    files: [{ path: change.path, content: change.markdown }],
-    message: message ?? defaultMessage(change),
-    resetStale: true
-    // a leftover branch from a merged PR must not seed a conflicting new PR
-  });
-  const head = `${owner}:${branch}`;
-  const existing = await repo.findOpenPull({ head });
-  if (existing) {
-    return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
-  }
-  const pull = await repo.openPull({ title: title ?? defaultTitle(change), head, base: base2, body: body ?? "" });
-  return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
-}
-async function publishFiles({ repo, branch, files, message, title, body, clobberOpenPull = false }) {
-  if (!branch) throw new Error("publishFiles: a branch name is required");
-  if (!Array.isArray(files) || files.length === 0) throw new Error("publishFiles: at least one file change is required");
-  const { fork, owner, base: base2 } = await commitToBranchOnFork({ repo, branch, files, message, resetStale: true, clobberOpenPull });
-  const head = `${owner}:${branch}`;
-  const existing = await repo.findOpenPull({ head });
-  if (existing) return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
-  const pull = await repo.openPull({ title: title ?? message ?? "Update", head, base: base2, body: body ?? "" });
-  return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
-}
-
-// client/src/member-comment-echo-client.mjs
-var trimBase = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-var CommentEchoClientError = class extends Error {
-};
-async function call(method, path4, body, { token, signupBase, fetch = globalThis.fetch }) {
-  if (!token || !signupBase) throw new CommentEchoClientError("not signed in");
-  const res = await fetch(trimBase(signupBase) + "/membership/comment-echo" + path4, {
-    method,
-    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
-    ...body ? { body: JSON.stringify(body) } : {}
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-  }
-  if (!res.ok) throw new CommentEchoClientError(data?.message || data?.error || `comment-echo request failed (${res.status})`);
-  return data;
-}
-async function getCommentEchoes({ targetType, targetSlug, ...opts }) {
-  const q = `?targetType=${encodeURIComponent(targetType)}&targetSlug=${encodeURIComponent(targetSlug)}`;
-  return call("GET", q, null, opts);
-}
-async function addCommentEcho({ echo, ...opts }) {
-  return call("POST", "", { action: "add", echo }, opts);
-}
-async function reapCommentEchoes({ targetType, targetSlug, ids, ...opts }) {
-  return call("POST", "", { action: "reap", targetType, targetSlug, ids }, opts);
-}
-
-// membership/comment-echo.mjs
-var byTime = (a, b) => String(a?.createdAt || a?.postedAt || "").localeCompare(String(b?.createdAt || b?.postedAt || ""));
-function mergeCommentEchoes({ deployed = [], echoes = [], prState = () => "unknown" } = {}) {
-  const deployedIds = new Set((Array.isArray(deployed) ? deployed : []).map((c) => c && c.id).filter(Boolean));
-  const reap = [];
-  const pending = /* @__PURE__ */ new Set();
-  const kept = [];
-  const seenEcho = /* @__PURE__ */ new Set();
-  for (const e of Array.isArray(echoes) ? echoes : []) {
-    if (!e || !e.id || seenEcho.has(e.id)) continue;
-    seenEcho.add(e.id);
-    if (deployedIds.has(e.id)) {
-      reap.push(e.id);
-      continue;
-    }
-    if (prState(e.prNumber) === "closed") {
-      reap.push(e.id);
-      continue;
-    }
-    kept.push({ ...e, _pending: true });
-    pending.add(e.id);
-  }
-  const comments = [...Array.isArray(deployed) ? deployed : [], ...kept].sort(byTime);
-  return { comments, reap, pending };
-}
-
-// client/src/member-og-client.mjs
-var trimBase2 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-var OgClientError = class extends Error {
-};
-async function ogPreview({ url: url2, token, signupBase, fetch = globalThis.fetch }) {
-  if (!token || !signupBase) throw new OgClientError("not signed in");
-  const res = await fetch(trimBase2(signupBase) + "/membership/og-preview", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-    body: JSON.stringify({ url: url2 })
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-  }
-  if (!res.ok) throw new OgClientError(data?.message || data?.error || `og-preview request failed (${res.status})`);
-  return data;
-}
-
-// client/src/fork-sync-client.mjs
-var trimBase3 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-async function workerSyncFork({ token, signupBase, fetch = globalThis.fetch, branch = "main" } = {}) {
-  if (!token || !signupBase) return { ok: false, synced: false, reason: "not-signed-in" };
-  try {
-    const res = await fetch(`${trimBase3(signupBase)}/membership/sync-fork`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ branch })
-    });
-    if (!res.ok) return { ok: false, synced: false, reason: `http-${res.status}` };
-    const data = await res.json().catch(() => null);
-    return data && typeof data === "object" ? data : { ok: false, synced: false, reason: "bad-response" };
-  } catch {
-    return { ok: false, synced: false, reason: "network" };
-  }
-}
-
-// client/src/hosted-publish.mjs
-function hostedItemId(type, slug) {
-  return type === "profile" ? "profile" : `${type}-${slug}`;
-}
-function hostedPublishFiles(ctx2, { branch, files, title }) {
-  const itemId = String(branch || "").replace(/^gbti\//, "");
-  return hostedAuthor({
-    token: ctx2.store?.get?.("githubToken"),
-    itemId,
-    files,
-    title,
-    signupBase: SIGNUP_BASE,
-    fetchImpl: ctx2.fetch ?? globalThis.fetch
-  });
-}
-async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_BASE, fetchImpl = globalThis.fetch }) {
-  if (!token) throw new Error("sign in to publish");
-  const res = await fetchImpl(`${String(signupBase).replace(/\/$/, "")}/membership/author`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ itemId, files, title })
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.ok) throw new Error(body.message || `hosted publish failed (${res.status})`);
-  return { prNumber: body.number, prUrl: body.html_url, branch: body.branch, fork: null, updated: !!body.already, hosted: true };
-}
-
-// client/src/drafts-client.mjs
-var trimBase4 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
-var DraftsClientError = class extends Error {
-};
-async function call2(method, body, { token, signupBase, fetch = globalThis.fetch }) {
-  if (!token || !signupBase) throw new DraftsClientError("not signed in");
-  const res = await fetch(trimBase4(signupBase) + "/membership/drafts", {
-    method,
-    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
-    ...body ? { body: JSON.stringify(body) } : {}
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-  }
-  if (!res.ok) throw new DraftsClientError(data?.message || data?.error || `drafts request failed (${res.status})`);
-  return data;
-}
-async function workerListDrafts(opts) {
-  return call2("GET", null, opts);
-}
-async function workerPutDraft({ draft, ...opts }) {
-  return call2("POST", { op: "put", draft }, opts);
-}
-async function workerDeleteDraft({ type, slug, ...opts }) {
-  return call2("POST", { op: "delete", type, slug }, opts);
-}
-
-// client/src/repo-drafts-client.mjs
-var trimBase5 = (b) => String(b || "").replace(/\/$/, "");
-var RepoDraftsClientError = class extends Error {
-};
-async function workerListRepoDrafts({ token, signupBase, fetch = globalThis.fetch } = {}) {
-  if (!token || !signupBase) throw new RepoDraftsClientError("not signed in");
-  const res = await fetch(trimBase5(signupBase) + "/membership/repo-drafts", { headers: { Authorization: "Bearer " + token } });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-  }
-  if (!res.ok) throw new RepoDraftsClientError(data?.message || data?.error || `repo-drafts request failed (${res.status})`);
-  return data;
-}
-
-// client/src/repo-drafts-core.mjs
-function mapRepoDraftItem(item = {}) {
-  const type = item?.type;
-  const slug = item?.slug;
-  return {
-    type,
-    slug,
-    branch: null,
-    path: typeof item?.path === "string" ? item.path : null,
-    pendingSlug: null,
-    title: typeof item?.title === "string" && item.title ? item.title : slug || type || "",
-    visibility: item?.visibility === "members" ? "members" : "public",
-    status: "draft",
-    owner: item?.owner ?? null,
-    valid: true,
-    invalidReason: null,
-    pull: null,
-    store: "repo"
-  };
-}
-function mergeRepoDrafts(existing = [], repoItems = [], { type = null } = {}) {
-  const rows = Array.isArray(existing) ? [...existing] : [];
-  const seen = new Set(rows.map((d) => `${d?.type}:${d?.slug}`));
-  for (const item of Array.isArray(repoItems) ? repoItems : []) {
-    if (!item || !item.type || !item.slug) continue;
-    if (type && item.type !== type) continue;
-    const key = `${item.type}:${item.slug}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    rows.push(mapRepoDraftItem(item));
-  }
-  return rows;
-}
-
 // membership/overrides-core.mjs
 var ROLE2 = Object.freeze({
   member: "member",
@@ -18925,52 +18649,7 @@ function roleOf2(githubId, roles) {
   return roles.get(String(githubId)) ?? ROLE2.member;
 }
 
-// membership/tiers.mjs
-var TIER = Object.freeze({
-  none: "none",
-  // not paid, or paid for something we cannot identify (see tierForPrice)
-  member: "member",
-  // Network Member: $5 monthly / $50 annual
-  creator: "creator"
-  // Content Creator: $15 monthly / $150 annual
-});
-var TIER_LABEL = Object.freeze({
-  [TIER.none]: "",
-  [TIER.member]: "Network Member",
-  [TIER.creator]: "Content Creator"
-});
-var RANK2 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
-
-// membership/classify-pr.mjs
-var CONTENT_DIRS = ["posts", "products", "prompts", "comments"];
-var ROLE_RANK = { [ROLE2.member]: 0, [ROLE2.moderator]: 1, [ROLE2.admin]: 2, [ROLE2.superadmin]: 3 };
-function isCleanPath(p) {
-  if (typeof p !== "string" || p.length === 0) return false;
-  if (p.startsWith("/")) return false;
-  if (p.includes("\\")) return false;
-  if (p.includes("\0")) return false;
-  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
-}
-function isContributionToFolder(paths, ownerFolder) {
-  if (!ownerFolder || !Array.isArray(paths) || paths.length === 0) return false;
-  const prefix = `members/${ownerFolder}/`;
-  return paths.every((p) => {
-    if (!isCleanPath(p) || !p.startsWith(prefix)) return false;
-    return CONTENT_DIRS.includes(p.slice(prefix.length).split("/")[0]);
-  });
-}
-
-// membership/checkout-prices.mjs
-var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
-var PRICE_ENV = Object.freeze({
-  [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
-  [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
-});
-
-// membership/tier-gate.mjs
-var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
-
-// client/src/operations.mjs
+// client/src/operations-core.mjs
 var CLIENT_VERSION = "0.1.0";
 var OperationError = class extends Error {
   constructor(code, message, details) {
@@ -19031,6 +18710,68 @@ function getStatus(ctx2) {
     // SOW-046 C: news -> Discord publish (UX hint; Worker re-checks)
   };
 }
+async function membershipOf(ctx2) {
+  const m = await (ctx2.membershipResolved ? ctx2.membershipResolved() : ctx2.membership?.());
+  return m ?? "unknown";
+}
+
+// client/src/member-comment-echo-client.mjs
+var trimBase = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var CommentEchoClientError = class extends Error {
+};
+async function call(method, path4, body, { token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new CommentEchoClientError("not signed in");
+  const res = await fetch(trimBase(signupBase) + "/membership/comment-echo" + path4, {
+    method,
+    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
+    ...body ? { body: JSON.stringify(body) } : {}
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new CommentEchoClientError(data?.message || data?.error || `comment-echo request failed (${res.status})`);
+  return data;
+}
+async function getCommentEchoes({ targetType, targetSlug, ...opts }) {
+  const q = `?targetType=${encodeURIComponent(targetType)}&targetSlug=${encodeURIComponent(targetSlug)}`;
+  return call("GET", q, null, opts);
+}
+async function addCommentEcho({ echo, ...opts }) {
+  return call("POST", "", { action: "add", echo }, opts);
+}
+async function reapCommentEchoes({ targetType, targetSlug, ids, ...opts }) {
+  return call("POST", "", { action: "reap", targetType, targetSlug, ids }, opts);
+}
+
+// membership/comment-echo.mjs
+var byTime = (a, b) => String(a?.createdAt || a?.postedAt || "").localeCompare(String(b?.createdAt || b?.postedAt || ""));
+function mergeCommentEchoes({ deployed = [], echoes = [], prState = () => "unknown" } = {}) {
+  const deployedIds = new Set((Array.isArray(deployed) ? deployed : []).map((c) => c && c.id).filter(Boolean));
+  const reap = [];
+  const pending = /* @__PURE__ */ new Set();
+  const kept = [];
+  const seenEcho = /* @__PURE__ */ new Set();
+  for (const e of Array.isArray(echoes) ? echoes : []) {
+    if (!e || !e.id || seenEcho.has(e.id)) continue;
+    seenEcho.add(e.id);
+    if (deployedIds.has(e.id)) {
+      reap.push(e.id);
+      continue;
+    }
+    if (prState(e.prNumber) === "closed") {
+      reap.push(e.id);
+      continue;
+    }
+    kept.push({ ...e, _pending: true });
+    pending.add(e.id);
+  }
+  const comments = [...Array.isArray(deployed) ? deployed : [], ...kept].sort(byTime);
+  return { comments, reap, pending };
+}
+
+// client/src/operations-read.mjs
 async function listContent(ctx2, { type, scope = "member" } = {}) {
   const id = requireIdentity(ctx2);
   if (scope === "house") {
@@ -19038,10 +18779,6 @@ async function listContent(ctx2, { type, scope = "member" } = {}) {
     return { items: await ctx2.reader.list(NETWORK_CONTENT_OWNER, type || void 0, "member") };
   }
   return { items: await ctx2.reader.list(id.username, type || void 0, "member") };
-}
-async function membershipOf(ctx2) {
-  const m = await (ctx2.membershipResolved ? ctx2.membershipResolved() : ctx2.membership?.());
-  return m ?? "unknown";
 }
 function gateMemberComments(items, membership) {
   if (canSeeShares(membership ?? "unknown")) return items ?? [];
@@ -19121,13 +18858,208 @@ function validateContent(ctx2, { type, input, body } = {}) {
     return { valid: false, error: err.message };
   }
 }
-async function authorContent(ctx2, { type, input, body, status, message, title, prBody, authorNote, path: path4, scope } = {}) {
-  if (status !== "draft" && status !== "published") {
-    throw new OperationError("status-required", 'Specify status: "published" to publish (merge and go live on the network) or "draft" to stage on your fork for review before publishing.');
-  }
-  if (status === "draft") return saveDraft(ctx2, { type, input, body, message, path: path4 });
-  return publish(ctx2, { type, input, body, message, title, prBody, authorNote, path: path4, scope });
+
+// client/src/publish.mjs
+function branchName(type, slug, scope = "member") {
+  if (type === "profile") return "gbti/profile";
+  const prefix = scope === "house" ? "gbti/house-" : "gbti/";
+  return `${prefix}${type}-${slug}`;
 }
+function defaultMessage(change) {
+  return change.type === "profile" ? "Update profile" : `${change.slug ? "Update" : "Add"} ${change.type}: ${change.slug ?? ""}`.trim();
+}
+function defaultTitle(change) {
+  return change.type === "profile" ? `Update ${change.username}'s profile` : `${change.type}: ${change.slug}`;
+}
+async function commitToBranchOnFork({ repo, branch, files, message, resetStale = false, clobberOpenPull = false }) {
+  if (!branch) throw new Error("commitToBranchOnFork: a branch name is required");
+  if (!Array.isArray(files) || files.length === 0) throw new Error("commitToBranchOnFork: at least one file change is required");
+  const fork = await repo.ensureFork();
+  const base2 = await repo.getDefaultBranch(repo.upstream);
+  const baseSha = await repo.getBranchSha(fork.full_name, base2);
+  if (resetStale && repo.findOpenPull && repo.forceBranch) {
+    let tip = null;
+    try {
+      tip = await repo.getBranchSha(fork.full_name, branch);
+    } catch {
+      tip = null;
+    }
+    if (tip && tip !== baseSha) {
+      const open = clobberOpenPull ? null : await repo.findOpenPull({ head: `${fork.owner}:${branch}` });
+      if (!open) await repo.forceBranch(fork.full_name, branch, baseSha);
+    }
+  }
+  await repo.ensureBranch(fork.full_name, branch, baseSha);
+  for (const f of files) {
+    const existingSha = await repo.getFileSha(fork.full_name, f.path, branch);
+    if (f.content === null) {
+      if (existingSha) await repo.deleteFile(fork.full_name, f.path, { message: message ?? `Remove ${f.path}`, branch, sha: existingSha });
+    } else {
+      await repo.putFile(fork.full_name, f.path, {
+        message: message ?? `Update ${f.path}`,
+        contentBase64: toBase64(f.content),
+        branch,
+        sha: existingSha ?? void 0
+      });
+    }
+  }
+  return { fork: fork.full_name, owner: fork.owner, branch, base: base2 };
+}
+async function publishContent({ repo, change, message, title, body }) {
+  if (!change?.path || !change?.markdown) throw new Error("publishContent: a built content change is required");
+  const branch = branchName(change.type, change.slug, change.scope);
+  const { fork, owner, base: base2 } = await commitToBranchOnFork({
+    repo,
+    branch,
+    files: [{ path: change.path, content: change.markdown }],
+    message: message ?? defaultMessage(change),
+    resetStale: true
+    // a leftover branch from a merged PR must not seed a conflicting new PR
+  });
+  const head = `${owner}:${branch}`;
+  const existing = await repo.findOpenPull({ head });
+  if (existing) {
+    return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
+  }
+  const pull = await repo.openPull({ title: title ?? defaultTitle(change), head, base: base2, body: body ?? "" });
+  return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
+}
+async function publishFiles({ repo, branch, files, message, title, body, clobberOpenPull = false }) {
+  if (!branch) throw new Error("publishFiles: a branch name is required");
+  if (!Array.isArray(files) || files.length === 0) throw new Error("publishFiles: at least one file change is required");
+  const { fork, owner, base: base2 } = await commitToBranchOnFork({ repo, branch, files, message, resetStale: true, clobberOpenPull });
+  const head = `${owner}:${branch}`;
+  const existing = await repo.findOpenPull({ head });
+  if (existing) return { prNumber: existing.number, prUrl: existing.html_url, branch, fork, updated: true };
+  const pull = await repo.openPull({ title: title ?? message ?? "Update", head, base: base2, body: body ?? "" });
+  return { prNumber: pull.number, prUrl: pull.html_url, branch, fork, updated: false };
+}
+
+// client/src/drafts-client.mjs
+var trimBase2 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var DraftsClientError = class extends Error {
+};
+async function call2(method, body, { token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new DraftsClientError("not signed in");
+  const res = await fetch(trimBase2(signupBase) + "/membership/drafts", {
+    method,
+    headers: { Authorization: "Bearer " + token, ...body ? { "Content-Type": "application/json" } : {} },
+    ...body ? { body: JSON.stringify(body) } : {}
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new DraftsClientError(data?.message || data?.error || `drafts request failed (${res.status})`);
+  return data;
+}
+async function workerListDrafts(opts) {
+  return call2("GET", null, opts);
+}
+async function workerPutDraft({ draft, ...opts }) {
+  return call2("POST", { op: "put", draft }, opts);
+}
+async function workerDeleteDraft({ type, slug, ...opts }) {
+  return call2("POST", { op: "delete", type, slug }, opts);
+}
+
+// client/src/repo-drafts-client.mjs
+var trimBase3 = (b) => String(b || "").replace(/\/$/, "");
+var RepoDraftsClientError = class extends Error {
+};
+async function workerListRepoDrafts({ token, signupBase, fetch = globalThis.fetch } = {}) {
+  if (!token || !signupBase) throw new RepoDraftsClientError("not signed in");
+  const res = await fetch(trimBase3(signupBase) + "/membership/repo-drafts", { headers: { Authorization: "Bearer " + token } });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new RepoDraftsClientError(data?.message || data?.error || `repo-drafts request failed (${res.status})`);
+  return data;
+}
+
+// client/src/repo-drafts-core.mjs
+function mapRepoDraftItem(item = {}) {
+  const type = item?.type;
+  const slug = item?.slug;
+  return {
+    type,
+    slug,
+    branch: null,
+    path: typeof item?.path === "string" ? item.path : null,
+    pendingSlug: null,
+    title: typeof item?.title === "string" && item.title ? item.title : slug || type || "",
+    visibility: item?.visibility === "members" ? "members" : "public",
+    status: "draft",
+    owner: item?.owner ?? null,
+    valid: true,
+    invalidReason: null,
+    pull: null,
+    store: "repo"
+  };
+}
+function mergeRepoDrafts(existing = [], repoItems = [], { type = null } = {}) {
+  const rows = Array.isArray(existing) ? [...existing] : [];
+  const seen = new Set(rows.map((d) => `${d?.type}:${d?.slug}`));
+  for (const item of Array.isArray(repoItems) ? repoItems : []) {
+    if (!item || !item.type || !item.slug) continue;
+    if (type && item.type !== type) continue;
+    const key = `${item.type}:${item.slug}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(mapRepoDraftItem(item));
+  }
+  return rows;
+}
+
+// client/src/fork-sync-client.mjs
+var trimBase4 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+async function workerSyncFork({ token, signupBase, fetch = globalThis.fetch, branch = "main" } = {}) {
+  if (!token || !signupBase) return { ok: false, synced: false, reason: "not-signed-in" };
+  try {
+    const res = await fetch(`${trimBase4(signupBase)}/membership/sync-fork`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ branch })
+    });
+    if (!res.ok) return { ok: false, synced: false, reason: `http-${res.status}` };
+    const data = await res.json().catch(() => null);
+    return data && typeof data === "object" ? data : { ok: false, synced: false, reason: "bad-response" };
+  } catch {
+    return { ok: false, synced: false, reason: "network" };
+  }
+}
+
+// client/src/hosted-publish.mjs
+function hostedItemId(type, slug) {
+  return type === "profile" ? "profile" : `${type}-${slug}`;
+}
+function hostedPublishFiles(ctx2, { branch, files, title }) {
+  const itemId = String(branch || "").replace(/^gbti\//, "");
+  return hostedAuthor({
+    token: ctx2.store?.get?.("githubToken"),
+    itemId,
+    files,
+    title,
+    signupBase: SIGNUP_BASE,
+    fetchImpl: ctx2.fetch ?? globalThis.fetch
+  });
+}
+async function hostedAuthor({ token, itemId, files, title, signupBase = SIGNUP_BASE, fetchImpl = globalThis.fetch }) {
+  if (!token) throw new Error("sign in to publish");
+  const res = await fetchImpl(`${String(signupBase).replace(/\/$/, "")}/membership/author`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ itemId, files, title })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) throw new Error(body.message || `hosted publish failed (${res.status})`);
+  return { prNumber: body.number, prUrl: body.html_url, branch: body.branch, fork: null, updated: !!body.already, hosted: true };
+}
+
+// client/src/operations-publish.mjs
 var RENAME_URL_BASE = { post: "/articles", product: "/products", prompt: "/prompts" };
 function renameOriginOf({ path: path4, username, type }) {
   const m = OWN_STATUS_PATH_RE.exec(String(path4 || ""));
@@ -19438,6 +19370,15 @@ async function planMemberFiles({ built, body, encrypt }) {
     encPath,
     assetId
   };
+}
+
+// client/src/operations-drafts.mjs
+async function authorContent(ctx2, { type, input, body, status, message, title, prBody, authorNote, path: path4, scope } = {}) {
+  if (status !== "draft" && status !== "published") {
+    throw new OperationError("status-required", 'Specify status: "published" to publish (merge and go live on the network) or "draft" to stage on your fork for review before publishing.');
+  }
+  if (status === "draft") return saveDraft(ctx2, { type, input, body, message, path: path4 });
+  return publish(ctx2, { type, input, body, message, title, prBody, authorNote, path: path4, scope });
 }
 function draftMetaFromBranch(branch) {
   if (branch === "gbti/profile") return { type: "profile", slug: null };
@@ -19815,6 +19756,8 @@ async function decryptMemberAsset(ctx2, { encPath } = {}) {
     throw new OperationError("decrypt-failed", err?.message || "could not decrypt the asset");
   }
 }
+
+// client/src/operations-social.mjs
 async function publishShare(ctx2, { input = {}, body = "", message, title, prBody } = {}) {
   const id = requireIdentity(ctx2);
   const repo = requireRepo(ctx2);
@@ -19950,6 +19893,28 @@ async function editComment(ctx2, { id, body, authorNote } = {}) {
   });
   return { ...r, edited: true, targetType: fm.targetType, targetSlug: fm.targetSlug };
 }
+
+// client/src/member-og-client.mjs
+var trimBase5 = (signupBase) => String(signupBase || "").replace(/\/$/, "");
+var OgClientError = class extends Error {
+};
+async function ogPreview({ url: url2, token, signupBase, fetch = globalThis.fetch }) {
+  if (!token || !signupBase) throw new OgClientError("not signed in");
+  const res = await fetch(trimBase5(signupBase) + "/membership/og-preview", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url2 })
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+  }
+  if (!res.ok) throw new OgClientError(data?.message || data?.error || `og-preview request failed (${res.status})`);
+  return data;
+}
+
+// client/src/operations-member.mjs
 async function ogPreview2(ctx2, { url: url2 } = {}) {
   requireIdentity(ctx2);
   const token = ctx2.store?.get?.("githubToken");
@@ -19960,6 +19925,53 @@ async function ogPreview2(ctx2, { url: url2 } = {}) {
     throw err;
   }
 }
+
+// membership/tiers.mjs
+var TIER = Object.freeze({
+  none: "none",
+  // not paid, or paid for something we cannot identify (see tierForPrice)
+  member: "member",
+  // Network Member: $5 monthly / $50 annual
+  creator: "creator"
+  // Content Creator: $15 monthly / $150 annual
+});
+var TIER_LABEL = Object.freeze({
+  [TIER.none]: "",
+  [TIER.member]: "Network Member",
+  [TIER.creator]: "Content Creator"
+});
+var RANK2 = Object.freeze({ [TIER.none]: 0, [TIER.member]: 1, [TIER.creator]: 2 });
+
+// membership/classify-pr.mjs
+var CONTENT_DIRS = ["posts", "products", "prompts", "comments"];
+var ROLE_RANK = { [ROLE2.member]: 0, [ROLE2.moderator]: 1, [ROLE2.admin]: 2, [ROLE2.superadmin]: 3 };
+function isCleanPath(p) {
+  if (typeof p !== "string" || p.length === 0) return false;
+  if (p.startsWith("/")) return false;
+  if (p.includes("\\")) return false;
+  if (p.includes("\0")) return false;
+  return p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+function isContributionToFolder(paths, ownerFolder) {
+  if (!ownerFolder || !Array.isArray(paths) || paths.length === 0) return false;
+  const prefix = `members/${ownerFolder}/`;
+  return paths.every((p) => {
+    if (!isCleanPath(p) || !p.startsWith(prefix)) return false;
+    return CONTENT_DIRS.includes(p.slice(prefix.length).split("/")[0]);
+  });
+}
+
+// membership/checkout-prices.mjs
+var BILLING_PERIODS = Object.freeze(["monthly", "annual"]);
+var PRICE_ENV = Object.freeze({
+  [TIER.member]: Object.freeze({ monthly: "STRIPE_PRICE_MEMBER_MONTHLY", annual: "STRIPE_PRICE_MEMBER_ANNUAL" }),
+  [TIER.creator]: Object.freeze({ monthly: "STRIPE_PRICE_CREATOR_MONTHLY", annual: "STRIPE_PRICE_CREATOR_ANNUAL" })
+});
+
+// membership/tier-gate.mjs
+var PAID_GRANT_TIERS = Object.freeze([TIER.member, TIER.creator]);
+
+// client/src/operations-admin.mjs
 async function listPRs(ctx2) {
   const id = requireIdentity(ctx2);
   const repo = requireRepo(ctx2);

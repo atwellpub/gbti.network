@@ -4,11 +4,7 @@
  */
 
 const exportFileHtml = {
-    /**
-     * Generate HTML for the signature file
-     * @param {string} signatureHtml - The HTML of the signature
-     * @returns {string} - The complete HTML document
-     */
+    /** @returns {string} a complete standalone HTML document wrapping `signatureHtml`. */
     generateSignatureFileHtml: function(signatureHtml) {
         return `<!DOCTYPE html>
 <html lang="en">
@@ -362,10 +358,7 @@ const exportFileHtml = {
         });
     },
     
-    /**
-     * Strip all class names from elements
-     * @param {HTMLElement} element - The element to process
-     */
+    /** Strips every class attribute in the subtree, in place (export HTML carries inline styles only). */
     stripClassNamesFromElements: function(element) {
         DEBUG.info('Stripping class names from elements...');
         
@@ -515,11 +508,7 @@ const exportFileHtml = {
         }
     },
     
-    /**
-     * Process all elements in the container to apply styles
-     * @param {HTMLElement} container - The container element with all signature elements
-     * @param {string} cssText - The CSS text to apply
-     */
+    /** Inline the rules in `cssText` onto matching elements in `container`, in place. */
     processElementStyles: function(container, cssText) {
         // Apply CSS rules to the container and all child elements
         this.applyCssRules(container, cssText);
@@ -657,12 +646,7 @@ const exportFileHtml = {
         });
     },
     
-    /**
-     * Process a CSS selector for use with querySelector
-     * @param {string} selector - The CSS selector
-     * @param {HTMLElement} container - The container element
-     * @returns {string} - Processed selector
-     */
+    /** @returns {string} `selector` rewritten so querySelector can run it against `container`. */
     processSelector: function(selector, container) {
         // Handle special cases
         if (selector === '.signature') {

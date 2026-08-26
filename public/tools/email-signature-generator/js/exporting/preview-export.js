@@ -62,9 +62,6 @@ const previewExport = {
         }
     },
     
-    /**
-     * Ensure the preview container exists in the DOM
-     */
     ensurePreviewContainer: function() {
         // Check if container already exists
         let container = document.getElementById(this._config.previewContainerId);
@@ -103,9 +100,6 @@ const previewExport = {
         }
     },
     
-    /**
-     * Extend the download buttons module with preview functionality
-     */
     extendDownloadButtons: function() {
         const originalInitialize = window.EmailSignatureApp.DownloadButtons.initializeSignatureDownload;
         
@@ -128,9 +122,6 @@ const previewExport = {
         this.addPreviewButtons();
     },
     
-    /**
-     * Add preview buttons next to download buttons
-     */
     addPreviewButtons: function() {
         try {
             // Get all signature wrappers that have download buttons but no preview buttons yet
@@ -194,10 +185,6 @@ const previewExport = {
         }
     },
     
-    /**
-     * Generate an export preview for a signature
-     * @param {HTMLElement} signature - The signature element to preview
-     */
     generatePreview: async function(signature) {
         try {
             // Ensure the preview container exists
@@ -236,10 +223,6 @@ const previewExport = {
         }
     },
     
-    /**
-     * Show the export preview
-     * @param {string} html - The HTML to display
-     */
     showPreview: function(html) {
         // Get the preview container
         const container = document.getElementById(this._config.previewContainerId);
