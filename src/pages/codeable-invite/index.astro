@@ -170,9 +170,10 @@ const year = new Date().getFullYear();
          UPDATED 2026-08-26: shop talk is no longer a TIER benefit at all. The owner ruled it out of the
          Content Creator list (sow-201, 2026-08-18) because it is positioning rather than software, and
          sow-185 section 7 requires a named owner and a cadence before such a thing appears in pricing copy.
-         It now lives only in general community copy (src/components/JoinOffers.astro). So this section does
-         not come back by reclassifying it in the yml; it would need the session to have a host and a
-         calendar first. -->
+         The only copy that still describes it is src/components/JoinOffers.astro, and that component is
+         UNMOUNTED (zero imports, renders on no page), so in practice shop talk is currently advertised
+         nowhere on the live site. Either way this section does not come back by reclassifying it in the
+         yml; it would need the session to have a host and a calendar first. -->
     <!-- ================= BENEFITS ================= -->
     <section id="benefits" class="ci-sec">
       <h2 style="max-width:20ch">What {TIER_LABEL} gives you</h2>
