@@ -199,15 +199,23 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
      the section itself is chromeless here. Stack the field above a full-width button for the ~256px column. */
   .dsub-rail { --dsub-pad: 0; }
   .dsub-rail .dsub-in { gap: 12px; }
-  .dsub-rail .dsub-row { flex-direction: column; align-items: stretch; gap: 9px; }
-  .dsub-rail .dsub-input { flex: 1 1 auto; }
+  .dsub-rail .dsub-row { flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; }
+  .dsub-rail .dsub-input { flex: 1 1 auto; width: 100%; min-width: 0; }
+  /* The product and prompt sidebars mount this rail in a ~150px column, narrower than the ~256px homepage
+     card it was first designed for. Keep every child from imposing a wider min-content than the column: the
+     grids size to the column rather than to their widest child, and the email input does not fall back to its
+     intrinsic (~208px) size. Without this the rail overflowed the document at 768px (sow-166 follow-up). */
+  .dsub-rail .dsub-in, .dsub-rail .dsub-form { grid-template-columns: minmax(0, 1fr); }
   /* sow-192 CTA match: the rail button is the design's theme-aware outline (foreground text + a subtle
      border, no green fill), not the band/inline solid green. Reads correctly in light and dark from the
      tokens alone. */
   .dsub-rail .dsub-btn { width: 100%; background: transparent; color: var(--fg); border-color: var(--line-2); box-shadow: none; }
   .dsub-rail .dsub-btn:hover { background: var(--tint); border-color: var(--fg-mute); transform: none; }
-  /* Turnstile runs interaction-only in the rail (invisible for the normal visitor), so collapse its space. */
-  .dsub-rail .dsub-ts { min-height: 0; }
+  /* Turnstile runs interaction-only in the rail (invisible for the normal visitor), so collapse its space.
+     The flexible widget still reserves a ~200px-wide box; clamp and clip it to the column so it cannot widen
+     the rail. It is invisible here, and a managed challenge renders in its own overlay, not inline. */
+  .dsub-rail .dsub-ts { min-height: 0; min-width: 0; max-width: 100%; overflow: hidden; }
+  .dsub-rail .dsub-ts > * { max-width: 100%; }
 
   .dsub-h { font-size: 1.15rem; line-height: 1.25; margin: 0 0 4px; font-weight: 700; }
   .dsub-sub { margin: 0; color: var(--fg-mute); font-size: .94rem; line-height: 1.55; max-width: 62ch; }
