@@ -15,10 +15,12 @@
 // The enhancement script below only upgrades the experience: it posts by fetch and reports inline instead of
 // navigating away.
 //
-// ONE INSTANCE PER PAGE. The Turnstile api.js tag below is emitted per render, and Turnstile does not expect
-// to be loaded twice on one document. Every current mount point renders this once (the homepage feed column,
-// and ContentFooter, which itself renders once per content page). If a page ever needs two, hoist the api.js
-// tag into BaseLayout and delete it from here.
+// SAFE FOR MULTIPLE INSTANCES PER PAGE (sow-166 revision). The Turnstile api.js tag below is emitted per
+// render, but the inline loader guards on a window flag so api.js is appended to the document only once, no
+// matter how many times this component renders. Content detail pages now carry two instances (a sidebar
+// `rail` plus the kept under-content `inline`), and the enhancement script already iterates every instance
+// and reads each form's own token, so both work. Do not go back to a bare `<script src>` tag: two of those
+// execute the implicit-render scan twice and Turnstile warns about re-rendering an existing widget.
 import { TURNSTILE_SITE_KEY, SIGNUP_BASE } from '../../lib/membership';
 
 interface Props {
@@ -27,14 +29,19 @@ interface Props {
   variant?: 'band' | 'inline' | 'rail';
   heading?: string;
   blurb?: string;
+  /** Run Turnstile interaction-only, so the widget stays invisible for a normal visitor while still
+   *  producing and verifying a token. `rail` is always quiet; this opts the other variants in too. */
+  quietTurnstile?: boolean;
 }
-const { variant = 'inline', heading, blurb } = Astro.props;
+const { variant = 'inline', heading, blurb, quietTurnstile = false } = Astro.props;
+// The rail is quiet by design; the flag opts inline/band into the same invisible-badge behavior.
+const quiet = quietTurnstile || variant === 'rail';
 
 const title = heading ?? 'Get the weekly digest';
 const sub = blurb ?? 'One email a week: new member articles, products and prompts, plus the developer news worth reading. Unsubscribe in one click, any time.';
 ---
 
-<section class:list={['dsub', `dsub-${variant}`]} data-digest-subscribe aria-labelledby={`dsub-h-${variant}`}>
+<section class:list={['dsub', `dsub-${variant}`]} data-digest-subscribe data-quiet-ts={quiet ? '' : undefined} aria-labelledby={`dsub-h-${variant}`}>
   <div class="dsub-in">
     <div class="dsub-copy">
       <h2 class="dsub-h" id={`dsub-h-${variant}`}>{title}</h2>
@@ -58,7 +65,7 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
         <button class="btn btn-primary dsub-btn" type="submit" data-dsub-go>{variant === 'rail' ? 'Get the digest' : 'Subscribe'}</button>
       </div>
 
-      <div class="cf-turnstile dsub-ts" data-sitekey={TURNSTILE_SITE_KEY} data-theme="auto" data-size="flexible" data-appearance={variant === 'rail' ? 'interaction-only' : undefined}></div>
+      <div class="cf-turnstile dsub-ts" data-sitekey={TURNSTILE_SITE_KEY} data-theme="auto" data-size="flexible" data-appearance={quiet ? 'interaction-only' : undefined}></div>
 
       <p class="dsub-fine">
         We send a confirmation email first. You are not subscribed until you click the link in it.
@@ -69,7 +76,20 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
   </div>
 </section>
 
-<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script is:inline>
+  // Load Turnstile's api.js exactly once per document. This block is emitted per component instance, but the
+  // window flag makes the actual append happen once, so two DigestSubscribe instances on one page (a content
+  // page's sidebar rail + its under-content inline) do not load api.js twice and do not re-run the
+  // implicit-render scan over an already-rendered widget.
+  if (!window.__gbtiTurnstileLoading) {
+    window.__gbtiTurnstileLoading = true;
+    var s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+    s.async = true;
+    s.defer = true;
+    document.head.appendChild(s);
+  }
+</script>
 
 <script>
   // Progressive enhancement only. Everything here is optional: with scripting off, the form is a plain POST
@@ -144,9 +164,11 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
       } finally {
         btn.disabled = false;
         btn.textContent = label;
-        // Turnstile tokens are single use, so a retry needs a fresh one.
-        if (window.turnstile && typeof window.turnstile.reset === 'function') {
-          try { window.turnstile.reset(); } catch { /* a reset failure must not break the form */ }
+        // Turnstile tokens are single use, so a retry needs a fresh one. Scope the reset to THIS form's own
+        // widget (a page may carry two), so a failed submit on one does not reset the other's token.
+        const tsEl = form.querySelector('.cf-turnstile');
+        if (window.turnstile && typeof window.turnstile.reset === 'function' && tsEl) {
+          try { window.turnstile.reset(tsEl); } catch { /* a reset failure must not break the form */ }
         }
       }
     });
@@ -211,6 +233,9 @@ const sub = blurb ?? 'One email a week: new member articles, products and prompt
      height instead of the 14px/26px hero padding. */
   .dsub-btn { flex: 0 0 auto; padding: 12px 22px; font-size: .95rem; }
   .dsub-ts { min-height: 65px; }
+  /* Interaction-only Turnstile is invisible for the normal visitor, so reserve no space for it. Covers the
+     rail (always quiet) and any inline/band opted in via quietTurnstile. */
+  .dsub[data-quiet-ts] .dsub-ts { min-height: 0; }
 
   .dsub-fine { margin: 0; color: var(--fg-mute); font-size: .82rem; line-height: 1.5; }
   .dsub-fine a { color: inherit; text-decoration: underline; }

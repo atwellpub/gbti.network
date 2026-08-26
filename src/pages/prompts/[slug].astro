@@ -18,6 +18,7 @@ import { authorDisplay, authorHref, authorAvatar } from '../../lib/authors';
 import { breadcrumb, categoryLabel } from '../../lib/taxonomy';
 import { favoriteCount } from '../../lib/favorites';
 import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the opt-in favoriter list
+import DigestSubscribe from '../../components/mail/DigestSubscribe.astro'; // sow-166: the weekly-digest sidebar CTA
 import { aliasSlugsOf } from '../../lib/content-index.mjs'; // SOW-112: pre-rename slugs for count/discussion aliasing
 
 export async function getStaticPaths() {
@@ -212,6 +213,10 @@ const editHref = editPath ? `/workbench/#tab=prompt&edit=${encodeURIComponent(ed
           )}
 
           <FavoritedBy type="prompt" slug={d.slug} aliases={aliasSlugsOf(d)} />
+
+          <div class="card" style="padding:22px">
+            <DigestSubscribe variant="rail" heading="The weekly digest" />
+          </div>
         </aside>
       </div>
     </div>

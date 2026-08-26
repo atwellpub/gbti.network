@@ -35,5 +35,8 @@ const skipAuthorBox = hideAuthor || hasAuthorNote(await getCollection('comment')
 <Comments targetType={type} targetSlug={slug} author={author} wide={wide} aliases={aliases} />
 {/* sow-166 / sow-202: the digest capture, below the discussion. Mounted HERE rather than on each of
     the three page templates, because this component is already the one shared closing block for
-    articles, products and prompts, so one mount covers all three and cannot drift between them. */}
-<DigestSubscribe variant="inline" />
+    articles, products and prompts, so one mount covers all three and cannot drift between them.
+    quietTurnstile: the visible challenge box is hidden here (owner request) while the token is still
+    produced and verified; each content page also carries a sidebar digest, and the component's load
+    guard keeps the two instances from loading Turnstile twice. */}
+<DigestSubscribe variant="inline" quietTurnstile />

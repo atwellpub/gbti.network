@@ -13,6 +13,7 @@ import type { AvatarIndex } from '../../lib/avatars';
 import { FIRST_TOUCH_PCT, SIGNUP_BASE } from '../../lib/membership';
 import { FEED_NAV } from '../../lib/site-nav'; // sow-187: the one consolidated feed-nav source
 import FeedChrome from './FeedChrome.astro'; // sow-205: the shared lab + tab nav (was inline here)
+import DigestSubscribe from '../mail/DigestSubscribe.astro'; // sow-166: the weekly-digest CTA at the foot of the prompts grid
 
 interface Props {
   narrow: 'all' | 'news' | 'network' | 'articles' | 'products' | 'prompts' | 'shares';
@@ -113,6 +114,15 @@ const showLockedShares = (narrow === 'all' || narrow === 'shares') && membersSha
         </div>
       </div>
     </FeedList>
+  )}
+
+  {/* sow-166: a full-width digest signup at the foot of the prompts grid only. Container-level, so it carries
+      no data-fi and stays inert to the density toggle + tag filter, and it is one instance here (no load-guard
+      concern). Turnstile is quiet for visual consistency with the rest of the digest surfaces. */}
+  {narrow === 'prompts' && (
+    <div style="margin-top:28px">
+      <DigestSubscribe variant="band" quietTurnstile heading="The weekly digest" />
+    </div>
   )}
 
   <p class="feed-empty" data-feed-empty hidden>Nothing here matches the current filter.</p>

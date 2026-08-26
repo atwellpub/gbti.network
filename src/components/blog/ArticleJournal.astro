@@ -13,6 +13,7 @@ import LockedBody from '../LockedBody.astro';
 import ContentMeta from '../ContentMeta.astro';
 import ContentActions from '../ContentActions.astro';
 import ArticleContents from './ArticleContents.astro';
+import DigestSubscribe from '../mail/DigestSubscribe.astro'; // sow-166: the weekly-digest sidebar CTA
 import { favoriteCount } from '../../lib/favorites';
 import { aliasSlugsOf } from '../../lib/content-index.mjs';
 import { breadcrumb, leafLabel, topKey } from '../../lib/taxonomy';
@@ -69,6 +70,10 @@ const editHref = editPath ? `/workbench/#tab=post&edit=${encodeURIComponent(edit
       )}
 
       <slot name="rail" />
+
+      <div>
+        <DigestSubscribe variant="rail" heading="The weekly digest" />
+      </div>
     </aside>
 
     <div class="art-j-col">

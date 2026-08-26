@@ -31,6 +31,7 @@ import { hasPublicPage, isStub, contentRepoPath } from '../../lib/content';
 import { breadcrumb } from '../../lib/taxonomy';
 import { favoriteCount } from '../../lib/favorites';
 import FavoritedBy from '../../components/FavoritedBy.astro'; // SOW-114: the opt-in favoriter list
+import DigestSubscribe from '../../components/mail/DigestSubscribe.astro'; // sow-166: the weekly-digest sidebar CTA
 import { aliasSlugsOf } from '../../lib/content-index.mjs'; // SOW-112: pre-rename slugs for count/discussion aliasing
 import {
   normalizeGallery,
@@ -226,6 +227,10 @@ const lockedHint = (l: { encrypted?: boolean }) =>
 
           <div class="pd-block">
             <FavoritedBy type="product" slug={d.slug} aliases={aliasSlugsOf(d)} />
+          </div>
+
+          <div class="pd-block">
+            <DigestSubscribe variant="rail" heading="The weekly digest" />
           </div>
         </aside>
 
