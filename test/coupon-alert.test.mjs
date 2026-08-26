@@ -46,3 +46,64 @@ test('FAIL-SOFT: a throwing send does not throw out, it reports the error', asyn
   assert.equal(res.reason, 'error');
   assert.match(res.message, /resend 500/);
 });
+
+// --- sow-279 follow-up (2026-08-26): the notice must fail LOUDLY, not merely fail softly. ---
+//
+// `house/coupons.yml` requires this control to log and surface a failure, because it is the ONLY control on the
+// uncapped codes rather than one of several. It did neither until now: it swallowed the error and returned a
+// result the caller discards (index.mjs fires it through ctx.waitUntil and never reads the resolved value), so a
+// send Resend rejected left no email, no log and no trace. From outside, that is identical to a code that was
+// never redeemed, which is the precise state the notice was built to end.
+//
+// These assert on console.warn because the log IS the deliverable here. Run them against the previous version of
+// coupon-alert.mjs and all three go red for the right reason: zero warnings captured.
+
+function captureWarn(fn) {
+  const orig = console.warn;
+  const lines = [];
+  console.warn = (...a) => lines.push(a.join(' '));
+  return Promise.resolve()
+    .then(fn)
+    .then((v) => ({ value: v, lines }))
+    .finally(() => { console.warn = orig; });
+}
+
+test('LOUD: a rejected send is logged, naming the code and the github_id', async () => {
+  const { value, lines } = await captureWarn(() => sendCouponRedemptionAlert(
+    ENV, RECORD, { sendEmail: async () => { throw new Error('Resend 422 domain not verified'); } },
+  ));
+  assert.equal(value.sent, false);
+  assert.equal(value.reason, 'error');
+  assert.equal(lines.length, 1, 'exactly one warning, so a failure is neither silent nor duplicated');
+  assert.match(lines[0], /coupon-alert: notice FAILED/);
+  assert.match(lines[0], /CODEABLEYEAR/, 'the code, so the owner knows WHICH code to deactivate');
+  assert.match(lines[0], /12345/, 'the github_id, so the redemption is attributable');
+  assert.match(lines[0], /Resend 422 domain not verified/, 'the underlying cause, not just that it failed');
+});
+
+test('LOUD: an unconfigured alarm says so rather than returning quietly', async () => {
+  const { value, lines } = await captureWarn(() => sendCouponRedemptionAlert(
+    { MAIL_FROM: 'noreply@gbti.network' }, RECORD, { sendEmail: async () => ({ id: 'x' }) },
+  ));
+  assert.equal(value.reason, 'unconfigured');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /NOT SENT/);
+  assert.match(lines[0], /CODEABLEYEAR/);
+});
+
+test('QUIET on success: a working alarm logs nothing, so a warning always means something', async () => {
+  const { value, lines } = await captureWarn(() => sendCouponRedemptionAlert(
+    ENV, RECORD, { sendEmail: async () => ({ id: 'x' }) },
+  ));
+  assert.equal(value.sent, true);
+  assert.deepEqual(lines, [], 'no warning on the happy path, or the signal is worthless');
+});
+
+test('a record with no code and no github_id still logs a readable line, not "undefined"', async () => {
+  const { lines } = await captureWarn(() => sendCouponRedemptionAlert(
+    ENV, {}, { sendEmail: async () => { throw new Error('boom'); } },
+  ));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /\(unknown code\)/);
+  assert.doesNotMatch(lines[0], /undefined/);
+});

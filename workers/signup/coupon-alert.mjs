@@ -20,16 +20,38 @@ export async function sendCouponRedemptionAlert(env, record, { sendEmail } = {})
     const to = String(env?.COUPON_ALERT_EMAIL || '').trim();
     const from = String(env?.MAIL_FROM || env?.RESEND_FROM || '').trim();
     const apiKey = String(env?.RESEND_API_KEY || '').trim();
-    // Unprovisioned is a no-op, not a failure: nothing to alert to, or no way to send.
-    if (!to || !from) return { sent: false, reason: 'unconfigured' };
+    // Unprovisioned is a no-op, not a failure: nothing to alert to, or no way to send. It is EXPECTED in
+    // sandbox, which deliberately leaves COUPON_ALERT_EMAIL unset so test redemptions do not mail. It is a
+    // real problem in production, where the var is set in wrangler.toml, so say so rather than returning
+    // quietly: an unconfigured alarm and a working one are otherwise indistinguishable from the outside.
+    if (!to || !from) { warnUnconfigured(record, 'no recipient or no sender'); return { sent: false, reason: 'unconfigured' }; }
     const send = sendEmail || (apiKey ? createResendClient({ apiKey }).sendEmail : null);
-    if (!send) return { sent: false, reason: 'unconfigured' };
+    if (!send) { warnUnconfigured(record, 'no RESEND_API_KEY and no injected sender'); return { sent: false, reason: 'unconfigured' }; }
     const { subject, text } = couponRedemptionNotice(record);
     await send({ from, to, subject, text });
     return { sent: true };
   } catch (err) {
     // Swallow: the grant is already written and the member is already signed up. A failed notice is recoverable
     // (the redemption record persists in KV); breaking signup to report it is not.
-    return { sent: false, reason: 'error', message: err?.message ?? String(err) };
+    //
+    // BUT SWALLOWING IS NOT THE SAME AS SAYING NOTHING, and until 2026-08-26 this did both. `house/coupons.yml`
+    // requires this notice to fail LOUDLY, precisely because it is the ONLY control on the uncapped codes rather
+    // than one of several. The caller fires it through `ctx.waitUntil` and discards the resolved value, so a
+    // send that Resend rejects produced no email, no log and no trace: identical, from the outside, to a code
+    // that was never redeemed. Log it here rather than at the call site so every caller inherits it.
+    const message = err?.message ?? String(err);
+    console.warn(`coupon-alert: notice FAILED for code ${codeOf(record)} / github_id ${idOf(record)}: ${message}. `
+      + 'The grant IS written and the redemption record persists in KV, so this is recoverable, but nobody was told.');
+    return { sent: false, reason: 'error', message };
   }
+}
+
+// Kept tiny and separate so the two unconfigured branches cannot drift apart, and so a record with no code or no
+// github_id still produces a readable line rather than "undefined".
+function codeOf(record) { return record?.code ? String(record.code) : '(unknown code)'; }
+function idOf(record) { return record?.githubId ? String(record.githubId) : '?'; }
+
+function warnUnconfigured(record, why) {
+  console.warn(`coupon-alert: notice NOT SENT for code ${codeOf(record)} / github_id ${idOf(record)}: ${why}. `
+    + 'Expected in sandbox; in production it means the alarm on the uncapped codes is off.');
 }

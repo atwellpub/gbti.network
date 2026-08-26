@@ -18,24 +18,48 @@
 # MANUAL moderation over an artificial cap, reasoning that a cap set below the real cohort silently breaks
 # the campaign.
 #
-# THE CONTROL IS THE NOTIFICATION, AND AS OF 2026-08-11 THAT NOTIFICATION DOES NOT EXIST.
+# THE CONTROL IS THE NOTIFICATION, AND SINCE 2026-08-26 IT EXISTS AND IS ARMED.
 #
-# Corrected 2026-08-11 (SecurityMaster, after OnboardingMaster's pre-flight found it via SowMaster). The
-# first version of this note asked for the redemption email to be HARDENED so it fails loudly instead of
-# silently. That was wrong in the direction that matters: `opportunities@gbti.network` appears nowhere in the
-# codebase, `workers/signup/coupons.mjs` has no notification path, and `redeemCoupon` sends nothing. Every
-# redemption today is silent.
+# History, kept because the gap was real and the dates matter. From the 2026-08-11 ruling until 2026-08-25
+# there was NO control at all: `redeemCoupon` sent nothing, and every redemption of an uncapped, non-expiring,
+# publicly published free-year code was silent. Manual moderation had replaced the cap, and manual moderation
+# is impossible without the signal it depends on.
 #
-# So the state is not "a weak control". It is NO CONTROL. The owner's ruling replaced the redemption cap with
-# manual moderation, and manual moderation is impossible without the signal it depends on. Until the
-# notification is built, an uncapped, non-expiring, publicly published free-year code has nothing watching it.
+# Built as sow-279 and deployed 2026-08-25 (`3518ade0`). It stayed INERT for another day, because it is
+# fail-soft and no recipient was set, so the repository looked armed while production was not. The owner chose
+# `opportunities@gbti.network` on 2026-08-26 and it is committed as `COUPON_ALERT_EMAIL` in
+# `[env.production.vars]` of `workers/signup/wrangler.toml`, deployed in Worker version `a6dad01f`. It was
+# verified ON THE DEPLOYED VERSION rather than in the repository, because a committed var is not a live var.
 #
-# WHEN IT IS BUILT, it must fail LOUDLY (log plus a surfaced failure), not best-effort like an ordinary
-# nice-to-have email, precisely because it is the only control rather than one of several. It needs enough
-# detail to spot an abusive pattern: code, github_id, timestamp, and the running redemption count.
+# WHAT IT SENDS: one email per NEW redemption, carrying the code, the campaign, the member login and
+# github_id, the tier and grant end, and the redemption timestamp. It fires once per member, on the GitHub
+# leg only.
 #
-# Owner: this is the gap to weigh when deciding how long to leave the codes uncapped. Tracked with
-# @OnboardingMaster, who holds the build.
+# IT NOW FAILS LOUDLY, which it did not at first, and the way it failed is worth keeping. The requirement
+# below has always said this notice must log and surface a failure, because it is the ONLY control here rather
+# than one of several. As built it swallowed the error and returned a result the caller discards: the Worker
+# fires it through `ctx.waitUntil` and never reads the resolved value, so a send that Resend rejected produced
+# no email, no log and no trace. From the outside that is indistinguishable from a code nobody redeemed, which
+# is the exact state this notice exists to end. Fixed 2026-08-26 in `workers/signup/coupon-alert.mjs`: a
+# failed send and an unconfigured alarm both warn, naming the code and the github_id, and success stays silent
+# so a warning always means something. Covered by tests in `test/coupon-alert.test.mjs` that were run against
+# the previous version first and failed there.
+#
+# ONE REQUIREMENT REMAINS UNMET, stated plainly rather than quietly dropped: the notice does NOT carry the
+# RUNNING REDEMPTION COUNT that the paragraph below asks for. Forty redemptions produce forty emails, which is
+# a signal, but the count that would make a burst obvious at a glance is not in them, and adding it means a KV
+# read on the signup completion path. That is a design decision, not an oversight to fix in passing.
+#
+# AND IT HAS NEVER FIRED ON A REAL REDEMPTION. The send path is complete and every input is present on
+# production, but no coupon has been redeemed since it was armed, so the end-to-end path is proven only by
+# unit tests. Treat the first real redemption as the live test.
+#
+# THE STANDING REQUIREMENT, unchanged: it must fail LOUDLY (log plus a surfaced failure), not best-effort like
+# an ordinary nice-to-have email, precisely because it is the only control rather than one of several. It needs
+# enough detail to spot an abusive pattern: code, github_id, timestamp, and the running redemption count.
+#
+# Owner: this is no longer the gap to weigh when deciding how long to leave the codes uncapped. The signal now
+# exists. What remains open is how long uncapped is right, which is a separate ruling in `human-todo.md`.
 #
 # TIER IS EXPLICIT, NOT INHERITED. Do NOT rely on `grantTier`'s creator default to deliver it: that default
 # exists to preserve legacy flat grants, and leaning on it means the tier is re-decided implicitly on every
