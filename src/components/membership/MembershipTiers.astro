@@ -54,9 +54,12 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
   <div class="mtiers-head">
     <Heading id="mtiers-h" class:list={[headingLevel === 'h1' ? 'h1' : 'h2']}>Choose how you take part</Heading>
     <p class="lead mtiers-sub">
-      Reading is free for everyone. A <strong>Network Member</strong> joins the conversation with comments and
-      the community. A <strong>Content Creator</strong> publishes to the network: articles, products, prompts,
-      and a public profile.
+      Reading is free for everyone. <strong>Members</strong> participate in the Discord, Community Events, and
+      Members Only Content. <strong>Content Creators</strong> help curate network content and participate
+      directly in revenue sharing opportunities.<span class="mtiers-star" aria-hidden="true">*</span>
+    </p>
+    <p class="mtiers-note">
+      * See the <a href="/handbook/">content and editorial guidelines</a> for more information.
     </p>
   </div>
 
@@ -122,6 +125,11 @@ function revenueFragments(s: string): { text: string; href?: string }[] {
   .mtiers { max-width: 1040px; margin: 0 auto; }
   .mtiers-head { text-align: center; max-width: 680px; margin: 0 auto 36px; }
   .mtiers-sub { margin: 16px auto 0; }
+  /* The asterisk is decorative and aria-hidden: the note below carries the same information as real text, so
+     a screen reader hears the sentence rather than a stray "star". */
+  .mtiers-star { color: var(--fg-mute); }
+  .mtiers-note { margin: 10px auto 0; font-size: .85rem; color: var(--fg-mute); }
+  .mtiers-note a { color: inherit; text-decoration: underline; }
   .mtiers-sub strong { color: var(--fg); }
 
   /* Grid */
