@@ -173,16 +173,3 @@ BizFlow is a sleek, responsive business landing page built with React, Tailwind 
 [![Learn more about BugHerd](./images/bugherd-banner.webp)](https://gbti.network/outbound/bugherd)
 
 Open this link in a new tab to learn about **BugHerd**. It is an affiliate link, so GBTI Network earns a commission if you subscribe through it.
-
-## Follow the GBTI Network for more content like this![](https://github.com/gbti-network#stay-connected)
-
-Leave a comment below if you would like us to consider adding your free REACT landing page template and follow us on your favorite platforms for updates, news, and community discussions:
-
--   **[Twitter/X](https://twitter.com/gbti_network)**
--   **[GitHub](https://github.com/gbti-network)**
--   **[YouTube](https://www.youtube.com/channel/UCh4FjB6r4oWQW-QFiwqv-UA)**
--   **[Dev.to](https://dev.to/gbti)**
--   **[Daily.dev](https://dly.to/zfCriM6JfRF)**
--   **[Hashnode](https://gbti.hashnode.dev/)**
--   **[Discord Community](https://gbti.network/)**
--   **[Reddit Community](https://www.reddit.com/r/GBTI_network)**

@@ -1,6 +1,7 @@
 ---
 import { authorDisplay } from '../lib/authors';
 import { refCodeForAuthor, REF_COOKIE, REF_VIA_COOKIE, REF_COOKIE_DAYS } from '../lib/referral';
+import { tierDisplay, benefitProse } from '../lib/tiers';
 
 interface Props {
   /** Content author username. Resolved to the author's immutable github_id referral code. */
@@ -20,32 +21,64 @@ if (via) params.set('via', via);
 const query = params.toString();
 const joinHref = query ? `/membership/?${query}` : '/membership/';
 
-const perks = [
-  'Publish your profile, blog posts, products, and prompts',
-  'Share in network profits',
-  'Join weekly coaching calls with the community',
-];
+// Tier copy is BOUND to the registry (house/membership-tiers.yml via src/lib/tiers.ts) so this CTA can never
+// advertise a benefit a tier does not carry: benefitProse renders a tier's benefit labels as one clause, and
+// the prices come from the same record. This is the same governance the membership page follows, and
+// test/community-invite-parity.test.mjs asserts the invite never hand-writes a benefit label.
+const member = tierDisplay('member');
+const creator = tierDisplay('creator');
+const memberName = member?.label ?? 'Network Member';
+const tierRows = [
+  member && {
+    label: member.label,
+    priceLabel: `$${member.priceAnnual}/year`,
+    lead: '',
+    prose: benefitProse(member),
+    // The Member revenue line is plain text in the registry, so it binds directly.
+    revenue: member.revenue,
+    revenueHref: null as string | null,
+  },
+  creator && {
+    label: creator.label,
+    priceLabel: `$${creator.priceAnnual}/year`,
+    // Creator is the higher tier and includes the Member benefits, so it leads with that rather than
+    // repeating them. benefitProse opens with a verb phrase ("publish articles..."), so this reads clean.
+    lead: `everything in ${memberName}, plus `,
+    prose: benefitProse(creator),
+    // Creator revenue is a registry markdown link; render it as a real link to the revenue model page.
+    revenue: 'Content Creators share in the',
+    revenueHref: '/revenue-model/',
+  },
+].filter(Boolean) as {
+  label: string;
+  priceLabel: string;
+  lead: string;
+  prose: string;
+  revenue: string;
+  revenueHref: string | null;
+}[];
 const isMemberAuthored = author !== 'gbti';
 ---
 <section class="dark community-invite" style="max-width:820px;margin:48px auto 0;border-radius:var(--r-lg);overflow:hidden;padding:40px">
   <div class="chip" style="display:inline-flex"><span class="chip-dot"></span> A creator network, powered by Git</div>
   <h2 class="h2 mt16" style="color:#fff">Join the GBTI Network</h2>
   <p class="lead mt12">
-    The GBTI Network is a creator network. Members showcase their work, write articles, share in network
-    profits, and meet in weekly coaching calls with the community.
+    The GBTI Network is a creator community. Browse, follow, and save across the network for free, no card
+    required. Join a paid tier to take part and share in the revenue.
   </p>
   <div class="flex col g14 mt24">
-    {perks.map((p) => (
-      <div class="flex items-center g12">
-        <svg viewBox="0 0 24 24" width="20" height="20" style="color:var(--green-mint);flex:none"><use href="#ico-check"/></svg>
-        <span style="color:#fff;font-weight:600">{p}</span>
+    {tierRows.map((t) => (
+      <div class="flex g12">
+        <svg viewBox="0 0 24 24" width="20" height="20" style="color:var(--green-mint);flex:none;margin-top:3px"><use href="#ico-check"/></svg>
+        <span style="color:#fff;line-height:1.5">
+          <strong>{t.label}</strong> ({t.priceLabel}): {t.lead}{t.prose}.
+          {t.revenueHref
+            ? <> {t.revenue} <a href={t.revenueHref} style="color:var(--green-mint);text-decoration:underline">revenue program</a>.</>
+            : <> {t.revenue}</>}
+        </span>
       </div>
     ))}
   </div>
-  <p class="lead mt24">
-    Create a free account to browse the community first, no card required. A paid membership unlocks your
-    public presence on the network: your profile, blog, products, and prompts.
-  </p>
   <div class="flex wrap-w items-center g20 mt28">
     <a href={joinHref} class="btn btn-primary">Become a member <svg class="ar" viewBox="0 0 24 24" width="18" height="18"><use href="#ico-arrow"/></svg></a>
     {isMemberAuthored && (

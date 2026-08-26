@@ -607,16 +607,3 @@ CjxmaWd1cmUgY2xhc3M9IndwLWJsb2NrLWVtYmVkIGlzLXR5cGUtdmlkZW8gaXMtcHJvdmlkZXIteW91
 Convesio (@convesio) is the official YouTube channel of Convesio—a cutting-edge managed WordPress hosting platform built for high-traffic and scalable eCommerce sites. The content centers around technical discussions, platform features like auto-scaling and self-healing infrastructure, and interviews that highlight innovation in WordPress hosting strategy. The channel has around 166 subscribers and approximately 226 videos, serving as a focused hub for developers, agencies, and growth-focused site owners. Videos are presented by Convesio team members and leadership, offering expert insights into building resilient, container-based WordPress environments.
 
 [SUBSCRIBE @convesio](https://www.youtube.com/@convesio)
-
-## Follow the GBTI Network for more content like this![](https://github.com/gbti-network#stay-connected)
-
--   **[Twitter/X](https://twitter.com/gbti_network)**
--   **[GitHub](https://github.com/gbti-network)**
--   **[YouTube](https://www.youtube.com/channel/UCh4FjB6r4oWQW-QFiwqv-UA)**
--   **[Dev.to](https://dev.to/gbti)**
--   **[Daily.dev](https://dly.to/zfCriM6JfRF)**
--   **[Hashnode](https://gbti.hashnode.dev/)**
--   **[Discord Community](https://gbti.network/)**
--   **[Reddit Community](https://www.reddit.com/r/GBTI_network)**
-
-If you are a content creator in the WordPress space, let us know about your channel in the comments below and share a link to your latest WordPress-related YouTube video 🙏

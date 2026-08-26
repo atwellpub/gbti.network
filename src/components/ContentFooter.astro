@@ -8,6 +8,7 @@ import { getCollection } from 'astro:content';
 import CommunityInvite from './CommunityInvite.astro';
 import Comments from './blog/Comments.astro';
 import AuthorBox from './blog/AuthorBox.astro';
+import FollowNetwork from './FollowNetwork.astro';
 import DigestSubscribe from './mail/DigestSubscribe.astro';
 import { hasAuthorNote } from '../lib/comments';
 import type { ShareType } from '../lib/share';
@@ -32,6 +33,9 @@ const skipAuthorBox = hideAuthor || hasAuthorNote(await getCollection('comment')
 ---
 <CommunityInvite author={author} via={viaTag} />
 {!skipAuthorBox && <AuthorBox author={author} publishedAt={publishedAt} />}
+{/* The social-follow block sits under the author box and above the comments (was hand-copied, and stale,
+    inside individual article markdown; now one shared mount bound to SOCIAL_LINKS). */}
+<FollowNetwork />
 <Comments targetType={type} targetSlug={slug} author={author} wide={wide} aliases={aliases} />
 {/* sow-166 / sow-202: the digest capture, below the discussion. Mounted HERE rather than on each of
     the three page templates, because this component is already the one shared closing block for
