@@ -11,10 +11,8 @@ if (typeof require !== 'undefined') {
 
 const socialMediaHandlers = {
     /**
-     * Helper function to get the correct URL for icon paths
-     * @param {string} iconPath - The relative path to the icon
-     * @param {string} baseUrl - The base URL
-     * @returns {string} - The full URL to the icon
+     * @returns {string} Under WordPress, toolBaseUrl + iconPath, prepended UNCONDITIONALLY, so an
+     * already-absolute iconPath comes back mangled. Otherwise resolved against baseUrl, which handles it.
      */
     getIconUrl: function(iconPath, baseUrl) {
         // In WordPress environments, prepend path with toolBaseUrl

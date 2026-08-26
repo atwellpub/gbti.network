@@ -134,10 +134,6 @@
             }
         },
         
-        /**
-         * Apply color variables to the template
-         * @param {HTMLElement} container - The container element
-         */
         applyColorVariables: function(container) {
             // Get current color values
             const mode = localStorage.getItem('signature-dark-mode') === 'true' ? 'dark' : 'light';

@@ -137,11 +137,7 @@ const imageProcessing = {
         }
     },
 
-    /**
-     * Convert a data URL to a Blob
-     * @param {string} dataUrl - The data URL to convert
-     * @returns {Promise<Blob>} - A promise that resolves to a Blob
-     */
+    /** @returns {Promise<Blob>} */
     dataUrlToBlob: function(dataUrl) {
         return new Promise((resolve, reject) => {
             try {
@@ -297,11 +293,7 @@ const imageProcessing = {
         return signatureImagePromises;
     },
 
-    /**
-     * Get the correct URL for an asset based on its path
-     * @param {string} assetPath - The path of the asset
-     * @returns {string} - The full URL to the asset
-     */
+    /** @returns {string} assetPath unchanged when already http(s), '' when empty, else prefixed with the tool base. */
     getAssetUrl: function(assetPath) {
 
         if (!assetPath) {

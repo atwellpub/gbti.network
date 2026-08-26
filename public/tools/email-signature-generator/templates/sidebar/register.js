@@ -139,10 +139,6 @@
             }
         },
         
-        /**
-         * Toggle the visibility of sidebar-specific fields
-         * @param {boolean} show - Whether to show or hide the fields
-         */
         toggleSidebarFields: function(show) {
             const sidebarFields = document.querySelectorAll('.sidebar-template-fields');
             sidebarFields.forEach(element => {
@@ -150,10 +146,6 @@
             });
         },
         
-        /**
-         * Update address and quote in the signature
-         * @param {HTMLElement} container - The container element
-         */
         updateAddressAndQuote: function(container) {
             // Get input values
             const address = document.getElementById('input-address').value;
@@ -211,10 +203,6 @@
             });
         },
         
-        /**
-         * Apply color variables to the template
-         * @param {HTMLElement} container - The container element
-         */
         applyColorVariables: function(container) {
             // Get current color values
             const mode = localStorage.getItem('signature-dark-mode') === 'true' ? 'dark' : 'light';

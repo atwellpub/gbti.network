@@ -40,9 +40,6 @@ EmailSignatureApp.ImageHandlers = (function() {
     // Track images that exceed localStorage quota
     let _fallbackImages = {};
     
-    /**
-     * Initialize all image upload handlers
-     */
     function _initializeImageHandlers() {
         DEBUG.info('Initializing image handlers...');
         
@@ -55,10 +52,6 @@ EmailSignatureApp.ImageHandlers = (function() {
         _loadSavedImages();
     }
     
-    /**
-     * Initialize a specific image upload
-     * @param {Object} imageConfig - Configuration for this image type
-     */
     function _initializeImageUpload(imageConfig) {
         const uploadInput = document.getElementById(imageConfig.id);
         const previewImg = document.getElementById(imageConfig.previewId);
@@ -191,9 +184,6 @@ EmailSignatureApp.ImageHandlers = (function() {
         return localStorage.getItem(storageKey);
     }
     
-    /**
-     * Load saved images from storage
-     */
     function _loadSavedImages() {
         // Profile image
         const profileImg = document.getElementById(_config.profileImage.previewId);
@@ -217,10 +207,6 @@ EmailSignatureApp.ImageHandlers = (function() {
         }
     }
     
-    /**
-     * Reset a specific image to default
-     * @param {Object} imageConfig - Configuration for this image type
-     */
     function _resetImage(imageConfig) {
         const previewImg = document.getElementById(imageConfig.previewId);
         
@@ -240,9 +226,6 @@ EmailSignatureApp.ImageHandlers = (function() {
         localStorage.removeItem(imageConfig.storageKey);
     }
     
-    /**
-     * Reset all images to default
-     */
     function _resetImages() {
         // Reset each image type
         _resetImage(_config.profileImage);
@@ -253,9 +236,6 @@ EmailSignatureApp.ImageHandlers = (function() {
         _updateImages();
     }
     
-    /**
-     * Update all images in signatures
-     */
     function _updateImages() {
         // Get profile image
         const profileImage = document.getElementById(_config.profileImage.previewId);

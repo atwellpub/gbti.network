@@ -287,23 +287,13 @@ const downloadUtils = {
         }
     },
 
-    /**
-     * Convert a data URL to a Blob
-     * @param {string} dataUrl - The data URL to convert
-     * @returns {Promise<Blob>} - A promise that resolves to a Blob
-     * @deprecated Use imageProcessing.dataUrlToBlob instead
-     */
+    /** @deprecated use imageProcessing.dataUrlToBlob instead. @returns {Promise<Blob>} */
     dataUrlToBlob: function(dataUrl) {
         console.warn('downloadUtils.dataUrlToBlob is deprecated. Use imageProcessing.dataUrlToBlob instead.');
         return imageProcessing.dataUrlToBlob(dataUrl);
     },
 
-    /**
-     * Downloads a file
-     * @param {Blob} blob - The file content as a Blob
-     * @param {string} filename - The filename
-     * @returns {Promise} - Resolves when download is initiated
-     */
+    /** @returns {Promise} resolves once the download has been INITIATED, not once it completes. */
     downloadFile: function(blob, filename) {
         return new Promise((resolve, reject) => {
             try {
@@ -337,8 +327,8 @@ const downloadUtils = {
     },
     
     /**
-     * Generates a unique ID for a file
-     * @returns {string} - The unique ID
+     * A 9-character base-36 suffix from Math.random. Collision-resistant enough to name files inside one
+     * export, NOT unique in any stronger sense: do not use it as a durable key.
      */
     generateUniqueId: function() {
         return Math.random().toString(36).substr(2, 9);

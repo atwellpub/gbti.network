@@ -112,10 +112,6 @@
         }
     };
     
-    /**
-     * Update dark mode toggle label (private helper)
-     * @param {boolean} isDarkMode - Whether dark mode is enabled
-     */
     function _updateDarkModeToggleLabel(isDarkMode) {
         const label = document.querySelector(`label[for="${CONFIG.darkMode.toggleId}"]`);
         if (label) {
@@ -123,10 +119,6 @@
         }
     }
     
-    /**
-     * Update social icons for dark mode (private helper)
-     * @param {boolean} isDarkMode - Whether dark mode is enabled
-     */
     function _updateSocialIconsForDarkMode(isDarkMode) {
         if (window.EmailSignatureApp && 
             window.EmailSignatureApp.SocialIcons && 
@@ -158,10 +150,6 @@
         }
     }
     
-    /**
-     * Apply colors based on current mode (private helper)
-     * @param {boolean} isDarkMode - Whether dark mode is enabled
-     */
     function _applyColorsForMode(isDarkMode) {
         const colorMode = isDarkMode ? 'dark' : 'light';
         const colorSettings = CONFIG.colors[colorMode];
@@ -339,11 +327,7 @@
             }
         };
         
-        /**
-         * Legacy function for updating dark mode toggle label
-         * Moved from controls.js
-         * @param {boolean} isDarkMode - Whether dark mode is enabled
-         */
+        /** Legacy copy of the toggle-label updater, moved here from controls.js. */
         function _legacyUpdateDarkModeToggleLabel(isDarkMode) {
             const label = document.querySelector('label[for="dark-mode-toggle"]');
             if (label) {

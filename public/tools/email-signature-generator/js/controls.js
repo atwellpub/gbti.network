@@ -76,9 +76,6 @@ function initializeControls() {
     // No-op, functionality moved to init()
 }
 
-/**
- * Initialize form fields with placeholders from config
- */
 function initializeFormFields() {
     // Personal Information
     setInputValueAndPlaceholder('input-name', CONFIG.defaults.name, CONFIG.placeholders.name);
@@ -117,12 +114,7 @@ function addInputChangeListener(inputId) {
     }
 }
 
-/**
- * Set input value and placeholder from config
- * @param {string} inputId - The ID of the input element
- * @param {string} defaultValue - The default value
- * @param {string} placeholder - The placeholder text
- */
+/** @param {string} inputId  @param {string} defaultValue  @param {string} placeholder */
 function setInputValueAndPlaceholder(inputId, defaultValue, placeholder) {
     const input = document.getElementById(inputId);
     if (!input) return;
@@ -135,9 +127,6 @@ function setInputValueAndPlaceholder(inputId, defaultValue, placeholder) {
     input.value = savedValue || defaultValue || '';
 }
 
-/**
- * Update all signatures with current form values
- */
 function updateSignatures() {
     DEBUG.info('Updating all signatures...');
     
@@ -173,9 +162,6 @@ function updateSignatures() {
 // Make updateSignatures available globally for backward compatibility
 window.updateSignatures = updateSignatures;
 
-/**
- * Update text content in all signatures
- */
 function updateTextContent() {
     try {
         // Get form values
@@ -263,19 +249,12 @@ function updateTextContent() {
     }
 }
 
-/**
- * Get input value
- * @param {string} id - Input element ID
- * @returns {string} Input value or empty string if element not found
- */
+/** @returns {string} the input value, or '' when no element has that id. */
 function getInputValue(id) {
     const input = document.getElementById(id);
     return input ? input.value : '';
 }
 
-/**
- * Update colors based on color picker values
- */
 function updateColors() {
     // Get color values
     const primaryColor = getInputValue('input-primary-color') || CONFIG.defaults.primaryColor;
@@ -356,9 +335,6 @@ function initializeTabs() {
     }
 }
 
-/**
- * Initialize color pickers
- */
 function initializeColorPickers() {
     // Check current mode
     const isDarkMode = localStorage.getItem('signature-dark-mode') === 'true';
@@ -422,9 +398,6 @@ function initializeColorPickers() {
     DEBUG.info(`Color pickers initialized for ${mode} mode`);
 }
 
-/**
- * Initialize download buttons
- */
 function initializeDownloadButtons() {
     try {
         DEBUG.info('Initializing download buttons');
@@ -547,10 +520,6 @@ function loadTemplate(templateName) {
     });
 }
 
-/**
- * Update color preview for a color input
- * @param {HTMLElement} colorInput - The color input element
- */
 function updateColorPreview(colorInput) {
     try {
         if (!colorInput) {
@@ -598,9 +567,6 @@ function updateColorPreview(colorInput) {
     }
 }
 
-/**
- * Update colors in all signatures
- */
 function updateSignatureColors() {
     // Get color values
     const mode = localStorage.getItem('signature-dark-mode') === 'true' ? 'dark' : 'light';
@@ -761,10 +727,8 @@ function updateSocialIcons() {
 }
 
 /**
- * Create a social icon element
- * @param {string} platform - The social platform
- * @param {string} url - The URL for the social platform
- * @returns {HTMLElement|null} - The created element or null if failed
+ * @returns {HTMLElement|null} null when platform or url is missing, or when construction throws.
+ * An UNRECOGNISED platform is not a failure: it still renders, with the generic icon.
  */
 function createSocialIcon(platform, url) {
     try {
@@ -821,11 +785,6 @@ function createSocialIcon(platform, url) {
     }
 }
 
-/**
- * Setup SVG icon with path data
- * @param {SVGElement} svg - The SVG element
- * @param {string} pathData - The path data
- */
 function setupSvgIcon(svg, pathData) {
     svg.setAttribute('viewBox', '0 0 16 16');
     svg.setAttribute('fill', 'currentColor');
@@ -837,9 +796,6 @@ function setupSvgIcon(svg, pathData) {
     svg.appendChild(path);
 }
 
-/**
- * Apply colors to signatures
- */
 function applyColors() {
     const isDarkMode = localStorage.getItem('signature-dark-mode') === 'true';
     const mode = isDarkMode ? 'dark' : 'light';
@@ -1037,9 +993,6 @@ EmailSignatureApp.processTemplateHtml = function(html, templateName) {
     return tempDiv.innerHTML;
 };
 
-/**
- * Initialize border radius controls for profile and logo images
- */
 function initializeBorderRadiusControls() {
     DEBUG.info('Initializing border radius controls');
     

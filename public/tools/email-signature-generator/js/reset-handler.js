@@ -8,9 +8,6 @@
     // Create namespace if it doesn't exist
     window.EmailSignatureApp = window.EmailSignatureApp || {};
 
-    /**
-     * Reset Handler Module
-     */
     const ResetHandler = {
         /**
          * Initialize reset button functionality
@@ -32,9 +29,6 @@
             }
         },
 
-        /**
-         * Handle reset button click
-         */
         handleResetClick: function() {
             DEBUG.info('Reset button clicked');
             
@@ -54,9 +48,6 @@
             }
         },
 
-        /**
-         * Reset all values to defaults
-         */
         resetAllValues: function() {
             // Debug info
             DEBUG.info('Resetting all values to defaults');
@@ -234,11 +225,7 @@
             DEBUG.info(`- signature title: "${signatureTitle ? signatureTitle.textContent : 'not found'}"`);
         },
 
-        /**
-         * Reset color input to default value and update localStorage
-         * @param {string} id - The ID of the input to reset
-         * @param {string} defaultValue - The default value
-         */
+        /** Resets the input and writes the default to the MODE-SCOPED key (signature-<type>-color-<light|dark>). */
         resetColorToDefault: function(id, defaultValue) {
             const input = document.getElementById(id);
             if (input) {
@@ -255,11 +242,7 @@
             }
         },
 
-        /**
-         * Reset input to default value and trigger events
-         * @param {string} inputId - The ID of the input element
-         * @param {string} defaultValue - The default value
-         */
+        /** Resets the input, saves to localStorage, and fires input+change so listeners re-render. */
         resetInputToDefault: function(inputId, defaultValue) {
             const input = document.getElementById(inputId);
             if (input) {
@@ -283,10 +266,6 @@
             }
         },
 
-        /**
-         * Update color preview for a color input
-         * @param {HTMLElement} input - The color input element
-         */
         updateColorPreview: function(input) {
             // Get the preview element
             const preview = input.parentElement.querySelector('.color-preview');
@@ -295,9 +274,6 @@
             }
         },
 
-        /**
-         * Reset social media repeater to defaults
-         */
         resetSocialMedia: function() {
             DEBUG.info('Resetting social media icons...');
             if (window.socialMediaRepeater) {
