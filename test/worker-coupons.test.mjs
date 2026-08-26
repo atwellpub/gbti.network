@@ -309,3 +309,38 @@ test('membership-status emits couponUntil for a KV grant, a mirror grant, and ne
   const d = await base(kvExpired, stripeNone);
   assert.equal(d.body.couponUntil, null);
 });
+
+// --- sow-279 follow-up (2026-08-26): redeemCoupon returns the ordinal of THIS redemption. ---
+//
+// The owner notice needs the running per-code count so a burst is legible without counting emails, which
+// house/coupons.yml has required from the start. The number was already being computed here to enforce
+// maxRedemptions, so it rides out on the return rather than being re-read by the caller.
+//
+// The property that matters is that the returned ordinal MATCHES the counter that was persisted. Returning
+// the pre-increment value would be off by one on every email and no other test would notice.
+
+test('sow-279: redeemCoupon returns this redemption ordinal, matching the persisted counter', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR });
+  const first = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW });
+  assert.equal(first.redemptionCount, 1, 'the first redemption is 1, not 0');
+  assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), '1', 'and it agrees with what was stored');
+
+  const second = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '43', now: NOW });
+  assert.equal(second.redemptionCount, 2);
+  assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), '2');
+});
+
+test('sow-279: the ordinal continues from a counter that already exists', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR, [redemptionCountKey('CODEABLEYEAR')]: '11' });
+  const r = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '99', now: NOW });
+  assert.equal(r.redemptionCount, 12);
+  assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), '12');
+});
+
+test('sow-279: an idempotent re-run announces nothing, so it needs no ordinal', async () => {
+  const kv = fakeKv({ 'coupons:config': MIRROR });
+  await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW });
+  const again = await redeemCoupon({ kv, code: 'CODEABLEYEAR', githubId: '42', now: NOW });
+  assert.equal(again.already, true, 'the second call is the deferred Discord leg, not a new grant');
+  assert.equal(kv.store.get(redemptionCountKey('CODEABLEYEAR')), '1', 'and it must not advance the counter');
+});

@@ -156,7 +156,8 @@ export async function redeemCoupon({ kv, code, githubId, login = null, now = new
     await kv.put(couponGrantKey(githubId), JSON.stringify(record));
     await kv.put(redemptionKey(redeemedCode, githubId), JSON.stringify(record));
     const count = Number(await kv.get(redemptionCountKey(coupon.code))) || 0;
-    await kv.put(redemptionCountKey(coupon.code), String(count + 1));
+    const redemptionCount = count + 1; // sow-279: THIS redemption's ordinal, carried out on the grant below
+    await kv.put(redemptionCountKey(coupon.code), String(redemptionCount));
 
     // MARK THE INVITE ONLY NOW, AFTER A GRANT WAS ACTUALLY WRITTEN. Every early return above leaves the
     // invite UNUSED on purpose: an existing grant, the post-erasure minimized lock, a hit cap and an
@@ -172,7 +173,16 @@ export async function redeemCoupon({ kv, code, githubId, login = null, now = new
       const { next, changed } = markInviteRedeemed(invite, { githubId, login, now });
       if (changed) await writeInvite(kv, next);
     }
-    return { ...record, already: false };
+    // sow-279: the owner notice needs the RUNNING COUNT to make a burst legible at a glance, which
+    // house/coupons.yml has required from the start. It rides on the return rather than being re-read later,
+    // because it is already in hand here and a second read would be both wasteful and racier.
+    //
+    // NOT ATOMIC, and that is accepted rather than overlooked. The read-then-write above is the same
+    // non-atomic pair that already governs maxRedemptions, so two simultaneous redemptions of one code can
+    // report the same ordinal and the stored total can lag by one. For spotting an abusive BURST that is
+    // immaterial: the emails still arrive one per redemption, and the count is a convenience on top of them,
+    // never the thing being counted on. Do not make a cap decision from this number.
+    return { ...record, redemptionCount, already: false };
   } catch {
     return null; // a KV hiccup never breaks signup
   }

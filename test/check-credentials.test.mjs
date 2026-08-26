@@ -1,7 +1,7 @@
 // Credential health check: the pure decision logic + the probe wiring (fake fetch, no network, no email).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { daysUntil, evaluate, buildEmail, runProbes } from '../scripts/check-credentials.mjs';
+import { daysUntil, evaluate, buildEmail, runProbes, productionVarFromToml } from '../scripts/check-credentials.mjs';
 
 const NOW = new Date('2026-06-20T00:00:00Z');
 
@@ -262,4 +262,65 @@ test('runProbes: the Cloudflare probes carry not_before through from the API res
   for (const r of out) assert.equal(r.notBefore, '2027-08-18T00:00:00Z', `${r.name} lost not_before`);
   // End to end: the probe output alone is enough for evaluate to catch it.
   assert.equal(evaluate(out, { warnDays: 30, now: NOW }).problems.every((p) => p.kind === 'not-yet-valid'), true);
+});
+
+// --- sow-279: the coupon-redemption alarm self-test ------------------------------------------------------
+// The alarm is the ONLY control on three uncapped free-year codes, and it has twice been in a state where it
+// looked present and sent nothing. These cover the two ways the weekly probe could go quietly useless: reading
+// the recipient from a place wrangler does not deploy, and treating a non-send as a pass.
+
+test('productionVarFromToml: reads the production env block, not the base [vars] block', () => {
+  // Wrangler does NOT inherit top-level [vars] into a named environment. A recipient sitting only in the base
+  // block is committed and still absent from the deployed Worker, so finding it there would report a working
+  // alarm that sends nowhere. Empty is the correct answer.
+  const baseOnly = '[vars]\nCOUPON_ALERT_EMAIL = "wrong@example.com"\n\n[env.production.vars]\nMAIL_FROM = "a@b"\n';
+  assert.equal(productionVarFromToml(baseOnly, 'COUPON_ALERT_EMAIL'), '');
+  const inProd = '[vars]\nCOUPON_ALERT_EMAIL = "wrong@example.com"\n\n[env.production.vars]\nCOUPON_ALERT_EMAIL = "right@example.com"\n';
+  assert.equal(productionVarFromToml(inProd, 'COUPON_ALERT_EMAIL'), 'right@example.com');
+});
+
+test('productionVarFromToml: a commented-out or absent var reads as empty, never as set', () => {
+  assert.equal(productionVarFromToml('[env.production.vars]\n# COUPON_ALERT_EMAIL = "x@y"\n', 'COUPON_ALERT_EMAIL'), '');
+  assert.equal(productionVarFromToml('[env.production.vars]\nMAIL_FROM = "a@b"\n', 'COUPON_ALERT_EMAIL'), '');
+  assert.equal(productionVarFromToml('', 'COUPON_ALERT_EMAIL'), '');
+  assert.equal(productionVarFromToml(null, 'COUPON_ALERT_EMAIL'), '');
+});
+
+test('the live Worker config carries the alarm recipient in the DEPLOYED section', async () => {
+  // Reads the real file on purpose. If someone moves COUPON_ALERT_EMAIL up into [vars] the diff looks harmless,
+  // the repo still "has" it, and the deployed Worker silently stops alerting. This is the guard for that.
+  const { readFileSync } = await import('node:fs');
+  const toml = readFileSync(new URL('../workers/signup/wrangler.toml', import.meta.url), 'utf8');
+  assert.match(productionVarFromToml(toml, 'COUPON_ALERT_EMAIL'), /@/, 'no coupon alarm recipient in [env.production.vars]');
+  assert.match(productionVarFromToml(toml, 'MAIL_FROM'), /@/, 'no sender in [env.production.vars]');
+});
+
+test('runProbes: the coupon alarm probe sends through the real alert path and passes only on a real send', async () => {
+  const calls = [];
+  const sendAlert = async (env, record, opts) => { calls.push({ env, record, opts }); return { sent: true }; };
+  const out = await runProbes({ env: { RESEND_API_KEY: 're_x' }, fetch: async () => { throw new Error('no probe should fetch here'); }, sendAlert });
+  const probe = out.find((r) => /COUPON_ALERT_EMAIL/.test(r.name));
+  assert.ok(probe, 'the coupon alarm probe did not run with RESEND_API_KEY set');
+  assert.equal(probe.ok, true);
+  assert.equal(calls.length, 1, 'the probe must send exactly one notice');
+  assert.equal(calls[0].opts.selfTest, true, 'the weekly email must be marked as a self-test, not look like a redemption');
+  assert.match(calls[0].env.COUPON_ALERT_EMAIL, /@/, 'the probe must address the configured recipient');
+  assert.equal(calls[0].env.RESEND_API_KEY, 're_x');
+});
+
+test('runProbes: a coupon alarm that does not send is a FAILED probe, with the reason carried', async () => {
+  // sendCouponRedemptionAlert is fail-soft and never throws, so `sent: false` is the only signal there is.
+  // Reading an unconfigured or rejected send as a pass would restore exactly the silence this probe exists for.
+  const sendAlert = async () => ({ sent: false, reason: 'error', message: 'Resend rejected the sender domain' });
+  const out = await runProbes({ env: { RESEND_API_KEY: 're_x' }, sendAlert });
+  const probe = out.find((r) => /COUPON_ALERT_EMAIL/.test(r.name));
+  assert.equal(probe.ok, false);
+  assert.match(probe.detail, /Resend rejected the sender domain/);
+  assert.equal(evaluate([probe], { warnDays: 30, now: NOW }).healthy, false, 'a dead alarm must make the run red');
+});
+
+test('runProbes: no Resend key means the coupon probe is skipped, not silently passed', async () => {
+  const sendAlert = async () => { throw new Error('must not be called without a key'); };
+  const out = await runProbes({ env: { CF_API_TOKEN: 'tok' }, fetch: async () => ({ ok: true, status: 200, json: async () => ({ result: { status: 'active', expires_on: '2027-01-01T00:00:00Z' } }) }), sendAlert });
+  assert.equal(out.some((r) => /COUPON_ALERT_EMAIL/.test(r.name)), false);
 });

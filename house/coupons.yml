@@ -45,10 +45,29 @@
 # so a warning always means something. Covered by tests in `test/coupon-alert.test.mjs` that were run against
 # the previous version first and failed there.
 #
-# ONE REQUIREMENT REMAINS UNMET, stated plainly rather than quietly dropped: the notice does NOT carry the
-# RUNNING REDEMPTION COUNT that the paragraph below asks for. Forty redemptions produce forty emails, which is
-# a signal, but the count that would make a burst obvious at a glance is not in them, and adding it means a KV
-# read on the signup completion path. That is a design decision, not an oversight to fix in passing.
+# THE RUNNING REDEMPTION COUNT IS NOW CARRIED, as the requirement below asks. Every notice reads
+# `Total: N redemptions of this code, including this one`, so a burst is legible from one email instead of by
+# counting an inbox. `redeemCoupon` returns the post-increment count on the grant and the notice projects it.
+#
+# A CORRECTION, kept because the reasoning was wrong and not just the conclusion. On 2026-08-26 this file said
+# adding the count "means a KV read on the signup completion path. That is a design decision". It is not: the
+# read was already there. `redeemCoupon` reads that same counter to enforce `maxRedemptions` and writes it
+# back, so the number was in scope eleven lines above the return the whole time. A cost was asserted from the
+# shape of the problem instead of read off the code, and it deferred a requirement for a day on that basis.
+#
+# The read-then-write around the counter is NOT atomic, and deliberately still is not. That is the same
+# non-atomic pair that already governs cap enforcement, so under simultaneous redemptions the number in one
+# email can lag by one. The emails are the record; the count is a reading aid. Do not use it for a cap
+# decision, and do not "fix" the atomicity for the sake of this line.
+#
+# IT IS PROBED WEEKLY, so it cannot go quietly dead again. `credential-health.yml` (Mondays 13:23 UTC) calls
+# `sendCouponRedemptionAlert` itself, not a copy, and sends one real email subject-prefixed
+# `[alarm self-test]`. A rotated Resend key, an unverified sender domain or a broken address now goes red and
+# emails the owner BEFORE a redemption rather than after one was missed. Two limits worth knowing rather than
+# discovering: it sends a real email every week, and it reads the recipient from `[env.production.vars]` in
+# `workers/signup/wrangler.toml`, so it proves the COMMITTED address works and cannot prove the Worker was
+# deployed since. That second gap is exactly what kept this alarm inert on 2026-08-25, so verify a deploy with
+# `npx wrangler versions view <id> --env production`, never with a green run here.
 #
 # AND IT HAS NEVER FIRED ON A REAL REDEMPTION. The send path is complete and every input is present on
 # production, but no coupon has been redeemed since it was armed, so the end-to-end path is proven only by
