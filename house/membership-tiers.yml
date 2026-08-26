@@ -29,6 +29,12 @@
 #     section 7 requires a named owner and a cadence before such a thing appears in PRICING copy. It already
 #     lives in general community copy (src/components/JoinOffers.astro, "Weekly Shop Talk calls"), so nothing
 #     was written to replace it and no new commitment was invented.
+#     CORRECTION, same day: JoinOffers.astro is UNMOUNTED. It has zero imports and renders on no page (its
+#     own header even says "the /membership/ page is the natural future home"), so the sentence above is true
+#     of the repository and false of the live site. The practical effect is that shop talk is now advertised
+#     NOWHERE, which is the safe end of the ruling rather than the intended one: the owner said it moves INTO
+#     general community copy. Mounting that component is a visible page change and is the owner's call, so it
+#     is raised in human-todo rather than done here. Do not read this note as "it is covered elsewhere".
 tiers:
   - key: none
     label: Free
