@@ -704,10 +704,15 @@ class GbtiContentEditor extends GbtiElement {
     // SOW-062 P6: prefill the from-the-author note from the existing intro-<slug> comment (existing item).
     const introSlug = AUTHOR_NOTE_TYPES.has(this.type) ? this.presetStr(this.preset?.input?.slug) : '';
     if (introSlug) {
-      this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
-        const ta = this.$('#authornote');
-        if (ta && !ta.value && c?.body) ta.value = c.body;
-      }).catch(() => {});
+      const staged = typeof this.preset?.authorNote === 'string' ? this.preset.authorNote : null;
+      const ta0 = this.$('#authornote');
+      if (ta0 && !ta0.value && staged) ta0.value = staged;
+      if (staged == null) {
+        this.client?.getComment?.({ id: `intro-${introSlug}` }).then((c) => {
+          const ta = this.$('#authornote');
+          if (ta && !ta.value && c?.body) ta.value = c.body;
+        }).catch(() => {});
+      }
     }
     // SOW-062 P6 rail-2: fill the Discussions stat tile from the live comment count; fill the rest from an optional
     // client.itemStats() once a later backend phase provides it (until then they stay a pending dash).
@@ -1454,7 +1459,11 @@ class GbtiContentEditor extends GbtiElement {
       const { type, input, body } = this.gather();
       if (this.fields.some((f) => f.key === 'status')) input.status = 'draft'; // SOW-062 P6: status is action-driven (no rail dropdown)
       if (['post', 'product', 'prompt'].includes(type)) input.updatedAt = new Date().toISOString(); // SOW-062 P6: last-updated-locally
-      const res = await this.client.saveDraft({ type, input, body, path: this.itemPath || undefined }); // SOW-112 v2: a changed permalink stages on the item's own branch
+      const authorNote = this.$('#authornote')?.value ?? undefined;
+      const res = await this.client.saveDraft({
+        type, input, body, path: this.itemPath || undefined, // SOW-112 v2: a changed permalink stages on the item's own branch
+        ...(typeof authorNote === 'string' ? { authorNote } : {}),
+      });
       this._setChip(`${CHECK} Draft saved`, 'ok');
       // A pending rename is a big deal — say so in the top banner too (the bottom status line hides below the fold).
       if (res?.renamed) this._banner(`Draft saved with the pending permalink change: <b>${esc(res.renamed.from)}</b> becomes <b>${esc(res.renamed.to)}</b> when you publish. The old link will redirect.`);

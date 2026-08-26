@@ -114,6 +114,7 @@ function mapDraftRecord(rec: any) {
     visibility: fm.visibility || 'public',
     frontmatter: fm,
     body: rec?.body || '',
+    authorNote: typeof rec?.authorNote === 'string' ? rec.authorNote : null,
     pull: null,
     store: 'kv', // sow-194: the store discriminator, so a KV draft never collides with a repo draft on merge
     publishedAt: fm.publishedAt ? Number(fm.publishedAt) : null,
@@ -465,11 +466,18 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const r = await workerGet('/membership/author/targets');
       return { members: Array.isArray(r?.members) ? r.members : [] };
     },
-    async saveDraft({ type, input = {}, body = '', path }: any) {
+    async saveDraft({ type, input = {}, body = '', path, authorNote }: any) {
       // A members-only draft is allowed: its plain body stays in the private, erasable KV draft store (SOW-157),
       // never git; publishDraft() encrypts it at publish time. So no members refusal here.
       const slug = String((input && input.slug) || '');
-      await workerPost('/membership/drafts', { op: 'put', draft: { type, slug, path: path || null, frontmatter: input, body } });
+      await workerPost('/membership/drafts', {
+        op: 'put',
+        draft: {
+          type, slug, path: path || null, frontmatter: input, body,
+          // SOW-014: omitted rather than nulled, so a caller that does not know about the note cannot clear one.
+          ...(typeof authorNote === 'string' ? { authorNote } : {}),
+        },
+      });
       return { state: 'staged' };
     },
     async listDrafts({ type }: any = {}) {
@@ -495,7 +503,7 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const r = await workerGet('/membership/drafts');
       const rec = (Array.isArray(r?.drafts) ? r.drafts : []).find((d: any) => d.type === type && d.slug === slug);
       if (!rec) throw err('not-found', 'could not open that draft');
-      return { frontmatter: rec.frontmatter || {}, body: rec.body || '', path: rec.path || '' };
+      return { frontmatter: rec.frontmatter || {}, body: rec.body || '', path: rec.path || '', authorNote: typeof rec.authorNote === 'string' ? rec.authorNote : null };
     },
     discardDraft,
     async publishDraft({ type, slug, store, path }: any) {
@@ -508,7 +516,10 @@ export function createWorkbenchClient({ signupBase, login, githubId = null }: { 
       const r = await workerGet('/membership/drafts');
       const rec = (Array.isArray(r?.drafts) ? r.drafts : []).find((d: any) => d.type === type && d.slug === slug);
       if (!rec) throw err('not-found', 'could not find that draft');
-      const res = await publish({ type, input: rec.frontmatter || {}, body: rec.body || '', path: rec.path || undefined });
+      const res = await publish({
+        type, input: rec.frontmatter || {}, body: rec.body || '', path: rec.path || undefined,
+        ...(typeof rec.authorNote === 'string' ? { authorNote: rec.authorNote } : {}),
+      });
       await discardDraft({ type, slug }).catch(() => {}); // best-effort: the draft is now a submitted PR
       return { prNumber: res.prNumber, prUrl: res.prUrl };
     },
